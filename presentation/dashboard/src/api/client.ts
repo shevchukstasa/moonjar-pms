@@ -1,7 +1,19 @@
 import axios from 'axios';
 
+function resolveBaseURL(): string {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  // Production: derive backend URL from frontend hostname
+  // Frontend: moonjar-pms-production-XXXX.up.railway.app
+  // Backend:  moonjar-pms-production.up.railway.app
+  if (typeof window !== 'undefined' && window.location.hostname.includes('.up.railway.app')) {
+    const host = window.location.hostname.replace(/-\d+\.up\.railway\.app$/, '.up.railway.app');
+    return `${window.location.protocol}//${host}/api`;
+  }
+  return '/api';
+}
+
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: resolveBaseURL(),
   timeout: 30_000,
   headers: { 'Content-Type': 'application/json' },
   withCredentials: true,

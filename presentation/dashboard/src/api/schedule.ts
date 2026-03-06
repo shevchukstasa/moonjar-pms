@@ -28,4 +28,10 @@ export const scheduleApi = {
 
   kilnSchedule: (params?: { factory_id?: string }) =>
     apiClient.get('/schedule/kiln-schedule', { params }).then((r) => r.data),
+
+  reorderPositions: (positionIds: string[]) =>
+    apiClient.patch('/schedule/positions/reorder', { position_ids: positionIds }).then((r) => r.data),
+
+  assignBatchPositions: (batchId: string, positionIds: string[]) =>
+    apiClient.post(`/schedule/batches/${batchId}/positions`, { position_ids: positionIds }).then((r) => r.data),
 };

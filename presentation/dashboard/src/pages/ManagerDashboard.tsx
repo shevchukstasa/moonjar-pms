@@ -143,8 +143,8 @@ export default function ManagerDashboard() {
         </select>
         <div className="flex-1" />
         <Button onClick={() => setCreateOpen(true)}>+ Create Order</Button>
-        <Button variant="secondary" onClick={() => navigate('/manager/schedule')}>
-          Schedule
+        <Button variant="secondary" onClick={() => navigate('/tablo')}>
+          Tablo
         </Button>
       </div>
 

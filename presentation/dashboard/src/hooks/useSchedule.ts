@@ -54,3 +54,26 @@ export function useKilnSchedule(factoryId?: string | null) {
     queryFn: () => scheduleApi.kilnSchedule(factoryId ? { factory_id: factoryId } : undefined),
   });
 }
+
+export function useReorderPositions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (positionIds: string[]) => scheduleApi.reorderPositions(positionIds),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schedule'] });
+      qc.invalidateQueries({ queryKey: ['positions'] });
+    },
+  });
+}
+
+export function useAssignBatchPositions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ batchId, positionIds }: { batchId: string; positionIds: string[] }) =>
+      scheduleApi.assignBatchPositions(batchId, positionIds),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schedule'] });
+      qc.invalidateQueries({ queryKey: ['positions'] });
+    },
+  });
+}

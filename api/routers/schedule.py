@@ -104,6 +104,14 @@ class BatchCreateInput(BaseModel):
     notes: Optional[str] = None
 
 
+class PositionReorderInput(BaseModel):
+    position_ids: list[str]
+
+
+class BatchAssignPositionsInput(BaseModel):
+    position_ids: list[str]
+
+
 # --- Endpoints ---
 
 @router.get("/resources")
@@ -261,3 +269,40 @@ async def get_kiln_schedule(
         })
 
     return {"items": result, "total": len(result)}
+
+
+@router.patch("/positions/reorder")
+async def reorder_positions(
+    data: PositionReorderInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Bulk reorder positions — assigns sequential priority_order values."""
+    for idx, pid in enumerate(data.position_ids):
+        pos = db.query(OrderPosition).filter(OrderPosition.id == UUID(pid)).first()
+        if pos:
+            pos.priority_order = idx
+    db.commit()
+    return {"ok": True, "count": len(data.position_ids)}
+
+
+@router.post("/batches/{batch_id}/positions")
+async def assign_batch_positions(
+    batch_id: UUID,
+    data: BatchAssignPositionsInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Assign positions to an existing batch."""
+    batch = db.query(Batch).filter(Batch.id == batch_id).first()
+    if not batch:
+        raise HTTPException(404, "Batch not found")
+    count = 0
+    for pid in data.position_ids:
+        pos = db.query(OrderPosition).filter(OrderPosition.id == UUID(pid)).first()
+        if pos:
+            pos.batch_id = batch.id
+            pos.resource_id = batch.resource_id
+            count += 1
+    db.commit()
+    return _serialize_batch(batch, db)

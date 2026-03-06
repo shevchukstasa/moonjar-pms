@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Dialog } from '@/components/ui/Dialog';
@@ -7,18 +7,13 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { orderCreateSchema, type OrderCreateFormData } from '@/types/forms';
 import { useCreateOrder } from '@/hooks/useOrders';
+import { useFactories } from '@/hooks/useFactories';
 
 const PRODUCT_TYPES = [
   { value: 'tile', label: 'Tile' },
   { value: 'countertop', label: 'Countertop' },
   { value: 'sink', label: 'Sink' },
   { value: '3d', label: '3D' },
-];
-
-const FACTORIES = [
-  { value: '', label: 'Select factory...' },
-  { value: 'bali', label: 'Bali' },
-  { value: 'java', label: 'Java' },
 ];
 
 interface Props {
@@ -28,7 +23,16 @@ interface Props {
 
 export function OrderCreateDialog({ open, onClose }: Props) {
   const createOrder = useCreateOrder();
+  const { data: factoriesData } = useFactories();
   const [submitError, setSubmitError] = useState('');
+
+  const factoryOptions = useMemo(() => {
+    const opts = [{ value: '', label: 'Select factory...' }];
+    for (const f of factoriesData?.items || []) {
+      opts.push({ value: f.id, label: f.name });
+    }
+    return opts;
+  }, [factoriesData]);
 
   const {
     register,
@@ -76,7 +80,7 @@ export function OrderCreateDialog({ open, onClose }: Props) {
         <div className="grid grid-cols-2 gap-4">
           <Input label="Order Number" {...register('order_number')} error={errors.order_number?.message} placeholder="M-001" />
           <Input label="Client" {...register('client')} error={errors.client?.message} placeholder="Client name" />
-          <Select label="Factory" {...register('factory_id')} error={errors.factory_id?.message} options={FACTORIES} />
+          <Select label="Factory" {...register('factory_id')} error={errors.factory_id?.message} options={factoryOptions} />
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">Deadline</label>
             <input type="date" {...register('final_deadline')} className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />

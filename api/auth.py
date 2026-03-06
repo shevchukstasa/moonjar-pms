@@ -75,14 +75,19 @@ def decode_token(token: str) -> dict:
 # --- Cookie helpers ---
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str, csrf_token: str):
-    """Set HttpOnly cookies for tokens."""
+    """Set HttpOnly cookies for tokens.
+
+    Uses SameSite=None + Secure for cross-origin Railway deployment
+    (frontend and API on separate *.up.railway.app subdomains).
+    Path=/ so cookies are sent on all API requests regardless of prefix.
+    """
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
         secure=True,
-        samesite="strict",
-        path="/api",
+        samesite="none",
+        path="/",
         max_age=settings.JWT_ACCESS_EXPIRE_MINUTES * 60,
     )
     response.set_cookie(
@@ -90,8 +95,8 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str, 
         value=refresh_token,
         httponly=True,
         secure=True,
-        samesite="strict",
-        path="/api/auth/refresh",
+        samesite="none",
+        path="/",
         max_age=settings.JWT_REFRESH_EXPIRE_MINUTES * 60,
     )
     response.set_cookie(
@@ -99,14 +104,14 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str, 
         value=csrf_token,
         httponly=False,  # JS needs to read this
         secure=True,
-        samesite="strict",
+        samesite="none",
         path="/",
         max_age=settings.JWT_ACCESS_EXPIRE_MINUTES * 60,
     )
 
 def clear_auth_cookies(response: Response):
-    response.delete_cookie("access_token", path="/api")
-    response.delete_cookie("refresh_token", path="/api/auth/refresh")
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/")
     response.delete_cookie("csrf_token", path="/")
 
 

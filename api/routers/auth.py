@@ -1,6 +1,7 @@
 """Auth router — login, Google OAuth, refresh, logout, TOTP."""
 
 import uuid as _uuid
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -8,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
+from api.enums import AuditActionType
 from api.auth import (
     verify_password, create_access_token, create_refresh_token,
     decode_token, set_auth_cookies, clear_auth_cookies, generate_csrf_token,
@@ -17,6 +19,12 @@ from api.auth import (
 from api.models import User, ActiveSession
 
 router = APIRouter()
+logger = logging.getLogger("moonjar.auth")
+
+
+def _role_str(role) -> str:
+    """Safely convert role to string value."""
+    return role.value if hasattr(role, 'value') else str(role)
 
 
 class LoginRequest(BaseModel):
@@ -33,24 +41,33 @@ class TOTPVerifyRequest(BaseModel):
 @router.post("/login")
 async def login(data: LoginRequest, request: Request, response: Response,
                 db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == data.email).first()
-    if not user:
-        raise HTTPException(401, "Invalid credentials")
-    check_lockout(user)
-    if not verify_password(data.password, user.password_hash or ""):
-        record_failed_login(db, user)
-        raise HTTPException(401, "Invalid credentials")
-    reset_failed_logins(db, user)
-    jti = str(_uuid.uuid4())
-    access = create_access_token(str(user.id), user.role, jti)
-    refresh = create_refresh_token(str(user.id), jti)
-    csrf = generate_csrf_token(jti)
-    create_session(db, str(user.id), jti, request)
-    set_auth_cookies(response, access, refresh, csrf)
-    log_security_event(db, "login", actor_id=str(user.id), actor_email=user.email,
-                       ip_address=request.client.host if request.client else None)
-    return {"access_token": access, "token_type": "bearer",
-            "user": {"id": str(user.id), "email": user.email, "role": user.role, "name": user.name}}
+    try:
+        user = db.query(User).filter(User.email == data.email).first()
+        if not user:
+            raise HTTPException(401, "Invalid credentials")
+        check_lockout(user)
+        if not verify_password(data.password, user.password_hash or ""):
+            record_failed_login(db, user)
+            raise HTTPException(401, "Invalid credentials")
+        reset_failed_logins(db, user)
+        jti = str(_uuid.uuid4())
+        role_val = _role_str(user.role)
+        access = create_access_token(str(user.id), role_val, jti)
+        refresh = create_refresh_token(str(user.id), jti)
+        csrf = generate_csrf_token(jti)
+        create_session(db, str(user.id), jti, request)
+        set_auth_cookies(response, access, refresh, csrf)
+        log_security_event(db, AuditActionType.LOGIN_SUCCESS,
+                           actor_id=str(user.id), actor_email=user.email,
+                           ip_address=request.client.host if request.client else None)
+        return {"access_token": access, "token_type": "bearer",
+                "user": {"id": str(user.id), "email": user.email,
+                         "role": role_val, "name": user.name}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(500, f"Login error: {type(e).__name__}: {e}")
 
 
 @router.post("/google")
@@ -64,13 +81,18 @@ async def google_login(data: GoogleLoginRequest, request: Request, response: Res
         user.google_id = info["google_id"]
         db.commit()
     jti = str(_uuid.uuid4())
-    access = create_access_token(str(user.id), user.role, jti)
+    role_val = _role_str(user.role)
+    access = create_access_token(str(user.id), role_val, jti)
     refresh = create_refresh_token(str(user.id), jti)
     csrf = generate_csrf_token(jti)
     create_session(db, str(user.id), jti, request)
     set_auth_cookies(response, access, refresh, csrf)
+    log_security_event(db, AuditActionType.LOGIN_SUCCESS,
+                       actor_id=str(user.id), actor_email=user.email,
+                       ip_address=request.client.host if request.client else None)
     return {"access_token": access, "token_type": "bearer",
-            "user": {"id": str(user.id), "email": user.email, "role": user.role, "name": user.name}}
+            "user": {"id": str(user.id), "email": user.email,
+                     "role": role_val, "name": user.name}}
 
 
 @router.post("/refresh")
@@ -88,10 +110,11 @@ async def refresh_token(request: Request, response: Response, db: Session = Depe
     if not user:
         raise HTTPException(401, "User not found")
     jti = str(_uuid.uuid4())
-    access = create_access_token(str(user.id), user.role, jti)
+    role_val = _role_str(user.role)
+    access = create_access_token(str(user.id), role_val, jti)
     csrf = generate_csrf_token(jti)
-    response.set_cookie("access_token", access, httponly=True, secure=True, samesite="strict", path="/api")
-    response.set_cookie("csrf_token", csrf, httponly=False, secure=True, samesite="strict", path="/")
+    response.set_cookie("access_token", access, httponly=True, secure=True, samesite="none", path="/")
+    response.set_cookie("csrf_token", csrf, httponly=False, secure=True, samesite="none", path="/")
     return {"access_token": access, "token_type": "bearer"}
 
 

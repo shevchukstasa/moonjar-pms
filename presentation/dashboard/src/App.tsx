@@ -1,6 +1,8 @@
+import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { roleRoutes } from '@/lib/roleRoutes';
+import apiClient from '@/api/client';
 import LoginPage from '@/pages/LoginPage';
 import NotFoundPage from '@/pages/NotFoundPage';
 import OwnerDashboard from '@/pages/OwnerDashboard';
@@ -17,6 +19,24 @@ import PurchaserDashboard from '@/pages/PurchaserDashboard';
 import UsersPage from '@/pages/UsersPage';
 import AdminPanelPage from '@/pages/AdminPanelPage';
 import AppLayout from '@/components/layout/AppLayout';
+import { Spinner } from '@/components/ui/Spinner';
+
+/** Try to restore session from JWT cookie on app mount */
+function useSessionRestore() {
+  const [checking, setChecking] = useState(true);
+  const login = useAuthStore((s) => s.login);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  useEffect(() => {
+    if (isAuthenticated) { setChecking(false); return; }
+    apiClient.get('/auth/me')
+      .then(({ data }) => { login(data); })
+      .catch(() => { /* no valid session — stay logged out */ })
+      .finally(() => setChecking(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return checking;
+}
 
 function RequireAuth() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -37,6 +57,12 @@ function RoleRedirect() {
 }
 
 export default function App() {
+  const checking = useSessionRestore();
+
+  if (checking) {
+    return <div className="flex min-h-screen items-center justify-center"><Spinner className="h-10 w-10" /></div>;
+  }
+
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />

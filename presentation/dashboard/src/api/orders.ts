@@ -1,7 +1,18 @@
 import apiClient from './client';
 
+export interface OrderListParams {
+  page?: number;
+  per_page?: number;
+  factory_id?: string;
+  status?: string;
+  search?: string;
+  tab?: 'current' | 'archive';
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+}
+
 export const ordersApi = {
-  list: (params?: Record<string, unknown>) =>
+  list: (params?: OrderListParams) =>
     apiClient.get('/orders', { params }).then((r) => r.data),
   get: (id: string) =>
     apiClient.get(`/orders/${id}`).then((r) => r.data),

@@ -1,8 +1,168 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useUiStore } from '@/stores/uiStore';
+import { useGlazingSchedule, useFiringSchedule, useSortingSchedule, useKilnSchedule } from '@/hooks/useSchedule';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Tabs } from '@/components/ui/Tabs';
+import { Spinner } from '@/components/ui/Spinner';
+import { DataTable } from '@/components/ui/Table';
+import { FactorySelector } from '@/components/layout/FactorySelector';
+
+const SECTION_TABS = [
+  { id: 'glazing', label: 'Glazing' },
+  { id: 'firing', label: 'Firing' },
+  { id: 'sorting', label: 'Sorting' },
+  { id: 'kilns', label: 'Kilns' },
+];
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const positionColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
+  { key: 'order_number', header: 'Order' },
+  { key: 'color', header: 'Color' },
+  { key: 'size', header: 'Size' },
+  { key: 'quantity', header: 'Qty' },
+  {
+    key: 'status',
+    header: 'Status',
+    render: (item) => <Badge status={item.status} />,
+  },
+  { key: 'product_type', header: 'Type' },
+  {
+    key: 'priority_order',
+    header: 'Priority',
+    render: (item) => item.priority_order != null ? item.priority_order : '\u2014',
+  },
+];
+
 export default function ManagerSchedulePage() {
+  const navigate = useNavigate();
+  const activeFactoryId = useUiStore((s) => s.activeFactoryId);
+  const [tab, setTab] = useState('glazing');
+
+  const { data: glazingData, isLoading: glazingLoading } = useGlazingSchedule(activeFactoryId);
+  const { data: firingData, isLoading: firingLoading } = useFiringSchedule(activeFactoryId);
+  const { data: sortingData, isLoading: sortingLoading } = useSortingSchedule(activeFactoryId);
+  const { data: kilnData, isLoading: kilnLoading } = useKilnSchedule(activeFactoryId);
+
+  const isLoading =
+    (tab === 'glazing' && glazingLoading) ||
+    (tab === 'firing' && firingLoading) ||
+    (tab === 'sorting' && sortingLoading) ||
+    (tab === 'kilns' && kilnLoading);
+
+  const sectionItems: Record<string, unknown[]> = {
+    glazing: glazingData?.items || [],
+    firing: firingData?.items || [],
+    sorting: sortingData?.items || [],
+  };
+
+  const kilns = kilnData?.items || [];
+
   return (
     <div className="space-y-6">
-      <div><h1 className="text-2xl font-bold text-gray-900">Schedule</h1><p className="mt-1 text-sm text-gray-500">Batches, kiln schedule</p></div>
-      <div className="rounded-lg border-2 border-dashed border-gray-300 p-12 text-center"><p className="text-gray-400">TODO: Implement — see FRONTEND_ARCHITECTURE.md</p></div>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" onClick={() => navigate('/manager')}>&larr; Back</Button>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Production Schedule</h1>
+            <p className="mt-1 text-sm text-gray-500">Section schedules and kiln batches</p>
+          </div>
+        </div>
+        <FactorySelector />
+      </div>
+
+      {/* KPI */}
+      <div className="grid grid-cols-4 gap-4">
+        <Card>
+          <div className="text-sm text-gray-500">Glazing</div>
+          <div className="mt-1 text-2xl font-bold text-gray-900">{glazingData?.total ?? '\u2014'}</div>
+        </Card>
+        <Card>
+          <div className="text-sm text-gray-500">Firing</div>
+          <div className="mt-1 text-2xl font-bold text-gray-900">{firingData?.total ?? '\u2014'}</div>
+        </Card>
+        <Card>
+          <div className="text-sm text-gray-500">Sorting</div>
+          <div className="mt-1 text-2xl font-bold text-gray-900">{sortingData?.total ?? '\u2014'}</div>
+        </Card>
+        <Card>
+          <div className="text-sm text-gray-500">Kilns</div>
+          <div className="mt-1 text-2xl font-bold text-gray-900">{kilns.length}</div>
+        </Card>
+      </div>
+
+      {/* Tabs */}
+      <Tabs tabs={SECTION_TABS} activeTab={tab} onChange={setTab} />
+
+      {/* Content */}
+      {isLoading ? (
+        <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>
+      ) : tab === 'kilns' ? (
+        /* Kilns tab */
+        kilns.length === 0 ? (
+          <div className="py-8 text-center text-gray-400">No kilns found</div>
+        ) : (
+          <div className="space-y-4">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            {kilns.map((k: any) => (
+              <Card key={k.kiln.id} className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <h3 className="font-semibold text-gray-900">{k.kiln.name}</h3>
+                    <Badge status={k.kiln.status} />
+                    {k.kiln.kiln_type && (
+                      <span className="text-xs text-gray-500">{k.kiln.kiln_type}</span>
+                    )}
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    {k.kiln.capacity_sqm && <span>Cap: {k.kiln.capacity_sqm} m&sup2;</span>}
+                    {k.kiln.num_levels && <span className="ml-2">Levels: {k.kiln.num_levels}</span>}
+                  </div>
+                </div>
+                {k.batches.length > 0 ? (
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="w-full text-left text-sm">
+                      <thead className="border-b bg-gray-50 text-xs font-medium uppercase text-gray-500">
+                        <tr>
+                          <th className="px-4 py-2">Date</th>
+                          <th className="px-4 py-2">Status</th>
+                          <th className="px-4 py-2">Positions</th>
+                          <th className="px-4 py-2">Pieces</th>
+                          <th className="px-4 py-2">Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                        {k.batches.map((b: any) => (
+                          <tr key={b.id} className="bg-white">
+                            <td className="px-4 py-2">{b.batch_date || '\u2014'}</td>
+                            <td className="px-4 py-2"><Badge status={b.status} /></td>
+                            <td className="px-4 py-2">{b.positions_count}</td>
+                            <td className="px-4 py-2">{b.total_pcs}</td>
+                            <td className="px-4 py-2 text-xs text-gray-500">{b.notes || '\u2014'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="py-4 text-center text-sm text-gray-400">No batches scheduled</div>
+                )}
+              </Card>
+            ))}
+          </div>
+        )
+      ) : (
+        /* Section tabs (glazing/firing/sorting) */
+        sectionItems[tab].length === 0 ? (
+          <div className="py-8 text-center text-gray-400">No positions in this section</div>
+        ) : (
+          <DataTable columns={positionColumns} data={sectionItems[tab] as Record<string, unknown>[]} />
+        )
+      )}
     </div>
   );
 }

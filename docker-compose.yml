@@ -1,0 +1,60 @@
+version: "3.9"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    profiles: ["local-db"]
+    environment:
+      POSTGRES_DB: moonjar
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./api:/app/api
+      - ./business:/app/business
+      - ./scripts:/app/scripts
+      - ./alembic:/app/alembic
+      - ./uploads:/app/uploads
+    # depends_on:
+    #   db:
+    #     condition: service_healthy
+
+  dashboard:
+    build:
+      context: ./presentation/dashboard
+    ports:
+      - "5174:5174"
+    volumes:
+      - ./presentation/dashboard/src:/app/src
+    env_file:
+      - .env
+
+  warehouse-pwa:
+    build:
+      context: ./presentation/warehouse-pwa
+    ports:
+      - "5175:5175"
+    volumes:
+      - ./presentation/warehouse-pwa/src:/app/src
+    env_file:
+      - .env
+
+volumes:
+  pgdata:

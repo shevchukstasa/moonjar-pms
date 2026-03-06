@@ -5,6 +5,7 @@ Moonjar PMS — FastAPI application entry point.
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from contextlib import asynccontextmanager
 import logging
 
@@ -74,6 +75,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+# --- Proxy headers (Railway runs behind a reverse proxy) ---
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 
 # --- CORS ---
 app.add_middleware(

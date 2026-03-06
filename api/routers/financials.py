@@ -1,4 +1,4 @@
-"""CRUD router for financial_records (auto-generated)."""
+"""CRUD router for financial_entries (auto-generated)."""
 
 from uuid import UUID
 
@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
-from api.models import FinancialRecord
-from api.schemas import FinancialRecordCreate, FinancialRecordUpdate, FinancialRecordResponse
+from api.models import FinancialEntry
+from api.schemas import FinancialEntryCreate, FinancialEntryUpdate, FinancialEntryResponse
 
 router = APIRouter()
 
@@ -20,47 +20,47 @@ async def list_financials(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    query = db.query(FinancialRecord)
+    query = db.query(FinancialEntry)
     total = query.count()
     items = query.offset((page - 1) * per_page).limit(per_page).all()
     return {"items": items, "total": total, "page": page, "per_page": per_page}
 
 
-@router.get("/{item_id}", response_model=FinancialRecordResponse)
+@router.get("/{item_id}", response_model=FinancialEntryResponse)
 async def get_financials_item(
     item_id: UUID,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    item = db.query(FinancialRecord).filter(FinancialRecord.id == item_id).first()
+    item = db.query(FinancialEntry).filter(FinancialEntry.id == item_id).first()
     if not item:
-        raise HTTPException(404, "FinancialRecord not found")
+        raise HTTPException(404, "FinancialEntry not found")
     return item
 
 
-@router.post("/", response_model=FinancialRecordResponse, status_code=201)
+@router.post("/", response_model=FinancialEntryResponse, status_code=201)
 async def create_financials_item(
-    data: FinancialRecordCreate,
+    data: FinancialEntryCreate,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    item = FinancialRecord(**data.model_dump())
+    item = FinancialEntry(**data.model_dump())
     db.add(item)
     db.commit()
     db.refresh(item)
     return item
 
 
-@router.patch("/{item_id}", response_model=FinancialRecordResponse)
+@router.patch("/{item_id}", response_model=FinancialEntryResponse)
 async def update_financials_item(
     item_id: UUID,
-    data: FinancialRecordUpdate,
+    data: FinancialEntryUpdate,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    item = db.query(FinancialRecord).filter(FinancialRecord.id == item_id).first()
+    item = db.query(FinancialEntry).filter(FinancialEntry.id == item_id).first()
     if not item:
-        raise HTTPException(404, "FinancialRecord not found")
+        raise HTTPException(404, "FinancialEntry not found")
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(item, k, v)
     db.commit()
@@ -74,8 +74,8 @@ async def delete_financials_item(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    item = db.query(FinancialRecord).filter(FinancialRecord.id == item_id).first()
+    item = db.query(FinancialEntry).filter(FinancialEntry.id == item_id).first()
     if not item:
-        raise HTTPException(404, "FinancialRecord not found")
+        raise HTTPException(404, "FinancialEntry not found")
     db.delete(item)
     db.commit()

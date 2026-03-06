@@ -1,4 +1,4 @@
-"""CRUD router for kiln_maintenance_logs (auto-generated)."""
+"""CRUD router for kiln_maintenance_schedules (auto-generated)."""
 
 from uuid import UUID
 
@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
-from api.models import KilnMaintenanceLog
-from api.schemas import KilnMaintenanceLogCreate, KilnMaintenanceLogUpdate, KilnMaintenanceLogResponse
+from api.models import KilnMaintenanceSchedule
+from api.schemas import KilnMaintenanceScheduleCreate, KilnMaintenanceScheduleUpdate, KilnMaintenanceScheduleResponse
 
 router = APIRouter()
 
@@ -20,47 +20,47 @@ async def list_kiln_maintenance(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    query = db.query(KilnMaintenanceLog)
+    query = db.query(KilnMaintenanceSchedule)
     total = query.count()
     items = query.offset((page - 1) * per_page).limit(per_page).all()
     return {"items": items, "total": total, "page": page, "per_page": per_page}
 
 
-@router.get("/{item_id}", response_model=KilnMaintenanceLogResponse)
+@router.get("/{item_id}", response_model=KilnMaintenanceScheduleResponse)
 async def get_kiln_maintenance_item(
     item_id: UUID,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    item = db.query(KilnMaintenanceLog).filter(KilnMaintenanceLog.id == item_id).first()
+    item = db.query(KilnMaintenanceSchedule).filter(KilnMaintenanceSchedule.id == item_id).first()
     if not item:
-        raise HTTPException(404, "KilnMaintenanceLog not found")
+        raise HTTPException(404, "KilnMaintenanceSchedule not found")
     return item
 
 
-@router.post("/", response_model=KilnMaintenanceLogResponse, status_code=201)
+@router.post("/", response_model=KilnMaintenanceScheduleResponse, status_code=201)
 async def create_kiln_maintenance_item(
-    data: KilnMaintenanceLogCreate,
+    data: KilnMaintenanceScheduleCreate,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    item = KilnMaintenanceLog(**data.model_dump())
+    item = KilnMaintenanceSchedule(**data.model_dump())
     db.add(item)
     db.commit()
     db.refresh(item)
     return item
 
 
-@router.patch("/{item_id}", response_model=KilnMaintenanceLogResponse)
+@router.patch("/{item_id}", response_model=KilnMaintenanceScheduleResponse)
 async def update_kiln_maintenance_item(
     item_id: UUID,
-    data: KilnMaintenanceLogUpdate,
+    data: KilnMaintenanceScheduleUpdate,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    item = db.query(KilnMaintenanceLog).filter(KilnMaintenanceLog.id == item_id).first()
+    item = db.query(KilnMaintenanceSchedule).filter(KilnMaintenanceSchedule.id == item_id).first()
     if not item:
-        raise HTTPException(404, "KilnMaintenanceLog not found")
+        raise HTTPException(404, "KilnMaintenanceSchedule not found")
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(item, k, v)
     db.commit()
@@ -74,8 +74,8 @@ async def delete_kiln_maintenance_item(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    item = db.query(KilnMaintenanceLog).filter(KilnMaintenanceLog.id == item_id).first()
+    item = db.query(KilnMaintenanceSchedule).filter(KilnMaintenanceSchedule.id == item_id).first()
     if not item:
-        raise HTTPException(404, "KilnMaintenanceLog not found")
+        raise HTTPException(404, "KilnMaintenanceSchedule not found")
     db.delete(item)
     db.commit()

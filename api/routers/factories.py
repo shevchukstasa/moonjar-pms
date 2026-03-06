@@ -23,7 +23,12 @@ async def list_factories(
     query = db.query(Factory)
     total = query.count()
     items = query.offset((page - 1) * per_page).limit(per_page).all()
-    return {"items": items, "total": total, "page": page, "per_page": per_page}
+    return {
+        "items": [FactoryResponse.model_validate(i).model_dump() for i in items],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 @router.get("/{item_id}", response_model=FactoryResponse)

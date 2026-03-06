@@ -19,7 +19,7 @@ from api.enums import AuditActionType, BatchCreator, BatchMode, BatchStatus, Buf
 
 def PgEnum(enum_class, **kwargs):
     """Enum helper: uses enum VALUES (lowercase) to match PostgreSQL DDL."""
-    return PgEnum(enum_class, values_callable=lambda x: [e.value for e in x], create_type=False, **kwargs)
+    return sa.Enum(enum_class, values_callable=lambda x: [e.value for e in x], create_type=False, **kwargs)
 
 
 class Factory(Base):

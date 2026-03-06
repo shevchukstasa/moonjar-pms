@@ -13,13 +13,12 @@ from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import APIKeyCookie
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 
 from api.config import get_settings
 from api.database import get_db
 
 settings = get_settings()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 cookie_scheme = APIKeyCookie(name="access_token", auto_error=False)
 
 ALGORITHM = "HS256"
@@ -28,13 +27,16 @@ LOCKOUT_DURATION_MINUTES = 15
 MAX_SESSIONS_PER_USER = 5
 
 
-# --- Password hashing ---
+# --- Password hashing (direct bcrypt, no passlib) ---
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
 
 
 # --- JWT tokens ---

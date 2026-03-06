@@ -58,11 +58,23 @@ export function OrderCreateDialog({ open, onClose }: Props) {
   const onSubmit = async (data: OrderCreateFormData) => {
     setSubmitError('');
     try {
-      await createOrder.mutateAsync(data as unknown as Record<string, unknown>);
+      // Strip empty optional fields so backend gets null instead of ""
+      const payload: Record<string, unknown> = { ...data };
+      if (!payload.final_deadline) delete payload.final_deadline;
+      if (!payload.notes) delete payload.notes;
+      await createOrder.mutateAsync(payload);
       reset();
       onClose();
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to create order';
+      const resp = (err as { response?: { data?: { detail?: unknown } } })?.response?.data;
+      let msg = 'Failed to create order';
+      if (resp?.detail) {
+        if (typeof resp.detail === 'string') {
+          msg = resp.detail;
+        } else if (Array.isArray(resp.detail)) {
+          msg = resp.detail.map((e: { msg?: string; loc?: string[] }) => e.msg || JSON.stringify(e)).join('; ');
+        }
+      }
       setSubmitError(msg);
     }
   };

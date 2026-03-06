@@ -153,4 +153,4 @@ setup_routers()
 # --- Health check ---
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "service": "moonjar-pms"}
+    return {"status": "ok", "service": "moonjar-pms", "version": "2026-03-07a"}

@@ -14,21 +14,18 @@ const DEFAULTS: Record<string, Partial<KilnCreateFormData>> = {
     kiln_working_area_cm: { width: 54, depth: 84, height: 80 },
     kiln_multi_level: true,
     kiln_coefficient: 0.8,
-    num_levels: 5,
   },
   small: {
     kiln_dimensions_cm: { width: 120, depth: 180, height: 50 },
     kiln_working_area_cm: { width: 100, depth: 160, height: 45 },
     kiln_multi_level: false,
     kiln_coefficient: 0.92,
-    num_levels: 1,
   },
   raku: {
     kiln_dimensions_cm: { width: 70, depth: 110, height: 50 },
     kiln_working_area_cm: { width: 60, depth: 100, height: 45 },
     kiln_multi_level: false,
     kiln_coefficient: 0.85,
-    num_levels: 1,
   },
 };
 
@@ -60,7 +57,6 @@ export function KilnCreateDialog({ open, onClose, factoryId }: Props) {
       kiln_working_area_cm: { width: 0, depth: 0, height: 0 },
       kiln_multi_level: false,
       kiln_coefficient: 0.8,
-      num_levels: 1,
     },
   });
 
@@ -81,7 +77,6 @@ export function KilnCreateDialog({ open, onClose, factoryId }: Props) {
       }
       if (d.kiln_multi_level !== undefined) setValue('kiln_multi_level', d.kiln_multi_level);
       if (d.kiln_coefficient !== undefined) setValue('kiln_coefficient', d.kiln_coefficient);
-      if (d.num_levels !== undefined) setValue('num_levels', d.num_levels);
     }
   };
 
@@ -136,10 +131,7 @@ export function KilnCreateDialog({ open, onClose, factoryId }: Props) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <Input label="Coefficient" type="number" step="0.01" {...register('kiln_coefficient')} error={errors.kiln_coefficient?.message} />
-              <Input label="Max Levels" type="number" {...register('num_levels')} error={errors.num_levels?.message} />
-            </div>
+            <Input label="Coefficient" type="number" step="0.01" {...register('kiln_coefficient')} error={errors.kiln_coefficient?.message} />
 
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" {...register('kiln_multi_level')} className="rounded border-gray-300" />

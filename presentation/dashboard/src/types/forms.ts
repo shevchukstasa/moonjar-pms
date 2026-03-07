@@ -97,6 +97,15 @@ export const kilnCreateSchema = z.object({
   kiln_working_area_cm: dimensionSchema,
   kiln_multi_level: z.boolean().default(false),
   kiln_coefficient: z.coerce.number().min(0).max(1).default(0.8),
-  num_levels: z.coerce.number().int().min(1).default(1),
 });
 export type KilnCreateFormData = z.infer<typeof kilnCreateSchema>;
+
+export const kilnEditSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  factory_id: z.string().min(1, 'Factory is required'),
+  kiln_dimensions_cm: dimensionSchema,
+  kiln_working_area_cm: dimensionSchema,
+  kiln_multi_level: z.boolean().default(false),
+  kiln_coefficient: z.coerce.number().min(0).max(1).default(0.8),
+});
+export type KilnEditFormData = z.infer<typeof kilnEditSchema>;

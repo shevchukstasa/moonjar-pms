@@ -85,6 +85,7 @@ export default function ManagerKilnsPage() {
             <KilnCard
               key={kiln.id}
               kiln={kiln}
+              showFactory={!factoryId}
               onEdit={() => setEditKiln(kiln)}
               onRules={() => setRulesKiln(kiln)}
             />
@@ -122,14 +123,20 @@ export default function ManagerKilnsPage() {
 
 function KilnCard({
   kiln,
+  showFactory,
   onEdit,
   onRules,
 }: {
   kiln: KilnItem;
+  showFactory: boolean;
   onEdit: () => void;
   onRules: () => void;
 }) {
   const hasRules = !!kiln.loading_rules;
+  const rules = kiln.loading_rules as Record<string, unknown> | null;
+
+  // Summarize allowed collections from rules
+  const allowedCollections = (rules?.allowed_collections as string[]) || [];
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
@@ -137,9 +144,14 @@ function KilnCard({
       <div className="mb-3 flex items-start justify-between">
         <div>
           <h3 className="text-base font-semibold text-gray-900">{kiln.name}</h3>
-          <span className="mt-0.5 inline-block rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-            {KILN_TYPE_LABELS[kiln.kiln_type] || kiln.kiln_type}
-          </span>
+          <div className="mt-0.5 flex items-center gap-2">
+            <span className="inline-block rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+              {KILN_TYPE_LABELS[kiln.kiln_type] || kiln.kiln_type}
+            </span>
+            {showFactory && kiln.factory_name && (
+              <span className="text-xs text-gray-400">{kiln.factory_name}</span>
+            )}
+          </div>
         </div>
         <Badge status={kiln.status} />
       </div>
@@ -159,12 +171,8 @@ function KilnCard({
           <span className="font-medium">{kiln.kiln_coefficient ?? '—'}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-400">Levels</span>
-          <span>
-            {kiln.kiln_multi_level
-              ? `${kiln.num_levels} (multi-level)`
-              : `${kiln.num_levels} level`}
-          </span>
+          <span className="text-gray-400">Multi-level</span>
+          <span>{kiln.kiln_multi_level ? 'Yes' : 'No'}</span>
         </div>
         {kiln.capacity_sqm != null && (
           <div className="flex justify-between">
@@ -174,14 +182,30 @@ function KilnCard({
         )}
       </div>
 
-      {/* Loading rules indicator */}
-      <div className="mt-3 flex items-center gap-1.5 text-xs">
-        <span
-          className={`inline-block h-2 w-2 rounded-full ${hasRules ? 'bg-green-400' : 'bg-gray-300'}`}
-        />
-        <span className="text-gray-500">
-          {hasRules ? 'Loading rules configured' : 'No loading rules'}
-        </span>
+      {/* Loading rules indicator + collections */}
+      <div className="mt-3 space-y-1">
+        <div className="flex items-center gap-1.5 text-xs">
+          <span
+            className={`inline-block h-2 w-2 rounded-full ${hasRules ? 'bg-green-400' : 'bg-gray-300'}`}
+          />
+          <span className="text-gray-500">
+            {hasRules ? 'Loading rules configured' : 'No loading rules'}
+          </span>
+        </div>
+        {allowedCollections.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {allowedCollections.slice(0, 4).map((c) => (
+              <span key={c} className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600">
+                {c}
+              </span>
+            ))}
+            {allowedCollections.length > 4 && (
+              <span className="text-[10px] text-gray-400">
+                +{allowedCollections.length - 4} more
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Actions */}

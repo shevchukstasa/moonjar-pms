@@ -15,9 +15,17 @@ export interface KilnCreateData {
   kiln_working_area_cm?: { width: number; depth: number; height: number };
   kiln_multi_level?: boolean;
   kiln_coefficient?: number;
-  num_levels?: number;
   capacity_sqm?: number;
   capacity_pcs?: number;
+}
+
+export interface KilnUpdateData {
+  name?: string;
+  factory_id?: string;
+  kiln_dimensions_cm?: { width: number; depth: number; height: number };
+  kiln_working_area_cm?: { width: number; depth: number; height: number };
+  kiln_multi_level?: boolean;
+  kiln_coefficient?: number;
 }
 
 export const kilnsApi = {
@@ -27,10 +35,14 @@ export const kilnsApi = {
     apiClient.get(`/kilns/${id}`).then((r) => r.data),
   create: (data: KilnCreateData) =>
     apiClient.post('/kilns', data).then((r) => r.data),
-  update: (id: string, data: Partial<KilnCreateData>) =>
+  update: (id: string, data: KilnUpdateData) =>
     apiClient.patch(`/kilns/${id}`, data).then((r) => r.data),
   updateStatus: (id: string, status: string) =>
     apiClient.patch(`/kilns/${id}/status?status=${status}`).then((r) => r.data),
+  delete: (id: string) =>
+    apiClient.delete(`/kilns/${id}`).then((r) => r.data),
+  collections: () =>
+    apiClient.get('/kilns/collections').then((r) => r.data),
 };
 
 export const kilnConstantsApi = {

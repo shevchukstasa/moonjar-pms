@@ -1,10 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { kilnsApi, kilnConstantsApi, kilnLoadingRulesApi, type KilnListParams, type KilnCreateData } from '@/api/kilns';
+import { kilnsApi, kilnConstantsApi, kilnLoadingRulesApi, type KilnListParams, type KilnCreateData, type KilnUpdateData } from '@/api/kilns';
 
 export interface KilnItem {
   id: string;
   name: string;
   factory_id: string;
+  factory_name: string | null;
   kiln_type: string;
   status: string;
   kiln_dimensions_cm: { width: number; depth: number; height: number } | null;
@@ -19,6 +20,11 @@ export interface KilnItem {
   loading_rules_id: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface CollectionItem {
+  id: string;
+  name: string;
 }
 
 export interface KilnConstantItem {
@@ -57,7 +63,15 @@ export function useCreateKiln() {
 export function useUpdateKiln() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<KilnCreateData> }) => kilnsApi.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: KilnUpdateData }) => kilnsApi.update(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kilns'] }); qc.invalidateQueries({ queryKey: ['schedule'] }); },
+  });
+}
+
+export function useDeleteKiln() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => kilnsApi.delete(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['kilns'] }); qc.invalidateQueries({ queryKey: ['schedule'] }); },
   });
 }
@@ -67,6 +81,14 @@ export function useUpdateKilnStatus() {
   return useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => kilnsApi.updateStatus(id, status),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['kilns'] }); qc.invalidateQueries({ queryKey: ['schedule'] }); },
+  });
+}
+
+export function useCollections() {
+  return useQuery<{ items: CollectionItem[] }>({
+    queryKey: ['collections'],
+    queryFn: () => kilnsApi.collections(),
+    staleTime: 10 * 60 * 1000,
   });
 }
 

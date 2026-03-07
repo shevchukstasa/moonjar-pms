@@ -2,9 +2,22 @@ import { useState, useEffect } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { useUpdateLoadingRules, useCreateLoadingRules, type KilnItem } from '@/hooks/useKilns';
+import {
+  useUpdateLoadingRules,
+  useCreateLoadingRules,
+  useCollections,
+  type KilnItem,
+} from '@/hooks/useKilns';
 
 const PRODUCT_TYPES = ['tile', 'countertop', 'sink', '3d'];
+
+// Default constants (match business/kiln/constants.py)
+const DEFAULTS = {
+  gap_x_cm: 1.2,
+  gap_y_cm: 1.2,
+  air_gap_cm: 2.0,
+  shelf_thickness_cm: 3.0,
+};
 
 interface Props {
   open: boolean;
@@ -15,55 +28,87 @@ interface Props {
 export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
   const updateRules = useUpdateLoadingRules();
   const createRules = useCreateLoadingRules();
+  const { data: collectionsData } = useCollections();
+  const collections = collectionsData?.items || [];
   const [submitError, setSubmitError] = useState('');
 
-  // Form state
+  // Product types
   const [allowedTypes, setAllowedTypes] = useState<string[]>([]);
-  const [maxTemp, setMaxTemp] = useState(1200);
+
+  // Per-kiln gap overrides
+  const [gapX, setGapX] = useState(DEFAULTS.gap_x_cm);
+  const [gapY, setGapY] = useState(DEFAULTS.gap_y_cm);
+  const [airGap, setAirGap] = useState(DEFAULTS.air_gap_cm);
+  const [shelfThickness, setShelfThickness] = useState(DEFAULTS.shelf_thickness_cm);
+
+  // Max product dimensions
+  const [maxProductWidth, setMaxProductWidth] = useState<number | ''>('');
+  const [maxProductHeight, setMaxProductHeight] = useState<number | ''>('');
+
+  // Edge loading
   const [edgeAllowed, setEdgeAllowed] = useState(true);
-  const [coefficient, setCoefficient] = useState(0.8);
-  const [levels, setLevels] = useState(1);
-  const [maxTempDelta, setMaxTempDelta] = useState(50);
+
+  // Allowed collections
+  const [allowedCollections, setAllowedCollections] = useState<string[]>([]);
 
   useEffect(() => {
     if (kiln?.loading_rules) {
       const r = kiln.loading_rules as Record<string, unknown>;
       setAllowedTypes((r.allowed_product_types as string[]) || PRODUCT_TYPES);
-      setMaxTemp((r.max_temperature as number) || 1200);
+      setGapX((r.gap_x_cm as number) ?? DEFAULTS.gap_x_cm);
+      setGapY((r.gap_y_cm as number) ?? DEFAULTS.gap_y_cm);
+      setAirGap((r.air_gap_cm as number) ?? DEFAULTS.air_gap_cm);
+      setShelfThickness((r.shelf_thickness_cm as number) ?? DEFAULTS.shelf_thickness_cm);
+      setMaxProductWidth((r.max_product_width_cm as number) || '');
+      setMaxProductHeight((r.max_product_height_cm as number) || '');
       setEdgeAllowed((r.edge_loading_allowed as boolean) ?? true);
-      setCoefficient((r.coefficient as number) || kiln.kiln_coefficient || 0.8);
-      setLevels((r.levels as number) || kiln.num_levels || 1);
-      const cofiring = r.co_firing_restrictions as Record<string, unknown> | undefined;
-      setMaxTempDelta((cofiring?.max_temp_delta as number) || 50);
+      setAllowedCollections((r.allowed_collections as string[]) || []);
     } else if (kiln) {
       setAllowedTypes(PRODUCT_TYPES);
-      setMaxTemp(1200);
+      setGapX(DEFAULTS.gap_x_cm);
+      setGapY(DEFAULTS.gap_y_cm);
+      setAirGap(DEFAULTS.air_gap_cm);
+      setShelfThickness(DEFAULTS.shelf_thickness_cm);
+      setMaxProductWidth('');
+      setMaxProductHeight('');
       setEdgeAllowed(true);
-      setCoefficient(kiln.kiln_coefficient || 0.8);
-      setLevels(kiln.num_levels || 1);
-      setMaxTempDelta(50);
+      setAllowedCollections([]);
     }
   }, [kiln]);
 
   const toggleType = (t: string) => {
-    setAllowedTypes((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]);
+    setAllowedTypes((prev) =>
+      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t],
+    );
+  };
+
+  const toggleCollection = (name: string) => {
+    setAllowedCollections((prev) =>
+      prev.includes(name) ? prev.filter((x) => x !== name) : [...prev, name],
+    );
   };
 
   const handleSave = async () => {
     if (!kiln) return;
     setSubmitError('');
 
-    const rules = {
+    const rules: Record<string, unknown> = {
       allowed_product_types: allowedTypes,
-      max_temperature: maxTemp,
+      gap_x_cm: gapX,
+      gap_y_cm: gapY,
+      air_gap_cm: airGap,
+      shelf_thickness_cm: shelfThickness,
       edge_loading_allowed: edgeAllowed,
-      coefficient,
-      levels,
-      co_firing_restrictions: {
-        max_temp_delta: maxTempDelta,
-        excluded_glaze_combos: [],
-      },
+      allowed_collections: allowedCollections,
     };
+
+    // Only include max dims if set
+    if (maxProductWidth !== '' && maxProductWidth > 0) {
+      rules.max_product_width_cm = maxProductWidth;
+    }
+    if (maxProductHeight !== '' && maxProductHeight > 0) {
+      rules.max_product_height_cm = maxProductHeight;
+    }
 
     try {
       if (kiln.loading_rules_id) {
@@ -73,7 +118,8 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
       }
       onClose();
     } catch (err: unknown) {
-      const resp = (err as { response?: { data?: { detail?: string } } })?.response?.data;
+      const resp = (err as { response?: { data?: { detail?: string } } })
+        ?.response?.data;
       setSubmitError(resp?.detail || 'Failed to save loading rules');
     }
   };
@@ -81,14 +127,21 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
   if (!kiln) return null;
 
   return (
-    <Dialog open={open} onClose={onClose} title={`Loading Rules — ${kiln.name}`} className="w-full max-w-md">
-      <div className="space-y-4">
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={`Loading Rules — ${kiln.name}`}
+      className="w-full max-w-lg"
+    >
+      <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
         {/* Allowed product types */}
         <div>
-          <label className="mb-2 block text-sm font-medium text-gray-700">Allowed Product Types</label>
-          <div className="space-y-1.5">
+          <label className="mb-2 block text-sm font-medium text-gray-700">
+            Allowed Product Types
+          </label>
+          <div className="flex flex-wrap gap-3">
             {PRODUCT_TYPES.map((t) => (
-              <label key={t} className="flex items-center gap-2 text-sm capitalize">
+              <label key={t} className="flex items-center gap-1.5 text-sm capitalize">
                 <input
                   type="checkbox"
                   checked={allowedTypes.includes(t)}
@@ -101,13 +154,73 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
           </div>
         </div>
 
-        <Input
-          label="Max Firing Temperature (°C)"
-          type="number"
-          value={maxTemp}
-          onChange={(e) => setMaxTemp(Number(e.target.value))}
-        />
+        {/* Per-kiln gap parameters */}
+        <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+          <label className="mb-2 block text-sm font-semibold text-gray-700">
+            Loading Parameters (overrides defaults)
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Tile Gap X (cm)"
+              type="number"
+              step="0.1"
+              value={gapX}
+              onChange={(e) => setGapX(Number(e.target.value))}
+            />
+            <Input
+              label="Tile Gap Y (cm)"
+              type="number"
+              step="0.1"
+              value={gapY}
+              onChange={(e) => setGapY(Number(e.target.value))}
+            />
+            <Input
+              label="Air Gap (cm)"
+              type="number"
+              step="0.1"
+              value={airGap}
+              onChange={(e) => setAirGap(Number(e.target.value))}
+            />
+            <Input
+              label="Shelf Thickness (cm)"
+              type="number"
+              step="0.1"
+              value={shelfThickness}
+              onChange={(e) => setShelfThickness(Number(e.target.value))}
+            />
+          </div>
+        </div>
 
+        {/* Max product dimensions */}
+        <div>
+          <label className="mb-2 block text-sm font-medium text-gray-700">
+            Max Product Dimensions (cm)
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Max Width"
+              type="number"
+              step="1"
+              placeholder="No limit"
+              value={maxProductWidth}
+              onChange={(e) =>
+                setMaxProductWidth(e.target.value ? Number(e.target.value) : '')
+              }
+            />
+            <Input
+              label="Max Height"
+              type="number"
+              step="1"
+              placeholder="No limit"
+              value={maxProductHeight}
+              onChange={(e) =>
+                setMaxProductHeight(e.target.value ? Number(e.target.value) : '')
+              }
+            />
+          </div>
+        </div>
+
+        {/* Edge loading */}
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -118,34 +231,51 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
           Edge loading allowed
         </label>
 
-        <div className="grid grid-cols-2 gap-4">
-          <Input
-            label="Coefficient"
-            type="number"
-            step="0.01"
-            value={coefficient}
-            onChange={(e) => setCoefficient(Number(e.target.value))}
-          />
-          <Input
-            label="Levels"
-            type="number"
-            value={levels}
-            onChange={(e) => setLevels(Number(e.target.value))}
-          />
+        {/* Allowed collections */}
+        <div>
+          <label className="mb-2 block text-sm font-medium text-gray-700">
+            Allowed Collections
+            {allowedCollections.length === 0 && (
+              <span className="ml-2 text-xs font-normal text-gray-400">(all allowed)</span>
+            )}
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {collections.map((c) => (
+              <label
+                key={c.id}
+                className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors ${
+                  allowedCollections.includes(c.name)
+                    ? 'border-blue-300 bg-blue-50 text-blue-700'
+                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={allowedCollections.includes(c.name)}
+                  onChange={() => toggleCollection(c.name)}
+                  className="sr-only"
+                />
+                {c.name}
+              </label>
+            ))}
+            {collections.length === 0 && (
+              <p className="text-xs text-gray-400">
+                No collections in database. Add them via reference data.
+              </p>
+            )}
+          </div>
         </div>
-
-        <Input
-          label="Co-firing: Max Temp Delta (°C)"
-          type="number"
-          value={maxTempDelta}
-          onChange={(e) => setMaxTempDelta(Number(e.target.value))}
-        />
 
         {submitError && <p className="text-sm text-red-500">{submitError}</p>}
 
         <div className="flex justify-end gap-3 border-t pt-4">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={updateRules.isPending || createRules.isPending}>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={updateRules.isPending || createRules.isPending}
+          >
             {updateRules.isPending || createRules.isPending ? 'Saving...' : 'Save Rules'}
           </Button>
         </div>

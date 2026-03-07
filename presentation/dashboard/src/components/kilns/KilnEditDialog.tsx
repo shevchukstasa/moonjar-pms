@@ -5,8 +5,9 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { kilnCreateSchema, type KilnCreateFormData, KILN_STATUS_OPTIONS } from '@/types/forms';
-import { useUpdateKiln, useUpdateKilnStatus, type KilnItem } from '@/hooks/useKilns';
+import { kilnEditSchema, type KilnEditFormData, KILN_STATUS_OPTIONS } from '@/types/forms';
+import { useUpdateKiln, useUpdateKilnStatus, useDeleteKiln, type KilnItem } from '@/hooks/useKilns';
+import { useFactories } from '@/hooks/useFactories';
 
 interface Props {
   open: boolean;
@@ -17,34 +18,43 @@ interface Props {
 export function KilnEditDialog({ open, onClose, kiln }: Props) {
   const updateKiln = useUpdateKiln();
   const updateStatus = useUpdateKilnStatus();
+  const deleteKiln = useDeleteKiln();
+  const { data: factoriesData } = useFactories();
+  const factories = factoriesData?.items || [];
   const [submitError, setSubmitError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const statusOptions = [...KILN_STATUS_OPTIONS];
+
+  const factoryOptions = factories.map((f) => ({
+    value: f.id,
+    label: `${f.name}${f.location ? ` (${f.location})` : ''}`,
+  }));
 
   const {
     register,
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
-  } = useForm<KilnCreateFormData>({
-    resolver: zodResolver(kilnCreateSchema),
+  } = useForm<KilnEditFormData>({
+    resolver: zodResolver(kilnEditSchema),
   });
 
   useEffect(() => {
     if (kiln) {
       reset({
         name: kiln.name,
-        kiln_type: kiln.kiln_type,
+        factory_id: kiln.factory_id,
         kiln_dimensions_cm: kiln.kiln_dimensions_cm || { width: 0, depth: 0, height: 0 },
         kiln_working_area_cm: kiln.kiln_working_area_cm || { width: 0, depth: 0, height: 0 },
         kiln_multi_level: kiln.kiln_multi_level,
         kiln_coefficient: kiln.kiln_coefficient || 0.8,
-        num_levels: kiln.num_levels || 1,
       });
+      setConfirmDelete(false);
     }
   }, [kiln, reset]);
 
-  const onSubmit = async (data: KilnCreateFormData) => {
+  const onSubmit = async (data: KilnEditFormData) => {
     if (!kiln) return;
     setSubmitError('');
     try {
@@ -68,6 +78,19 @@ export function KilnEditDialog({ open, onClose, kiln }: Props) {
     }
   };
 
+  const handleDelete = async () => {
+    if (!kiln) return;
+    setSubmitError('');
+    try {
+      await deleteKiln.mutateAsync(kiln.id);
+      onClose();
+    } catch (err: unknown) {
+      const resp = (err as { response?: { data?: { detail?: string } } })?.response?.data;
+      setSubmitError(resp?.detail || 'Failed to delete kiln');
+      setConfirmDelete(false);
+    }
+  };
+
   if (!kiln) return null;
 
   return (
@@ -82,6 +105,14 @@ export function KilnEditDialog({ open, onClose, kiln }: Props) {
             </p>
           </div>
         </div>
+
+        {/* Factory assignment */}
+        <Select
+          label="Factory"
+          {...register('factory_id')}
+          error={errors.factory_id?.message}
+          options={factoryOptions}
+        />
 
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">Outer Dimensions (cm)</label>
@@ -101,15 +132,20 @@ export function KilnEditDialog({ open, onClose, kiln }: Props) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <Input label="Coefficient" type="number" step="0.01" {...register('kiln_coefficient')} />
-          <Input label="Max Levels" type="number" {...register('num_levels')} />
-        </div>
+        <Input label="Coefficient" type="number" step="0.01" {...register('kiln_coefficient')} />
 
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" {...register('kiln_multi_level')} className="rounded border-gray-300" />
           Multi-level support
         </label>
+
+        {/* Calculated levels info */}
+        {kiln.kiln_multi_level && kiln.kiln_working_area_cm && (
+          <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+            Levels are calculated automatically based on product height, air gap, and shelf
+            thickness (configured in Loading Rules).
+          </div>
+        )}
 
         {/* Status control */}
         <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
@@ -126,11 +162,48 @@ export function KilnEditDialog({ open, onClose, kiln }: Props) {
 
         {submitError && <p className="text-sm text-red-500">{submitError}</p>}
 
-        <div className="flex justify-end gap-3 border-t pt-4">
-          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Saving...' : 'Save Changes'}
-          </Button>
+        <div className="flex items-center justify-between border-t pt-4">
+          {/* Delete section */}
+          <div>
+            {!confirmDelete ? (
+              <Button
+                type="button"
+                variant="ghost"
+                className="text-red-500 hover:bg-red-50 hover:text-red-700"
+                onClick={() => setConfirmDelete(true)}
+              >
+                Delete Kiln
+              </Button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-red-600">Are you sure?</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-red-600 hover:bg-red-100"
+                  onClick={handleDelete}
+                  disabled={deleteKiln.isPending}
+                >
+                  {deleteKiln.isPending ? 'Deleting...' : 'Yes, delete'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setConfirmDelete(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* Save section */}
+          <div className="flex gap-3">
+            <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </div>
         </div>
       </form>
     </Dialog>

@@ -13,6 +13,23 @@ from api.schemas import SupplierCreate, SupplierUpdate, SupplierResponse
 router = APIRouter()
 
 
+def _serialize_supplier(s) -> dict:
+    return {
+        "id": str(s.id),
+        "name": s.name,
+        "contact_person": s.contact_person,
+        "phone": s.phone,
+        "email": s.email,
+        "address": s.address,
+        "material_types": s.material_types,
+        "default_lead_time_days": s.default_lead_time_days,
+        "rating": float(s.rating) if s.rating else None,
+        "notes": s.notes,
+        "is_active": s.is_active,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+    }
+
+
 @router.get("/", response_model=dict)
 async def list_suppliers(
     page: int = Query(1, ge=1),
@@ -23,10 +40,10 @@ async def list_suppliers(
     query = db.query(Supplier)
     total = query.count()
     items = query.offset((page - 1) * per_page).limit(per_page).all()
-    return {"items": items, "total": total, "page": page, "per_page": per_page}
+    return {"items": [_serialize_supplier(s) for s in items], "total": total, "page": page, "per_page": per_page}
 
 
-@router.get("/{item_id}", response_model=SupplierResponse)
+@router.get("/{item_id}")
 async def get_suppliers_item(
     item_id: UUID,
     db: Session = Depends(get_db),
@@ -35,10 +52,10 @@ async def get_suppliers_item(
     item = db.query(Supplier).filter(Supplier.id == item_id).first()
     if not item:
         raise HTTPException(404, "Supplier not found")
-    return item
+    return _serialize_supplier(item)
 
 
-@router.post("/", response_model=SupplierResponse, status_code=201)
+@router.post("/", status_code=201)
 async def create_suppliers_item(
     data: SupplierCreate,
     db: Session = Depends(get_db),
@@ -48,10 +65,10 @@ async def create_suppliers_item(
     db.add(item)
     db.commit()
     db.refresh(item)
-    return item
+    return _serialize_supplier(item)
 
 
-@router.patch("/{item_id}", response_model=SupplierResponse)
+@router.patch("/{item_id}")
 async def update_suppliers_item(
     item_id: UUID,
     data: SupplierUpdate,
@@ -65,7 +82,7 @@ async def update_suppliers_item(
         setattr(item, k, v)
     db.commit()
     db.refresh(item)
-    return item
+    return _serialize_supplier(item)
 
 
 @router.delete("/{item_id}", status_code=204)

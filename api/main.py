@@ -157,4 +157,49 @@ setup_routers()
 # --- Health check ---
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "service": "moonjar-pms", "version": "2026-03-07a"}
+    return {"status": "ok", "service": "moonjar-pms", "version": "2026-03-07b"}
+
+
+@app.post("/api/admin/fix-enums")
+async def fix_enum_columns():
+    """One-time migration: fix materialtype enum columns to text."""
+    from api.database import engine
+    with engine.connect() as conn:
+        from sqlalchemy import text
+        # Check if materialtype enum exists
+        result = conn.execute(text(
+            "SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'materialtype')"
+        )).scalar()
+
+        changes = []
+        if result:
+            # Change suppliers.material_types from materialtype[] to text[]
+            try:
+                conn.execute(text(
+                    "ALTER TABLE suppliers ALTER COLUMN material_types TYPE text[] USING material_types::text[]"
+                ))
+                changes.append("suppliers.material_types → text[]")
+            except Exception as e:
+                changes.append(f"suppliers.material_types: {e}")
+
+            # Change supplier_lead_times.material_type from materialtype to text
+            try:
+                conn.execute(text(
+                    "ALTER TABLE supplier_lead_times ALTER COLUMN material_type TYPE text USING material_type::text"
+                ))
+                changes.append("supplier_lead_times.material_type → text")
+            except Exception as e:
+                changes.append(f"supplier_lead_times.material_type: {e}")
+
+            # Change materials.material_type from materialtype to text
+            try:
+                conn.execute(text(
+                    "ALTER TABLE materials ALTER COLUMN material_type TYPE text USING material_type::text"
+                ))
+                changes.append("materials.material_type → text")
+            except Exception as e:
+                changes.append(f"materials.material_type: {e}")
+
+            conn.commit()
+
+        return {"materialtype_exists": result, "changes": changes}

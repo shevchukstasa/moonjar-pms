@@ -1,5 +1,6 @@
-"""Positions router — list, status transitions, filtering by section."""
+"""Positions router — list, status transitions, sorting split, filtering by section."""
 
+import uuid as uuid_mod
 from datetime import datetime, timezone
 from uuid import UUID
 from typing import Optional
@@ -11,9 +12,12 @@ from sqlalchemy import or_
 
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
-from api.roles import require_management
-from api.models import OrderPosition, ProductionOrder
-from api.enums import PositionStatus
+from api.roles import require_management, require_sorting
+from api.models import OrderPosition, ProductionOrder, DefectRecord, GrindingStock, RepairQueue
+from api.enums import (
+    PositionStatus, SplitCategory, DefectStage, DefectOutcome,
+    GrindingStatus, RepairStatus,
+)
 
 router = APIRouter()
 
@@ -200,3 +204,191 @@ async def change_position_status(
     db.commit()
     db.refresh(p)
     return _serialize_position(p)
+
+
+# ---------- Sorting Split ----------
+
+class SortingSplitRequest(BaseModel):
+    good_quantity: int
+    repair_quantity: int = 0
+    color_mismatch_quantity: int = 0
+    grinding_quantity: int = 0
+    write_off_quantity: int = 0
+    notes: Optional[str] = None
+
+
+@router.post("/{position_id}/split")
+async def split_position(
+    position_id: UUID,
+    data: SortingSplitRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_sorting),
+):
+    """Sort a fired position: split into good/repair/color_mismatch/grinding/write-off."""
+
+    p = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not p:
+        raise HTTPException(404, "Position not found")
+
+    if _ev(p.status) != "transferred_to_sorting":
+        raise HTTPException(400, f"Position status must be 'transferred_to_sorting', got '{_ev(p.status)}'")
+
+    total = (
+        data.good_quantity + data.repair_quantity + data.color_mismatch_quantity
+        + data.grinding_quantity + data.write_off_quantity
+    )
+    if total != p.quantity:
+        raise HTTPException(
+            400,
+            f"Total ({total}) must equal position quantity ({p.quantity})",
+        )
+
+    now = datetime.now(timezone.utc)
+    sub_positions = []
+    grinding_record = None
+    defect_record = None
+
+    # 1. Update parent — good quantity, mark as packed
+    p.quantity = data.good_quantity
+    p.status = PositionStatus.PACKED
+    p.updated_at = now
+
+    # 2. Repair sub-position
+    if data.repair_quantity > 0:
+        repair_pos = OrderPosition(
+            id=uuid_mod.uuid4(),
+            order_id=p.order_id,
+            order_item_id=p.order_item_id,
+            parent_position_id=p.id,
+            factory_id=p.factory_id,
+            status=PositionStatus.SENT_TO_GLAZING,
+            quantity=data.repair_quantity,
+            color=p.color,
+            size=p.size,
+            application=p.application,
+            finishing=p.finishing,
+            collection=p.collection,
+            application_type=p.application_type,
+            place_of_application=p.place_of_application,
+            product_type=p.product_type,
+            shape=p.shape,
+            thickness_mm=p.thickness_mm,
+            recipe_id=p.recipe_id,
+            mandatory_qc=p.mandatory_qc,
+            split_category=SplitCategory.REPAIR,
+            priority_order=p.priority_order,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(repair_pos)
+        sub_positions.append(repair_pos)
+
+        # Repair queue entry for SLA tracking
+        rq = RepairQueue(
+            id=uuid_mod.uuid4(),
+            factory_id=p.factory_id,
+            color=p.color,
+            size=p.size,
+            quantity=data.repair_quantity,
+            defect_type="sorting_repair",
+            source_order_id=p.order_id,
+            source_position_id=p.id,
+            status=RepairStatus.IN_REPAIR,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(rq)
+
+    # 3. Color mismatch sub-position
+    if data.color_mismatch_quantity > 0:
+        cm_pos = OrderPosition(
+            id=uuid_mod.uuid4(),
+            order_id=p.order_id,
+            order_item_id=p.order_item_id,
+            parent_position_id=p.id,
+            factory_id=p.factory_id,
+            status=PositionStatus.PLANNED,
+            quantity=data.color_mismatch_quantity,
+            color=p.color,
+            size=p.size,
+            application=p.application,
+            finishing=p.finishing,
+            collection=p.collection,
+            application_type=p.application_type,
+            place_of_application=p.place_of_application,
+            product_type=p.product_type,
+            shape=p.shape,
+            thickness_mm=p.thickness_mm,
+            recipe_id=p.recipe_id,
+            mandatory_qc=p.mandatory_qc,
+            split_category=SplitCategory.COLOR_MISMATCH,
+            priority_order=p.priority_order,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(cm_pos)
+        sub_positions.append(cm_pos)
+
+    # 4. Grinding stock
+    if data.grinding_quantity > 0:
+        gs = GrindingStock(
+            id=uuid_mod.uuid4(),
+            factory_id=p.factory_id,
+            color=p.color,
+            size=p.size,
+            quantity=data.grinding_quantity,
+            source_order_id=p.order_id,
+            source_position_id=p.id,
+            status=GrindingStatus.IN_STOCK,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(gs)
+        grinding_record = {
+            "id": str(gs.id),
+            "color": gs.color,
+            "size": gs.size,
+            "quantity": gs.quantity,
+        }
+
+    # 5. Write-off defect record
+    if data.write_off_quantity > 0:
+        dr = DefectRecord(
+            id=uuid_mod.uuid4(),
+            factory_id=p.factory_id,
+            stage=DefectStage.SORTING,
+            position_id=p.id,
+            defect_type="sorting_write_off",
+            quantity=data.write_off_quantity,
+            outcome=DefectOutcome.WRITE_OFF,
+            reported_by=current_user.id,
+            reported_via="dashboard",
+            notes=data.notes,
+            created_at=now,
+        )
+        db.add(dr)
+        defect_record = {
+            "id": str(dr.id),
+            "quantity": dr.quantity,
+            "outcome": "write_off",
+        }
+
+    db.commit()
+    db.refresh(p)
+    for sp in sub_positions:
+        db.refresh(sp)
+
+    return {
+        "parent_position": _serialize_position(p),
+        "sub_positions": [_serialize_position(sp) for sp in sub_positions],
+        "grinding_record": grinding_record,
+        "defect_record": defect_record,
+        "reconciliation": {
+            "input_total": total,
+            "good": data.good_quantity,
+            "repair": data.repair_quantity,
+            "color_mismatch": data.color_mismatch_quantity,
+            "grinding": data.grinding_quantity,
+            "write_off": data.write_off_quantity,
+        },
+    }

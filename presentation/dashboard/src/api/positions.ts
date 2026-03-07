@@ -10,6 +10,15 @@ export interface PositionListParams {
   section?: 'glazing' | 'firing' | 'sorting';
 }
 
+export interface SortingSplitRequest {
+  good_quantity: number;
+  repair_quantity: number;
+  color_mismatch_quantity: number;
+  grinding_quantity: number;
+  write_off_quantity: number;
+  notes?: string;
+}
+
 export const positionsApi = {
   list: (params?: PositionListParams) =>
     apiClient.get('/positions', { params }).then((r) => r.data),
@@ -19,4 +28,6 @@ export const positionsApi = {
     apiClient.patch(`/positions/${id}`, data).then((r) => r.data),
   changeStatus: (id: string, status: string, notes?: string) =>
     apiClient.post(`/positions/${id}/status`, { status, notes }).then((r) => r.data),
+  split: (id: string, data: SortingSplitRequest) =>
+    apiClient.post(`/positions/${id}/split`, data).then((r) => r.data),
 };

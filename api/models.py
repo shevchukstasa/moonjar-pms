@@ -132,20 +132,6 @@ class Color(Base):
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 
-class BaseColor(Base):
-    __tablename__ = 'base_colors'
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    color_id = Column(UUID(as_uuid=True), ForeignKey('colors.id', ondelete='CASCADE'), nullable=False)
-    is_base = Column(sa.Boolean, nullable=False, default=False)
-
-    __table_args__ = (
-        UniqueConstraint('color_id'),
-    )
-
-    color = relationship('Color', foreign_keys=[color_id])
-
-
 class ApplicationType(Base):
     __tablename__ = 'application_types'
 

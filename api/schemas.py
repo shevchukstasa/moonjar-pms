@@ -250,24 +250,6 @@ class ColorResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class BaseColorCreate(BaseModel):
-    color_id: UUID
-    is_base: Optional[bool] = None
-
-
-class BaseColorUpdate(BaseModel):
-    color_id: Optional[UUID] = None
-    is_base: Optional[bool] = None
-
-
-class BaseColorResponse(BaseModel):
-    id: UUID
-    color_id: UUID
-    is_base: bool
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 class ApplicationTypeCreate(BaseModel):
     name: str
 

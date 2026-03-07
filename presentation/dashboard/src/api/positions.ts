@@ -30,4 +30,6 @@ export const positionsApi = {
     apiClient.post(`/positions/${id}/status`, { status, notes }).then((r) => r.data),
   split: (id: string, data: SortingSplitRequest) =>
     apiClient.post(`/positions/${id}/split`, data).then((r) => r.data),
+  stockAvailability: (id: string) =>
+    apiClient.get(`/positions/${id}/stock-availability`).then((r) => r.data),
 };

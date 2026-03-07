@@ -6,7 +6,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useUiStore } from '@/stores/uiStore';
-import { usePositions, useChangePositionStatus, useSplitPosition, type PositionItem } from '@/hooks/usePositions';
+import { usePositions, useChangePositionStatus, useSplitPosition, useStockAvailability, type PositionItem } from '@/hooks/usePositions';
 import { useSorterTasks, useCompleteTask } from '@/hooks/useTasks';
 import type { TaskItem } from '@/api/tasks';
 import { FileUpload } from '@/components/ui/FileUpload';
@@ -144,6 +144,11 @@ function SortingTab({ positions, isLoading }: { positions: PositionItem[]; isLoa
         ))}
       </div>
 
+      {/* Stock availability panel (stock positions only) */}
+      {selected && isStockCollection(selected.collection) && (
+        <StockAvailabilityPanel positionId={selected.id} />
+      )}
+
       {/* Split form */}
       {selected && (
         <SplitForm
@@ -152,6 +157,75 @@ function SortingTab({ positions, isLoading }: { positions: PositionItem[]; isLoa
         />
       )}
     </div>
+  );
+}
+
+/* ---- Stock Availability Panel ---- */
+
+function StockAvailabilityPanel({ positionId }: { positionId: string }) {
+  const { data, isLoading } = useStockAvailability(positionId);
+
+  if (isLoading) {
+    return (
+      <Card className="border-purple-200 bg-purple-50/30">
+        <div className="flex items-center gap-2 text-sm text-purple-600">
+          <Spinner className="h-4 w-4" /> Checking stock availability...
+        </div>
+      </Card>
+    );
+  }
+
+  if (!data || !data.is_stock) return null;
+
+  const sufficient = data.sufficient_on_factory;
+  const totalSufficient = data.sufficient_total;
+
+  return (
+    <Card className={`border ${sufficient ? 'border-green-200 bg-green-50/30' : totalSufficient ? 'border-yellow-200 bg-yellow-50/30' : 'border-red-200 bg-red-50/30'}`}>
+      <h4 className="mb-2 text-sm font-semibold text-gray-900">Stock Availability</h4>
+      <div className="space-y-1.5 text-sm">
+        <div className="flex justify-between">
+          <span className="text-gray-600">Needed (order)</span>
+          <span className="font-semibold">{data.needed} pcs</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-600">This factory</span>
+          <span className={`font-semibold ${data.factory_available >= data.needed ? 'text-green-700' : 'text-red-700'}`}>
+            {data.factory_available} pcs
+          </span>
+        </div>
+        {data.all_factories && data.all_factories.length > 1 && (
+          <>
+            <div className="my-1.5 border-t border-gray-200" />
+            <p className="text-xs font-medium text-gray-500">Other factories:</p>
+            {data.all_factories
+              .filter((f: { is_home: boolean }) => !f.is_home)
+              .map((f: { factory_id: string; factory_name: string; available: number }) => (
+                <div key={f.factory_id} className="flex justify-between text-xs">
+                  <span className="text-gray-500">{f.factory_name}</span>
+                  <span className="font-medium">{f.available} pcs</span>
+                </div>
+              ))}
+            <div className="flex justify-between border-t border-gray-200 pt-1">
+              <span className="text-gray-600">Total all factories</span>
+              <span className={`font-semibold ${totalSufficient ? 'text-green-700' : 'text-red-700'}`}>
+                {data.total_available} pcs
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+      {data.is_multi_factory && (
+        <div className="mt-2 rounded bg-blue-50 px-2 py-1 text-xs text-blue-700">
+          Multi-factory fulfillment: {data.sibling_count} other position(s) on different factories
+        </div>
+      )}
+      {!totalSufficient && (
+        <div className="mt-2 rounded bg-red-50 px-2 py-1 text-xs text-red-700">
+          Insufficient stock. After sorting, PM will be notified to decide.
+        </div>
+      )}
+    </Card>
   );
 }
 

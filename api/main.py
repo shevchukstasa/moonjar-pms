@@ -57,6 +57,7 @@ from api.routers import problem_cards
 from api.routers import security
 from api.routers import ws
 from api.routers import packing_photos
+from api.routers import finished_goods
 
 
 @asynccontextmanager
@@ -152,6 +153,7 @@ def setup_routers():
     app.include_router(security.router, prefix="/api/security", tags=["security"])
     app.include_router(ws.router, prefix="/api/ws", tags=["websocket"])
     app.include_router(packing_photos.router, prefix="/api/packing-photos", tags=["packing-photos"])
+    app.include_router(finished_goods.router, prefix="/api/finished-goods", tags=["finished-goods"])
 
 setup_routers()
 

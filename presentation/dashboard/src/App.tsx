@@ -11,6 +11,7 @@ import ManagerDashboard from '@/pages/ManagerDashboard';
 import OrderDetailPage from '@/pages/OrderDetailPage';
 import ManagerSchedulePage from '@/pages/ManagerSchedulePage';
 import ManagerKilnsPage from '@/pages/ManagerKilnsPage';
+import ShortageDecisionPage from '@/pages/ShortageDecisionPage';
 import TabloDashboard from '@/pages/TabloDashboard';
 import QualityManagerDashboard from '@/pages/QualityManagerDashboard';
 import WarehouseDashboard from '@/pages/WarehouseDashboard';
@@ -85,6 +86,7 @@ export default function App() {
           <Route path="/manager/orders/:orderId" element={<OrderDetailPage />} />
           <Route path="/manager/schedule" element={<ManagerSchedulePage />} />
           <Route path="/manager/kilns" element={<ManagerKilnsPage />} />
+          <Route path="/manager/shortage/:taskId" element={<ShortageDecisionPage />} />
         </Route>
         <Route path="/tablo" element={<TabloDashboard />} />
         <Route element={<RequireRole roles={['quality_manager', 'owner', 'administrator']} />}>

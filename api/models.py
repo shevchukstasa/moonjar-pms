@@ -493,6 +493,7 @@ class Task(Base):
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     completed_at = Column(sa.DateTime(timezone=True))
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    metadata_json = Column(JSONB)
 
     factory = relationship('Factory', foreign_keys=[factory_id])
     assigned_to_rel = relationship('User', foreign_keys=[assigned_to])
@@ -1377,4 +1378,25 @@ class RateLimitEvent(Base):
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     user = relationship('User', foreign_keys=[user_id])
+
+
+class FinishedGoodsStock(Base):
+    __tablename__ = 'finished_goods_stock'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    color = Column(sa.String(100), nullable=False)
+    size = Column(sa.String(50), nullable=False)
+    collection = Column(sa.String(100))
+    product_type = Column(PgEnum(ProductType), default=ProductType.TILE)
+    quantity = Column(sa.Integer, nullable=False, default=0)
+    reserved_quantity = Column(sa.Integer, nullable=False, default=0)
+    updated_at = Column(sa.DateTime(timezone=True), server_default=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('factory_id', 'color', 'size', 'collection', 'product_type',
+                         name='uq_finished_goods_stock'),
+    )
+
+    factory = relationship('Factory', foreign_keys=[factory_id])
 

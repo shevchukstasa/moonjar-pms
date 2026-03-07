@@ -68,6 +68,8 @@ class TaskType(str, Enum):
     RECIPE_CONFIGURATION = 'recipe_configuration'
     REPAIR_SLA_ALERT = 'repair_sla_alert'
     RECONCILIATION_ALERT = 'reconciliation_alert'
+    STOCK_SHORTAGE = 'stock_shortage'
+    STOCK_TRANSFER = 'stock_transfer'
 
 class TaskStatus(str, Enum):
     PENDING = 'pending'
@@ -216,6 +218,7 @@ class NotificationType(str, Enum):
     KILN_BREAKDOWN = 'kiln_breakdown'
     REFERENCE_CHANGED = 'reference_changed'
     READY_FOR_SHIPMENT = 'ready_for_shipment'
+    STOCK_SHORTAGE = 'stock_shortage'
 
 class RelatedEntityType(str, Enum):
     ORDER = 'order'

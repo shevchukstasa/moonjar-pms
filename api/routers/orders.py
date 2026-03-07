@@ -1,5 +1,6 @@
 """Orders router — production order management."""
 
+import uuid as uuid_mod
 from datetime import date, datetime, timezone
 from uuid import UUID
 from typing import Optional
@@ -12,7 +13,7 @@ from sqlalchemy import or_, func
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
-from api.models import ProductionOrder, ProductionOrderItem, OrderPosition, Factory
+from api.models import ProductionOrder, ProductionOrderItem, OrderPosition, Factory, FinishedGoodsStock
 from api.enums import OrderStatus, OrderSource, PositionStatus, is_stock_collection
 
 router = APIRouter()
@@ -281,6 +282,11 @@ async def create_order(
             mandatory_qc=data.mandatory_qc,
         )
         db.add(position)
+        db.flush()
+
+        # Stock positions: distribute across factories based on finished goods availability
+        if is_stock_collection(item_data.collection):
+            _distribute_stock_position(db, position, item_data.quantity_pcs)
 
     db.commit()
     db.refresh(order)
@@ -320,3 +326,91 @@ async def cancel_order(
         {"status": PositionStatus.CANCELLED}
     )
     db.commit()
+
+
+# --- Stock distribution helper ---
+
+def _distribute_stock_position(db: Session, position: OrderPosition, needed_qty: int):
+    """Distribute a stock position across factories based on finished goods availability.
+
+    Logic:
+    1. Check home factory → if sufficient, do nothing
+    2. Check if any single factory has full quantity → auto-transfer (change factory_id)
+    3. No single factory has full qty → split across multiple factories (create sibling positions)
+    """
+    home_factory_id = position.factory_id
+
+    # Get all available stock for this color + size across factories
+    all_stocks = db.query(FinishedGoodsStock).filter(
+        FinishedGoodsStock.color == position.color,
+        FinishedGoodsStock.size == position.size,
+    ).all()
+
+    def _available(stock: FinishedGoodsStock) -> int:
+        return max(0, stock.quantity - stock.reserved_quantity)
+
+    # 1. Check home factory
+    home_stock = next((s for s in all_stocks if s.factory_id == home_factory_id), None)
+    home_available = _available(home_stock) if home_stock else 0
+
+    if home_available >= needed_qty:
+        return  # Sufficient on home factory
+
+    # 2. Check if any single factory has full quantity
+    for s in sorted(all_stocks, key=_available, reverse=True):
+        if s.factory_id != home_factory_id and _available(s) >= needed_qty:
+            # Single factory has everything → auto-transfer
+            position.factory_id = s.factory_id
+            return
+
+    # 3. Distribute across multiple factories
+    # Home factory keeps what it has, create siblings on other factories
+    if home_available > 0:
+        position.quantity = home_available
+    else:
+        position.quantity = 0  # Will be updated below if no stock on home
+
+    remaining = needed_qty - position.quantity
+
+    # If home has 0, try to use all from other factories
+    for s in sorted(all_stocks, key=_available, reverse=True):
+        if remaining <= 0:
+            break
+        if s.factory_id == home_factory_id:
+            continue
+        avail = _available(s)
+        if avail <= 0:
+            continue
+
+        take = min(avail, remaining)
+
+        sibling = OrderPosition(
+            id=uuid_mod.uuid4(),
+            order_id=position.order_id,
+            order_item_id=position.order_item_id,
+            parent_position_id=position.id,
+            factory_id=s.factory_id,
+            status=PositionStatus.TRANSFERRED_TO_SORTING,
+            quantity=take,
+            color=position.color,
+            size=position.size,
+            application=position.application,
+            finishing=position.finishing,
+            collection=position.collection,
+            application_type=position.application_type,
+            place_of_application=position.place_of_application,
+            product_type=position.product_type,
+            thickness_mm=position.thickness_mm,
+            mandatory_qc=position.mandatory_qc,
+            priority_order=position.priority_order,
+        )
+        db.add(sibling)
+        remaining -= take
+
+    # If home had 0 stock and we created siblings, remove the empty home position
+    # Actually keep it — position.quantity=0 won't show in sorting meaningfully
+    # But better to set quantity to whatever was allocated
+    if position.quantity == 0 and home_available == 0:
+        # No stock on home — if we distributed all to other factories, mark position quantity=0
+        # The siblings carry the actual quantities
+        pass

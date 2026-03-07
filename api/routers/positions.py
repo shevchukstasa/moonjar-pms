@@ -13,10 +13,14 @@ from sqlalchemy import or_
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management, require_sorting
-from api.models import OrderPosition, ProductionOrder, DefectRecord, GrindingStock, RepairQueue
+from api.models import (
+    OrderPosition, ProductionOrder, ProductionOrderItem, DefectRecord,
+    GrindingStock, RepairQueue, FinishedGoodsStock, Task,
+)
 from api.enums import (
     PositionStatus, SplitCategory, DefectStage, DefectOutcome,
-    GrindingStatus, RepairStatus,
+    GrindingStatus, RepairStatus, TaskType, TaskStatus, UserRole,
+    is_stock_collection,
 )
 
 router = APIRouter()
@@ -378,6 +382,11 @@ async def split_position(
     for sp in sub_positions:
         db.refresh(sp)
 
+    # --- Stock fulfillment check (only for stock positions) ---
+    stock_fulfillment = None
+    if is_stock_collection(p.collection):
+        stock_fulfillment = _check_stock_fulfillment(db, p, data.good_quantity)
+
     return {
         "parent_position": _serialize_position(p),
         "sub_positions": [_serialize_position(sp) for sp in sub_positions],
@@ -391,4 +400,224 @@ async def split_position(
             "grinding": data.grinding_quantity,
             "write_off": data.write_off_quantity,
         },
+        "stock_fulfillment": stock_fulfillment,
+    }
+
+
+# ---------- Stock Fulfillment Check ----------
+
+def _check_stock_fulfillment(db: Session, position: OrderPosition, good_quantity: int):
+    """After sorting a stock position, check if ALL sibling positions are also sorted.
+
+    If all sorted: compare total good vs needed quantity from order item.
+    - Sufficient → create STOCK_TRANSFER tasks for non-home factory positions
+    - Insufficient → create STOCK_SHORTAGE task for PM
+    """
+    order_item = db.query(ProductionOrderItem).filter(
+        ProductionOrderItem.id == position.order_item_id
+    ).first()
+    if not order_item:
+        return None
+
+    needed = order_item.quantity_pcs
+
+    # Find ALL positions for this order_item
+    all_positions = db.query(OrderPosition).filter(
+        OrderPosition.order_item_id == position.order_item_id,
+        OrderPosition.status != PositionStatus.CANCELLED,
+    ).all()
+
+    # Check if ALL are sorted (none still in transferred_to_sorting)
+    unsorted = [
+        p for p in all_positions
+        if _ev(p.status) == "transferred_to_sorting"
+    ]
+    if unsorted:
+        return {
+            "status": "waiting",
+            "message": f"Waiting for {len(unsorted)} position(s) on other factories to be sorted",
+            "unsorted_count": len(unsorted),
+        }
+
+    # All sorted! Sum good quantities (packed positions without split_category = the "good" ones)
+    total_good = sum(
+        p.quantity for p in all_positions
+        if _ev(p.status) == "packed" and p.split_category is None
+    )
+
+    # Get the home factory (from the order)
+    order = db.query(ProductionOrder).filter(
+        ProductionOrder.id == position.order_id
+    ).first()
+    home_factory_id = order.factory_id if order else position.factory_id
+
+    now = datetime.now(timezone.utc)
+
+    if total_good >= needed:
+        # Sufficient! Create transfer tasks for non-home factories
+        transfer_tasks = []
+        for p in all_positions:
+            if p.factory_id != home_factory_id and _ev(p.status) == "packed" and p.split_category is None:
+                home_factory = db.query(ProductionOrder).filter(
+                    ProductionOrder.id == p.order_id
+                ).first()
+                home_name = "home factory"
+                hf = db.query(OrderPosition).first()  # placeholder
+                factory_obj = db.query(FinishedGoodsStock).first()  # placeholder
+
+                # Get factory name
+                from api.models import Factory
+                dest_factory = db.query(Factory).filter(Factory.id == home_factory_id).first()
+                dest_name = dest_factory.name if dest_factory else "home factory"
+
+                task = Task(
+                    id=uuid_mod.uuid4(),
+                    factory_id=p.factory_id,
+                    type=TaskType.STOCK_TRANSFER,
+                    status=TaskStatus.PENDING,
+                    assigned_role=UserRole.WAREHOUSE,
+                    related_order_id=p.order_id,
+                    related_position_id=p.id,
+                    blocking=False,
+                    description=f"Ship {p.quantity} pcs ({p.color} {p.size}) to {dest_name}",
+                    priority=3,
+                    metadata_json={
+                        "destination_factory_id": str(home_factory_id),
+                        "destination_factory_name": dest_name,
+                        "quantity": p.quantity,
+                        "color": p.color,
+                        "size": p.size,
+                    },
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(task)
+                transfer_tasks.append(str(task.id))
+
+        db.commit()
+        return {
+            "status": "sufficient",
+            "total_good": total_good,
+            "needed": needed,
+            "transfer_tasks_created": len(transfer_tasks),
+        }
+
+    else:
+        # Shortage! Create PM task
+        shortage = needed - total_good
+        sorted_positions_info = [
+            {
+                "position_id": str(p.id),
+                "factory_id": str(p.factory_id),
+                "good": p.quantity,
+                "status": _ev(p.status),
+            }
+            for p in all_positions
+            if _ev(p.status) == "packed" and p.split_category is None
+        ]
+
+        task = Task(
+            id=uuid_mod.uuid4(),
+            factory_id=position.factory_id,
+            type=TaskType.STOCK_SHORTAGE,
+            status=TaskStatus.PENDING,
+            assigned_role=UserRole.PRODUCTION_MANAGER,
+            related_order_id=position.order_id,
+            related_position_id=position.id,
+            blocking=False,
+            description=f"Stock shortage: {shortage} pcs needed ({position.color} {position.size})",
+            priority=5,
+            metadata_json={
+                "needed": needed,
+                "total_good": total_good,
+                "shortage": shortage,
+                "color": position.color,
+                "size": position.size,
+                "collection": position.collection,
+                "order_item_id": str(position.order_item_id),
+                "sorted_positions": sorted_positions_info,
+            },
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(task)
+        db.commit()
+
+        return {
+            "status": "shortage",
+            "total_good": total_good,
+            "needed": needed,
+            "shortage": shortage,
+            "task_id": str(task.id),
+        }
+
+
+# ---------- Stock Availability ----------
+
+@router.get("/{position_id}/stock-availability")
+async def get_stock_availability(
+    position_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Check finished goods availability for a stock position (informational, shown before sorting)."""
+    position = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not position:
+        raise HTTPException(404, "Position not found")
+
+    if not is_stock_collection(position.collection):
+        return {"error": "Not a stock position", "is_stock": False}
+
+    # Get needed quantity from order item
+    order_item = db.query(ProductionOrderItem).filter(
+        ProductionOrderItem.id == position.order_item_id
+    ).first()
+    needed = order_item.quantity_pcs if order_item else position.quantity
+
+    # Get stock on this factory
+    local_stock = db.query(FinishedGoodsStock).filter(
+        FinishedGoodsStock.factory_id == position.factory_id,
+        FinishedGoodsStock.color == position.color,
+        FinishedGoodsStock.size == position.size,
+    ).first()
+    local_available = max(0, local_stock.quantity - local_stock.reserved_quantity) if local_stock else 0
+
+    # Get stock on all factories
+    all_stocks = db.query(FinishedGoodsStock).filter(
+        FinishedGoodsStock.color == position.color,
+        FinishedGoodsStock.size == position.size,
+    ).all()
+
+    from api.models import Factory
+    factories_info = []
+    for s in all_stocks:
+        avail = max(0, s.quantity - s.reserved_quantity)
+        factory = db.query(Factory).filter(Factory.id == s.factory_id).first()
+        factories_info.append({
+            "factory_id": str(s.factory_id),
+            "factory_name": factory.name if factory else "Unknown",
+            "available": avail,
+            "is_home": s.factory_id == position.factory_id,
+        })
+
+    total_available = sum(f["available"] for f in factories_info)
+
+    # Check sibling positions (multi-factory fulfillment)
+    siblings = db.query(OrderPosition).filter(
+        OrderPosition.order_item_id == position.order_item_id,
+        OrderPosition.id != position.id,
+        OrderPosition.status != PositionStatus.CANCELLED,
+    ).all()
+
+    return {
+        "is_stock": True,
+        "needed": needed,
+        "position_quantity": position.quantity,
+        "factory_available": local_available,
+        "all_factories": factories_info,
+        "total_available": total_available,
+        "sufficient_on_factory": local_available >= needed,
+        "sufficient_total": total_available >= needed,
+        "is_multi_factory": len(siblings) > 0,
+        "sibling_count": len(siblings),
     }

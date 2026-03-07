@@ -64,6 +64,15 @@ export function useSplitPosition() {
       qc.invalidateQueries({ queryKey: ['positions'] });
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['schedule'] });
+      qc.invalidateQueries({ queryKey: ['tasks'] });
     },
+  });
+}
+
+export function useStockAvailability(positionId?: string) {
+  return useQuery({
+    queryKey: ['stock-availability', positionId],
+    queryFn: () => positionsApi.stockAvailability(positionId!),
+    enabled: !!positionId,
   });
 }

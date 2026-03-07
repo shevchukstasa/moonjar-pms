@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOrders } from '@/hooks/useOrders';
 import { usePositions } from '@/hooks/usePositions';
+import { useShortageTasksForManager } from '@/hooks/useTasks';
 import { useUiStore } from '@/stores/uiStore';
 import { useDebounce } from '@/hooks/useDebounce';
 import { Card } from '@/components/ui/Card';
@@ -49,6 +50,7 @@ export default function ManagerDashboard() {
   const { data: positionsData } = usePositions(
     activeFactoryId ? { factory_id: activeFactoryId } : undefined,
   );
+  const { data: shortageTasksData } = useShortageTasksForManager(activeFactoryId || undefined);
 
   const orders = ordersData?.items || [];
   const totalOrders = ordersData?.total || 0;
@@ -147,6 +149,36 @@ export default function ManagerDashboard() {
           Tablo
         </Button>
       </div>
+
+      {/* Stock Shortage Tasks */}
+      {(shortageTasksData?.items?.length ?? 0) > 0 && (
+        <Card className="border-red-200 bg-red-50/50">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-sm font-semibold text-red-800">Stock Shortage Tasks</span>
+            <span className="rounded-full bg-red-200 px-2 py-0.5 text-xs font-medium text-red-800">
+              {shortageTasksData!.items.length}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {shortageTasksData!.items.map((task) => (
+              <div
+                key={task.id}
+                className="flex items-center justify-between rounded-md bg-white px-3 py-2 text-sm"
+              >
+                <div>
+                  <span className="font-medium text-gray-900">{task.description}</span>
+                  {task.related_order_number && (
+                    <span className="ml-2 text-gray-400">Order: {task.related_order_number}</span>
+                  )}
+                </div>
+                <Button size="sm" onClick={() => navigate(`/manager/shortage/${task.id}`)}>
+                  Resolve
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* Orders Table */}
       {ordersLoading ? (

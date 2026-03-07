@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { tasksApi, type TaskListParams, type TaskItem } from '@/api/tasks';
+import { tasksApi, type TaskListParams, type TaskItem, type ShortageResolutionInput } from '@/api/tasks';
 
 export function useTasks(params?: TaskListParams) {
   return useQuery<{ items: TaskItem[]; total: number }>({
@@ -27,5 +27,38 @@ export function useCompleteTask() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tasks'] });
     },
+  });
+}
+
+export function useTask(id?: string) {
+  return useQuery<TaskItem>({
+    queryKey: ['tasks', id],
+    queryFn: () => tasksApi.get(id!),
+    enabled: !!id,
+  });
+}
+
+export function useShortageResolution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: ShortageResolutionInput }) =>
+      tasksApi.resolveShortage(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+    },
+  });
+}
+
+export function useShortageTasksForManager(factoryId?: string) {
+  const params: TaskListParams = {
+    task_type: 'stock_shortage',
+    status: 'pending',
+    ...(factoryId ? { factory_id: factoryId } : {}),
+  };
+  return useQuery<{ items: TaskItem[]; total: number }>({
+    queryKey: ['tasks', 'shortage', params],
+    queryFn: () => tasksApi.list(params),
   });
 }

@@ -26,6 +26,14 @@ export interface TaskItem {
   priority: number;
   due_at: string | null;
   created_at: string | null;
+  metadata_json: Record<string, unknown> | null;
+}
+
+export interface ShortageResolutionInput {
+  decision: 'manufacture' | 'decline';
+  target_factory_id?: string;
+  manufacture_quantity?: number;
+  notes?: string;
 }
 
 export const tasksApi = {
@@ -35,4 +43,6 @@ export const tasksApi = {
     apiClient.get(`/tasks/${id}`).then((r) => r.data),
   complete: (id: string) =>
     apiClient.post(`/tasks/${id}/complete`).then((r) => r.data),
+  resolveShortage: (id: string, data: ShortageResolutionInput) =>
+    apiClient.post(`/tasks/${id}/resolve-shortage`, data).then((r) => r.data),
 };

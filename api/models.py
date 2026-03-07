@@ -436,6 +436,7 @@ class OrderPosition(Base):
     reservation_at = Column(sa.DateTime(timezone=True))
     materials_written_off_at = Column(sa.DateTime(timezone=True))
     quantity = Column(sa.Integer, nullable=False)
+    quantity_sqm = Column(sa.Numeric(10, 3))
     quantity_with_defect_margin = Column(sa.Integer)
     color = Column(sa.String(100), nullable=False)
     size = Column(sa.String(50), nullable=False)

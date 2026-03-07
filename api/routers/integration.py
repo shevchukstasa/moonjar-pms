@@ -111,24 +111,34 @@ async def receive_sales_order(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """Receive order from Sales app. Auth: Bearer token or HMAC."""
+    """Receive order from Sales app.
+    Auth: X-API-Key header OR Bearer token.
+    Payload: flat format (Sales) or nested order_data (legacy).
+    """
     settings = get_settings()
 
     if not settings.PRODUCTION_WEBHOOK_ENABLED:
         raise HTTPException(503, "Webhook receiver disabled")
 
-    # Verify authentication
-    if settings.PRODUCTION_WEBHOOK_AUTH_MODE == "bearer":
-        auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}":
-            raise HTTPException(401, "Invalid bearer token")
-    # TODO: HMAC mode verification
+    # Verify authentication — accept both X-API-Key and Bearer
+    x_api_key = request.headers.get("X-API-Key")
+    auth_header = request.headers.get("Authorization", "")
+    bearer_token = auth_header[7:] if auth_header.startswith("Bearer ") else None
+
+    authenticated = False
+    if x_api_key and settings.SALES_APP_API_KEY and x_api_key == settings.SALES_APP_API_KEY:
+        authenticated = True
+    elif bearer_token and settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and bearer_token == settings.PRODUCTION_WEBHOOK_BEARER_TOKEN:
+        authenticated = True
+
+    if not authenticated:
+        raise HTTPException(401, "Invalid API key or bearer token")
 
     # Parse body
     body = await request.json()
-    event_id = body.get("event_id")
-    if not event_id:
-        raise HTTPException(400, "Missing event_id")
+
+    # Auto-generate event_id if not provided (Sales may not send it)
+    event_id = body.get("event_id") or f"auto-{uuid_mod.uuid4().hex[:16]}"
 
     # Idempotency check
     existing = db.query(SalesWebhookEvent).filter(
@@ -147,7 +157,12 @@ async def receive_sales_order(
     db.add(event)
 
     event_type = body.get("event_type", "new_order")
-    order_data = body.get("order_data", {})
+
+    # Support both flat format (Sales) and nested order_data (legacy)
+    order_data = body.get("order_data")
+    if order_data is None:
+        # Flat format: external_id, customer_name, items are at top level
+        order_data = body
 
     if event_type == "new_order":
         try:
@@ -201,7 +216,7 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
     order = ProductionOrder(
         id=uuid_mod.uuid4(),
         order_number=order_data.get("order_number", f"SALES-{uuid_mod.uuid4().hex[:8].upper()}"),
-        client=order_data.get("client", "Unknown"),
+        client=order_data.get("client") or order_data.get("customer_name", "Unknown"),
         client_location=order_data.get("client_location"),
         sales_manager_name=order_data.get("sales_manager_name"),
         factory_id=UUID(factory_id),
@@ -221,6 +236,16 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
 
     items = order_data.get("items", [])
     for item_data in items:
+        # Support both "quantity" (Sales) and "quantity_pcs" (PMS native)
+        qty_pcs = item_data.get("quantity_pcs") or item_data.get("quantity", 0)
+        qty_sqm = item_data.get("quantity_sqm")
+
+        # Parse thickness: accept string "11mm" or number 11.0
+        raw_thickness = item_data.get("thickness", 11.0)
+        if isinstance(raw_thickness, str):
+            raw_thickness = float(''.join(c for c in raw_thickness if c.isdigit() or c == '.') or '11')
+        thickness_mm = item_data.get("thickness_mm") or raw_thickness
+
         item = ProductionOrderItem(
             id=uuid_mod.uuid4(),
             order_id=order.id,
@@ -228,9 +253,9 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
             size=item_data.get("size", ""),
             application=item_data.get("application"),
             finishing=item_data.get("finishing"),
-            thickness=item_data.get("thickness", 11.0),
-            quantity_pcs=item_data.get("quantity_pcs", 0),
-            quantity_sqm=item_data.get("quantity_sqm"),
+            thickness=thickness_mm,
+            quantity_pcs=qty_pcs,
+            quantity_sqm=qty_sqm,
             collection=item_data.get("collection"),
             application_type=item_data.get("application_type"),
             place_of_application=item_data.get("place_of_application"),
@@ -249,7 +274,8 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
                 if is_stock_collection(item_data.get("collection"))
                 else PositionStatus.PLANNED
             ),
-            quantity=item_data.get("quantity_pcs", 0),
+            quantity=qty_pcs,
+            quantity_sqm=qty_sqm,
             color=item_data.get("color", ""),
             size=item_data.get("size", ""),
             application=item_data.get("application"),
@@ -258,7 +284,7 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
             application_type=item_data.get("application_type"),
             place_of_application=item_data.get("place_of_application"),
             product_type=item_data.get("product_type", "tile"),
-            thickness_mm=item_data.get("thickness", 11.0),
+            thickness_mm=thickness_mm,
             mandatory_qc=order_data.get("mandatory_qc", False),
         )
         db.add(position)

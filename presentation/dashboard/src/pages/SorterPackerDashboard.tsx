@@ -9,6 +9,8 @@ import { useUiStore } from '@/stores/uiStore';
 import { usePositions, useChangePositionStatus, useSplitPosition, type PositionItem } from '@/hooks/usePositions';
 import { useSorterTasks, useCompleteTask } from '@/hooks/useTasks';
 import type { TaskItem } from '@/api/tasks';
+import { FileUpload } from '@/components/ui/FileUpload';
+import { usePackingPhotos, useUploadPackingPhoto, useDeletePackingPhoto } from '@/hooks/usePackingPhotos';
 
 const TABS = [
   { id: 'sorting', label: 'Sorting' },
@@ -323,18 +325,169 @@ function PackingTab({ positions, isLoading }: { positions: PositionItem[]; isLoa
    ============================================================ */
 
 function PhotosTab() {
+  const activeFactoryId = useUiStore((s) => s.activeFactoryId);
+  const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null);
+  const [notes, setNotes] = useState('');
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState('');
+
+  // Positions the packer is working with
+  const { data: posData } = usePositions(
+    activeFactoryId
+      ? { factory_id: activeFactoryId, status: 'packed,transferred_to_sorting,sent_to_quality_check', per_page: 200 }
+      : { status: 'packed,transferred_to_sorting,sent_to_quality_check', per_page: 200 },
+  );
+  const positions = posData?.items || [];
+
+  const selectedPosition = positions.find((p) => p.id === selectedPositionId) || null;
+
+  // Photos for selected position
+  const { data: photosData, isLoading: photosLoading } = usePackingPhotos(
+    selectedPositionId ? { position_id: selectedPositionId } : undefined,
+  );
+  const photos = photosData?.items || [];
+
+  const uploadMutation = useUploadPackingPhoto();
+  const deleteMutation = useDeletePackingPhoto();
+
+  const handleUpload = async () => {
+    if (!pendingFile || !selectedPosition) return;
+    setUploadError('');
+    try {
+      await uploadMutation.mutateAsync({
+        file: pendingFile,
+        orderId: selectedPosition.order_id,
+        positionId: selectedPosition.id,
+        notes: notes || undefined,
+      });
+      setPendingFile(null);
+      setNotes('');
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message || 'Upload failed';
+      setUploadError(msg);
+    }
+  };
+
   return (
-    <div className="rounded-lg border-2 border-dashed border-gray-300 p-8 text-center">
-      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-2xl">
-        📷
+    <div className="space-y-6">
+      {/* Position Selector */}
+      <div>
+        <label className="mb-1 block text-sm font-medium text-gray-700">Select Position</label>
+        <select
+          value={selectedPositionId || ''}
+          onChange={(e) => {
+            setSelectedPositionId(e.target.value || null);
+            setPendingFile(null);
+            setUploadError('');
+          }}
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+        >
+          <option value="">-- Select position --</option>
+          {positions.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.order_number} | {p.color} | {p.size} | {p.quantity} pcs
+            </option>
+          ))}
+        </select>
       </div>
-      <p className="text-lg font-medium text-gray-400">Packing Photos</p>
-      <p className="mt-1 text-sm text-gray-400">
-        Upload 1 m² photo with color sample for each position.
-      </p>
-      <p className="mt-3 text-xs text-gray-300">
-        Requires Supabase Storage configuration — coming soon
-      </p>
+
+      {/* Upload Section */}
+      {selectedPosition && (
+        <Card>
+          <h3 className="mb-3 text-sm font-semibold text-gray-900">Upload Photo</h3>
+          <FileUpload
+            onUpload={(file) => {
+              setPendingFile(file);
+              setUploadError('');
+            }}
+          />
+          {pendingFile && (
+            <div className="mt-3 space-y-3">
+              <p className="text-sm text-gray-600">
+                Selected: {pendingFile.name} ({(pendingFile.size / 1024).toFixed(0)} KB)
+              </p>
+              <textarea
+                placeholder="Notes (optional)"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+                rows={2}
+              />
+              {uploadError && <p className="text-sm text-red-500">{uploadError}</p>}
+              <Button
+                onClick={handleUpload}
+                disabled={uploadMutation.isPending}
+                className="w-full"
+              >
+                {uploadMutation.isPending ? 'Uploading...' : 'Upload Photo'}
+              </Button>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Photo Gallery */}
+      {selectedPositionId && (
+        <div>
+          <h3 className="mb-3 text-sm font-semibold text-gray-900">
+            Photos ({photos.length})
+          </h3>
+          {photosLoading ? (
+            <div className="flex justify-center py-8">
+              <Spinner className="h-8 w-8" />
+            </div>
+          ) : photos.length === 0 ? (
+            <div className="rounded-lg border-2 border-dashed border-gray-300 p-8 text-center">
+              <p className="text-gray-400">No photos uploaded for this position</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              {photos.map((photo) => (
+                <div
+                  key={photo.id}
+                  className="group relative overflow-hidden rounded-lg border border-gray-200"
+                >
+                  <img
+                    src={photo.photo_url}
+                    alt="Packing photo"
+                    className="aspect-square w-full object-cover"
+                  />
+                  <div className="p-2">
+                    {photo.notes && (
+                      <p className="truncate text-xs text-gray-600">{photo.notes}</p>
+                    )}
+                    <p className="text-xs text-gray-400">
+                      {new Date(photo.uploaded_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (confirm('Delete this photo?')) deleteMutation.mutate(photo.id);
+                    }}
+                    className="absolute right-1 top-1 hidden rounded bg-red-500 px-2 py-0.5 text-xs text-white group-hover:block"
+                    disabled={deleteMutation.isPending}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* No position selected */}
+      {!selectedPositionId && (
+        <div className="rounded-lg border-2 border-dashed border-gray-300 p-8 text-center">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-2xl">
+            📷
+          </div>
+          <p className="text-lg font-medium text-gray-400">Packing Photos</p>
+          <p className="mt-1 text-sm text-gray-400">
+            Select a position above to upload or view photos.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

@@ -180,6 +180,25 @@ async def receive_sales_order(
         order_data = body
 
     if event_type == "new_order":
+        # Check if order with this external_id already exists (duplicate protection)
+        ext_id = order_data.get("external_id")
+        if ext_id:
+            existing_order = db.query(ProductionOrder).filter(
+                ProductionOrder.external_id == ext_id,
+                ProductionOrder.source == OrderSource.SALES_WEBHOOK,
+            ).first()
+            if existing_order:
+                event.processed = True
+                event.error_message = f"Duplicate: order {ext_id} already exists"
+                db.commit()
+                factory = db.query(Factory).filter(Factory.id == existing_order.factory_id).first()
+                return {
+                    "status": "duplicate",
+                    "order_id": str(existing_order.id),
+                    "factory_name": factory.name if factory else None,
+                    "factory_location": factory.location if factory else None,
+                }
+
         try:
             order = _create_order_from_webhook(db, order_data, body)
             event.processed = True
@@ -198,7 +217,9 @@ async def receive_sales_order(
                 ),
             }
         except Exception as e:
+            db.rollback()
             event.error_message = str(e)
+            db.add(event)
             db.commit()
             raise HTTPException(422, f"Failed to process order: {e}")
 

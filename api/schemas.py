@@ -364,6 +364,7 @@ class ProductionOrderCreate(BaseModel):
     client: str
     client_location: Optional[str] = None
     sales_manager_name: Optional[str] = None
+    sales_manager_contact: Optional[str] = None
     factory_id: UUID
     document_date: Optional[date] = None
     production_received_date: Optional[date] = None
@@ -385,6 +386,7 @@ class ProductionOrderUpdate(BaseModel):
     client: Optional[str] = None
     client_location: Optional[str] = None
     sales_manager_name: Optional[str] = None
+    sales_manager_contact: Optional[str] = None
     factory_id: Optional[UUID] = None
     document_date: Optional[date] = None
     production_received_date: Optional[date] = None
@@ -407,6 +409,7 @@ class ProductionOrderResponse(BaseModel):
     client: str
     client_location: Optional[str] = None
     sales_manager_name: Optional[str] = None
+    sales_manager_contact: Optional[str] = None
     factory_id: UUID
     document_date: Optional[date] = None
     production_received_date: Optional[date] = None

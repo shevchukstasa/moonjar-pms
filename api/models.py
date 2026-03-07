@@ -192,6 +192,7 @@ class ProductionOrder(Base):
     client = Column(sa.String(300), nullable=False)
     client_location = Column(sa.String(300))
     sales_manager_name = Column(sa.String(200))
+    sales_manager_contact = Column(sa.String(300))
     factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
     document_date = Column(sa.Date)
     production_received_date = Column(sa.Date)

@@ -103,6 +103,7 @@ def _order_detail(order, db: Session) -> dict:
         "client": order.client,
         "client_location": order.client_location,
         "sales_manager_name": order.sales_manager_name,
+        "sales_manager_contact": order.sales_manager_contact,
         "factory_id": str(order.factory_id),
         "factory_name": order.factory.name if order.factory else "",
         "document_date": str(order.document_date) if order.document_date else None,

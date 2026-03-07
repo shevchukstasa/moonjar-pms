@@ -92,12 +92,18 @@ async def get_production_status(
     else:
         current_stage = 'unknown'
 
+    # Include factory info
+    factory = db.query(Factory).filter(Factory.id == order.factory_id).first()
+
     return {
         "external_id": external_id,
         "order_number": order.order_number,
         "client": order.client,
         "status": _ev(order.status),
         "current_stage": current_stage,
+        "factory_id": str(order.factory_id),
+        "factory_name": factory.name if factory else None,
+        "factory_location": factory.location if factory else None,
         "positions_total": total,
         "positions_ready": ready,
         "progress_percent": round(ready / total * 100, 1) if total else 0,
@@ -178,7 +184,19 @@ async def receive_sales_order(
             order = _create_order_from_webhook(db, order_data, body)
             event.processed = True
             db.commit()
-            return {"status": "processed", "order_id": str(order.id)}
+            # Return factory info + estimated completion so Sales can show delivery date
+            factory = db.query(Factory).filter(Factory.id == order.factory_id).first()
+            return {
+                "status": "processed",
+                "order_id": str(order.id),
+                "factory_name": factory.name if factory else None,
+                "factory_location": factory.location if factory else None,
+                "estimated_completion_date": (
+                    str(order.schedule_deadline) if order.schedule_deadline
+                    else str(order.final_deadline) if order.final_deadline
+                    else None
+                ),
+            }
         except Exception as e:
             event.error_message = str(e)
             db.commit()
@@ -228,6 +246,7 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
         client=order_data.get("client") or order_data.get("customer_name", "Unknown"),
         client_location=order_data.get("client_location"),
         sales_manager_name=order_data.get("sales_manager_name"),
+        sales_manager_contact=order_data.get("sales_manager_contact"),
         factory_id=UUID(factory_id),
         document_date=date.today(),
         production_received_date=date.today(),

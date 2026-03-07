@@ -166,13 +166,8 @@ async def fix_enum_columns():
     from api.database import engine
     with engine.connect() as conn:
         from sqlalchemy import text
-        # Check if material_type enum exists (PG names it material_type not materialtype)
-        result = conn.execute(text(
-            "SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'material_type' AND typtype = 'e')"
-        )).scalar()
-
         changes = []
-        if result:
+        if True:  # Always run — columns are USER-DEFINED type 'material_type'
             # Change suppliers.material_types from materialtype[] to text[]
             try:
                 conn.execute(text(
@@ -213,4 +208,4 @@ async def fix_enum_columns():
             except Exception as e:
                 col_info.append({"table": table, "column": col, "error": str(e)})
 
-        return {"materialtype_exists": result, "changes": changes, "columns": col_info}
+        return {"changes": changes, "columns": col_info}

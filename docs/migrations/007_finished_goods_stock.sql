@@ -3,11 +3,11 @@
 -- Description: Add finished goods stock table, metadata_json to tasks, and stock-related enum values
 
 -- 1. New enum values for TaskType
-ALTER TYPE task_type_enum ADD VALUE IF NOT EXISTS 'stock_shortage';
-ALTER TYPE task_type_enum ADD VALUE IF NOT EXISTS 'stock_transfer';
+ALTER TYPE task_type ADD VALUE IF NOT EXISTS 'stock_shortage';
+ALTER TYPE task_type ADD VALUE IF NOT EXISTS 'stock_transfer';
 
 -- 2. New enum value for NotificationType
-ALTER TYPE notification_type_enum ADD VALUE IF NOT EXISTS 'stock_shortage';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'stock_shortage';
 
 -- 3. Add metadata_json column to tasks table
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS metadata_json JSONB;
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS finished_goods_stock (
     color VARCHAR(100) NOT NULL,
     size VARCHAR(50) NOT NULL,
     collection VARCHAR(100),
-    product_type product_type_enum DEFAULT 'tile',
+    product_type product_type DEFAULT 'tile',
     quantity INTEGER NOT NULL DEFAULT 0,
     reserved_quantity INTEGER NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ DEFAULT now(),

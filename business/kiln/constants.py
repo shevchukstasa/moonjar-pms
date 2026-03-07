@@ -8,19 +8,19 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 
-# Default kiln constants (used before DB values available)
+# Default kiln constants (used before per-kiln values available).
+# Each kiln can override these via kiln_loading_rules JSONB.
 DEFAULT_CONSTANTS = {
-    "TILE_GAP": 0.3,             # cm gap between tiles
-    "AIR_GAP": 1.5,              # cm air gap between levels
-    "SHELF_THICKNESS": 2.0,      # cm kiln shelf thickness
-    "FLAT_ON_EDGE_COEFFICIENT": 0.30,  # 30% of area for flat-on-edge
+    "TILE_GAP_X": 1.2,           # cm gap between tiles along X axis
+    "TILE_GAP_Y": 1.2,           # cm gap between tiles along Y axis
+    "AIR_GAP": 2.0,              # cm air gap between shelf levels
+    "SHELF_THICKNESS": 3.0,      # cm kiln shelf thickness
+    "FLAT_ON_EDGE_COEFFICIENT": 0.30,  # 30% of area for flat-on-edge loading
     "MAX_EDGE_HEIGHT_LARGE": 60,  # cm — max standing height in Large kiln
     "MAX_EDGE_HEIGHT_SMALL": 45,  # cm — max standing height in Small kiln
-    "MAX_BIG_KILN_TILE_MIN": 60,  # cm — max min-dimension for tile in Large
-    "MAX_BIG_KILN_TILE_MAX": 120, # cm — max max-dimension for tile in Large
-    "SINK_COUNTERTOP_LARGE_MIN": 100,
-    "SINK_COUNTERTOP_LARGE_MAX": 150,
 }
+# NOTE: Max product dimensions and allowed collections are per-kiln,
+# stored in kiln_loading_rules.rules JSONB (not here).
 
 _cache = {}
 

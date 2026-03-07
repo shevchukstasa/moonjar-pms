@@ -1,14 +1,61 @@
 import apiClient from './client';
 
+export interface InspectionItem {
+  id: string;
+  position_id: string | null;
+  factory_id: string;
+  stage: string;
+  result: string;
+  defect_cause_id: string | null;
+  defect_cause: { id: string; code: string; description: string } | null;
+  notes: string | null;
+  checked_by: string | null;
+  checked_by_name: string | null;
+  created_at: string | null;
+  order_number?: string;
+  color?: string;
+  size?: string;
+  quantity?: number;
+  position_status?: string;
+}
+
+export interface QcPositionItem {
+  id: string;
+  order_id: string;
+  order_number: string | null;
+  factory_id: string;
+  status: string;
+  color: string;
+  size: string;
+  quantity: number;
+  product_type: string;
+}
+
+export interface QualityStats {
+  pending_qc: number;
+  blocked: number;
+  open_problem_cards: number;
+  inspections_today: number;
+}
+
+export interface InspectionInput {
+  position_id: string;
+  factory_id: string;
+  stage?: string;
+  result: 'ok' | 'defect';
+  defect_cause_id?: string;
+  notes?: string;
+}
+
 export const qualityApi = {
-  list: (params?: Record<string, unknown>) =>
-    apiClient.get('/quality', { params }).then((r) => r.data),
-  get: (id: string) =>
-    apiClient.get(`/quality/${id}`).then((r) => r.data),
-  create: (data: Record<string, unknown>) =>
-    apiClient.post('/quality', data).then((r) => r.data),
-  update: (id: string, data: Record<string, unknown>) =>
-    apiClient.patch(`/quality/${id}`, data).then((r) => r.data),
-  remove: (id: string) =>
-    apiClient.delete(`/quality/${id}`).then((r) => r.data),
+  listInspections: (params?: Record<string, unknown>) =>
+    apiClient.get('/quality/inspections', { params }).then((r) => r.data),
+  createInspection: (data: InspectionInput) =>
+    apiClient.post('/quality/inspections', data).then((r) => r.data),
+  updateInspection: (id: string, data: Record<string, unknown>) =>
+    apiClient.patch(`/quality/inspections/${id}`, data).then((r) => r.data),
+  getPositionsForQc: (params?: { factory_id?: string }) =>
+    apiClient.get('/quality/positions-for-qc', { params }).then((r) => r.data),
+  getStats: (params?: { factory_id?: string }) =>
+    apiClient.get('/quality/stats', { params }).then((r) => r.data),
 };

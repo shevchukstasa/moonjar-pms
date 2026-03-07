@@ -10,7 +10,8 @@ from sqlalchemy import Column, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import INET
-from pgvector.sqlalchemy import Vector
+from sqlalchemy.dialects.postgresql import ARRAY as PgARRAY
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import relationship
 
 from api.database import Base
@@ -1097,7 +1098,8 @@ class RagEmbedding(Base):
     source_table = Column(sa.String(100), nullable=False)
     source_id = Column(UUID(as_uuid=True), nullable=False)
     content_text = Column(sa.Text, nullable=False)
-    embedding = Column(Vector(1536))
+    content_tsvector = Column(TSVECTOR)                  # full-text search index
+    embedding = Column(PgARRAY(sa.Float))                # float[] — no pgvector needed
     metadata_json = Column(JSONB)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())

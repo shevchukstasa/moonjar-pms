@@ -30,11 +30,14 @@ def _ev(val):
     return val.value if hasattr(val, "value") else str(val) if val else None
 
 
-def _recalculate_order_status(db: Session, order_id):
-    """Recalculate order status based on main position statuses (excluding sub-positions)."""
+def _recalculate_order_status(db: Session, order_id) -> tuple:
+    """Recalculate order status based on main position statuses (excluding sub-positions).
+
+    Returns (old_status, new_status, order) or (None, None, None) if no change.
+    """
     order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
     if not order or order.status_override:
-        return  # Don't override manual status
+        return None, None, None  # Don't override manual status
 
     positions = db.query(OrderPosition).filter(
         OrderPosition.order_id == order_id,
@@ -42,7 +45,7 @@ def _recalculate_order_status(db: Session, order_id):
     ).all()
 
     if not positions:
-        return
+        return None, None, None
 
     statuses = {_ev(p.status) for p in positions}
 
@@ -59,9 +62,39 @@ def _recalculate_order_status(db: Session, order_id):
     else:
         new_status = OrderStatus.IN_PRODUCTION
 
-    if order.status != new_status:
+    old_status = order.status
+    if old_status != new_status:
         order.status = new_status
         order.updated_at = datetime.now(timezone.utc)
+        return old_status, new_status, order
+
+    return None, None, None
+
+
+async def _notify_sales_order_event(order, event_type: str):
+    """Send order status event to Sales app (fire-and-forget)."""
+    try:
+        from api.config import get_settings
+        settings = get_settings()
+        if not settings.SALES_APP_URL or not settings.PRODUCTION_WEBHOOK_ENABLED:
+            return
+        import httpx
+        payload = {
+            "event": event_type,
+            "external_id": order.external_id,
+            "order_number": order.order_number,
+            "status": _ev(order.status),
+            "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
+        }
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"{settings.SALES_APP_URL}/api/webhooks/production-status",
+                json=payload,
+                headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
+                timeout=10,
+            )
+    except Exception:
+        pass  # Fire-and-forget; webhook retry can be added later
 
 
 # Section → status mapping
@@ -241,10 +274,19 @@ async def change_position_status(
     p.updated_at = datetime.now(timezone.utc)
 
     # Auto-recalculate parent order status
-    _recalculate_order_status(db, p.order_id)
+    old_order_status, new_order_status, order = _recalculate_order_status(db, p.order_id)
 
     db.commit()
     db.refresh(p)
+
+    # Send order_ready webhook to Sales when all positions become ready_for_shipment
+    if (
+        new_order_status == OrderStatus.READY_FOR_SHIPMENT
+        and order
+        and order.external_id
+    ):
+        await _notify_sales_order_event(order, "order_ready")
+
     return _serialize_position(p)
 
 

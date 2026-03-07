@@ -231,17 +231,20 @@ class CollectionResponse(BaseModel):
 class ColorCreate(BaseModel):
     name: str
     code: Optional[str] = None
+    is_basic: Optional[bool] = False
 
 
 class ColorUpdate(BaseModel):
     name: Optional[str] = None
     code: Optional[str] = None
+    is_basic: Optional[bool] = None
 
 
 class ColorResponse(BaseModel):
     id: UUID
     name: str
     code: Optional[str] = None
+    is_basic: bool = False
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

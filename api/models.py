@@ -128,6 +128,7 @@ class Color(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(sa.String(100), unique=True, nullable=False)
     code = Column(sa.String(20))
+    is_basic = Column(sa.Boolean, nullable=False, server_default=sa.false_())
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 

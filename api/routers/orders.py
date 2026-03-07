@@ -154,7 +154,8 @@ def _order_detail(order, db: Session) -> dict:
             for p in positions
         ],
         "positions_count": len(positions),
-        "positions_ready": sum(1 for p in positions if _ev(p.status) == "ready_for_shipment"),
+        "positions_ready": sum(1 for p in positions if _ev(p.status) in ("ready_for_shipment", "shipped")),
+        "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
     }
 
 
@@ -178,11 +179,11 @@ async def list_orders(
 
     if tab == "archive":
         query = query.filter(ProductionOrder.status.in_([
-            OrderStatus.READY_FOR_SHIPMENT, OrderStatus.CANCELLED
+            OrderStatus.READY_FOR_SHIPMENT, OrderStatus.SHIPPED, OrderStatus.CANCELLED
         ]))
     elif tab != "all":
         query = query.filter(ProductionOrder.status.notin_([
-            OrderStatus.READY_FOR_SHIPMENT, OrderStatus.CANCELLED
+            OrderStatus.READY_FOR_SHIPMENT, OrderStatus.SHIPPED, OrderStatus.CANCELLED
         ]))
 
     if status:
@@ -203,7 +204,7 @@ async def list_orders(
         pc = db.query(func.count(OrderPosition.id)).filter(OrderPosition.order_id == o.id).scalar() or 0
         pr = db.query(func.count(OrderPosition.id)).filter(
             OrderPosition.order_id == o.id,
-            OrderPosition.status == PositionStatus.READY_FOR_SHIPMENT,
+            OrderPosition.status.in_([PositionStatus.READY_FOR_SHIPMENT, PositionStatus.SHIPPED]),
         ).scalar() or 0
         items.append(_order_list_item(o, pc, pr))
 
@@ -326,6 +327,67 @@ async def cancel_order(
         {"status": PositionStatus.CANCELLED}
     )
     db.commit()
+
+
+@router.patch("/{order_id}/ship")
+async def mark_order_shipped(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Mark order as shipped. All READY_FOR_SHIPMENT positions → SHIPPED."""
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if _ev(order.status) == "cancelled":
+        raise HTTPException(400, "Cannot ship a cancelled order")
+
+    # Transition all ready positions to shipped
+    positions = db.query(OrderPosition).filter(
+        OrderPosition.order_id == order_id,
+        OrderPosition.status == PositionStatus.READY_FOR_SHIPMENT,
+    ).all()
+
+    if not positions:
+        raise HTTPException(400, "No positions are ready for shipment")
+
+    for p in positions:
+        p.status = PositionStatus.SHIPPED
+
+    order.status = OrderStatus.SHIPPED
+    order.shipped_at = datetime.now(timezone.utc)
+    order.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    # Notify Sales app if order has external_id (async, fire-and-forget)
+    if order.external_id:
+        try:
+            from api.config import get_settings
+            settings = get_settings()
+            if settings.SALES_APP_URL and settings.PRODUCTION_WEBHOOK_ENABLED:
+                import httpx
+                payload = {
+                    "event": "order_shipped",
+                    "external_id": order.external_id,
+                    "order_number": order.order_number,
+                    "shipped_at": order.shipped_at.isoformat(),
+                    "status": "shipped",
+                }
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"{settings.SALES_APP_URL}/api/webhooks/production-status",
+                        json=payload,
+                        headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
+                        timeout=10,
+                    )
+        except Exception:
+            pass  # Log error; webhook retry can be added later
+
+    return {
+        "status": "shipped",
+        "positions_shipped": len(positions),
+        "shipped_at": order.shipped_at.isoformat(),
+    }
 
 
 # --- Stock distribution helper ---

@@ -205,6 +205,7 @@ class ProductionOrder(Base):
     sales_payload_json = Column(JSONB)
     mandatory_qc = Column(sa.Boolean, nullable=False, default=False)
     notes = Column(sa.Text)
+    shipped_at = Column(sa.DateTime(timezone=True))
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 

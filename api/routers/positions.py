@@ -18,7 +18,7 @@ from api.models import (
     GrindingStock, RepairQueue, FinishedGoodsStock, Task,
 )
 from api.enums import (
-    PositionStatus, SplitCategory, DefectStage, DefectOutcome,
+    PositionStatus, OrderStatus, SplitCategory, DefectStage, DefectOutcome,
     GrindingStatus, RepairStatus, TaskType, TaskStatus, UserRole,
     is_stock_collection,
 )
@@ -28,6 +28,40 @@ router = APIRouter()
 
 def _ev(val):
     return val.value if hasattr(val, "value") else str(val) if val else None
+
+
+def _recalculate_order_status(db: Session, order_id):
+    """Recalculate order status based on main position statuses (excluding sub-positions)."""
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
+    if not order or order.status_override:
+        return  # Don't override manual status
+
+    positions = db.query(OrderPosition).filter(
+        OrderPosition.order_id == order_id,
+        OrderPosition.split_category.is_(None),  # main positions only
+    ).all()
+
+    if not positions:
+        return
+
+    statuses = {_ev(p.status) for p in positions}
+
+    if all(s == 'cancelled' for s in statuses):
+        new_status = OrderStatus.CANCELLED
+    elif all(s == 'shipped' for s in statuses):
+        new_status = OrderStatus.SHIPPED
+    elif all(s in ('ready_for_shipment', 'shipped') for s in statuses):
+        new_status = OrderStatus.READY_FOR_SHIPMENT
+    elif any(s in ('ready_for_shipment', 'shipped', 'packed', 'quality_check_done') for s in statuses):
+        new_status = OrderStatus.PARTIALLY_READY
+    elif all(s == 'planned' for s in statuses):
+        new_status = OrderStatus.NEW
+    else:
+        new_status = OrderStatus.IN_PRODUCTION
+
+    if order.status != new_status:
+        order.status = new_status
+        order.updated_at = datetime.now(timezone.utc)
 
 
 # Section → status mapping
@@ -205,6 +239,10 @@ async def change_position_status(
 
     p.status = new_status
     p.updated_at = datetime.now(timezone.utc)
+
+    # Auto-recalculate parent order status
+    _recalculate_order_status(db, p.order_id)
+
     db.commit()
     db.refresh(p)
     return _serialize_position(p)

@@ -40,6 +40,7 @@ class PositionStatus(str, Enum):
     QUALITY_CHECK_DONE = 'quality_check_done'
     READY_FOR_SHIPMENT = 'ready_for_shipment'
     BLOCKED_BY_QM = 'blocked_by_qm'
+    SHIPPED = 'shipped'
     CANCELLED = 'cancelled'
 
 class OrderStatus(str, Enum):
@@ -47,6 +48,7 @@ class OrderStatus(str, Enum):
     IN_PRODUCTION = 'in_production'
     PARTIALLY_READY = 'partially_ready'
     READY_FOR_SHIPMENT = 'ready_for_shipment'
+    SHIPPED = 'shipped'
     CANCELLED = 'cancelled'
 
 class ChangeRequestStatus(str, Enum):

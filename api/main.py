@@ -202,4 +202,15 @@ async def fix_enum_columns():
 
             conn.commit()
 
-        return {"materialtype_exists": result, "changes": changes}
+        # Also check actual column types
+        col_info = []
+        for table, col in [("suppliers", "material_types"), ("materials", "material_type"), ("supplier_lead_times", "material_type")]:
+            try:
+                row = conn.execute(text(
+                    f"SELECT data_type, udt_name FROM information_schema.columns WHERE table_name='{table}' AND column_name='{col}'"
+                )).first()
+                col_info.append({"table": table, "column": col, "data_type": row[0] if row else "NOT FOUND", "udt_name": row[1] if row else None})
+            except Exception as e:
+                col_info.append({"table": table, "column": col, "error": str(e)})
+
+        return {"materialtype_exists": result, "changes": changes, "columns": col_info}

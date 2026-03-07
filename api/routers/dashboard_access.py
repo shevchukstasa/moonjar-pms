@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
+from api.roles import require_admin
 from api.models import UserDashboardAccess
 from api.schemas import UserDashboardAccessCreate, UserDashboardAccessUpdate, UserDashboardAccessResponse
 
@@ -42,7 +43,7 @@ async def get_dashboard_access_item(
 async def create_dashboard_access_item(
     data: UserDashboardAccessCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     item = UserDashboardAccess(**data.model_dump())
     db.add(item)
@@ -56,7 +57,7 @@ async def update_dashboard_access_item(
     item_id: UUID,
     data: UserDashboardAccessUpdate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     item = db.query(UserDashboardAccess).filter(UserDashboardAccess.id == item_id).first()
     if not item:
@@ -72,7 +73,7 @@ async def update_dashboard_access_item(
 async def delete_dashboard_access_item(
     item_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     item = db.query(UserDashboardAccess).filter(UserDashboardAccess.id == item_id).first()
     if not item:

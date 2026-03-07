@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
+from api.roles import require_admin
 from api.models import Factory
 from api.schemas import FactoryCreate, FactoryUpdate, FactoryResponse
 
@@ -47,7 +48,7 @@ async def get_factories_item(
 async def create_factories_item(
     data: FactoryCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     item = Factory(**data.model_dump())
     db.add(item)
@@ -61,7 +62,7 @@ async def update_factories_item(
     item_id: UUID,
     data: FactoryUpdate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     item = db.query(Factory).filter(Factory.id == item_id).first()
     if not item:
@@ -77,7 +78,7 @@ async def update_factories_item(
 async def delete_factories_item(
     item_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     item = db.query(Factory).filter(Factory.id == item_id).first()
     if not item:

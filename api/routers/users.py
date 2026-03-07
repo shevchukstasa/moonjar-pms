@@ -1,62 +1,223 @@
-"""Users router — user management.
-See API_CONTRACTS.md for full specification.
-"""
+"""Users router — user management (CRUD + factory assignment)."""
 
 from uuid import UUID
 from typing import Optional
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, UploadFile, File
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from api.database import get_db
-from api.auth import get_current_user
+from api.auth import get_current_user, hash_password
 from api.roles import require_admin
-from api.auth import hash_password
+from api.models import User, UserFactory, Factory, ActiveSession
+from api.enums import UserRole, LanguagePreference
 
 router = APIRouter()
 
 
+def _ev(val):
+    return val.value if hasattr(val, "value") else str(val) if val else None
+
+
+def _serialize_user(user: User, db: Session) -> dict:
+    """Serialize user with factory assignments."""
+    factories = (
+        db.query(Factory.id, Factory.name)
+        .join(UserFactory, UserFactory.factory_id == Factory.id)
+        .filter(UserFactory.user_id == user.id)
+        .all()
+    )
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "name": user.name,
+        "role": _ev(user.role),
+        "language": _ev(user.language),
+        "is_active": user.is_active,
+        "totp_enabled": user.totp_enabled,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+        "factories": [{"id": str(f.id), "name": f.name} for f in factories],
+    }
+
+
+class UserCreateInput(BaseModel):
+    email: str
+    name: str
+    role: str
+    password: str
+    factory_ids: list[str] = []
+    language: Optional[str] = "en"
+
+
+class UserUpdateInput(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    language: Optional[str] = None
+    factory_ids: Optional[list[str]] = None
+
+
+# --- Endpoints ---
+
 @router.get("/")
 async def list_users(
-    page: int = Query(1), per_page: int = Query(50),
-    role: str | None = None, is_active: bool | None = None,
-    db: Session = Depends(get_db), current_user=Depends(get_current_user),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    role: str | None = None,
+    is_active: bool | None = None,
+    search: str | None = None,
+    factory_id: str | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
 ):
-    # TODO: List users — see API_CONTRACTS §11
-    raise HTTPException(501, "Not implemented")
+    query = db.query(User)
+
+    if role:
+        query = query.filter(User.role == role)
+    if is_active is not None:
+        query = query.filter(User.is_active == is_active)
+    if search:
+        term = f"%{search}%"
+        query = query.filter(or_(User.name.ilike(term), User.email.ilike(term)))
+    if factory_id:
+        query = query.join(UserFactory, UserFactory.user_id == User.id).filter(
+            UserFactory.factory_id == UUID(factory_id)
+        )
+
+    total = query.count()
+    users = query.order_by(User.name).offset((page - 1) * per_page).limit(per_page).all()
+
+    return {
+        "items": [_serialize_user(u, db) for u in users],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 @router.get("/{user_id}")
-async def get_user(user_id: UUID, db: Session = Depends(get_db),
-                   current_user=Depends(get_current_user)):
-    # TODO: Get user details — see API_CONTRACTS §11
-    raise HTTPException(501, "Not implemented")
+async def get_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+    return _serialize_user(user, db)
 
 
-@router.post("/invite", status_code=201)
-async def invite_user(request: Request, db: Session = Depends(get_db),
-                      current_user=Depends(get_current_user)):
-    # TODO: Invite new user (send email) — see API_CONTRACTS §11
-    raise HTTPException(501, "Not implemented")
+@router.post("/", status_code=201)
+async def create_user(
+    data: UserCreateInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    # Check duplicate email
+    existing = db.query(User).filter(User.email == data.email).first()
+    if existing:
+        raise HTTPException(409, f"User with email '{data.email}' already exists")
+
+    # Validate role
+    valid_roles = [r.value for r in UserRole]
+    if data.role not in valid_roles:
+        raise HTTPException(422, f"Invalid role '{data.role}'. Valid: {', '.join(valid_roles)}")
+
+    # Validate language
+    valid_langs = [l.value for l in LanguagePreference]
+    lang = data.language if data.language in valid_langs else "en"
+
+    # Create user
+    user = User(
+        email=data.email,
+        name=data.name,
+        role=data.role,
+        password_hash=hash_password(data.password),
+        language=lang,
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+
+    # Assign factories
+    for fid in data.factory_ids:
+        factory = db.query(Factory).filter(Factory.id == UUID(fid)).first()
+        if factory:
+            db.add(UserFactory(user_id=user.id, factory_id=factory.id))
+
+    db.commit()
+    db.refresh(user)
+    return _serialize_user(user, db)
 
 
 @router.patch("/{user_id}")
-async def update_user(user_id: UUID, request: Request, db: Session = Depends(get_db),
-                      current_user=Depends(get_current_user)):
-    # TODO: Update user — see API_CONTRACTS §11
-    raise HTTPException(501, "Not implemented")
+async def update_user(
+    user_id: UUID,
+    data: UserUpdateInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    if data.name is not None:
+        user.name = data.name
+    if data.role is not None:
+        valid_roles = [r.value for r in UserRole]
+        if data.role not in valid_roles:
+            raise HTTPException(422, f"Invalid role '{data.role}'")
+        user.role = data.role
+    if data.language is not None:
+        valid_langs = [l.value for l in LanguagePreference]
+        if data.language in valid_langs:
+            user.language = data.language
+
+    # Sync factory assignments
+    if data.factory_ids is not None:
+        db.query(UserFactory).filter(UserFactory.user_id == user.id).delete()
+        for fid in data.factory_ids:
+            factory = db.query(Factory).filter(Factory.id == UUID(fid)).first()
+            if factory:
+                db.add(UserFactory(user_id=user.id, factory_id=factory.id))
+
+    user.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(user)
+    return _serialize_user(user, db)
 
 
 @router.post("/{user_id}/toggle-active")
-async def toggle_user_active(user_id: UUID, db: Session = Depends(get_db),
-                             current_user=Depends(get_current_user)):
-    # TODO: Toggle user active status — see API_CONTRACTS §11
-    raise HTTPException(501, "Not implemented")
+async def toggle_user_active(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
 
+    # Prevent self-deactivation
+    if user.id == current_user.id:
+        raise HTTPException(400, "Cannot deactivate yourself")
 
-@router.get("/{user_id}/sessions")
-async def list_user_sessions(user_id: UUID, db: Session = Depends(get_db),
-                             current_user=Depends(get_current_user)):
-    # TODO: List active sessions for user — see API_CONTRACTS §11
-    raise HTTPException(501, "Not implemented")
+    user.is_active = not user.is_active
+    user.updated_at = datetime.now(timezone.utc)
+
+    # If deactivating, revoke all sessions
+    if not user.is_active:
+        db.query(ActiveSession).filter(
+            ActiveSession.user_id == user.id,
+            ActiveSession.revoked == False,
+        ).update({
+            "revoked": True,
+            "revoked_at": datetime.now(timezone.utc),
+            "revoked_reason": "user_deactivated",
+        })
+
+    db.commit()
+    db.refresh(user)
+    return _serialize_user(user, db)

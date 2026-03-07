@@ -40,12 +40,21 @@ async def get_production_status(
     """
     settings = get_settings()
 
-    # Verify authentication
-    api_key = x_api_key
-    if not api_key and authorization and authorization.startswith("Bearer "):
-        api_key = authorization[7:]
+    # Verify authentication — accept X-API-Key OR Bearer token
+    # Sales uses PMS_WEBHOOK_TOKEN (Bearer) for polling,
+    # and PMS_API_KEY (X-API-Key) for sending orders
+    authenticated = False
+    if x_api_key and settings.SALES_APP_API_KEY and x_api_key == settings.SALES_APP_API_KEY:
+        authenticated = True
+    elif authorization and authorization.startswith("Bearer "):
+        bearer = authorization[7:]
+        if bearer and (
+            (settings.SALES_APP_API_KEY and bearer == settings.SALES_APP_API_KEY)
+            or (settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and bearer == settings.PRODUCTION_WEBHOOK_BEARER_TOKEN)
+        ):
+            authenticated = True
 
-    if not api_key or api_key != settings.SALES_APP_API_KEY:
+    if not authenticated:
         raise HTTPException(401, "Invalid API key")
 
     # Find order by external_id

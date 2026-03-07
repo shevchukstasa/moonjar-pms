@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
+from api.roles import require_admin
 from api.models import KilnLoadingRule
 from api.schemas import KilnLoadingRuleCreate, KilnLoadingRuleUpdate, KilnLoadingRuleResponse
 
@@ -42,7 +43,7 @@ async def get_kiln_loading_rules_item(
 async def create_kiln_loading_rules_item(
     data: KilnLoadingRuleCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     item = KilnLoadingRule(**data.model_dump())
     db.add(item)
@@ -56,7 +57,7 @@ async def update_kiln_loading_rules_item(
     item_id: UUID,
     data: KilnLoadingRuleUpdate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     item = db.query(KilnLoadingRule).filter(KilnLoadingRule.id == item_id).first()
     if not item:
@@ -72,7 +73,7 @@ async def update_kiln_loading_rules_item(
 async def delete_kiln_loading_rules_item(
     item_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     item = db.query(KilnLoadingRule).filter(KilnLoadingRule.id == item_id).first()
     if not item:

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
+from api.roles import require_admin
 from api.models import KilnConstant
 from api.schemas import KilnConstantCreate, KilnConstantUpdate, KilnConstantResponse
 
@@ -42,7 +43,7 @@ async def get_kiln_constants_item(
 async def create_kiln_constants_item(
     data: KilnConstantCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     item = KilnConstant(**data.model_dump())
     db.add(item)
@@ -56,7 +57,7 @@ async def update_kiln_constants_item(
     item_id: UUID,
     data: KilnConstantUpdate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     item = db.query(KilnConstant).filter(KilnConstant.id == item_id).first()
     if not item:
@@ -72,7 +73,7 @@ async def update_kiln_constants_item(
 async def delete_kiln_constants_item(
     item_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     item = db.query(KilnConstant).filter(KilnConstant.id == item_id).first()
     if not item:

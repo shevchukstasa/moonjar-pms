@@ -68,3 +68,34 @@ export const factoryCreateSchema = z.object({
   is_active: z.boolean().optional().default(true),
 });
 export type FactoryFormData = z.infer<typeof factoryCreateSchema>;
+
+// --- Kiln Management ---
+export const KILN_TYPE_OPTIONS = [
+  { value: 'big', label: 'Large Kiln' },
+  { value: 'small', label: 'Small Kiln' },
+  { value: 'raku', label: 'Raku Kiln' },
+] as const;
+
+export const KILN_STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'maintenance_planned', label: 'Maintenance Planned' },
+  { value: 'maintenance_emergency', label: 'Emergency Maintenance' },
+  { value: 'inactive', label: 'Inactive' },
+] as const;
+
+const dimensionSchema = z.object({
+  width: z.coerce.number().positive('Width required'),
+  depth: z.coerce.number().positive('Depth required'),
+  height: z.coerce.number().positive('Height required'),
+});
+
+export const kilnCreateSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  kiln_type: z.string().min(1, 'Kiln type is required'),
+  kiln_dimensions_cm: dimensionSchema,
+  kiln_working_area_cm: dimensionSchema,
+  kiln_multi_level: z.boolean().default(false),
+  kiln_coefficient: z.coerce.number().min(0).max(1).default(0.8),
+  num_levels: z.coerce.number().int().min(1).default(1),
+});
+export type KilnCreateFormData = z.infer<typeof kilnCreateSchema>;

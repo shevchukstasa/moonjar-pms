@@ -224,6 +224,7 @@ class ProductionOrderItem(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     order_id = Column(UUID(as_uuid=True), ForeignKey('production_orders.id', ondelete='CASCADE'), nullable=False)
     color = Column(sa.String(100), nullable=False)
+    color_2 = Column(sa.String(100))              # Second color for Stencil/Silkscreen/Custom
     size = Column(sa.String(50), nullable=False)
     application = Column(sa.String(100))
     finishing = Column(sa.String(100))
@@ -440,6 +441,7 @@ class OrderPosition(Base):
     quantity_sqm = Column(sa.Numeric(10, 3))
     quantity_with_defect_margin = Column(sa.Integer)
     color = Column(sa.String(100), nullable=False)
+    color_2 = Column(sa.String(100))              # Second color for Stencil/Silkscreen/Custom
     size = Column(sa.String(50), nullable=False)
     application = Column(sa.String(100))
     finishing = Column(sa.String(100))

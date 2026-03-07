@@ -166,9 +166,9 @@ async def fix_enum_columns():
     from api.database import engine
     with engine.connect() as conn:
         from sqlalchemy import text
-        # Check if materialtype enum exists
+        # Check if material_type enum exists (PG names it material_type not materialtype)
         result = conn.execute(text(
-            "SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'materialtype')"
+            "SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'material_type' AND typtype = 'e')"
         )).scalar()
 
         changes = []

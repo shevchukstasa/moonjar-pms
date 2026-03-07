@@ -13,7 +13,7 @@ from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
 from api.models import ProductionOrder, ProductionOrderItem, OrderPosition, Factory
-from api.enums import OrderStatus, OrderSource, PositionStatus
+from api.enums import OrderStatus, OrderSource, PositionStatus, is_stock_collection
 
 router = APIRouter()
 
@@ -265,7 +265,11 @@ async def create_order(
         position = OrderPosition(
             order_id=order.id, order_item_id=item.id,
             factory_id=UUID(data.factory_id),
-            status=PositionStatus.PLANNED,
+            status=(
+                PositionStatus.TRANSFERRED_TO_SORTING
+                if is_stock_collection(item_data.collection)
+                else PositionStatus.PLANNED
+            ),
             quantity=item_data.quantity_pcs,
             color=item_data.color, size=item_data.size,
             application=item_data.application, finishing=item_data.finishing,

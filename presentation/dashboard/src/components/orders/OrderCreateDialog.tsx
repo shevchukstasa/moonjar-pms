@@ -49,7 +49,7 @@ export function OrderCreateDialog({ open, onClose }: Props) {
       final_deadline: '',
       notes: '',
       mandatory_qc: false,
-      items: [{ color: '', size: '', application: '', finishing: '', quantity_pcs: 1, product_type: 'tile' }],
+      items: [{ color: '', size: '', application: '', finishing: '', collection: '', quantity_pcs: 1, product_type: 'tile' }],
     },
   });
 
@@ -114,7 +114,7 @@ export function OrderCreateDialog({ open, onClose }: Props) {
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() => append({ color: '', size: '', application: '', finishing: '', quantity_pcs: 1, product_type: 'tile' })}
+              onClick={() => append({ color: '', size: '', application: '', finishing: '', collection: '', quantity_pcs: 1, product_type: 'tile' })}
             >
               + Add Item
             </Button>
@@ -137,6 +137,7 @@ export function OrderCreateDialog({ open, onClose }: Props) {
                   <Input label="Quantity" type="number" {...register(`items.${idx}.quantity_pcs`)} error={errors.items?.[idx]?.quantity_pcs?.message} />
                   <Input label="Application" {...register(`items.${idx}.application`)} placeholder="Wall" />
                   <Input label="Finishing" {...register(`items.${idx}.finishing`)} placeholder="Matte" />
+                  <Input label="Collection" {...register(`items.${idx}.collection`)} placeholder="e.g. Сток" />
                   <Select label="Product Type" {...register(`items.${idx}.product_type`)} options={PRODUCT_TYPES} />
                 </div>
               </div>

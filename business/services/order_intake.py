@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from api.models import *  # noqa
 from api.schemas import *  # noqa
+from api.enums import is_stock_collection
 
 
 def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
@@ -29,7 +30,12 @@ def estimate_factory_lead_time(db: Session, factory_id: UUID) -> dict:
     raise NotImplementedError
 
 def process_order_item(db: Session, order: ProductionOrder, item: ProductionOrderItem) -> Optional[OrderPosition]:
-    """Recipe lookup → position creation → blocking tasks + material reservation."""
+    """Recipe lookup → position creation → blocking tasks + material reservation.
+
+    STOCK: If is_stock_collection(item.collection), create position with
+    status=TRANSFERRED_TO_SORTING and skip recipe lookup, material reservation,
+    and blocking tasks. Stock items are pre-made.
+    """
     # TODO: implement — see BUSINESS_LOGIC.md §1-3
     raise NotImplementedError
 

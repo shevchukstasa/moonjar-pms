@@ -8,6 +8,7 @@ export const orderItemSchema = z.object({
   size: z.string().min(1, 'Size is required'),
   application: z.string().optional().default(''),
   finishing: z.string().optional().default(''),
+  collection: z.string().optional().default(''),
   thickness_mm: z.coerce.number().positive().optional(),
   quantity_pcs: z.coerce.number().int().positive('Quantity must be > 0'),
   product_type: z.string().optional().default('tile'),

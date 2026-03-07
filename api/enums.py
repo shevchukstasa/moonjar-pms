@@ -344,3 +344,15 @@ class IpScope(str, Enum):
     ADMIN_PANEL = 'admin_panel'
     WEBHOOK = 'webhook'
     ALL = 'all'
+
+
+# --- Stock Collection Detection ---
+
+STOCK_COLLECTION_NAMES = {"сток", "stock"}
+
+
+def is_stock_collection(collection: str | None) -> bool:
+    """Check if collection name indicates pre-made stock (skip manufacturing)."""
+    if not collection:
+        return False
+    return collection.strip().lower() in STOCK_COLLECTION_NAMES

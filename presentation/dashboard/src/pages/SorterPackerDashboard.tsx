@@ -12,6 +12,12 @@ import type { TaskItem } from '@/api/tasks';
 import { FileUpload } from '@/components/ui/FileUpload';
 import { usePackingPhotos, useUploadPackingPhoto, useDeletePackingPhoto } from '@/hooks/usePackingPhotos';
 
+function isStockCollection(collection: string | null | undefined): boolean {
+  if (!collection) return false;
+  const n = collection.trim().toLowerCase();
+  return n === 'сток' || n === 'stock';
+}
+
 const TABS = [
   { id: 'sorting', label: 'Sorting' },
   { id: 'packing', label: 'Packing' },
@@ -121,7 +127,14 @@ function SortingTab({ positions, isLoading }: { positions: PositionItem[]; isLoa
           >
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold">{p.order_number}</span>
-              <Badge status={p.status} />
+              <div className="flex items-center gap-1.5">
+                {isStockCollection(p.collection) && (
+                  <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
+                    Stock
+                  </span>
+                )}
+                <Badge status={p.status} />
+              </div>
             </div>
             <p className="mt-1 text-sm text-gray-600">
               {p.color} · {p.size}

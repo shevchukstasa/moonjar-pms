@@ -16,6 +16,7 @@ export interface PositionItem {
   size: string;
   application: string | null;
   finishing: string | null;
+  collection: string | null;
   product_type: string;
   shape: string | null;
   split_category: string | null;

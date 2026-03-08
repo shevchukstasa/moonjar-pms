@@ -403,8 +403,12 @@ class Batch(Base):
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
+    firing_profile_id = Column(UUID(as_uuid=True), ForeignKey('firing_profiles.id'))
+    target_temperature = Column(sa.Integer)
+
     resource = relationship('Resource', foreign_keys=[resource_id])
     factory = relationship('Factory', foreign_keys=[factory_id])
+    firing_profile = relationship('FiringProfile', foreign_keys=[firing_profile_id])
 
 
 class ScheduleSlot(Base):
@@ -457,6 +461,7 @@ class OrderPosition(Base):
     split_category = Column(PgEnum(SplitCategory))
     is_merged = Column(sa.Boolean, nullable=False, default=False)
     priority_order = Column(sa.Integer, default=0)
+    firing_round = Column(sa.Integer, nullable=False, default=1)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
@@ -1394,4 +1399,44 @@ class FinishedGoodsStock(Base):
     )
 
     factory = relationship('Factory', foreign_keys=[factory_id])
+
+
+class FiringProfile(Base):
+    """Universal firing profile — temperature curve definition (not per-kiln)."""
+    __tablename__ = 'firing_profiles'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(sa.String(200), nullable=False)
+    product_type = Column(PgEnum(ProductType))                       # nullable = matches all
+    collection = Column(sa.String(100))                              # nullable = matches all
+    thickness_min_mm = Column(sa.Numeric(5, 1))                      # nullable = no lower bound
+    thickness_max_mm = Column(sa.Numeric(5, 1))                      # nullable = no upper bound
+    target_temperature = Column(sa.Integer, nullable=False)          # max firing temp °C
+    total_duration_hours = Column(sa.Numeric(5, 1), nullable=False)  # total cycle time
+    stages = Column(JSONB, nullable=False, default=list)             # temperature curve stages
+    match_priority = Column(sa.Integer, nullable=False, default=0)   # higher = more specific
+    is_default = Column(sa.Boolean, nullable=False, default=False)
+    is_active = Column(sa.Boolean, nullable=False, default=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+
+class RecipeFiringStage(Base):
+    """Multi-firing stage definition per recipe (Gold = 2 rows, regular = 0 rows)."""
+    __tablename__ = 'recipe_firing_stages'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    recipe_id = Column(UUID(as_uuid=True), ForeignKey('recipes.id', ondelete='CASCADE'), nullable=False)
+    stage_number = Column(sa.Integer, nullable=False, default=1)
+    firing_profile_id = Column(UUID(as_uuid=True), ForeignKey('firing_profiles.id'))
+    requires_glazing_before = Column(sa.Boolean, nullable=False, default=True)
+    description = Column(sa.String(200))
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('recipe_id', 'stage_number'),
+    )
+
+    recipe = relationship('Recipe', foreign_keys=[recipe_id])
+    firing_profile = relationship('FiringProfile', foreign_keys=[firing_profile_id])
 

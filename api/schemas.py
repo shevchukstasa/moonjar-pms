@@ -782,6 +782,8 @@ class BatchCreate(BaseModel):
     status: Optional[str] = None
     created_by: Optional[str] = None
     notes: Optional[str] = None
+    firing_profile_id: Optional[UUID] = None
+    target_temperature: Optional[int] = None
 
 
 class BatchUpdate(BaseModel):
@@ -791,6 +793,8 @@ class BatchUpdate(BaseModel):
     status: Optional[str] = None
     created_by: Optional[str] = None
     notes: Optional[str] = None
+    firing_profile_id: Optional[UUID] = None
+    target_temperature: Optional[int] = None
 
 
 class BatchResponse(BaseModel):
@@ -801,6 +805,8 @@ class BatchResponse(BaseModel):
     status: str
     created_by: str
     notes: Optional[str] = None
+    firing_profile_id: Optional[UUID] = None
+    target_temperature: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -865,6 +871,7 @@ class OrderPositionCreate(BaseModel):
     split_category: Optional[str] = None
     is_merged: Optional[bool] = None
     priority_order: Optional[int] = None
+    firing_round: Optional[int] = None
 
 
 class OrderPositionUpdate(BaseModel):
@@ -897,6 +904,7 @@ class OrderPositionUpdate(BaseModel):
     split_category: Optional[str] = None
     is_merged: Optional[bool] = None
     priority_order: Optional[int] = None
+    firing_round: Optional[int] = None
 
 
 class OrderPositionResponse(BaseModel):
@@ -930,6 +938,7 @@ class OrderPositionResponse(BaseModel):
     split_category: Optional[str] = None
     is_merged: bool
     priority_order: Optional[int] = None
+    firing_round: int = 1
     created_at: datetime
     updated_at: datetime
 
@@ -2659,4 +2668,84 @@ class RateLimitEventResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# --- Firing Profiles ---
+
+class FiringProfileCreate(BaseModel):
+    name: str
+    product_type: Optional[str] = None
+    collection: Optional[str] = None
+    thickness_min_mm: Optional[float] = None
+    thickness_max_mm: Optional[float] = None
+    target_temperature: int
+    total_duration_hours: float
+    stages: Optional[list] = None
+    match_priority: Optional[int] = None
+    is_default: Optional[bool] = None
+
+
+class FiringProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    product_type: Optional[str] = None
+    collection: Optional[str] = None
+    thickness_min_mm: Optional[float] = None
+    thickness_max_mm: Optional[float] = None
+    target_temperature: Optional[int] = None
+    total_duration_hours: Optional[float] = None
+    stages: Optional[list] = None
+    match_priority: Optional[int] = None
+    is_default: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
+class FiringProfileResponse(BaseModel):
+    id: UUID
+    name: str
+    product_type: Optional[str] = None
+    collection: Optional[str] = None
+    thickness_min_mm: Optional[float] = None
+    thickness_max_mm: Optional[float] = None
+    target_temperature: int
+    total_duration_hours: float
+    stages: list
+    match_priority: int
+    is_default: bool
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FiringProfileMatchRequest(BaseModel):
+    product_type: str
+    collection: Optional[str] = None
+    thickness_mm: float
+
+
+# --- Recipe Firing Stages ---
+
+class RecipeFiringStageCreate(BaseModel):
+    stage_number: int = 1
+    firing_profile_id: Optional[UUID] = None
+    requires_glazing_before: bool = True
+    description: Optional[str] = None
+
+
+class RecipeFiringStageResponse(BaseModel):
+    id: UUID
+    recipe_id: UUID
+    stage_number: int
+    firing_profile_id: Optional[UUID] = None
+    requires_glazing_before: bool
+    description: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RecipeFiringStagesBulkUpdate(BaseModel):
+    """Replace all firing stages for a recipe."""
+    stages: list[RecipeFiringStageCreate]
 

@@ -2,6 +2,7 @@
 Moonjar PMS — FastAPI application entry point.
 """
 
+import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,6 +15,8 @@ from api.database import engine, Base
 
 settings = get_settings()
 logger = logging.getLogger("moonjar")
+
+IS_PRODUCTION = os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("ENV", "").lower() == "production"
 
 # --- Router imports ---
 from api.routers import auth
@@ -58,6 +61,7 @@ from api.routers import security
 from api.routers import ws
 from api.routers import packing_photos
 from api.routers import finished_goods
+from api.routers import firing_profiles
 
 
 @asynccontextmanager
@@ -66,7 +70,15 @@ async def lifespan(app: FastAPI):
     logger.info("Moonjar PMS starting up...")
     # Create tables if needed (dev only; use Alembic in production)
     # Base.metadata.create_all(bind=engine)
+
+    # Start background scheduler
+    from api.scheduler import setup_scheduler
+    sched = setup_scheduler()
+
     yield
+
+    # Shutdown scheduler
+    sched.shutdown(wait=False)
     logger.info("Moonjar PMS shutting down...")
 
 
@@ -79,7 +91,9 @@ app = FastAPI(
 
 
 # --- Proxy headers (Railway runs behind a reverse proxy) ---
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
+# In production, trust only known proxy IPs; in dev, trust all for convenience.
+_trusted = ["127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"] if IS_PRODUCTION else ["*"]
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=_trusted)
 
 # --- CORS ---
 app.add_middleware(
@@ -91,14 +105,29 @@ app.add_middleware(
     expose_headers=["X-CSRF-Token"],
 )
 
+# --- CSRF + Request logging middleware ---
+from api.middleware import CSRFMiddleware, RequestLoggingMiddleware
+
+app.add_middleware(CSRFMiddleware)
+if IS_PRODUCTION:
+    app.add_middleware(RequestLoggingMiddleware)
+
 
 # --- Global exception handler ---
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled error: {exc}", exc_info=True)
+
+    if IS_PRODUCTION:
+        # Never expose internals in production
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"},
+        )
+
+    # Dev mode — include details for debugging
     import traceback
     tb = traceback.format_exc()
-    logger.error(f"Unhandled error: {exc}", exc_info=True)
-    # Include error details for debugging (disable in production later)
     return JSONResponse(
         status_code=500,
         content={
@@ -154,11 +183,6 @@ def setup_routers():
     app.include_router(ws.router, prefix="/api/ws", tags=["websocket"])
     app.include_router(packing_photos.router, prefix="/api/packing-photos", tags=["packing-photos"])
     app.include_router(finished_goods.router, prefix="/api/finished-goods", tags=["finished-goods"])
+    app.include_router(firing_profiles.router, prefix="/api/firing-profiles", tags=["firing-profiles"])
 
 setup_routers()
-
-
-# --- Health check ---
-@app.get("/api/health")
-async def health_check():
-    return {"status": "ok", "service": "moonjar-pms"}

@@ -648,7 +648,7 @@ class DefectRecord(Base):
     reported_via = Column(sa.String(20), nullable=False, default='dashboard')
     photos = Column(sa.ARRAY(sa.Text))
     notes = Column(sa.Text)
-    date = Column(sa.Date, nullable=False, server_default='CURRENT_DATE')
+    date = Column(sa.Date, nullable=False, server_default=sa.text('CURRENT_DATE'))
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     factory = relationship('Factory', foreign_keys=[factory_id])

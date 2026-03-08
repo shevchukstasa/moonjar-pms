@@ -33,13 +33,19 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const status = error.response?.status;
-    if (status === 401 && !error.config._retry) {
+    const url = error.config?.url || '';
+    // Skip interceptor for auth endpoints to avoid infinite loops
+    const isAuthUrl = url.includes('/auth/');
+    if (status === 401 && !error.config._retry && !isAuthUrl) {
       error.config._retry = true;
       try {
         await apiClient.post('/auth/refresh');
         return apiClient(error.config);
       } catch {
-        window.location.href = '/login';
+        if (!window.location.pathname.startsWith('/login')) {
+          window.location.href = '/login';
+        }
+        return Promise.reject(error);
       }
     }
     return Promise.reject(error);

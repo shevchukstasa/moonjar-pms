@@ -226,6 +226,33 @@ async def receive_sales_order(
             order = _create_order_from_webhook(db, order_data, body)
             event.processed = True
             db.commit()
+
+            # Notify Production Managers of the assigned factory (best-effort)
+            try:
+                from business.services.notifications import notify_pm
+                positions_count = db.query(OrderPosition).filter(
+                    OrderPosition.order_id == order.id,
+                ).count()
+                notify_pm(
+                    db=db,
+                    factory_id=order.factory_id,
+                    type="status_change",
+                    title=f"New order from Sales: {order.order_number}",
+                    message=(
+                        f"Client: {order.client}, "
+                        f"{positions_count} position(s). "
+                        f"Deadline: {order.final_deadline or 'not set'}"
+                    ),
+                    related_entity_type="order",
+                    related_entity_id=order.id,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to notify PM about new order: {e}")
+
+            # Schedule deadline estimation (stub — returns placeholder until
+            # factory/kiln configuration is complete)
+            estimated_completion = _estimate_completion_stub(order)
+
             # Return factory info + estimated completion so Sales can show delivery date
             factory = db.query(Factory).filter(Factory.id == order.factory_id).first()
             return {
@@ -233,11 +260,7 @@ async def receive_sales_order(
                 "order_id": str(order.id),
                 "factory_name": factory.name if factory else None,
                 "factory_location": factory.location if factory else None,
-                "estimated_completion_date": (
-                    str(order.schedule_deadline) if order.schedule_deadline
-                    else str(order.final_deadline) if order.final_deadline
-                    else None
-                ),
+                "estimated_completion_date": estimated_completion,
             }
         except Exception as e:
             db.rollback()
@@ -394,3 +417,132 @@ def _parse_date(val) -> Optional[date]:
         return date.fromisoformat(str(val))
     except (ValueError, TypeError):
         return None
+
+
+# ────────────────────────────────────────────────────────────────
+# Stubs — placeholder logic until full configuration is done.
+# Can be toggled via GET/POST /api/integration/stubs endpoints.
+# ────────────────────────────────────────────────────────────────
+
+# In-memory stub toggle state (persists until server restart)
+_stubs_state = {
+    "schedule_estimation": True,       # True = stub active (returns placeholder)
+    "intermediate_callbacks": True,     # True = stub active (skips callbacks)
+}
+
+
+def _estimate_completion_stub(order: ProductionOrder) -> Optional[str]:
+    """
+    Stub: return placeholder estimated completion date.
+    When disabled, will use real schedule_estimation service.
+    """
+    if not _stubs_state["schedule_estimation"]:
+        # Real calculation — use schedule_estimation service
+        try:
+            from business.services.schedule_estimation import calculate_schedule_deadline
+            from api.database import SessionLocal
+            db = SessionLocal()
+            try:
+                result = calculate_schedule_deadline(db, order)
+                if order.schedule_deadline:
+                    return str(order.schedule_deadline)
+            except Exception as e:
+                logger.warning(f"Schedule estimation failed, falling back: {e}")
+            finally:
+                db.close()
+        except ImportError:
+            pass
+
+    # Stub: return final_deadline if available, else None
+    if order.schedule_deadline:
+        return str(order.schedule_deadline)
+    if order.final_deadline:
+        return str(order.final_deadline)
+    return None
+
+
+async def notify_sales_status_change_stub(order, position, old_status: str, new_status: str):
+    """
+    Stub: send intermediate status callbacks to Sales.
+    When disabled (stub active), skips callback.
+    When enabled, sends real callback.
+    """
+    if _stubs_state["intermediate_callbacks"]:
+        return  # Stub: skip intermediate callbacks
+
+    # Real callback logic
+    try:
+        from api.config import get_settings
+        settings = get_settings()
+        if not settings.SALES_APP_URL or not settings.PRODUCTION_WEBHOOK_ENABLED:
+            return
+        if not order.external_id:
+            return
+
+        import httpx
+        payload = {
+            "event": "status_change",
+            "external_id": order.external_id,
+            "order_number": order.order_number,
+            "position_id": str(position.id),
+            "old_status": old_status,
+            "new_status": new_status,
+            "order_status": _ev(order.status),
+        }
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"{settings.SALES_APP_URL}/api/webhooks/production-status",
+                json=payload,
+                headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
+                timeout=10,
+            )
+    except Exception as e:
+        logger.warning(f"Sales status callback failed: {e}")
+
+
+@router.get("/stubs")
+async def get_stubs_state(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Get current state of integration stubs."""
+    return {
+        "stubs": {
+            "schedule_estimation": {
+                "active": _stubs_state["schedule_estimation"],
+                "description": "Schedule deadline estimation — returns placeholder dates",
+            },
+            "intermediate_callbacks": {
+                "active": _stubs_state["intermediate_callbacks"],
+                "description": "Intermediate status change callbacks to Sales app",
+            },
+        },
+    }
+
+
+@router.post("/stubs")
+async def toggle_stubs(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Toggle integration stubs on/off.
+    Body: {"schedule_estimation": false, "intermediate_callbacks": false}
+    """
+    import json
+    body = await request.json()
+
+    # Only allow management roles to toggle stubs
+    user_role = _ev(current_user.role) if hasattr(current_user, 'role') else None
+    if user_role not in ('owner', 'administrator', 'production_manager', 'ceo'):
+        from fastapi import HTTPException as HE
+        raise HE(403, "Only management can toggle stubs")
+
+    changed = {}
+    for key in ("schedule_estimation", "intermediate_callbacks"):
+        if key in body and isinstance(body[key], bool):
+            old = _stubs_state[key]
+            _stubs_state[key] = body[key]
+            changed[key] = {"old": old, "new": body[key]}
+
+    return {"status": "updated", "changed": changed, "current": _stubs_state}

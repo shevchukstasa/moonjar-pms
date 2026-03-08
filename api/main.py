@@ -69,7 +69,8 @@ async def lifespan(app: FastAPI):
     """Startup / shutdown events."""
     logger.info("Moonjar PMS starting up...")
     # Create tables if needed (dev only; use Alembic in production)
-    # Base.metadata.create_all(bind=engine)
+    from api.database import engine, Base
+    Base.metadata.create_all(bind=engine)
 
     # Start background scheduler
     from api.scheduler import setup_scheduler

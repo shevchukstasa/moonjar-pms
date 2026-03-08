@@ -12,6 +12,7 @@ import { Tabs } from '@/components/ui/Tabs';
 import { FactoryDialog } from '@/components/admin/FactoryDialog';
 import { AuditLogViewer } from '@/components/admin/AuditLogViewer';
 import { ActiveSessionsViewer } from '@/components/admin/ActiveSessionsViewer';
+import { StubsToggle } from '@/components/admin/StubsToggle';
 
 export default function AdminPanelPage() {
   const navigate = useNavigate();
@@ -232,6 +233,9 @@ export default function AdminPanelPage() {
           {securityTab === 'audit' ? <AuditLogViewer /> : <ActiveSessionsViewer />}
         </div>
       </div>
+
+      {/* Integration Stubs */}
+      <StubsToggle />
 
       {/* Quick Links */}
       <Card title="Quick Links">

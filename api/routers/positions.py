@@ -325,6 +325,15 @@ async def change_position_status(
     ):
         await _notify_sales_order_event(order, "order_ready")
 
+    # Send intermediate status callback to Sales (stub-aware)
+    try:
+        _order = order or db.query(ProductionOrder).filter(ProductionOrder.id == p.order_id).first()
+        if _order and _order.external_id and old_status != _ev(p.status):
+            from api.routers.integration import notify_sales_status_change_stub
+            await notify_sales_status_change_stub(_order, p, old_status, _ev(p.status))
+    except Exception:
+        pass  # Best-effort
+
     return _serialize_position(p)
 
 

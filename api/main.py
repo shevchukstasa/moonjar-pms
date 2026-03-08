@@ -68,9 +68,11 @@ from api.routers import firing_profiles
 async def lifespan(app: FastAPI):
     """Startup / shutdown events."""
     logger.info("Moonjar PMS starting up...")
-    # Create tables if needed (dev only; use Alembic in production)
-    from api.database import engine, Base
-    Base.metadata.create_all(bind=engine)
+    # Create tables if needed (dev only; production uses Alembic migrations)
+    if not IS_PRODUCTION:
+        from api.database import engine, Base
+        Base.metadata.create_all(bind=engine)
+        logger.info("Dev mode: create_all executed")
 
     # Start background scheduler
     from api.scheduler import setup_scheduler

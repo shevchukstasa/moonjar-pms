@@ -62,11 +62,21 @@ export const userUpdateSchema = z.object({
 });
 export type UserUpdateFormData = z.infer<typeof userUpdateSchema>;
 
+export const TELEGRAM_LANGUAGE_OPTIONS = [
+  { value: 'id', label: 'Indonesian' },
+  { value: 'en', label: 'English' },
+  { value: 'ru', label: 'Russian' },
+] as const;
+
 export const factoryCreateSchema = z.object({
   name: z.string().min(1, 'Factory name is required'),
   location: z.string().optional().default(''),
   timezone: z.string().optional().default('Asia/Makassar'),
   is_active: z.boolean().optional().default(true),
+  // Telegram
+  masters_group_chat_id: z.string().optional().default(''),
+  purchaser_chat_id: z.string().optional().default(''),
+  telegram_language: z.string().optional().default('id'),
 });
 export type FactoryFormData = z.infer<typeof factoryCreateSchema>;
 

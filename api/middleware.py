@@ -22,6 +22,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         "/api/auth/login",
         "/api/auth/google",
         "/api/auth/refresh",
+        "/api/telegram/webhook",
         "/api/ws/",
     )
 

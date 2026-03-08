@@ -7,6 +7,10 @@ export interface Factory {
   location: string | null;
   timezone: string | null;
   is_active: boolean;
+  // Telegram
+  masters_group_chat_id: number | null;
+  purchaser_chat_id: number | null;
+  telegram_language: string;
 }
 
 export function useFactories() {
@@ -20,8 +24,7 @@ export function useFactories() {
 export function useCreateFactory() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name: string; location?: string; timezone?: string; is_active?: boolean }) =>
-      factoriesApi.create(data),
+    mutationFn: (data: Record<string, unknown>) => factoriesApi.create(data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['factories'] }); },
   });
 }

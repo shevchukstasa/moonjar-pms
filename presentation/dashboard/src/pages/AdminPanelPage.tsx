@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFactories, type Factory } from '@/hooks/useFactories';
 import { useUsers } from '@/hooks/useUsers';
+import { useBotStatus } from '@/hooks/useTelegramBot';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DataTable } from '@/components/ui/Table';
@@ -13,6 +14,7 @@ export default function AdminPanelPage() {
   const navigate = useNavigate();
   const { data: factoriesData, isLoading: factoriesLoading } = useFactories();
   const { data: usersData, isLoading: usersLoading } = useUsers({ per_page: 1 });
+  const { data: botStatus, isLoading: botLoading } = useBotStatus();
   const [factoryDialogOpen, setFactoryDialogOpen] = useState(false);
   const [editFactory, setEditFactory] = useState<Factory | null>(null);
 
@@ -36,6 +38,31 @@ export default function AdminPanelPage() {
         render: (f: Factory) => (
           <span className="text-sm">{f.timezone || <span className="text-gray-400">&mdash;</span>}</span>
         ),
+      },
+      {
+        key: 'telegram',
+        header: 'Telegram',
+        render: (f: Factory) => {
+          const hasMasters = !!f.masters_group_chat_id;
+          const hasPurchaser = !!f.purchaser_chat_id;
+          if (!hasMasters && !hasPurchaser) {
+            return <span className="text-xs text-gray-400">Not configured</span>;
+          }
+          return (
+            <div className="flex gap-1">
+              {hasMasters && (
+                <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                  Masters
+                </span>
+              )}
+              {hasPurchaser && (
+                <span className="inline-flex items-center rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700">
+                  Purchaser
+                </span>
+              )}
+            </div>
+          );
+        },
       },
       {
         key: 'is_active',
@@ -100,6 +127,58 @@ export default function AdminPanelPage() {
           </div>
         </Card>
       </div>
+
+      {/* Telegram Bot Status */}
+      <Card>
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700">Telegram Bot</h3>
+            {botLoading ? (
+              <div className="mt-2">
+                <Spinner className="h-5 w-5" />
+              </div>
+            ) : botStatus?.connected ? (
+              <div className="mt-2 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-500" />
+                  <span className="text-sm font-medium text-gray-900">
+                    Connected — {botStatus.bot_username}
+                  </span>
+                </div>
+                {botStatus.bot_name && (
+                  <p className="text-xs text-gray-500">{botStatus.bot_name}</p>
+                )}
+                <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                  <span>Owner chat:</span>
+                  {botStatus.owner_chat_configured ? (
+                    <span className="text-green-600">configured ✓</span>
+                  ) : (
+                    <span className="text-amber-600">not set</span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-2 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />
+                  <span className="text-sm font-medium text-gray-900">Not connected</span>
+                </div>
+                <p className="text-xs text-gray-500">
+                  {botStatus?.error || botStatus?.message || 'Set TELEGRAM_BOT_TOKEN environment variable to enable Telegram notifications.'}
+                </p>
+              </div>
+            )}
+          </div>
+          <span className="rounded-md bg-gray-100 p-1.5 text-gray-400">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15v-4H7l5-7v4h4l-5 7z" />
+            </svg>
+          </span>
+        </div>
+        <p className="mt-3 text-xs text-gray-400">
+          Bot token is managed via environment variables. Contact DevOps to change.
+        </p>
+      </Card>
 
       {/* Factories Section */}
       <div>

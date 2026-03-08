@@ -310,4 +310,6 @@ async def verify_google_token(id_token: str) -> dict:
             "name": idinfo.get("name", idinfo["email"]),
         }
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid Google token: {e}")
+        import logging
+        logging.getLogger("moonjar.auth").warning(f"Google token verification failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid or expired Google token")

@@ -2,8 +2,19 @@
 Moonjar PMS — Application configuration.
 """
 
+import logging
+import os
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+_config_logger = logging.getLogger("moonjar.config")
+
+# Secrets that MUST be overridden before production
+_INSECURE_DEFAULTS = {
+    "change-to-random-64-char-string",
+    "change-me",
+    "change-this-to-random-32-char-key",
+}
 
 
 class Settings(BaseSettings):
@@ -69,4 +80,27 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    _is_production = bool(
+        os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("ENV", "").lower() == "production"
+    )
+    # In production, REFUSE to start with insecure default secrets
+    insecure = []
+    if s.SECRET_KEY in _INSECURE_DEFAULTS:
+        insecure.append("SECRET_KEY")
+    if s.OWNER_KEY in _INSECURE_DEFAULTS:
+        insecure.append("OWNER_KEY")
+    if s.TOTP_ENCRYPTION_KEY in _INSECURE_DEFAULTS:
+        insecure.append("TOTP_ENCRYPTION_KEY")
+
+    if insecure and _is_production:
+        raise RuntimeError(
+            f"FATAL: insecure default values for: {', '.join(insecure)}. "
+            f"Set proper secrets via environment variables before starting in production."
+        )
+    elif insecure:
+        _config_logger.warning(
+            f"⚠ Insecure default secrets detected: {', '.join(insecure)}. "
+            f"Set proper values in .env before deploying to production."
+        )
+    return s

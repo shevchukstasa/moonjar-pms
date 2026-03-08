@@ -172,6 +172,21 @@ def transition_position_status(
                 f"Invalid transition: {old_status} → {new_status_str}. "
                 f"Allowed: {allowed}"
             )
+    else:
+        # Audit log: admin/PM override bypassing normal transition rules
+        from api.auth import log_security_event
+        log_security_event(
+            db,
+            action="status_override",
+            actor_id=str(changed_by),
+            target_entity="order_position",
+            target_id=str(position_id),
+            details={
+                "old_status": old_status,
+                "new_status": new_status_str,
+                "notes": notes,
+            },
+        )
 
     # Apply status
     try:

@@ -16,7 +16,7 @@ from api.auth import (
     check_lockout, record_failed_login, reset_failed_logins, create_session,
     verify_google_token, log_security_event, get_current_user,
 )
-from api.models import User, ActiveSession
+from api.models import User, ActiveSession  # ActiveSession needed for refresh token rotation
 
 router = APIRouter()
 logger = logging.getLogger("moonjar.auth")
@@ -67,7 +67,7 @@ async def login(data: LoginRequest, request: Request, response: Response,
         raise
     except Exception as e:
         logger.error(f"Login error: {type(e).__name__}: {e}", exc_info=True)
-        raise HTTPException(500, f"Login error: {type(e).__name__}: {e}")
+        raise HTTPException(500, "An unexpected error occurred during login")
 
 
 @router.post("/google")
@@ -106,15 +106,33 @@ async def refresh_token(request: Request, response: Response, db: Session = Depe
         raise HTTPException(401, "Invalid refresh token")
     if payload.get("type") != "refresh":
         raise HTTPException(401, "Invalid token type")
+
+    # Verify old session is still valid
+    old_jti = payload.get("jti")
+    if old_jti:
+        old_session = db.query(ActiveSession).filter(
+            ActiveSession.token_jti == old_jti,
+            ActiveSession.revoked == False,
+        ).first()
+        if not old_session:
+            raise HTTPException(401, "Session revoked")
+        # Revoke old session (token rotation)
+        old_session.revoked = True
+        old_session.revoked_at = datetime.now(timezone.utc)
+        old_session.revoked_reason = "token_rotation"
+
     user = db.query(User).filter(User.id == payload["sub"], User.is_active == True).first()
     if not user:
         raise HTTPException(401, "User not found")
+
+    # Create new session with new JTI
     jti = str(_uuid.uuid4())
     role_val = _role_str(user.role)
     access = create_access_token(str(user.id), role_val, jti)
+    refresh = create_refresh_token(str(user.id), jti)
     csrf = generate_csrf_token(jti)
-    response.set_cookie("access_token", access, httponly=True, secure=True, samesite="none", path="/")
-    response.set_cookie("csrf_token", csrf, httponly=False, secure=True, samesite="none", path="/")
+    create_session(db, str(user.id), jti, request)
+    set_auth_cookies(response, access, refresh, csrf)
     return {"access_token": access, "token_type": "bearer"}
 
 

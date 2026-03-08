@@ -1,5 +1,8 @@
 """Integration router — Sales webhook receiver + production status API."""
 
+import hashlib
+import hmac as hmac_mod
+import logging
 import uuid as uuid_mod
 from datetime import date, datetime, timezone
 from uuid import UUID
@@ -18,6 +21,8 @@ from api.models import (
     SalesWebhookEvent, Factory,
 )
 from api.enums import OrderStatus, OrderSource, PositionStatus, is_stock_collection
+
+logger = logging.getLogger("moonjar.integration")
 
 router = APIRouter()
 
@@ -127,13 +132,16 @@ async def receive_sales_order(
     db: Session = Depends(get_db),
 ):
     """Receive order from Sales app.
-    Auth: X-API-Key header OR Bearer token.
+    Auth: X-API-Key header OR Bearer token.  HMAC-SHA256 signature verified when configured.
     Payload: flat format (Sales) or nested order_data (legacy).
     """
     settings = get_settings()
 
     if not settings.PRODUCTION_WEBHOOK_ENABLED:
         raise HTTPException(503, "Webhook receiver disabled")
+
+    # Read raw body BEFORE json parsing (needed for HMAC verification)
+    raw_body = await request.body()
 
     # Verify authentication — accept both X-API-Key and Bearer
     x_api_key = request.headers.get("X-API-Key")
@@ -149,8 +157,23 @@ async def receive_sales_order(
     if not authenticated:
         raise HTTPException(401, "Invalid API key or bearer token")
 
+    # HMAC-SHA256 signature verification (when HMAC secret is configured)
+    hmac_secret = settings.PRODUCTION_WEBHOOK_HMAC_SECRET
+    if hmac_secret:
+        signature = request.headers.get("X-Webhook-Signature")
+        if not signature:
+            logger.warning("Webhook received without HMAC signature")
+            raise HTTPException(401, "Missing webhook signature")
+        expected = hmac_mod.new(
+            hmac_secret.encode(), raw_body, hashlib.sha256
+        ).hexdigest()
+        if not hmac_mod.compare_digest(signature, expected):
+            logger.warning("Webhook HMAC signature mismatch")
+            raise HTTPException(401, "Invalid webhook signature")
+
     # Parse body
-    body = await request.json()
+    import json
+    body = json.loads(raw_body)
 
     # Auto-generate event_id if not provided (Sales may not send it)
     event_id = body.get("event_id") or f"auto-{uuid_mod.uuid4().hex[:16]}"

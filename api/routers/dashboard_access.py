@@ -19,7 +19,7 @@ async def list_dashboard_access(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     query = db.query(UserDashboardAccess)
     total = query.count()
@@ -31,7 +31,7 @@ async def list_dashboard_access(
 async def get_dashboard_access_item(
     item_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_admin),
 ):
     item = db.query(UserDashboardAccess).filter(UserDashboardAccess.id == item_id).first()
     if not item:

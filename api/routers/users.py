@@ -4,13 +4,13 @@ from uuid import UUID
 from typing import Optional
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from api.database import get_db
-from api.auth import get_current_user, hash_password
+from api.auth import get_current_user, hash_password, log_security_event
 from api.roles import require_admin
 from api.models import User, UserFactory, Factory, ActiveSession
 from api.enums import UserRole, LanguagePreference
@@ -157,6 +157,7 @@ async def create_user(
 async def update_user(
     user_id: UUID,
     data: UserUpdateInput,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
 ):
@@ -170,6 +171,18 @@ async def update_user(
         valid_roles = [r.value for r in UserRole]
         if data.role not in valid_roles:
             raise HTTPException(422, f"Invalid role '{data.role}'")
+        old_role = user.role.value if hasattr(user.role, 'value') else str(user.role)
+        if old_role != data.role:
+            log_security_event(
+                db,
+                action="role_change",
+                actor_id=str(current_user.id),
+                actor_email=current_user.email,
+                ip_address=request.client.host if request.client else None,
+                target_entity="user",
+                target_id=str(user_id),
+                details={"old_role": old_role, "new_role": data.role, "user_email": user.email},
+            )
         user.role = data.role
     if data.language is not None:
         valid_langs = [l.value for l in LanguagePreference]

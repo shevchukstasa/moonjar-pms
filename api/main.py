@@ -105,10 +105,11 @@ app.add_middleware(
     expose_headers=["X-CSRF-Token"],
 )
 
-# --- CSRF + Request logging middleware ---
-from api.middleware import CSRFMiddleware, RequestLoggingMiddleware
+# --- CSRF + Rate limiting + Request logging middleware ---
+from api.middleware import CSRFMiddleware, LoginRateLimitMiddleware, RequestLoggingMiddleware
 
 app.add_middleware(CSRFMiddleware)
+app.add_middleware(LoginRateLimitMiddleware)
 if IS_PRODUCTION:
     app.add_middleware(RequestLoggingMiddleware)
 

@@ -253,6 +253,23 @@ async def update_position(
     return _serialize_position(p)
 
 
+@router.get("/{position_id}/allowed-transitions")
+async def get_allowed_transitions(
+    position_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return list of allowed next statuses for a position."""
+    from business.services.status_machine import get_allowed_transitions as _get_allowed
+
+    p = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not p:
+        raise HTTPException(404, "Position not found")
+
+    current = _ev(p.status)
+    return {"current_status": current, "allowed": _get_allowed(current)}
+
+
 @router.post("/{position_id}/status")
 async def change_position_status(
     position_id: UUID,
@@ -260,6 +277,8 @@ async def change_position_status(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    from business.services.status_machine import validate_status_transition
+
     p = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
     if not p:
         raise HTTPException(404, "Position not found")
@@ -270,8 +289,27 @@ async def change_position_status(
     except ValueError:
         raise HTTPException(400, f"Invalid status: {data.status}")
 
+    # Validate transition
+    current = _ev(p.status)
+    is_management = hasattr(current_user, 'role') and _ev(current_user.role) in (
+        'production_manager', 'administrator', 'owner'
+    )
+    if not is_management and not validate_status_transition(current, data.status):
+        from business.services.status_machine import get_allowed_transitions as _get_allowed
+        allowed = _get_allowed(current)
+        raise HTTPException(
+            400,
+            f"Invalid transition: {current} → {data.status}. Allowed: {allowed}",
+        )
+
+    old_status = current
     p.status = new_status
     p.updated_at = datetime.now(timezone.utc)
+
+    # Special routing: FIRED → multi-firing check
+    if new_status == PositionStatus.FIRED:
+        from business.services.status_machine import route_after_firing
+        route_after_firing(db, p)
 
     # Auto-recalculate parent order status
     old_order_status, new_order_status, order = _recalculate_order_status(db, p.order_id)

@@ -295,35 +295,61 @@ async def receive_sales_order(
         return {"status": "acknowledged", "event_type": event_type}
 
 
-def _resolve_factory_by_location(db: Session, client_location: str | None) -> Factory | None:
-    """Find factory by delivery location using served_locations JSONB field."""
-    if not client_location:
-        return None
-    loc = client_location.strip()
-    # Search factories where served_locations array contains the location (case-insensitive)
-    factories = db.query(Factory).filter(Factory.is_active.is_(True)).all()
-    for f in factories:
-        if f.served_locations:
-            served = [s.lower() for s in f.served_locations]
-            if loc.lower() in served:
-                return f
-    return None
+def _resolve_factory(db: Session, client_location: str | None, explicit_factory_id: str | None = None) -> Factory:
+    """
+    Resolve factory for an incoming order.
+
+    Priority:
+    1. Explicit factory_id from payload
+    2. Single active factory → always use it (no lookup needed)
+    3. Match by served_locations JSONB
+    4. Fallback to first active factory
+
+    Raises ValueError only if zero factories exist.
+    """
+    # 1. Explicit factory_id
+    if explicit_factory_id:
+        factory = db.query(Factory).filter(
+            Factory.id == UUID(explicit_factory_id),
+            Factory.is_active.is_(True),
+        ).first()
+        if factory:
+            return factory
+        # If explicit ID is invalid, fall through to auto-assignment
+        logger.warning(f"Explicit factory_id {explicit_factory_id} not found or inactive, auto-assigning")
+
+    # 2. Get all active factories
+    active_factories = db.query(Factory).filter(Factory.is_active.is_(True)).all()
+    if not active_factories:
+        raise ValueError("No active factories configured in the system")
+
+    # Single factory → always use it, skip all matching logic
+    if len(active_factories) == 1:
+        return active_factories[0]
+
+    # 3. Match by served_locations (multiple factories)
+    if client_location:
+        loc = client_location.strip().lower()
+        for f in active_factories:
+            if f.served_locations:
+                served = [s.lower() for s in f.served_locations]
+                if loc in served:
+                    return f
+
+    # 4. Fallback: first active factory
+    return active_factories[0]
 
 
 def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict) -> ProductionOrder:
     """Create a production order from Sales webhook payload."""
 
-    # Resolve factory: by explicit factory_id, then by client_location, then default
-    factory_id = order_data.get("factory_id")
-    if not factory_id:
-        client_location = order_data.get("client_location")
-        factory = _resolve_factory_by_location(db, client_location)
-        if not factory:
-            # Fallback to first active factory
-            factory = db.query(Factory).filter(Factory.is_active.is_(True)).first()
-        if not factory:
-            raise ValueError("No factories configured")
-        factory_id = str(factory.id)
+    # Resolve factory (handles single-factory, location matching, fallback)
+    factory = _resolve_factory(
+        db,
+        client_location=order_data.get("client_location"),
+        explicit_factory_id=order_data.get("factory_id"),
+    )
+    factory_id = str(factory.id)
 
     order = ProductionOrder(
         id=uuid_mod.uuid4(),

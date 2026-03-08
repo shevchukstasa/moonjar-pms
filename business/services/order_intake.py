@@ -189,14 +189,26 @@ def assign_factory(db: Session, client_location: str) -> Factory:
     """
     Auto-assign factory by client region.
 
-    Logic:
-    - If client_location contains "bali"/"denpasar" → Bali factory
-    - If "java"/"jakarta"/"surabaya" → Java factory
-    - Default: factory with fewer active positions (load balancing)
+    Priority:
+    1. Single active factory → always use it (skip all matching)
+    2. Region-based keyword matching (bali/java keywords)
+    3. Load balancing: factory with fewest active positions
     """
+    # Get all active factories
+    factories = db.query(Factory).filter(Factory.is_active.is_(True)).all()
+    if not factories:
+        # Fallback: try any factory (even inactive)
+        factories = db.query(Factory).all()
+        if not factories:
+            raise ValueError("No factories configured in the system")
+
+    # Single factory → always use it, no matching needed
+    if len(factories) == 1:
+        return factories[0]
+
+    # Multiple factories: try region-based matching
     location_lower = (client_location or "").lower()
 
-    # Region-based matching
     bali_keywords = {"bali", "denpasar", "kuta", "ubud", "seminyak", "canggu"}
     java_keywords = {"java", "jakarta", "surabaya", "bandung", "semarang", "yogyakarta"}
 
@@ -212,15 +224,7 @@ def assign_factory(db: Session, client_location: str) -> Factory:
             if factory:
                 return factory
 
-    # Fallback: factory with least active positions (load balancing)
-    factories = db.query(Factory).all()
-    if not factories:
-        raise ValueError("No factories configured in the system")
-
-    if len(factories) == 1:
-        return factories[0]
-
-    # Count active (non-terminal) positions per factory
+    # Load balancing: factory with fewest active positions
     best = None
     min_load = float("inf")
     terminal = {PositionStatus.SHIPPED, PositionStatus.CANCELLED, PositionStatus.READY_FOR_SHIPMENT}

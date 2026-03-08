@@ -39,6 +39,7 @@ class Factory(Base):
     require_pm_approval_receiving = Column(sa.Boolean, nullable=False, default=False)
     kiln_constants_mode = Column(PgEnum(KilnConstantsMode), nullable=False, default=KilnConstantsMode.MANUAL)
     rotation_rules = Column(JSONB)
+    served_locations = Column(JSONB)  # ["Bali", "Lombok"] — delivery locations served by this factory
     is_active = Column(sa.Boolean, nullable=False, default=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 

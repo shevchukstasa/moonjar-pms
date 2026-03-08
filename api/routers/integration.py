@@ -249,14 +249,32 @@ async def receive_sales_order(
         return {"status": "acknowledged", "event_type": event_type}
 
 
+def _resolve_factory_by_location(db: Session, client_location: str | None) -> Factory | None:
+    """Find factory by delivery location using served_locations JSONB field."""
+    if not client_location:
+        return None
+    loc = client_location.strip()
+    # Search factories where served_locations array contains the location (case-insensitive)
+    factories = db.query(Factory).filter(Factory.is_active.is_(True)).all()
+    for f in factories:
+        if f.served_locations:
+            served = [s.lower() for s in f.served_locations]
+            if loc.lower() in served:
+                return f
+    return None
+
+
 def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict) -> ProductionOrder:
     """Create a production order from Sales webhook payload."""
 
-    # Resolve factory
+    # Resolve factory: by explicit factory_id, then by client_location, then default
     factory_id = order_data.get("factory_id")
     if not factory_id:
-        # Default to first factory
-        factory = db.query(Factory).first()
+        client_location = order_data.get("client_location")
+        factory = _resolve_factory_by_location(db, client_location)
+        if not factory:
+            # Fallback to first active factory
+            factory = db.query(Factory).filter(Factory.is_active.is_(True)).first()
         if not factory:
             raise ValueError("No factories configured")
         factory_id = str(factory.id)

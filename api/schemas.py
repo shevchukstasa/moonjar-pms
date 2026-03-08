@@ -34,6 +34,7 @@ class FactoryCreate(BaseModel):
     require_pm_approval_receiving: Optional[bool] = None
     kiln_constants_mode: Optional[str] = None
     rotation_rules: Optional[dict] = None
+    served_locations: Optional[list] = None
     is_active: Optional[bool] = None
 
 
@@ -50,6 +51,7 @@ class FactoryUpdate(BaseModel):
     require_pm_approval_receiving: Optional[bool] = None
     kiln_constants_mode: Optional[str] = None
     rotation_rules: Optional[dict] = None
+    served_locations: Optional[list] = None
     is_active: Optional[bool] = None
 
 
@@ -67,6 +69,7 @@ class FactoryResponse(BaseModel):
     require_pm_approval_receiving: bool
     kiln_constants_mode: str
     rotation_rules: Optional[dict] = None
+    served_locations: Optional[list] = None
     is_active: bool
     created_at: datetime
 

@@ -8,7 +8,10 @@ import { Button } from '@/components/ui/Button';
 import { DataTable } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
+import { Tabs } from '@/components/ui/Tabs';
 import { FactoryDialog } from '@/components/admin/FactoryDialog';
+import { AuditLogViewer } from '@/components/admin/AuditLogViewer';
+import { ActiveSessionsViewer } from '@/components/admin/ActiveSessionsViewer';
 
 export default function AdminPanelPage() {
   const navigate = useNavigate();
@@ -17,6 +20,7 @@ export default function AdminPanelPage() {
   const { data: botStatus, isLoading: botLoading, isError: botError } = useBotStatus();
   const [factoryDialogOpen, setFactoryDialogOpen] = useState(false);
   const [editFactory, setEditFactory] = useState<Factory | null>(null);
+  const [securityTab, setSecurityTab] = useState('audit');
 
   const factories = factoriesData?.items || [];
   const totalUsers = usersData?.total ?? 0;
@@ -211,6 +215,22 @@ export default function AdminPanelPage() {
             data={factories as unknown as Record<string, unknown>[]}
           />
         )}
+      </div>
+
+      {/* Security Section */}
+      <div>
+        <h2 className="mb-3 text-lg font-semibold text-gray-900">Security</h2>
+        <Tabs
+          tabs={[
+            { id: 'audit', label: 'Audit Log' },
+            { id: 'sessions', label: 'Active Sessions' },
+          ]}
+          activeTab={securityTab}
+          onChange={setSecurityTab}
+        />
+        <div className="mt-4">
+          {securityTab === 'audit' ? <AuditLogViewer /> : <ActiveSessionsViewer />}
+        </div>
       </div>
 
       {/* Quick Links */}

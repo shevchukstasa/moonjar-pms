@@ -14,7 +14,7 @@ export default function AdminPanelPage() {
   const navigate = useNavigate();
   const { data: factoriesData, isLoading: factoriesLoading } = useFactories();
   const { data: usersData, isLoading: usersLoading } = useUsers({ per_page: 1 });
-  const { data: botStatus, isLoading: botLoading } = useBotStatus();
+  const { data: botStatus, isLoading: botLoading, isError: botError } = useBotStatus();
   const [factoryDialogOpen, setFactoryDialogOpen] = useState(false);
   const [editFactory, setEditFactory] = useState<Factory | null>(null);
 
@@ -43,8 +43,8 @@ export default function AdminPanelPage() {
         key: 'telegram',
         header: 'Telegram',
         render: (f: Factory) => {
-          const hasMasters = !!f.masters_group_chat_id;
-          const hasPurchaser = !!f.purchaser_chat_id;
+          const hasMasters = f.masters_group_chat_id != null;
+          const hasPurchaser = f.purchaser_chat_id != null;
           if (!hasMasters && !hasPurchaser) {
             return <span className="text-xs text-gray-400">Not configured</span>;
           }
@@ -136,6 +136,11 @@ export default function AdminPanelPage() {
             {botLoading ? (
               <div className="mt-2">
                 <Spinner className="h-5 w-5" />
+              </div>
+            ) : botError ? (
+              <div className="mt-2 flex items-center gap-2">
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-gray-400" />
+                <span className="text-sm text-gray-500">Unable to check bot status</span>
               </div>
             ) : botStatus?.connected ? (
               <div className="mt-2 space-y-1">

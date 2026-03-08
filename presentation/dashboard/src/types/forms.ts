@@ -74,8 +74,12 @@ export const factoryCreateSchema = z.object({
   timezone: z.string().optional().default('Asia/Makassar'),
   is_active: z.boolean().optional().default(true),
   // Telegram
-  masters_group_chat_id: z.string().optional().default(''),
-  purchaser_chat_id: z.string().optional().default(''),
+  masters_group_chat_id: z.string()
+    .refine(v => !v || /^-?\d+$/.test(v), 'Must be a valid number')
+    .optional().default(''),
+  purchaser_chat_id: z.string()
+    .refine(v => !v || /^-?\d+$/.test(v), 'Must be a valid number')
+    .optional().default(''),
   telegram_language: z.string().optional().default('id'),
 });
 export type FactoryFormData = z.infer<typeof factoryCreateSchema>;

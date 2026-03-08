@@ -210,12 +210,12 @@ def _maybe_push_telegram(
 def send_telegram_message(chat_id: str, text: str) -> None:
     """
     Send message via Telegram Bot API.
-    Uses TELEGRAM_BOT_TOKEN from environment.
+    Uses TELEGRAM_BOT_TOKEN from config (cached via lru_cache).
     """
-    import os
     import httpx
+    from api.config import get_settings
 
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    token = get_settings().TELEGRAM_BOT_TOKEN
     if not token:
         logger.debug("TELEGRAM_BOT_TOKEN not set, skipping Telegram message")
         return

@@ -98,10 +98,17 @@ export function FactoryDialog({ open, onClose, factory }: Props) {
   const onSubmit = async (data: FactoryFormData) => {
     setSubmitError('');
     // Convert string chat IDs to numbers for the API (or null if empty)
+    const mastersId = data.masters_group_chat_id ? Number(data.masters_group_chat_id) : null;
+    const purchaserId = data.purchaser_chat_id ? Number(data.purchaser_chat_id) : null;
+    if ((mastersId !== null && !Number.isInteger(mastersId)) ||
+        (purchaserId !== null && !Number.isInteger(purchaserId))) {
+      setSubmitError('Chat IDs must be valid integers');
+      return;
+    }
     const payload: Record<string, unknown> = {
       ...data,
-      masters_group_chat_id: data.masters_group_chat_id ? Number(data.masters_group_chat_id) : null,
-      purchaser_chat_id: data.purchaser_chat_id ? Number(data.purchaser_chat_id) : null,
+      masters_group_chat_id: mastersId,
+      purchaser_chat_id: purchaserId,
     };
     try {
       if (isEdit && factory) {
@@ -167,6 +174,9 @@ export function FactoryDialog({ open, onClose, factory }: Props) {
                 Test
               </Button>
             </div>
+            {errors.masters_group_chat_id?.message && (
+              <p className="mt-1 text-xs text-red-500">{errors.masters_group_chat_id.message}</p>
+            )}
             {testResult?.field === 'masters' && (
               <p className={`mt-1 text-xs ${testResult.success ? 'text-green-600' : 'text-red-500'}`}>
                 {testResult.message}
@@ -193,6 +203,9 @@ export function FactoryDialog({ open, onClose, factory }: Props) {
                 Test
               </Button>
             </div>
+            {errors.purchaser_chat_id?.message && (
+              <p className="mt-1 text-xs text-red-500">{errors.purchaser_chat_id.message}</p>
+            )}
             {testResult?.field === 'purchaser' && (
               <p className={`mt-1 text-xs ${testResult.success ? 'text-green-600' : 'text-red-500'}`}>
                 {testResult.message}

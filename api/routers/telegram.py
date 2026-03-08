@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from api.database import get_db
@@ -63,11 +63,21 @@ async def get_bot_status(current_user=Depends(require_admin)):
         return {"connected": False, "error": "Telegram API timeout"}
     except Exception as e:
         logger.warning(f"Telegram bot status check failed: {e}")
-        return {"connected": False, "error": str(e)}
+        return {"connected": False, "error": "Failed to check bot status"}
 
 
 class TestChatRequest(BaseModel):
     chat_id: str
+
+    @field_validator('chat_id')
+    @classmethod
+    def validate_chat_id(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError('chat_id is required')
+        if not v.lstrip('-').isdigit():
+            raise ValueError('chat_id must be numeric (e.g. -1001234567890)')
+        return v
 
 
 @router.post("/test-chat")
@@ -112,7 +122,7 @@ async def test_chat(
         return {"success": False, "error": "Telegram API timeout"}
     except Exception as e:
         logger.warning(f"Telegram test-chat failed: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Failed to send test message"}
 
 
 # ────────────────────────────────────────────────────────────────

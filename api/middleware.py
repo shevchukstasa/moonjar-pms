@@ -14,10 +14,20 @@ settings = get_settings()
 class CSRFMiddleware(BaseHTTPMiddleware):
     """Validate CSRF token on mutating requests."""
 
+    # Paths that don't need CSRF (webhooks, auth login, health, internal cron)
+    SKIP_PREFIXES = (
+        "/api/integration/",
+        "/api/health",
+        "/api/internal/",
+        "/api/auth/login",
+        "/api/auth/google",
+        "/api/auth/refresh",
+        "/api/ws/",
+    )
+
     async def dispatch(self, request: Request, call_next):
         if request.method in ("POST", "PATCH", "PUT", "DELETE"):
-            # Skip CSRF for webhook and health endpoints
-            if not request.url.path.startswith(("/api/integration/", "/api/health")):
+            if not request.url.path.startswith(self.SKIP_PREFIXES):
                 validate_csrf(request)
         response = await call_next(request)
         return response

@@ -21,7 +21,7 @@ export function Sidebar() {
   return (
     <aside className={cn('fixed left-0 top-0 z-40 flex h-screen flex-col border-r bg-white transition-all', sidebarOpen ? 'w-64' : 'w-16')}>
       <div className="flex h-16 items-center justify-between border-b px-4">
-        {sidebarOpen && <span className="text-lg font-bold text-primary-600">Moonjar</span>}
+        {sidebarOpen && <span className="text-lg font-semibold"><span className="text-blue-600">Moonjar</span> <span className="font-bold text-gray-900">Production</span></span>}
         <button onClick={toggleSidebar} className="rounded p-1 text-gray-400 hover:bg-gray-100">{sidebarOpen ? '\u2190' : '\u2192'}</button>
       </div>
       <nav className="flex-1 space-y-1 px-2 py-4">

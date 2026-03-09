@@ -190,26 +190,35 @@ def _ensure_schema():
                     """))
 
             # Kilns — ensure 6 total (3 per factory)
+            # NOTE: Use bind params, NOT f-strings for JSON values!
+            # SQLAlchemy text() treats :number in JSON as bind parameters.
             for fname, prefix in [("Bali Factory", "Bali"), ("Java Factory", "Java"), ("Bali", "Bali"), ("Java", "Java")]:
                 row = conn.execute(text(f"SELECT id FROM factories WHERE name = '{fname}' LIMIT 1")).fetchone()
                 if not row:
                     continue
                 fid = str(row[0])
                 kilns_data = [
-                    (f"{prefix} Large Kiln", "big", '{"width_cm":54,"depth_cm":84,"height_cm":80}', '{"width_cm":54,"depth_cm":84}', True, 0.80),
-                    (f"{prefix} Small Kiln", "small", '{"width_cm":100,"depth_cm":160,"height_cm":40}', '{"width_cm":100,"depth_cm":150}', False, 0.92),
-                    (f"{prefix} Raku Kiln", "raku", '{"width_cm":60,"depth_cm":100,"height_cm":40}', '{"width_cm":60,"depth_cm":100}', False, 0.85),
+                    (f"{prefix} Large Kiln", "big", {"width_cm": 54, "depth_cm": 84, "height_cm": 80}, {"width_cm": 54, "depth_cm": 84}, True, 0.80),
+                    (f"{prefix} Small Kiln", "small", {"width_cm": 100, "depth_cm": 160, "height_cm": 40}, {"width_cm": 100, "depth_cm": 150}, False, 0.92),
+                    (f"{prefix} Raku Kiln", "raku", {"width_cm": 60, "depth_cm": 100, "height_cm": 40}, {"width_cm": 60, "depth_cm": 100}, False, 0.85),
                 ]
+                import json as json_mod
                 for kname, ktype, dims, work_area, multi, coeff in kilns_data:
-                    exists = conn.execute(text(f"SELECT 1 FROM resources WHERE factory_id='{fid}' AND name='{kname}' LIMIT 1")).fetchone()
+                    exists = conn.execute(text(
+                        "SELECT 1 FROM resources WHERE factory_id = :fid AND name = :kname LIMIT 1"
+                    ), {"fid": fid, "kname": kname}).fetchone()
                     if not exists:
-                        conn.execute(text(f"""
+                        conn.execute(text("""
                             INSERT INTO resources (id, factory_id, name, resource_type, kiln_type,
                                 kiln_dimensions_cm, kiln_working_area_cm, kiln_multi_level,
                                 kiln_coefficient, is_active, status)
-                            VALUES (gen_random_uuid(), '{fid}', '{kname}', 'kiln', '{ktype}',
-                                '{dims}'::JSONB, '{work_area}'::JSONB, {multi}, {coeff}, TRUE, 'active')
-                        """))
+                            VALUES (gen_random_uuid(), :fid, :kname, 'kiln', :ktype,
+                                :dims::JSONB, :work_area::JSONB, :multi, :coeff, TRUE, 'active')
+                        """), {
+                            "fid": fid, "kname": kname, "ktype": ktype,
+                            "dims": json_mod.dumps(dims), "work_area": json_mod.dumps(work_area),
+                            "multi": multi, "coeff": coeff,
+                        })
 
             # Stamp alembic to 003 so it doesn't retry failed migrations
             conn.execute(text("""

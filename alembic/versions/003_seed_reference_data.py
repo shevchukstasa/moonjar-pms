@@ -9,6 +9,7 @@ Create Date: 2026-03-09
 """
 from alembic import op
 from sqlalchemy import text
+import json
 import uuid
 
 revision = "003_seed_data"
@@ -218,42 +219,45 @@ def upgrade() -> None:
     #     kiln_coefficient (Numeric), kiln_multi_level (Boolean), kiln_type (String)
     # ═══════════════════════════════════════════════════════════
     kilns = [
-        # (factory_id, name, kiln_type, dims_json, working_area_json, multi_level, coefficient)
+        # (factory_id, name, kiln_type, dims_dict, working_area_dict, multi_level, coefficient)
         (bali_id, "Bali Large Kiln", "big",
-         '{"width_cm":54,"depth_cm":84,"height_cm":80}',
-         '{"width_cm":54,"depth_cm":84}',
+         {"width_cm": 54, "depth_cm": 84, "height_cm": 80},
+         {"width_cm": 54, "depth_cm": 84},
          True, 0.80),
         (bali_id, "Bali Small Kiln", "small",
-         '{"width_cm":100,"depth_cm":160,"height_cm":40}',
-         '{"width_cm":100,"depth_cm":150}',
+         {"width_cm": 100, "depth_cm": 160, "height_cm": 40},
+         {"width_cm": 100, "depth_cm": 150},
          False, 0.92),
         (bali_id, "Bali Raku Kiln", "raku",
-         '{"width_cm":60,"depth_cm":100,"height_cm":40}',
-         '{"width_cm":60,"depth_cm":100}',
+         {"width_cm": 60, "depth_cm": 100, "height_cm": 40},
+         {"width_cm": 60, "depth_cm": 100},
          False, 0.85),
         (java_id, "Java Large Kiln", "big",
-         '{"width_cm":54,"depth_cm":84,"height_cm":80}',
-         '{"width_cm":54,"depth_cm":84}',
+         {"width_cm": 54, "depth_cm": 84, "height_cm": 80},
+         {"width_cm": 54, "depth_cm": 84},
          True, 0.80),
         (java_id, "Java Small Kiln", "small",
-         '{"width_cm":100,"depth_cm":160,"height_cm":40}',
-         '{"width_cm":100,"depth_cm":150}',
+         {"width_cm": 100, "depth_cm": 160, "height_cm": 40},
+         {"width_cm": 100, "depth_cm": 150},
          False, 0.92),
         (java_id, "Java Raku Kiln", "raku",
-         '{"width_cm":60,"depth_cm":100,"height_cm":40}',
-         '{"width_cm":60,"depth_cm":100}',
+         {"width_cm": 60, "depth_cm": 100, "height_cm": 40},
+         {"width_cm": 60, "depth_cm": 100},
          False, 0.85),
     ]
+    # Use proper bind params — text() treats :number in JSON as bind parameters!
     for fid, name, ktype, dims, work_area, multi, coeff in kilns:
-        conn.execute(text(f"""
+        conn.execute(text("""
             INSERT INTO resources (id, factory_id, name, resource_type, kiln_type,
                 kiln_dimensions_cm, kiln_working_area_cm, kiln_multi_level,
                 kiln_coefficient, is_active, status)
-            VALUES (gen_random_uuid(), '{fid}', '{name}', 'kiln', '{ktype}',
-                '{dims}'::JSONB, '{work_area}'::JSONB, {multi},
-                {coeff}, TRUE, 'active')
+            VALUES (gen_random_uuid(), :fid, :name, 'kiln', :ktype,
+                :dims::JSONB, :work_area::JSONB, :multi,
+                :coeff, TRUE, 'active')
             ON CONFLICT DO NOTHING
-        """))
+        """), {"fid": fid, "name": name, "ktype": ktype,
+               "dims": json.dumps(dims), "work_area": json.dumps(work_area),
+               "multi": multi, "coeff": coeff})
 
     # ═══════════════════════════════════════════════════════════
     # 11. WAREHOUSE SECTIONS — 3 per factory

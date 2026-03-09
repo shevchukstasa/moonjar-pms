@@ -285,6 +285,23 @@ def _ensure_schema():
 
     _run_section("kilns", _seed_kilns)
 
+    # --- Section 7b: Clean up duplicate kilns (old names without prefix) ---
+    def _cleanup_duplicate_kilns(conn):
+        # Migration 003 created kilns named "Large Kiln", "Small Kiln", "Raku Kiln"
+        # _ensure_schema created "Bali Large Kiln", "Java Large Kiln" etc.
+        # Remove old duplicates (only if properly-named ones exist)
+        for old_name in ["Large Kiln", "Small Kiln", "Raku Kiln"]:
+            # Only delete if there's a properly-named replacement
+            has_replacement = conn.execute(text(
+                "SELECT 1 FROM resources WHERE name LIKE :pattern AND resource_type = 'kiln' LIMIT 1"
+            ), {"pattern": f"% {old_name}"}).fetchone()
+            if has_replacement:
+                conn.execute(text(
+                    "DELETE FROM resources WHERE name = :name AND resource_type = 'kiln'"
+                ), {"name": old_name})
+
+    _run_section("cleanup_kilns", _cleanup_duplicate_kilns)
+
     # --- Section 8: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""

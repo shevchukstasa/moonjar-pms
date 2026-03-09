@@ -236,15 +236,22 @@ def create_session(db: Session, user_id: str, jti: str, request: Request) -> Non
 # --- Factory scoping ---
 
 def apply_factory_filter(query, current_user, factory_id, model_class):
-    """Apply factory_id filter based on user role and request."""
+    """Apply factory_id filter based on user role and request.
+
+    - Explicit factory_id parameter → always filter by that factory
+    - Owner/CEO/Admin → see all factories
+    - Other roles with assigned factories → see only assigned
+    - Other roles WITHOUT assigned factories → see all (not blocked;
+      Admin can restrict later via Dashboard Constructor)
+    """
     from api.models import UserFactory
 
     if factory_id:
         return query.filter(model_class.factory_id == factory_id)
 
-    # If user is owner/ceo, show all factories they have access to
+    # Owner/CEO/Admin always see all
     if current_user.role in ("owner", "ceo", "administrator"):
-        return query  # all factories
+        return query
 
     # Other roles: filter by user's assigned factories
     user_factory_ids = [
@@ -254,7 +261,10 @@ def apply_factory_filter(query, current_user, factory_id, model_class):
 
     if user_factory_ids:
         return query.filter(model_class.factory_id.in_(user_factory_ids))
-    return query.filter(model_class.factory_id == None)  # no access
+
+    # No factory assignments → show all (graceful default, not block)
+    # Admin can restrict access later via factory assignment
+    return query
 
 
 # --- Security audit logging ---

@@ -64,6 +64,165 @@ from api.routers import finished_goods
 from api.routers import firing_profiles
 
 
+def _ensure_schema():
+    """Direct SQL: add any missing columns/tables that Alembic migrations failed to apply.
+    Uses IF NOT EXISTS / IF EXISTS — safe to run every startup."""
+    from sqlalchemy import text
+    try:
+        with engine.connect() as conn:
+            # --- Missing columns (DO $$ for safety) ---
+            add_cols = [
+                ("order_positions", "firing_round INTEGER NOT NULL DEFAULT 1"),
+                ("order_positions", "quantity_sqm NUMERIC(10,3)"),
+                ("order_positions", "color_2 VARCHAR(200)"),
+                ("production_order_items", "color_2 VARCHAR(100)"),
+                ("tasks", "metadata_json JSONB"),
+                ("colors", "is_basic BOOLEAN NOT NULL DEFAULT FALSE"),
+                ("production_orders", "shipped_at TIMESTAMPTZ"),
+                ("production_orders", "sales_manager_contact VARCHAR(300)"),
+                ("factories", "served_locations JSONB"),
+                ("batches", "firing_profile_id UUID"),
+                ("batches", "target_temperature INTEGER"),
+            ]
+            for table, col_def in add_cols:
+                try:
+                    conn.execute(text(f"""
+                        DO $$ BEGIN
+                            IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = '{table}') THEN
+                                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col_def};
+                            END IF;
+                        END $$
+                    """))
+                except Exception as e:
+                    logger.warning(f"_ensure_schema: skip {table}.{col_def.split()[0]}: {e}")
+
+            # --- Missing tables ---
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS firing_profiles (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    factory_id UUID NOT NULL REFERENCES factories(id),
+                    name VARCHAR(200) NOT NULL,
+                    description TEXT,
+                    max_temperature INTEGER NOT NULL DEFAULT 1000,
+                    min_temperature INTEGER NOT NULL DEFAULT 0,
+                    duration_hours NUMERIC(6,2) NOT NULL DEFAULT 24,
+                    cooling_hours NUMERIC(6,2) NOT NULL DEFAULT 12,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    metadata_json JSONB DEFAULT '{}',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS recipe_firing_stages (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    recipe_id UUID NOT NULL,
+                    stage_order INTEGER NOT NULL DEFAULT 1,
+                    target_temperature INTEGER NOT NULL,
+                    hold_minutes INTEGER NOT NULL DEFAULT 60,
+                    ramp_rate NUMERIC(5,1),
+                    atmosphere VARCHAR(50),
+                    notes TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS finished_goods_stock (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    factory_id UUID NOT NULL REFERENCES factories(id),
+                    position_id UUID REFERENCES order_positions(id),
+                    color VARCHAR(200), size VARCHAR(100), collection VARCHAR(200),
+                    quantity INTEGER NOT NULL DEFAULT 0,
+                    quantity_sqm NUMERIC(10,3), location VARCHAR(200), notes TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS rag_embeddings (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    content_type VARCHAR(50) NOT NULL, content_id UUID,
+                    content_text TEXT NOT NULL, embedding BYTEA,
+                    metadata_json JSONB DEFAULT '{}',
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+
+            # --- Seed missing reference data ---
+            # Warehouse sections
+            for fid_name in [("Bali Factory", "Bali"), ("Java Factory", "Java")]:
+                row = conn.execute(text(f"SELECT id FROM factories WHERE name = '{fid_name[0]}' LIMIT 1")).fetchone()
+                if not row:
+                    continue
+                fid = str(row[0])
+                for code, label in [("workshop", "Workshop"), ("finished_goods", "Finished Goods"), ("raw_materials", "Raw Materials")]:
+                    exists = conn.execute(text(f"SELECT 1 FROM warehouse_sections WHERE factory_id='{fid}' AND code='{code}' LIMIT 1")).fetchone()
+                    if not exists:
+                        conn.execute(text(f"INSERT INTO warehouse_sections (id, factory_id, code, name, is_default) VALUES (gen_random_uuid(), '{fid}', '{code}', '{fid_name[1]} {label}', TRUE)"))
+
+            # Shifts
+            for fname in ["Bali Factory", "Java Factory"]:
+                row = conn.execute(text(f"SELECT id FROM factories WHERE name = '{fname}' LIMIT 1")).fetchone()
+                if not row:
+                    continue
+                fid = str(row[0])
+                conn.execute(text(f"""
+                    INSERT INTO shifts (id, factory_id, shift_number, start_time, end_time)
+                    VALUES (gen_random_uuid(), '{fid}', 1, '07:00', '15:00')
+                    ON CONFLICT (factory_id, shift_number) DO NOTHING
+                """))
+                conn.execute(text(f"""
+                    INSERT INTO shifts (id, factory_id, shift_number, start_time, end_time)
+                    VALUES (gen_random_uuid(), '{fid}', 2, '15:00', '23:00')
+                    ON CONFLICT (factory_id, shift_number) DO NOTHING
+                """))
+
+            # Quality assignment config
+            for fname in ["Bali Factory", "Java Factory"]:
+                row = conn.execute(text(f"SELECT id FROM factories WHERE name = '{fname}' LIMIT 1")).fetchone()
+                if not row:
+                    continue
+                fid = str(row[0])
+                for stage in ['glazing', 'firing', 'sorting']:
+                    conn.execute(text(f"""
+                        INSERT INTO quality_assignment_config (id, factory_id, stage, base_percentage, increase_on_defect_percentage, current_percentage)
+                        VALUES (gen_random_uuid(), '{fid}', '{stage}', 2.0, 2.0, 2.0)
+                        ON CONFLICT (factory_id, stage) DO NOTHING
+                    """))
+
+            # Kilns — ensure 6 total (3 per factory)
+            for fname, prefix in [("Bali Factory", "Bali"), ("Java Factory", "Java")]:
+                row = conn.execute(text(f"SELECT id FROM factories WHERE name = '{fname}' LIMIT 1")).fetchone()
+                if not row:
+                    continue
+                fid = str(row[0])
+                kilns_data = [
+                    (f"{prefix} Large Kiln", "big", '{"width_cm":54,"depth_cm":84,"height_cm":80}', '{"width_cm":54,"depth_cm":84}', True, 0.80),
+                    (f"{prefix} Small Kiln", "small", '{"width_cm":100,"depth_cm":160,"height_cm":40}', '{"width_cm":100,"depth_cm":150}', False, 0.92),
+                    (f"{prefix} Raku Kiln", "raku", '{"width_cm":60,"depth_cm":100,"height_cm":40}', '{"width_cm":60,"depth_cm":100}', False, 0.85),
+                ]
+                for kname, ktype, dims, work_area, multi, coeff in kilns_data:
+                    exists = conn.execute(text(f"SELECT 1 FROM resources WHERE factory_id='{fid}' AND name='{kname}' LIMIT 1")).fetchone()
+                    if not exists:
+                        conn.execute(text(f"""
+                            INSERT INTO resources (id, factory_id, name, resource_type, kiln_type,
+                                kiln_dimensions_cm, kiln_working_area_cm, kiln_multi_level,
+                                kiln_coefficient, is_active, status)
+                            VALUES (gen_random_uuid(), '{fid}', '{kname}', 'kiln', '{ktype}',
+                                '{dims}'::JSONB, '{work_area}'::JSONB, {multi}, {coeff}, TRUE, 'active')
+                        """))
+
+            # Stamp alembic to 003 so it doesn't retry failed migrations
+            conn.execute(text("""
+                UPDATE alembic_version SET version_num = '003_seed_data'
+                WHERE version_num IN ('001_initial', '002_missing_cols')
+            """))
+
+            conn.commit()
+            logger.info("_ensure_schema: all columns, tables and seed data verified/added")
+    except Exception as e:
+        logger.error(f"_ensure_schema FAILED: {e}", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown events."""
@@ -73,6 +232,9 @@ async def lifespan(app: FastAPI):
         from api.database import engine, Base
         Base.metadata.create_all(bind=engine)
         logger.info("Dev mode: create_all executed")
+
+    # Ensure schema is complete (handles cases where Alembic migrations fail)
+    _ensure_schema()
 
     # Start background scheduler
     from api.scheduler import setup_scheduler

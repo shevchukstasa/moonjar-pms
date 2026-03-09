@@ -179,25 +179,25 @@ export default function ManagerDashboard() {
         <Card>
           <div className="text-xs text-gray-500">On-Time Rate</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {dashboardSummary?.on_time_rate != null ? `${Math.round(dashboardSummary.on_time_rate * 100)}%` : '\u2014'}
+            {dashboardSummary?.on_time_rate != null ? `${Math.round(dashboardSummary.on_time_rate)}%` : '\u2014'}
           </div>
         </Card>
         <Card>
           <div className="text-xs text-gray-500">Defect Rate</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {dashboardSummary?.defect_rate != null ? `${(dashboardSummary.defect_rate * 100).toFixed(1)}%` : '\u2014'}
+            {dashboardSummary?.defect_rate != null ? `${dashboardSummary.defect_rate.toFixed(1)}%` : '\u2014'}
           </div>
         </Card>
         <Card>
           <div className="text-xs text-gray-500">Kiln Utilization</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {dashboardSummary?.kiln_utilization != null ? `${Math.round(dashboardSummary.kiln_utilization * 100)}%` : '\u2014'}
+            {dashboardSummary?.kiln_utilization != null ? `${Math.round(dashboardSummary.kiln_utilization)}%` : '\u2014'}
           </div>
         </Card>
         <Card>
           <div className="text-xs text-gray-500">OEE</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {dashboardSummary?.oee != null ? `${Math.round(dashboardSummary.oee * 100)}%` : '\u2014'}
+            {dashboardSummary?.oee != null ? `${Math.round(dashboardSummary.oee)}%` : '\u2014'}
           </div>
         </Card>
       </div>
@@ -819,7 +819,7 @@ function TpsTabContent({ factoryId }: { factoryId: string | null }) {
         <Card>
           <div className="text-xs text-gray-500">OEE</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {dashboardSummary?.oee != null ? `${Math.round(dashboardSummary.oee * 100)}%` : '\u2014'}
+            {dashboardSummary?.oee != null ? `${Math.round(dashboardSummary.oee)}%` : '\u2014'}
           </div>
         </Card>
         <Card>

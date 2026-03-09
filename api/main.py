@@ -285,20 +285,16 @@ def _ensure_schema():
 
     _run_section("kilns", _seed_kilns)
 
-    # --- Section 7b: Clean up duplicate kilns (old names without prefix) ---
+    # --- Section 7b: Deactivate duplicate kilns (old names without factory prefix) ---
     def _cleanup_duplicate_kilns(conn):
         # Migration 003 created kilns named "Large Kiln", "Small Kiln", "Raku Kiln"
         # _ensure_schema created "Bali Large Kiln", "Java Large Kiln" etc.
-        # Remove old duplicates (only if properly-named ones exist)
+        # Deactivate old duplicates (can't DELETE due to FK constraints)
         for old_name in ["Large Kiln", "Small Kiln", "Raku Kiln"]:
-            # Only delete if there's a properly-named replacement
-            has_replacement = conn.execute(text(
-                "SELECT 1 FROM resources WHERE name LIKE :pattern AND resource_type = 'kiln' LIMIT 1"
-            ), {"pattern": f"% {old_name}"}).fetchone()
-            if has_replacement:
-                conn.execute(text(
-                    "DELETE FROM resources WHERE name = :name AND resource_type = 'kiln'"
-                ), {"name": old_name})
+            conn.execute(text(
+                "UPDATE resources SET is_active = FALSE "
+                "WHERE name = :name AND resource_type = 'kiln' AND is_active = TRUE"
+            ), {"name": old_name})
 
     _run_section("cleanup_kilns", _cleanup_duplicate_kilns)
 

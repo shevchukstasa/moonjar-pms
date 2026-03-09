@@ -9,7 +9,7 @@ import { useFactories } from '@/hooks/useFactories';
 export default function ShortageDecisionPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
-  const { data: task, isLoading } = useTask(taskId);
+  const { data: task, isLoading, isError } = useTask(taskId);
   const { data: factoriesData } = useFactories();
   const resolveMutation = useShortageResolution();
   const [decision, setDecision] = useState<'manufacture' | 'decline' | null>(null);
@@ -22,6 +22,14 @@ export default function ShortageDecisionPage() {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <Spinner className="h-8 w-8" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-8 text-center">
+        <p className="text-sm font-medium text-red-800">⚠ Error loading task. Try refreshing.</p>
       </div>
     );
   }

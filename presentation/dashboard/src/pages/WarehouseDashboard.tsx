@@ -27,12 +27,14 @@ export default function WarehouseDashboard() {
   const [tab, setTab] = useState('inventory');
 
   const factoryParams = activeFactoryId ? { factory_id: activeFactoryId } : undefined;
-  const { data: materialsData, isLoading: materialsLoading } = useMaterials(factoryParams);
+  const { data: materialsData, isLoading: materialsLoading, isError: materialsError } = useMaterials(factoryParams);
   const materials = materialsData?.items || [];
-  const { data: lowStockData, isLoading: lowStockLoading } = useLowStock(activeFactoryId || undefined);
+  const { data: lowStockData, isLoading: lowStockLoading, isError: lowStockError } = useLowStock(activeFactoryId || undefined);
   const lowStockItems = lowStockData?.items || [];
-  const { data: requestsData, isLoading: requestsLoading } = usePurchaseRequests(factoryParams);
+  const { data: requestsData, isLoading: requestsLoading, isError: requestsError } = usePurchaseRequests(factoryParams);
   const requests = requestsData?.items || [];
+
+  const hasError = materialsError || lowStockError || requestsError;
 
   return (
     <div className="space-y-6">
@@ -41,6 +43,13 @@ export default function WarehouseDashboard() {
         <h1 className="text-2xl font-bold text-gray-900">Warehouse</h1>
         <p className="mt-1 text-sm text-gray-500">Inventory, deliveries, purchase requests</p>
       </div>
+
+      {/* API Error */}
+      {hasError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm font-medium text-red-800">⚠ Error loading warehouse data. Try refreshing.</p>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-3 gap-4">

@@ -106,7 +106,7 @@ export default function ManagerDashboard() {
     return p;
   }, [page, orderTab, activeFactoryId, debouncedSearch, statusFilter]);
 
-  const { data: ordersData, isLoading: ordersLoading } = useOrders(ordersParams);
+  const { data: ordersData, isLoading: ordersLoading, isError: ordersError } = useOrders(ordersParams);
   const { data: positionsData } = usePositions(
     activeFactoryId ? { factory_id: activeFactoryId } : undefined,
   );
@@ -222,6 +222,13 @@ export default function ManagerDashboard() {
           </div>
         </Card>
       </div>
+
+      {/* API Error banner */}
+      {ordersError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm font-medium text-red-800">⚠ Error loading orders. Try refreshing.</p>
+        </div>
+      )}
 
       {/* Cancellation request alert banner — shown above tabs when requests are pending */}
       {pendingCancellations > 0 && activeTab !== 'cancellations' && (

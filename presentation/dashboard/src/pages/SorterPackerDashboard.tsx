@@ -30,7 +30,7 @@ export default function SorterPackerDashboard() {
   const [tab, setTab] = useState('sorting');
 
   // Sorting positions (transferred_to_sorting)
-  const { data: sortingData, isLoading: sortingLoading } = usePositions(
+  const { data: sortingData, isLoading: sortingLoading, isError: sortingError } = usePositions(
     activeFactoryId
       ? { factory_id: activeFactoryId, status: 'transferred_to_sorting' }
       : { status: 'transferred_to_sorting' },
@@ -38,7 +38,7 @@ export default function SorterPackerDashboard() {
   const sortingPositions = sortingData?.items || [];
 
   // Packed positions
-  const { data: packedData, isLoading: packedLoading } = usePositions(
+  const { data: packedData, isLoading: packedLoading, isError: packedError } = usePositions(
     activeFactoryId
       ? { factory_id: activeFactoryId, status: 'packed' }
       : { status: 'packed' },
@@ -46,8 +46,10 @@ export default function SorterPackerDashboard() {
   const packedPositions = packedData?.items || [];
 
   // Tasks
-  const { data: tasksData, isLoading: tasksLoading } = useSorterTasks(activeFactoryId || undefined);
+  const { data: tasksData, isLoading: tasksLoading, isError: tasksError } = useSorterTasks(activeFactoryId || undefined);
   const tasks = tasksData?.items || [];
+
+  const hasError = sortingError || packedError || tasksError;
 
   return (
     <div className="space-y-6">
@@ -56,6 +58,13 @@ export default function SorterPackerDashboard() {
         <h1 className="text-2xl font-bold text-gray-900">Sorting & Packing</h1>
         <p className="mt-1 text-sm text-gray-500">Sort fired tiles, pack, upload photos</p>
       </div>
+
+      {/* API Error */}
+      {hasError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm font-medium text-red-800">⚠ Error loading data. Try refreshing.</p>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-3 gap-4">

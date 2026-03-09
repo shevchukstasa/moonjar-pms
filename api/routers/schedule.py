@@ -37,8 +37,11 @@ SECTION_STATUSES = {
     ],
     "sorting": [
         PositionStatus.TRANSFERRED_TO_SORTING, PositionStatus.PACKED,
+        PositionStatus.READY_FOR_SHIPMENT,
+    ],
+    "qc": [
         PositionStatus.SENT_TO_QUALITY_CHECK, PositionStatus.QUALITY_CHECK_DONE,
-        PositionStatus.READY_FOR_SHIPMENT, PositionStatus.BLOCKED_BY_QM,
+        PositionStatus.BLOCKED_BY_QM,
     ],
 }
 
@@ -234,6 +237,22 @@ async def get_sorting_schedule(
 ):
     query = db.query(OrderPosition).filter(
         OrderPosition.status.in_(SECTION_STATUSES["sorting"])
+    )
+    if factory_id:
+        query = query.filter(OrderPosition.factory_id == factory_id)
+    positions = query.order_by(OrderPosition.priority_order, OrderPosition.created_at).all()
+    return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
+
+
+@router.get("/qc-schedule")
+async def get_qc_schedule(
+    factory_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Positions currently in QC pipeline."""
+    query = db.query(OrderPosition).filter(
+        OrderPosition.status.in_(SECTION_STATUSES["qc"])
     )
     if factory_id:
         query = query.filter(OrderPosition.factory_id == factory_id)

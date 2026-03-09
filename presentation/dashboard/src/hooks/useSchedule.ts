@@ -48,6 +48,13 @@ export function useSortingSchedule(factoryId?: string | null) {
   });
 }
 
+export function useQcSchedule(factoryId?: string | null) {
+  return useQuery({
+    queryKey: ['schedule', 'qc', factoryId],
+    queryFn: () => scheduleApi.qcSchedule(factoryId ? { factory_id: factoryId } : undefined),
+  });
+}
+
 export function useKilnSchedule(factoryId?: string | null) {
   return useQuery({
     queryKey: ['schedule', 'kilns', factoryId],

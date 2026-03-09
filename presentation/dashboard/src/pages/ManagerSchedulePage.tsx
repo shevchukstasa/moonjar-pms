@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUiStore } from '@/stores/uiStore';
-import { useGlazingSchedule, useFiringSchedule, useSortingSchedule, useKilnSchedule } from '@/hooks/useSchedule';
+import { useGlazingSchedule, useFiringSchedule, useSortingSchedule, useQcSchedule, useKilnSchedule } from '@/hooks/useSchedule';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -14,6 +14,7 @@ const SECTION_TABS = [
   { id: 'glazing', label: 'Glazing' },
   { id: 'firing', label: 'Firing' },
   { id: 'sorting', label: 'Sorting' },
+  { id: 'qc', label: 'QC' },
   { id: 'kilns', label: 'Kilns' },
 ];
 
@@ -44,18 +45,21 @@ export default function ManagerSchedulePage() {
   const { data: glazingData, isLoading: glazingLoading } = useGlazingSchedule(activeFactoryId);
   const { data: firingData, isLoading: firingLoading } = useFiringSchedule(activeFactoryId);
   const { data: sortingData, isLoading: sortingLoading } = useSortingSchedule(activeFactoryId);
+  const { data: qcData, isLoading: qcLoading } = useQcSchedule(activeFactoryId);
   const { data: kilnData, isLoading: kilnLoading } = useKilnSchedule(activeFactoryId);
 
   const isLoading =
     (tab === 'glazing' && glazingLoading) ||
     (tab === 'firing' && firingLoading) ||
     (tab === 'sorting' && sortingLoading) ||
+    (tab === 'qc' && qcLoading) ||
     (tab === 'kilns' && kilnLoading);
 
   const sectionItems: Record<string, unknown[]> = {
     glazing: glazingData?.items || [],
     firing: firingData?.items || [],
     sorting: sortingData?.items || [],
+    qc: qcData?.items || [],
   };
 
   const kilns = kilnData?.items || [];
@@ -75,7 +79,7 @@ export default function ManagerSchedulePage() {
       </div>
 
       {/* KPI */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-5 gap-4">
         <Card>
           <div className="text-sm text-gray-500">Glazing</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">{glazingData?.total ?? '\u2014'}</div>
@@ -87,6 +91,10 @@ export default function ManagerSchedulePage() {
         <Card>
           <div className="text-sm text-gray-500">Sorting</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">{sortingData?.total ?? '\u2014'}</div>
+        </Card>
+        <Card>
+          <div className="text-sm text-gray-500">QC</div>
+          <div className="mt-1 text-2xl font-bold text-gray-900">{qcData?.total ?? '\u2014'}</div>
         </Card>
         <Card>
           <div className="text-sm text-gray-500">Kilns</div>
@@ -156,11 +164,11 @@ export default function ManagerSchedulePage() {
           </div>
         )
       ) : (
-        /* Section tabs (glazing/firing/sorting) */
-        sectionItems[tab].length === 0 ? (
+        /* Section tabs (glazing/firing/sorting/qc) */
+        sectionItems[tab]?.length === 0 ? (
           <div className="py-8 text-center text-gray-400">No positions in this section</div>
         ) : (
-          <DataTable columns={positionColumns} data={sectionItems[tab] as Record<string, unknown>[]} />
+          <DataTable columns={positionColumns} data={(sectionItems[tab] || []) as Record<string, unknown>[]} />
         )
       )}
     </div>

@@ -26,6 +26,9 @@ export const scheduleApi = {
   sortingSchedule: (params?: { factory_id?: string }) =>
     apiClient.get('/schedule/sorting-schedule', { params }).then((r) => r.data),
 
+  qcSchedule: (params?: { factory_id?: string }) =>
+    apiClient.get('/schedule/qc-schedule', { params }).then((r) => r.data),
+
   kilnSchedule: (params?: { factory_id?: string }) =>
     apiClient.get('/schedule/kiln-schedule', { params }).then((r) => r.data),
 

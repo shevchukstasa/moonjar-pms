@@ -31,10 +31,11 @@ export function UserCreateDialog({ open, onClose }: Props) {
     formState: { errors, isSubmitting },
   } = useForm<UserCreateFormData>({
     resolver: zodResolver(userCreateSchema),
-    defaultValues: { email: '', name: '', role: '', password: '', factory_ids: [], language: 'en' },
+    defaultValues: { email: '', name: '', role: '', password: '', google_auth: false, factory_ids: [], language: 'en' },
   });
 
   const selectedFactories = watch('factory_ids') || [];
+  const googleAuth = watch('google_auth') || false;
   const factories = factoriesData?.items || [];
 
   const toggleFactory = (fid: string) => {
@@ -77,7 +78,21 @@ export function UserCreateDialog({ open, onClose }: Props) {
           <Select label="Language" {...register('language')} options={langOptions} />
         </div>
 
-        <Input label="Password" type="password" {...register('password')} error={errors.password?.message} placeholder="Min 6 characters" />
+        <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <input
+            type="checkbox"
+            id="google_auth"
+            {...register('google_auth')}
+            className="rounded border-gray-300"
+          />
+          <label htmlFor="google_auth" className="text-sm font-medium text-gray-700">
+            Google Auth — user logs in with Gmail (no password needed)
+          </label>
+        </div>
+
+        {!googleAuth && (
+          <Input label="Password" type="password" {...register('password')} error={errors.password?.message} placeholder="Min 6 characters" />
+        )}
 
         {/* Factory assignment */}
         {factories.length > 0 && (

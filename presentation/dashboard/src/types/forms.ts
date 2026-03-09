@@ -48,10 +48,14 @@ export const userCreateSchema = z.object({
   email: z.string().email('Invalid email'),
   name: z.string().min(1, 'Name is required'),
   role: z.string().min(1, 'Role is required'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  password: z.string().optional().default(''),
+  google_auth: z.boolean().optional().default(false),
   factory_ids: z.array(z.string()).optional().default([]),
   language: z.string().optional().default('en'),
-});
+}).refine(
+  (data) => data.google_auth || (data.password && data.password.length >= 6),
+  { message: 'Password (min 6 chars) required unless Google Auth is enabled', path: ['password'] },
+);
 export type UserCreateFormData = z.infer<typeof userCreateSchema>;
 
 export const userUpdateSchema = z.object({

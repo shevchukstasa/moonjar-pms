@@ -48,7 +48,8 @@ class UserCreateInput(BaseModel):
     email: str
     name: str
     role: str
-    password: str
+    password: Optional[str] = None  # Optional for Google OAuth users
+    google_auth: bool = False       # If True, user logs in via Google only
     factory_ids: list[str] = []
     language: Optional[str] = "en"
 
@@ -130,12 +131,19 @@ async def create_user(
     valid_langs = [l.value for l in LanguagePreference]
     lang = data.language if data.language in valid_langs else "en"
 
+    # Validate: either password or google_auth must be provided
+    if not data.password and not data.google_auth:
+        raise HTTPException(422, "Either password or Google Auth must be provided")
+
+    if data.password and len(data.password) < 6:
+        raise HTTPException(422, "Password must be at least 6 characters")
+
     # Create user
     user = User(
         email=data.email,
         name=data.name,
         role=data.role,
-        password_hash=hash_password(data.password),
+        password_hash=hash_password(data.password) if data.password else None,
         language=lang,
         is_active=True,
     )

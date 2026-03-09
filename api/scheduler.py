@@ -316,9 +316,88 @@ async def hourly_webhook_retry():
         db.close()
 
 
-async def daily_backup_reminder():
-    """Log backup status reminder."""
-    logger.info("Backup reminder: ensure daily database backups are running")
+async def daily_database_backup():
+    """Create daily database backup using pg_dump → local file (rotated 7 days)."""
+    import subprocess
+    import os
+    from datetime import datetime
+    from urllib.parse import urlparse
+
+    logger.info("Starting daily database backup")
+
+    database_url = os.getenv("DATABASE_URL", "")
+    if not database_url:
+        logger.error("DATABASE_URL not set — cannot create backup")
+        return
+
+    try:
+        parsed = urlparse(database_url)
+        pg_env = {
+            **os.environ,
+            "PGPASSWORD": parsed.password or "",
+        }
+        host = parsed.hostname or "localhost"
+        port = str(parsed.port or 5432)
+        dbname = (parsed.path or "/moonjar").lstrip("/")
+        user = parsed.username or "postgres"
+
+        # Backup directory
+        backup_dir = "/tmp/moonjar_backups"
+        os.makedirs(backup_dir, exist_ok=True)
+
+        # Filename with date (rotate weekly by using day-of-week)
+        day_of_week = datetime.utcnow().strftime("%A")
+        backup_file = os.path.join(backup_dir, f"moonjar_{day_of_week}.sql.gz")
+
+        # Remove old backup for this day
+        if os.path.exists(backup_file):
+            os.remove(backup_file)
+
+        # Run pg_dump
+        cmd = [
+            "pg_dump",
+            "-h", host,
+            "-p", port,
+            "-U", user,
+            "-d", dbname,
+            "--no-owner",
+            "--no-privileges",
+            "--format=custom",
+            "-f", backup_file,
+        ]
+
+        result = subprocess.run(
+            cmd,
+            env=pg_env,
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 min timeout
+        )
+
+        if result.returncode != 0:
+            logger.error("pg_dump failed: %s", result.stderr)
+            return
+
+        file_size = os.path.getsize(backup_file) / (1024 * 1024)  # MB
+        logger.info(
+            "Database backup created: %s (%.1f MB)",
+            backup_file, file_size,
+        )
+
+        # Optional: upload to S3 if configured
+        s3_bucket = os.getenv("S3_BACKUP_BUCKET", "")
+        if s3_bucket:
+            try:
+                import boto3
+                s3 = boto3.client("s3")
+                s3_key = f"moonjar-backups/{datetime.utcnow().strftime('%Y-%m-%d')}/moonjar_backup.dump"
+                s3.upload_file(backup_file, s3_bucket, s3_key)
+                logger.info("Backup uploaded to s3://%s/%s", s3_bucket, s3_key)
+            except Exception as e:
+                logger.warning("S3 upload failed (backup still on disk): %s", e)
+
+    except Exception as e:
+        logger.error("Database backup failed: %s", e)
 
 
 # --- Scheduler setup ---
@@ -332,7 +411,7 @@ def setup_scheduler():
     scheduler.add_job(daily_low_stock_alerts, CronTrigger(hour=21, minute=15), id="low_stock_alerts")
     scheduler.add_job(daily_overdue_tasks, CronTrigger(hour=21, minute=20), id="overdue_tasks")
     scheduler.add_job(daily_analytics_snapshot, CronTrigger(hour=21, minute=30), id="analytics_snapshot")
-    scheduler.add_job(daily_backup_reminder, CronTrigger(hour=22, minute=0), id="backup_reminder")
+    scheduler.add_job(daily_database_backup, CronTrigger(hour=22, minute=0), id="daily_backup")
 
     # Every 6 hours
     scheduler.add_job(cleanup_expired_sessions, IntervalTrigger(hours=6), id="cleanup_sessions")

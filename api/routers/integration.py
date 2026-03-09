@@ -31,6 +31,23 @@ def _ev(val):
     return val.value if hasattr(val, "value") else str(val) if val else None
 
 
+# ---------- Diagnostics ----------
+
+@router.get("/health")
+async def integration_health():
+    """Public diagnostic: check if Sales integration keys are configured (no secrets leaked)."""
+    settings = get_settings()
+    return {
+        "webhook_enabled": settings.PRODUCTION_WEBHOOK_ENABLED,
+        "sales_app_api_key_set": bool(settings.SALES_APP_API_KEY),
+        "sales_app_api_key_length": len(settings.SALES_APP_API_KEY),
+        "bearer_token_set": bool(settings.PRODUCTION_WEBHOOK_BEARER_TOKEN),
+        "bearer_token_length": len(settings.PRODUCTION_WEBHOOK_BEARER_TOKEN),
+        "hmac_secret_set": bool(settings.PRODUCTION_WEBHOOK_HMAC_SECRET),
+        "sales_app_url_set": bool(settings.SALES_APP_URL),
+    }
+
+
 # ---------- Production Status API (for Sales app) ----------
 
 @router.get("/orders/{external_id}/production-status")
@@ -250,6 +267,20 @@ async def receive_sales_order(
         authenticated = True
 
     if not authenticated:
+        # Debug logging — safe (no secrets leaked, only lengths and presence)
+        logger.warning(
+            "Webhook auth FAILED — "
+            "X-API-Key present: %s (len=%d), "
+            "SALES_APP_API_KEY configured: %s (len=%d), "
+            "Bearer present: %s, "
+            "PRODUCTION_WEBHOOK_BEARER_TOKEN configured: %s, "
+            "match_apikey: %s",
+            bool(x_api_key), len(x_api_key or ""),
+            bool(settings.SALES_APP_API_KEY), len(settings.SALES_APP_API_KEY or ""),
+            bool(bearer_token),
+            bool(settings.PRODUCTION_WEBHOOK_BEARER_TOKEN),
+            x_api_key == settings.SALES_APP_API_KEY if (x_api_key and settings.SALES_APP_API_KEY) else "N/A",
+        )
         raise HTTPException(401, "Invalid API key or bearer token")
 
     # HMAC-SHA256 signature verification (when HMAC secret is configured)

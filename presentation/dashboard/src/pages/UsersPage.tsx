@@ -33,7 +33,7 @@ export default function UsersPage() {
     return p;
   }, [page, search, roleFilter, statusFilter]);
 
-  const { data, isLoading } = useUsers(params);
+  const { data, isLoading, isError } = useUsers(params);
 
   const users = data?.items || [];
   const total = data?.total || 0;
@@ -143,7 +143,12 @@ export default function UsersPage() {
       </div>
 
       {/* Table */}
-      {isLoading ? (
+      {isError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
+          <p className="text-sm font-medium text-red-800">⚠ Error loading users from API</p>
+          <p className="mt-1 text-xs text-red-600">Check backend logs or refresh the page.</p>
+        </div>
+      ) : isLoading ? (
         <div className="flex justify-center py-12">
           <Spinner className="h-8 w-8" />
         </div>

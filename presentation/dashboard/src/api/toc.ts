@@ -1,14 +1,30 @@
 import apiClient from './client';
 
+export interface TocConstraint {
+  id: string;
+  factory_id: string;
+  constraint_type: string;
+  resource_id: string | null;
+  resource_name: string | null;
+  is_active: boolean;
+  notes: string | null;
+}
+
+export interface BufferHealth {
+  health: 'green' | 'yellow' | 'red';
+  hours: number;
+  target: number;
+  buffered_count: number;
+  buffered_sqm: number;
+  kiln_id: string;
+  kiln_name: string;
+}
+
 export const tocApi = {
-  list: (params?: Record<string, unknown>) =>
-    apiClient.get('/toc', { params }).then((r) => r.data),
-  get: (id: string) =>
-    apiClient.get(`/toc/${id}`).then((r) => r.data),
-  create: (data: Record<string, unknown>) =>
-    apiClient.post('/toc', data).then((r) => r.data),
-  update: (id: string, data: Record<string, unknown>) =>
-    apiClient.patch(`/toc/${id}`, data).then((r) => r.data),
-  remove: (id: string) =>
-    apiClient.delete(`/toc/${id}`).then((r) => r.data),
+  listConstraints: (params?: Record<string, unknown>) =>
+    apiClient.get('/toc/constraints', { params }).then((r) => r.data),
+  updateConstraint: (id: string, data: Record<string, unknown>) =>
+    apiClient.patch(`/toc/constraints/${id}`, data).then((r) => r.data),
+  getBufferHealth: (params?: { factory_id?: string }) =>
+    apiClient.get<{ items: BufferHealth[] }>('/toc/buffer-health', { params }).then((r) => r.data),
 };

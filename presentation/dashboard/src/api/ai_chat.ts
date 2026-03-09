@@ -1,14 +1,22 @@
 import apiClient from './client';
 
-export const ai_chatApi = {
-  list: (params?: Record<string, unknown>) =>
-    apiClient.get('/ai-chat', { params }).then((r) => r.data),
-  get: (id: string) =>
-    apiClient.get(`/ai-chat/${id}`).then((r) => r.data),
-  create: (data: Record<string, unknown>) =>
-    apiClient.post('/ai-chat', data).then((r) => r.data),
-  update: (id: string, data: Record<string, unknown>) =>
-    apiClient.patch(`/ai-chat/${id}`, data).then((r) => r.data),
-  remove: (id: string) =>
-    apiClient.delete(`/ai-chat/${id}`).then((r) => r.data),
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  created_at: string;
+  message_count: number;
+}
+
+export const aiChatApi = {
+  chat: (data: { message: string; session_id?: string }) =>
+    apiClient.post('/ai-chat/chat', data).then((r) => r.data),
+  listSessions: () =>
+    apiClient.get<{ items: ChatSession[] }>('/ai-chat/sessions').then((r) => r.data),
+  getMessages: (sessionId: string) =>
+    apiClient.get<{ items: ChatMessage[] }>(`/ai-chat/sessions/${sessionId}/messages`).then((r) => r.data),
 };

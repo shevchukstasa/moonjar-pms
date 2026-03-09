@@ -1,14 +1,14 @@
 import apiClient from './client';
 
 export const exportApi = {
-  list: (params?: Record<string, unknown>) =>
-    apiClient.get('/export', { params }).then((r) => r.data),
-  get: (id: string) =>
-    apiClient.get(`/export/${id}`).then((r) => r.data),
-  create: (data: Record<string, unknown>) =>
-    apiClient.post('/export', data).then((r) => r.data),
-  update: (id: string, data: Record<string, unknown>) =>
-    apiClient.patch(`/export/${id}`, data).then((r) => r.data),
-  remove: (id: string) =>
-    apiClient.delete(`/export/${id}`).then((r) => r.data),
+  ordersExcel: (params?: { factory_id?: string; date_from?: string; date_to?: string }) =>
+    apiClient.get('/export/orders/excel', { params, responseType: 'blob' }).then((r) => r.data),
+  ordersPdf: (params?: { factory_id?: string; date_from?: string; date_to?: string }) =>
+    apiClient.get('/export/orders/pdf', { params, responseType: 'blob' }).then((r) => r.data),
+  positionsPdf: (params?: { factory_id?: string; order_id?: string }) =>
+    apiClient.get('/export/positions/pdf', { params, responseType: 'blob' }).then((r) => r.data),
+  ownerMonthly: (data?: { factory_id?: string; month?: string }) =>
+    apiClient.post('/export/owner-monthly', data, { responseType: 'blob' }).then((r) => r.data),
+  ceoDailyReport: (data?: { factory_id?: string }) =>
+    apiClient.post('/export/ceo-daily', data, { responseType: 'blob' }).then((r) => r.data),
 };

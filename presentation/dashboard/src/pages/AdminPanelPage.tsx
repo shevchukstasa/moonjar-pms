@@ -16,8 +16,8 @@ import { StubsToggle } from '@/components/admin/StubsToggle';
 
 export default function AdminPanelPage() {
   const navigate = useNavigate();
-  const { data: factoriesData, isLoading: factoriesLoading } = useFactories();
-  const { data: usersData, isLoading: usersLoading } = useUsers({ per_page: 1 });
+  const { data: factoriesData, isLoading: factoriesLoading, isError: factoriesError } = useFactories();
+  const { data: usersData, isLoading: usersLoading, isError: usersError } = useUsers({ per_page: 1 });
   const { data: botStatus, isLoading: botLoading, isError: botError } = useBotStatus();
   const [factoryDialogOpen, setFactoryDialogOpen] = useState(false);
   const [editFactory, setEditFactory] = useState<Factory | null>(null);
@@ -107,18 +107,28 @@ export default function AdminPanelPage() {
         <p className="mt-1 text-sm text-gray-500">System configuration and reference data</p>
       </div>
 
+      {/* API Error Banner */}
+      {(factoriesError || usersError) && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm font-medium text-red-800">
+            ⚠ Error loading data from API. {factoriesError ? 'Factories API error. ' : ''}{usersError ? 'Users API error.' : ''}
+          </p>
+          <p className="mt-1 text-xs text-red-600">Try refreshing the page. If the problem persists, check the backend logs.</p>
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid grid-cols-3 gap-4">
         <Card>
           <div className="text-sm text-gray-500">Users</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {usersLoading ? <Spinner className="h-5 w-5" /> : totalUsers}
+            {usersLoading ? <Spinner className="h-5 w-5" /> : usersError ? <span className="text-red-400">ERR</span> : totalUsers}
           </div>
         </Card>
         <Card>
           <div className="text-sm text-gray-500">Factories</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {factoriesLoading ? <Spinner className="h-5 w-5" /> : factories.length}
+            {factoriesLoading ? <Spinner className="h-5 w-5" /> : factoriesError ? <span className="text-red-400">ERR</span> : factories.length}
           </div>
         </Card>
         <Card>

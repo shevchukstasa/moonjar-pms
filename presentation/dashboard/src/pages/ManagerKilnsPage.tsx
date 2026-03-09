@@ -18,14 +18,14 @@ function formatDims(d: { width: number; depth: number; height: number } | null) 
 }
 
 export default function ManagerKilnsPage() {
-  const { data: factoriesData } = useFactories();
+  const { data: factoriesData, isLoading: factoriesLoading, isError: factoriesError } = useFactories();
   const factories = factoriesData?.items || [];
 
   // Default to first factory
   const [factoryId, setFactoryId] = useState('');
   const selectedFactory = factoryId || (factories.length > 0 ? factories[0].id : '');
 
-  const { data: kilnsData, isLoading } = useKilns(
+  const { data: kilnsData, isLoading, isError: kilnsError } = useKilns(
     selectedFactory ? { factory_id: selectedFactory } : undefined,
   );
   const kilns = kilnsData?.items || [];
@@ -67,8 +67,17 @@ export default function ManagerKilnsPage() {
         </div>
       )}
 
+      {/* Error states */}
+      {(factoriesError || kilnsError) && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm font-medium text-red-800">
+            ⚠ Error loading {factoriesError ? 'factories' : 'kilns'}. Please try refreshing the page.
+          </p>
+        </div>
+      )}
+
       {/* Kiln Grid */}
-      {isLoading ? (
+      {isLoading || factoriesLoading ? (
         <div className="flex justify-center py-12">
           <Spinner className="h-8 w-8" />
         </div>

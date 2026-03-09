@@ -27,7 +27,7 @@ import { OrderCreateDialog } from '@/components/orders/OrderCreateDialog';
 import { tpsApi } from '@/api/tps';
 import { tocApi } from '@/api/toc';
 import { defectsApi } from '@/api/defects';
-import { ai_chatApi } from '@/api/ai_chat';
+import { aiChatApi } from '@/api/ai_chat';
 import type { OrderListParams } from '@/api/orders';
 
 // ---------------------------------------------------------------------------
@@ -894,7 +894,7 @@ function TocTabContent({ factoryId }: { factoryId: string | null }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: tocData, isLoading: tocLoading } = useQuery<{ items: any[]; total: number }>({
     queryKey: ['toc', params],
-    queryFn: () => tocApi.list(params),
+    queryFn: () => tocApi.listConstraints(params),
   });
 
   const { data: bufferHealth, isLoading: bufferLoading } = useBufferHealth(params);
@@ -1130,7 +1130,7 @@ function AiChatTabContent({ factoryId }: { factoryId: string | null }) {
       const payload: Record<string, unknown> = { message: text };
       if (factoryId) payload.factory_id = factoryId;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const response: any = await ai_chatApi.create(payload);
+      const response: any = await aiChatApi.chat(payload as any);
       const reply = response?.reply || response?.message || response?.text || JSON.stringify(response);
       setMessages((prev) => [...prev, { role: 'assistant', text: reply }]);
     } catch (err) {

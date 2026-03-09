@@ -8,6 +8,7 @@ Revises: 001_initial
 Create Date: 2026-03-09
 """
 from alembic import op
+from sqlalchemy import text
 
 revision = "002_missing_cols"
 down_revision = "001_initial"
@@ -19,56 +20,56 @@ def upgrade() -> None:
     conn = op.get_bind()
 
     # --- Migration 007: tasks.metadata_json ---
-    conn.execute(
+    conn.execute(text(
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS metadata_json JSONB"
-    )
+    ))
 
     # --- Migration 008: colors.is_basic ---
-    conn.execute(
+    conn.execute(text(
         "ALTER TABLE colors ADD COLUMN IF NOT EXISTS is_basic BOOLEAN NOT NULL DEFAULT FALSE"
-    )
+    ))
 
     # --- Migration 009: production_orders.shipped_at ---
-    conn.execute(
+    conn.execute(text(
         "ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ"
-    )
+    ))
 
     # --- Migration 011: order_positions.quantity_sqm ---
-    conn.execute(
+    conn.execute(text(
         "ALTER TABLE order_positions ADD COLUMN IF NOT EXISTS quantity_sqm NUMERIC(10,3)"
-    )
+    ))
 
     # --- Migration 012: production_orders.sales_manager_contact ---
-    conn.execute(
+    conn.execute(text(
         "ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS sales_manager_contact VARCHAR(300)"
-    )
+    ))
 
     # --- Migration 013: color_2 ---
-    conn.execute(
+    conn.execute(text(
         "ALTER TABLE production_order_items ADD COLUMN IF NOT EXISTS color_2 VARCHAR(100)"
-    )
-    conn.execute(
+    ))
+    conn.execute(text(
         "ALTER TABLE order_positions ADD COLUMN IF NOT EXISTS color_2 VARCHAR(200)"
-    )
+    ))
 
     # --- Migration 014: factories.served_locations ---
-    conn.execute(
+    conn.execute(text(
         "ALTER TABLE factories ADD COLUMN IF NOT EXISTS served_locations JSONB"
-    )
+    ))
 
     # --- Migration 015: firing_round, firing profiles ---
-    conn.execute(
+    conn.execute(text(
         "ALTER TABLE order_positions ADD COLUMN IF NOT EXISTS firing_round INTEGER NOT NULL DEFAULT 1"
-    )
-    conn.execute(
+    ))
+    conn.execute(text(
         "ALTER TABLE batches ADD COLUMN IF NOT EXISTS firing_profile_id UUID"
-    )
-    conn.execute(
+    ))
+    conn.execute(text(
         "ALTER TABLE batches ADD COLUMN IF NOT EXISTS target_temperature INTEGER"
-    )
+    ))
 
     # --- Table: firing_profiles (Migration 015) ---
-    conn.execute("""
+    conn.execute(text("""
         CREATE TABLE IF NOT EXISTS firing_profiles (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             factory_id UUID NOT NULL REFERENCES factories(id),
@@ -83,10 +84,10 @@ def upgrade() -> None:
             created_at TIMESTAMPTZ DEFAULT NOW(),
             updated_at TIMESTAMPTZ DEFAULT NOW()
         )
-    """)
+    """))
 
     # --- Table: recipe_firing_stages (Migration 015) ---
-    conn.execute("""
+    conn.execute(text("""
         CREATE TABLE IF NOT EXISTS recipe_firing_stages (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             recipe_id UUID NOT NULL,
@@ -98,10 +99,10 @@ def upgrade() -> None:
             notes TEXT,
             created_at TIMESTAMPTZ DEFAULT NOW()
         )
-    """)
+    """))
 
     # --- Table: finished_goods_stock (Migration 007) ---
-    conn.execute("""
+    conn.execute(text("""
         CREATE TABLE IF NOT EXISTS finished_goods_stock (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             factory_id UUID NOT NULL REFERENCES factories(id),
@@ -116,10 +117,10 @@ def upgrade() -> None:
             created_at TIMESTAMPTZ DEFAULT NOW(),
             updated_at TIMESTAMPTZ DEFAULT NOW()
         )
-    """)
+    """))
 
     # --- Table: rag_embeddings (Migration 010) ---
-    conn.execute("""
+    conn.execute(text("""
         CREATE TABLE IF NOT EXISTS rag_embeddings (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             content_type VARCHAR(50) NOT NULL,
@@ -129,11 +130,11 @@ def upgrade() -> None:
             metadata_json JSONB DEFAULT '{}',
             created_at TIMESTAMPTZ DEFAULT NOW()
         )
-    """)
+    """))
 
     # --- FK: batches.firing_profile_id → firing_profiles(id) ---
     # Only add if not already present
-    conn.execute("""
+    conn.execute(text("""
         DO $$
         BEGIN
             IF NOT EXISTS (
@@ -145,7 +146,7 @@ def upgrade() -> None:
                     FOREIGN KEY (firing_profile_id) REFERENCES firing_profiles(id);
             END IF;
         END $$
-    """)
+    """))
 
     print("INFO: Migration 002 — all missing columns/tables added (IF NOT EXISTS).")
 

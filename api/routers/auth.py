@@ -179,6 +179,47 @@ async def get_me(current_user=Depends(get_current_user), db: Session = Depends(g
     }
 
 
+@router.post("/logout-all")
+async def logout_all(request: Request, response: Response, db: Session = Depends(get_db),
+                     current_user=Depends(get_current_user)):
+    """Revoke ALL active sessions for the current user."""
+    revoked = db.query(ActiveSession).filter(
+        ActiveSession.user_id == str(current_user.id),
+        ActiveSession.revoked == False,
+    ).update({
+        "revoked": True,
+        "revoked_at": datetime.now(timezone.utc),
+        "revoked_reason": "logout_all",
+    })
+    db.commit()
+    clear_auth_cookies(response)
+    log_security_event(db, AuditActionType.LOGOUT,
+                       actor_id=str(current_user.id), actor_email=current_user.email,
+                       ip_address=request.client.host if request.client else None,
+                       details={"type": "logout_all", "sessions_revoked": revoked})
+    return {"detail": f"Logged out from all devices", "sessions_revoked": revoked}
+
+
+class OwnerKeyRequest(BaseModel):
+    key: str
+
+@router.post("/verify-owner-key")
+async def verify_owner_key(data: OwnerKeyRequest, db: Session = Depends(get_db)):
+    """First-time owner setup: verify the OWNER_KEY to claim the owner account."""
+    from api.config import get_settings
+    settings = get_settings()
+    if not settings.OWNER_KEY or settings.OWNER_KEY in ("change-me", ""):
+        raise HTTPException(503, "Owner key not configured. Contact system administrator.")
+    if data.key != settings.OWNER_KEY:
+        raise HTTPException(403, "Invalid owner key")
+    # Check if owner already exists
+    owner = db.query(User).filter(User.role == "owner").first()
+    if owner:
+        return {"status": "owner_exists", "email": owner.email,
+                "message": "Owner account already configured"}
+    return {"status": "key_valid", "message": "Key verified. Proceed to create owner account."}
+
+
 @router.post("/totp/setup")
 async def totp_setup(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     # TODO: Implement TOTP setup — see BUSINESS_LOGIC.md §Security

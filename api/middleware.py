@@ -29,6 +29,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         "/api/auth/google",
         "/api/auth/refresh",
         "/api/auth/logout",
+        "/api/auth/verify-owner-key",
         "/api/telegram/webhook",
         "/api/ws/",
     )
@@ -41,51 +42,84 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         return response
 
 
-class LoginRateLimitMiddleware(BaseHTTPMiddleware):
+class RateLimitMiddleware(BaseHTTPMiddleware):
     """
-    Simple in-memory rate limiter for authentication endpoints.
-    Limits: 10 requests per 60 seconds per IP.
+    In-memory rate limiter per IP address.
+    Limits (per spec):
+      - Login:   5/min
+      - API:     100/min
+      - Webhook: 30/min
+      - Upload:  10/min
     """
 
-    RATE_LIMIT_PATHS = ("/api/auth/login", "/api/auth/google")
-    MAX_REQUESTS = 10
-    WINDOW_SECONDS = 60
+    TIERS = {
+        "login":   {"paths": ("/api/auth/login", "/api/auth/google"), "max": 5, "window": 60},
+        "webhook": {"prefix": "/api/integration/webhook", "max": 30, "window": 60},
+        "upload":  {"prefix": "/api/packing-photos", "max": 10, "window": 60},
+        "api":     {"prefix": "/api/", "max": 100, "window": 60},
+    }
 
     def __init__(self, app):
         super().__init__(app)
-        self._requests: dict[str, list[float]] = defaultdict(list)
+        # Buckets: tier -> ip -> [timestamps]
+        self._buckets: dict[str, dict[str, list[float]]] = {
+            tier: defaultdict(list) for tier in self.TIERS
+        }
+
+    def _classify(self, request: Request) -> str | None:
+        """Classify request into a rate-limit tier."""
+        path = request.url.path
+        method = request.method
+
+        # Login: only POST
+        if method == "POST" and path in self.TIERS["login"]["paths"]:
+            return "login"
+        # Webhook: only POST
+        if method == "POST" and path.startswith(self.TIERS["webhook"]["prefix"]):
+            return "webhook"
+        # Upload: POST to packing-photos
+        if method == "POST" and path.startswith(self.TIERS["upload"]["prefix"]):
+            return "upload"
+        # General API (all methods)
+        if path.startswith(self.TIERS["api"]["prefix"]):
+            return "api"
+        return None
 
     async def dispatch(self, request: Request, call_next):
-        if request.method == "POST" and request.url.path in self.RATE_LIMIT_PATHS:
+        tier = self._classify(request)
+        if tier:
+            cfg = self.TIERS[tier]
             client_ip = request.client.host if request.client else "unknown"
             now = time.time()
-            window_start = now - self.WINDOW_SECONDS
+            window_start = now - cfg["window"]
+            bucket = self._buckets[tier]
 
             # Clean old entries
-            self._requests[client_ip] = [
-                t for t in self._requests[client_ip] if t > window_start
-            ]
+            bucket[client_ip] = [t for t in bucket[client_ip] if t > window_start]
 
-            if len(self._requests[client_ip]) >= self.MAX_REQUESTS:
+            if len(bucket[client_ip]) >= cfg["max"]:
                 _rate_limit_logger.warning(
-                    f"Rate limit exceeded for {client_ip} on {request.url.path}"
+                    f"Rate limit [{tier}] exceeded for {client_ip} on {request.url.path}"
                 )
+                msg = {
+                    "login": "Too many login attempts. Try again later.",
+                    "webhook": "Webhook rate limit exceeded.",
+                    "upload": "Upload rate limit exceeded.",
+                    "api": "API rate limit exceeded.",
+                }
                 return JSONResponse(
                     status_code=429,
-                    content={"detail": "Too many login attempts. Try again later."},
-                    headers={"Retry-After": str(self.WINDOW_SECONDS)},
+                    content={"detail": msg.get(tier, "Rate limit exceeded")},
+                    headers={"Retry-After": str(cfg["window"])},
                 )
 
-            self._requests[client_ip].append(now)
+            bucket[client_ip].append(now)
 
-            # Periodic cleanup: remove IPs with no recent requests
-            if len(self._requests) > 1000:
-                stale = [
-                    ip for ip, times in self._requests.items()
-                    if not times or times[-1] < window_start
-                ]
+            # Periodic cleanup per tier
+            if len(bucket) > 1000:
+                stale = [ip for ip, ts in bucket.items() if not ts or ts[-1] < window_start]
                 for ip in stale:
-                    del self._requests[ip]
+                    del bucket[ip]
 
         return await call_next(request)
 

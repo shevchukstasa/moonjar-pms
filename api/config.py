@@ -65,6 +65,7 @@ class Settings(BaseSettings):
 
     # AI
     OPENAI_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
 
     # IP allowlist
     ADMIN_IP_ALLOWLIST: str = ""

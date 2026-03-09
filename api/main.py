@@ -109,10 +109,10 @@ app.add_middleware(
 )
 
 # --- CSRF + Rate limiting + Request logging middleware ---
-from api.middleware import CSRFMiddleware, LoginRateLimitMiddleware, RequestLoggingMiddleware
+from api.middleware import CSRFMiddleware, RateLimitMiddleware, RequestLoggingMiddleware
 
 app.add_middleware(CSRFMiddleware)
-app.add_middleware(LoginRateLimitMiddleware)
+app.add_middleware(RateLimitMiddleware)
 if IS_PRODUCTION:
     app.add_middleware(RequestLoggingMiddleware)
 

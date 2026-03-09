@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { useOrders } from '@/hooks/useOrders';
+import { useOrders, useCancellationRequests } from '@/hooks/useOrders';
 import { usePositions } from '@/hooks/usePositions';
 import { useShortageTasksForManager, useTasks } from '@/hooks/useTasks';
 import { useLowStock } from '@/hooks/useMaterials';
@@ -29,14 +29,15 @@ import { tocApi } from '@/api/toc';
 import { defectsApi } from '@/api/defects';
 import { aiChatApi } from '@/api/ai_chat';
 import type { OrderListParams } from '@/api/orders';
+import { CancellationRequestsPanel } from '@/components/dashboard/CancellationRequestsPanel';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-type DashboardTab = 'orders' | 'tasks' | 'materials' | 'defects' | 'tps' | 'toc' | 'kilns' | 'ai_chat';
+type DashboardTab = 'orders' | 'tasks' | 'materials' | 'defects' | 'tps' | 'toc' | 'kilns' | 'ai_chat' | 'cancellations';
 
-const DASHBOARD_TABS: { id: DashboardTab; label: string }[] = [
+const DASHBOARD_TABS_BASE: { id: DashboardTab; label: string }[] = [
   { id: 'orders', label: 'Orders' },
   { id: 'tasks', label: 'Tasks' },
   { id: 'materials', label: 'Materials' },
@@ -128,6 +129,26 @@ export default function ManagerDashboard() {
   );
   const { data: dashboardSummary } = useDashboardSummary(factoryParams);
 
+  // --- Cancellation requests (poll every 30s) ---
+  const cancelParams = useMemo(
+    () => ({ ...(activeFactoryId ? { factory_id: activeFactoryId } : {}), decision: 'pending' }),
+    [activeFactoryId],
+  );
+  const { data: cancellationData } = useCancellationRequests(cancelParams);
+  const pendingCancellations: number = cancellationData?.total ?? 0;
+
+  // Build tabs dynamically — show badge count on Cancellations when > 0
+  const DASHBOARD_TABS = useMemo(
+    () => [
+      ...DASHBOARD_TABS_BASE,
+      {
+        id: 'cancellations' as DashboardTab,
+        label: pendingCancellations > 0 ? `Cancellations (${pendingCancellations})` : 'Cancellations',
+      },
+    ],
+    [pendingCancellations],
+  );
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const orderColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
     { key: 'order_number', header: 'Order #' },
@@ -202,6 +223,22 @@ export default function ManagerDashboard() {
         </Card>
       </div>
 
+      {/* Cancellation request alert banner — shown above tabs when requests are pending */}
+      {pendingCancellations > 0 && activeTab !== 'cancellations' && (
+        <div
+          className="cursor-pointer rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 flex items-center justify-between gap-3 hover:bg-amber-100 transition-colors"
+          onClick={() => setActiveTab('cancellations')}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-amber-600 text-lg">⚠</span>
+            <span className="text-sm font-medium text-amber-800">
+              {pendingCancellations} pending cancellation request{pendingCancellations > 1 ? 's' : ''} from Sales — requires your decision
+            </span>
+          </div>
+          <span className="text-xs text-amber-600 underline">View →</span>
+        </div>
+      )}
+
       {/* Main Dashboard Tabs */}
       <Tabs
         tabs={DASHBOARD_TABS}
@@ -237,6 +274,17 @@ export default function ManagerDashboard() {
       {activeTab === 'toc' && <TocTabContent factoryId={activeFactoryId} />}
       {activeTab === 'kilns' && <KilnsTabContent factoryId={activeFactoryId} navigate={navigate} />}
       {activeTab === 'ai_chat' && <AiChatTabContent factoryId={activeFactoryId} />}
+      {activeTab === 'cancellations' && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Cancellation Requests</h2>
+            <p className="mt-0.5 text-sm text-gray-500">
+              Sales app requested order cancellations. Review each request and accept or reject.
+            </p>
+          </div>
+          <CancellationRequestsPanel factoryId={activeFactoryId} />
+        </div>
+      )}
     </div>
   );
 }

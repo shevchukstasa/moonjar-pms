@@ -221,6 +221,7 @@ class NotificationType(str, Enum):
     REFERENCE_CHANGED = 'reference_changed'
     READY_FOR_SHIPMENT = 'ready_for_shipment'
     STOCK_SHORTAGE = 'stock_shortage'
+    CANCELLATION_REQUEST = 'cancellation_request'
 
 class RelatedEntityType(str, Enum):
     ORDER = 'order'

@@ -209,6 +209,13 @@ class ProductionOrder(Base):
     mandatory_qc = Column(sa.Boolean, nullable=False, default=False)
     notes = Column(sa.Text)
     shipped_at = Column(sa.DateTime(timezone=True))
+    # Cancellation request fields (set by Sales App via integration endpoint)
+    cancellation_requested = Column(sa.Boolean, nullable=False, default=False)
+    cancellation_requested_at = Column(sa.DateTime(timezone=True), nullable=True)
+    # "pending" | "accepted" | "rejected" | None
+    cancellation_decision = Column(sa.String(20), nullable=True)
+    cancellation_decided_at = Column(sa.DateTime(timezone=True), nullable=True)
+    cancellation_decided_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 

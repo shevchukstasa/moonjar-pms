@@ -391,6 +391,186 @@ async def mark_order_shipped(
     }
 
 
+# --- Cancellation request management (PM side) ---
+
+@router.get("/cancellation-requests")
+async def list_cancellation_requests(
+    factory_id: UUID | None = None,
+    decision: str = Query("pending", description="Filter by decision: pending|accepted|rejected|all"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """List orders with pending (or all) cancellation requests. PM dashboard uses this."""
+    query = db.query(ProductionOrder).filter(
+        ProductionOrder.cancellation_requested.is_(True)
+    )
+    if decision != "all":
+        query = query.filter(ProductionOrder.cancellation_decision == decision)
+
+    query = apply_factory_filter(query, current_user, factory_id, ProductionOrder)
+
+    orders = query.order_by(ProductionOrder.cancellation_requested_at.desc()).all()
+
+    results = []
+    for order in orders:
+        # Get position summary
+        positions = db.query(OrderPosition).filter(OrderPosition.order_id == order.id).all()
+        pos_count = len(positions)
+        pos_ready = sum(1 for p in positions if _ev(p.status) in ("ready_for_shipment", "shipped"))
+
+        # Most common position status (represents "current stage")
+        stage_map = {
+            'planned': 'Planning', 'insufficient_materials': 'Planning',
+            'awaiting_recipe': 'Planning', 'awaiting_stencil_silkscreen': 'Planning',
+            'awaiting_color_matching': 'Planning',
+            'engobe_applied': 'Glazing', 'engobe_check': 'Glazing',
+            'glazed': 'Glazing', 'pre_kiln_check': 'Glazing', 'sent_to_glazing': 'Glazing',
+            'in_kiln': 'Firing', 'fired': 'Fired',
+            'sorting': 'Sorting', 'packing': 'Packing',
+            'ready_for_shipment': 'Ready', 'shipped': 'Shipped',
+        }
+        if positions:
+            statuses = [_ev(p.status) for p in positions]
+            most_common = max(set(statuses), key=statuses.count)
+            current_stage = stage_map.get(most_common, most_common.replace("_", " ").title())
+        else:
+            current_stage = "No positions"
+
+        results.append({
+            "id": str(order.id),
+            "order_number": order.order_number,
+            "client": order.client,
+            "client_location": order.client_location,
+            "factory_id": str(order.factory_id),
+            "factory_name": order.factory.name if order.factory else "",
+            "status": _ev(order.status),
+            "current_stage": current_stage,
+            "positions_count": pos_count,
+            "positions_ready": pos_ready,
+            "final_deadline": str(order.final_deadline) if order.final_deadline else None,
+            "external_id": order.external_id,
+            "cancellation_requested_at": order.cancellation_requested_at.isoformat() if order.cancellation_requested_at else None,
+            "cancellation_decision": order.cancellation_decision,
+            "cancellation_decided_at": order.cancellation_decided_at.isoformat() if order.cancellation_decided_at else None,
+        })
+
+    return {"items": results, "total": len(results)}
+
+
+@router.post("/{order_id}/accept-cancellation")
+async def accept_cancellation(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """PM accepts the cancellation request → order status → CANCELLED."""
+    from api.models import Notification
+    from api.enums import NotificationType, RelatedEntityType
+
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if not order.cancellation_requested or order.cancellation_decision != "pending":
+        raise HTTPException(400, "No pending cancellation request for this order")
+
+    # Apply decision
+    order.cancellation_decision = "accepted"
+    order.cancellation_decided_at = datetime.now(timezone.utc)
+    order.cancellation_decided_by = current_user.id
+    order.status = OrderStatus.CANCELLED
+    order.updated_at = datetime.now(timezone.utc)
+
+    # Cancel all positions
+    db.query(OrderPosition).filter(OrderPosition.order_id == order_id).update(
+        {"status": PositionStatus.CANCELLED}
+    )
+    db.commit()
+
+    # Async: notify Sales App of cancellation (fire-and-forget)
+    if order.external_id:
+        try:
+            from api.config import get_settings
+            settings = get_settings()
+            if settings.SALES_APP_URL and settings.PRODUCTION_WEBHOOK_ENABLED:
+                import httpx
+                payload = {
+                    "event": "cancellation_accepted",
+                    "external_id": order.external_id,
+                    "order_number": order.order_number,
+                    "status": "cancelled",
+                    "decided_by": current_user.name,
+                    "decided_at": order.cancellation_decided_at.isoformat(),
+                }
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"{settings.SALES_APP_URL}/api/webhooks/production-status",
+                        json=payload,
+                        headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
+                        timeout=10,
+                    )
+        except Exception:
+            pass
+
+    return {
+        "status": "accepted",
+        "order_id": str(order_id),
+        "order_number": order.order_number,
+        "decided_by": current_user.name,
+    }
+
+
+@router.post("/{order_id}/reject-cancellation")
+async def reject_cancellation(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """PM rejects the cancellation request → order continues as-is."""
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if not order.cancellation_requested or order.cancellation_decision != "pending":
+        raise HTTPException(400, "No pending cancellation request for this order")
+
+    order.cancellation_decision = "rejected"
+    order.cancellation_decided_at = datetime.now(timezone.utc)
+    order.cancellation_decided_by = current_user.id
+    order.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    # Notify Sales App of rejection (fire-and-forget)
+    if order.external_id:
+        try:
+            from api.config import get_settings
+            settings = get_settings()
+            if settings.SALES_APP_URL and settings.PRODUCTION_WEBHOOK_ENABLED:
+                import httpx
+                payload = {
+                    "event": "cancellation_rejected",
+                    "external_id": order.external_id,
+                    "order_number": order.order_number,
+                    "status": _ev(order.status),  # status unchanged
+                    "decided_by": current_user.name,
+                    "decided_at": order.cancellation_decided_at.isoformat(),
+                }
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"{settings.SALES_APP_URL}/api/webhooks/production-status",
+                        json=payload,
+                        headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
+                        timeout=10,
+                    )
+        except Exception:
+            pass
+
+    return {
+        "status": "rejected",
+        "order_id": str(order_id),
+        "order_number": order.order_number,
+        "decided_by": current_user.name,
+    }
+
+
 # --- Stock distribution helper ---
 
 def _distribute_stock_position(db: Session, position: OrderPosition, needed_qty: int):

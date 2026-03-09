@@ -315,6 +315,104 @@ async def get_all_production_statuses(
     return {"items": results, "total": len(results)}
 
 
+# ---------- Cancellation Request (from Sales) ----------
+
+class CancellationRequestPayload(BaseModel):
+    external_id: str
+    order_number: Optional[str] = None
+
+
+@router.post("/orders/{external_id}/request-cancellation")
+async def request_cancellation(
+    external_id: str,
+    payload: CancellationRequestPayload,
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Sales App calls this to request PM review an order cancellation.
+    Auth: X-API-Key header or Bearer token.
+    Returns 200 with {"message": "Cancellation requested"} on success.
+    Returns 4xx/5xx with {"error": "..."} on failure.
+    """
+    from datetime import timezone as tz
+    from api.models import Notification, User
+    from api.models import UserFactory
+    from api.enums import NotificationType, RelatedEntityType, UserRole
+    settings = get_settings()
+
+    # --- Auth ---
+    authenticated = False
+    if x_api_key and settings.SALES_APP_API_KEY and x_api_key == settings.SALES_APP_API_KEY:
+        authenticated = True
+    elif authorization and authorization.startswith("Bearer "):
+        bearer = authorization[7:]
+        if bearer and (
+            (settings.SALES_APP_API_KEY and bearer == settings.SALES_APP_API_KEY)
+            or (settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and bearer == settings.PRODUCTION_WEBHOOK_BEARER_TOKEN)
+        ):
+            authenticated = True
+    if not authenticated:
+        raise HTTPException(401, detail={"error": "Invalid API key"})
+
+    # --- Find order ---
+    order = db.query(ProductionOrder).filter(
+        ProductionOrder.external_id == external_id,
+    ).first()
+    if not order:
+        raise HTTPException(404, detail={"error": f"Order with external_id={external_id} not found"})
+
+    # --- Guard: already cancelled ---
+    if _ev(order.status) == "cancelled":
+        raise HTTPException(409, detail={"error": "Order is already cancelled"})
+
+    # --- Guard: duplicate request ---
+    if order.cancellation_requested and order.cancellation_decision == "pending":
+        # Idempotent: Sales can safely retry
+        return {"message": "Cancellation requested"}
+
+    # --- Mark cancellation requested ---
+    order.cancellation_requested = True
+    order.cancellation_requested_at = datetime.now(tz.utc)
+    order.cancellation_decision = "pending"
+    order.updated_at = datetime.now(tz.utc)
+
+    # --- Notify all PMs for the factory ---
+    pm_users = (
+        db.query(User)
+        .join(UserFactory, UserFactory.user_id == User.id)
+        .filter(
+            UserFactory.factory_id == order.factory_id,
+            User.role == UserRole.PRODUCTION_MANAGER.value,
+            User.is_active.is_(True),
+        )
+        .all()
+    )
+    for pm in pm_users:
+        notif = Notification(
+            user_id=pm.id,
+            factory_id=order.factory_id,
+            type=NotificationType.CANCELLATION_REQUEST,
+            title=f"Cancellation request: {order.order_number}",
+            message=(
+                f"Sales app requested cancellation of order {order.order_number}"
+                + (f" (client: {order.client})" if order.client else "")
+                + f". Current status: {_ev(order.status)}. "
+                "Review the request in the dashboard."
+            ),
+            related_entity_type=RelatedEntityType.ORDER,
+            related_entity_id=order.id,
+        )
+        db.add(notif)
+
+    db.commit()
+    logger.info(
+        "Cancellation requested for order %s (external_id=%s) by Sales App",
+        order.order_number, external_id,
+    )
+    return {"message": "Cancellation requested"}
+
+
 # ---------- Incoming Webhook (from Sales) ----------
 
 class SalesOrderWebhookPayload(BaseModel):

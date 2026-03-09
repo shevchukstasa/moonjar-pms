@@ -40,3 +40,37 @@ export function useCancelOrder() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['orders'] }),
   });
 }
+
+// --- Cancellation requests ---
+
+export function useCancellationRequests(params?: { factory_id?: string; decision?: string }) {
+  return useQuery({
+    queryKey: ['orders', 'cancellation-requests', params],
+    queryFn: () => ordersApi.listCancellationRequests(params),
+    // Poll every 30s so PM sees new requests promptly
+    refetchInterval: 30_000,
+    staleTime: 20_000,
+  });
+}
+
+export function useAcceptCancellation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => ordersApi.acceptCancellation(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['orders', 'cancellation-requests'] });
+    },
+  });
+}
+
+export function useRejectCancellation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => ordersApi.rejectCancellation(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['orders', 'cancellation-requests'] });
+    },
+  });
+}

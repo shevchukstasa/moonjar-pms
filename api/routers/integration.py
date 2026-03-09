@@ -18,9 +18,12 @@ from api.auth import get_current_user
 from api.config import get_settings
 from api.models import (
     ProductionOrder, ProductionOrderItem, OrderPosition,
-    SalesWebhookEvent, Factory,
+    SalesWebhookEvent, Factory, Task,
 )
-from api.enums import OrderStatus, OrderSource, PositionStatus, is_stock_collection
+from api.enums import (
+    OrderStatus, OrderSource, PositionStatus, TaskType, TaskStatus,
+    UserRole, is_stock_collection,
+)
 
 logger = logging.getLogger("moonjar.integration")
 
@@ -82,7 +85,9 @@ async def db_check(db: Session = Depends(get_db)):
 
         # Row counts for key tables
         count_tables = ["factories", "colors", "sizes", "collections", "production_stages",
-                        "resources", "warehouse_sections", "shifts", "kiln_constants"]
+                        "resources", "warehouse_sections", "shifts", "kiln_constants",
+                        "firing_profiles", "quality_assignment_config",
+                        "production_orders", "order_positions", "tasks"]
         counts = {}
         for t in count_tables:
             try:
@@ -93,12 +98,33 @@ async def db_check(db: Session = Depends(get_db)):
                 db.rollback()
         result["row_counts"] = counts
 
-        # Check firing_profiles table
+        # Resource details (kilns)
         try:
-            row = db.execute(sa_text("SELECT COUNT(*) FROM firing_profiles")).fetchone()
-            counts["firing_profiles"] = row[0]
+            rows = db.execute(sa_text(
+                "SELECT r.name, r.resource_type, r.kiln_type, r.status, r.is_active, f.name as factory "
+                "FROM resources r JOIN factories f ON r.factory_id = f.id "
+                "ORDER BY f.name, r.name"
+            )).fetchall()
+            result["resources_detail"] = [
+                {"name": r[0], "type": r[1], "kiln_type": r[2], "status": r[3],
+                 "is_active": r[4], "factory": r[5]}
+                for r in rows
+            ]
         except Exception:
-            counts["firing_profiles"] = "table_missing"
+            result["resources_detail"] = "error"
+            db.rollback()
+
+        # Factory details
+        try:
+            rows = db.execute(sa_text(
+                "SELECT id, name, is_active, served_locations FROM factories ORDER BY name"
+            )).fetchall()
+            result["factories_detail"] = [
+                {"id": str(r[0]), "name": r[1], "is_active": r[2], "served_locations": r[3]}
+                for r in rows
+            ]
+        except Exception:
+            result["factories_detail"] = "error"
             db.rollback()
 
     except Exception as e:
@@ -558,7 +584,49 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
     db.add(order)
     db.flush()
 
+    # --- Helpers to detect service items and stencil/silkscreen ---
+    def _is_service_item(idata: dict) -> bool:
+        """Detect non-production service items (stencil design, silkscreen design, color matching)."""
+        # Explicit flag from Sales
+        if idata.get("is_additional_item") or idata.get("is_service"):
+            return True
+        # Heuristic: items with no size or zero quantity are service items
+        app = (idata.get("application") or "").strip().lower()
+        desc = (idata.get("description") or "").strip().lower()
+        name = (idata.get("name") or "").strip().lower()
+        combined = f"{desc} {name} {app}"
+        service_keywords = ["design", "matching service", "color matching", "design&production",
+                            "design & production", "stencil design", "silkscreen design"]
+        return any(kw in combined for kw in service_keywords)
+
+    def _detect_task_type(idata: dict) -> Optional[TaskType]:
+        """Determine task type for a service item."""
+        app = (idata.get("application") or "").strip().lower()
+        desc = (idata.get("description") or idata.get("name") or "").strip().lower()
+        combined = f"{desc} {app}"
+        if "stencil" in combined:
+            return TaskType.STENCIL_ORDER
+        if "silkscreen" in combined or "silk_screen" in combined or "silk screen" in combined:
+            return TaskType.SILK_SCREEN_ORDER
+        if "color matching" in combined or "color_matching" in combined:
+            return TaskType.COLOR_MATCHING
+        return None
+
+    def _needs_stencil_silkscreen(idata: dict) -> bool:
+        """Check if a tile position requires stencil/silkscreen work before glazing."""
+        app = (idata.get("application") or "").strip().lower()
+        return app in ("stencil", "silkscreen")
+
+    def _needs_color_matching(idata: dict) -> bool:
+        """Check if a tile position requires color matching work."""
+        app = (idata.get("application") or "").strip().lower()
+        desc = (idata.get("description") or "").strip().lower()
+        return "color matching" in desc or "color_matching" in app
+
     items = order_data.get("items", [])
+    created_tasks = []  # Track tasks created for linking
+    tile_positions = []  # Track tile positions that may need blocking
+
     for item_data in items:
         # Support both "quantity" (Sales) and "quantity_pcs" (PMS native)
         qty_pcs = item_data.get("quantity_pcs") or item_data.get("quantity", 0)
@@ -589,16 +657,56 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
         db.add(item)
         db.flush()
 
+        # --- Route: service item → Task (not a production position) ---
+        if _is_service_item(item_data):
+            task_type = _detect_task_type(item_data) or TaskType.STENCIL_ORDER
+            task = Task(
+                id=uuid_mod.uuid4(),
+                factory_id=UUID(factory_id),
+                type=task_type,
+                status=TaskStatus.PENDING,
+                assigned_role=UserRole.PRODUCTION_MANAGER,
+                related_order_id=order.id,
+                blocking=True,
+                description=(
+                    f"[{task_type.value.replace('_', ' ').title()}] "
+                    f"Order {order.order_number}: "
+                    f"{item_data.get('application', '')} — "
+                    f"{item_data.get('color', '')} "
+                    f"{'/ ' + item_data.get('color_2') if item_data.get('color_2') else ''}"
+                ).strip(),
+                priority=10,
+                metadata_json={
+                    "order_item_id": str(item.id),
+                    "application": item_data.get("application"),
+                    "color": item_data.get("color"),
+                    "color_2": item_data.get("color_2"),
+                    "source": "sales_webhook_auto",
+                },
+            )
+            db.add(task)
+            db.flush()
+            created_tasks.append(task)
+            logger.info(f"Created task {task_type.value} for order {order.order_number}")
+            continue  # Don't create position for service items
+
+        # --- Route: tile/product → OrderPosition ---
+        # Determine initial status
+        if is_stock_collection(item_data.get("collection")):
+            initial_status = PositionStatus.TRANSFERRED_TO_SORTING
+        elif _needs_stencil_silkscreen(item_data):
+            initial_status = PositionStatus.AWAITING_STENCIL_SILKSCREEN
+        elif _needs_color_matching(item_data):
+            initial_status = PositionStatus.AWAITING_COLOR_MATCHING
+        else:
+            initial_status = PositionStatus.PLANNED
+
         position = OrderPosition(
             id=uuid_mod.uuid4(),
             order_id=order.id,
             order_item_id=item.id,
             factory_id=UUID(factory_id),
-            status=(
-                PositionStatus.TRANSFERRED_TO_SORTING
-                if is_stock_collection(item_data.get("collection"))
-                else PositionStatus.PLANNED
-            ),
+            status=initial_status,
             quantity=qty_pcs,
             quantity_sqm=qty_sqm,
             color=item_data.get("color", ""),
@@ -615,6 +723,21 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
         )
         db.add(position)
         db.flush()
+        tile_positions.append(position)
+
+    # Link blocking tasks to their tile positions (same order)
+    for task in created_tasks:
+        if task.type in (TaskType.STENCIL_ORDER, TaskType.SILK_SCREEN_ORDER):
+            # Find positions that need stencil/silkscreen in this order
+            for pos in tile_positions:
+                if pos.status == PositionStatus.AWAITING_STENCIL_SILKSCREEN:
+                    task.related_position_id = pos.id
+                    break
+        elif task.type == TaskType.COLOR_MATCHING:
+            for pos in tile_positions:
+                if pos.status == PositionStatus.AWAITING_COLOR_MATCHING:
+                    task.related_position_id = pos.id
+                    break
 
     return order
 

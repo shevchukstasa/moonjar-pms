@@ -16,8 +16,24 @@ const SECTION_STATUSES: Record<string, string[]> = {
   ],
 };
 
-function formatStatus(s: string) {
-  return s.replace(/_/g, ' ');
+const STATUS_LABELS: Record<string, string> = {
+  awaiting_stencil_silkscreen: 'Awaiting Stencil / Silkscreen',
+  awaiting_color_matching: 'Awaiting Color Matching',
+  awaiting_recipe: 'Awaiting Recipe',
+  awaiting_reglaze: 'Awaiting Reglaze',
+  insufficient_materials: 'Insufficient Materials',
+  pre_kiln_check: 'Pre-Kiln Check',
+  sent_to_glazing: 'Sent to Glazing',
+  loaded_in_kiln: 'Loaded in Kiln',
+  transferred_to_sorting: 'Transferred to Sorting',
+  sent_to_quality_check: 'Sent to QC',
+  quality_check_done: 'QC Done',
+  ready_for_shipment: 'Ready for Shipment',
+  blocked_by_qm: 'Blocked by QM',
+};
+
+export function formatStatus(s: string) {
+  return STATUS_LABELS[s] || s.replace(/_/g, ' ');
 }
 
 interface Props {

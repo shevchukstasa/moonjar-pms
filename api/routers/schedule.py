@@ -125,8 +125,7 @@ async def list_resources(
     current_user=Depends(get_current_user),
 ):
     query = db.query(Resource).filter(Resource.is_active == True)
-    if factory_id:
-        query = query.filter(Resource.factory_id == factory_id)
+    query = apply_factory_filter(query, current_user, factory_id, Resource)
     if resource_type:
         query = query.filter(Resource.resource_type == resource_type)
     resources = query.order_by(Resource.name).all()
@@ -146,8 +145,7 @@ async def list_batches(
     current_user=Depends(get_current_user),
 ):
     query = db.query(Batch)
-    if factory_id:
-        query = query.filter(Batch.factory_id == factory_id)
+    query = apply_factory_filter(query, current_user, factory_id, Batch)
     if resource_id:
         query = query.filter(Batch.resource_id == resource_id)
     if status:
@@ -208,8 +206,7 @@ async def get_glazing_schedule(
     query = db.query(OrderPosition).filter(
         OrderPosition.status.in_(SECTION_STATUSES["glazing"])
     )
-    if factory_id:
-        query = query.filter(OrderPosition.factory_id == factory_id)
+    query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
     positions = query.order_by(OrderPosition.priority_order, OrderPosition.created_at).all()
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
@@ -223,8 +220,7 @@ async def get_firing_schedule(
     query = db.query(OrderPosition).filter(
         OrderPosition.status.in_(SECTION_STATUSES["firing"])
     )
-    if factory_id:
-        query = query.filter(OrderPosition.factory_id == factory_id)
+    query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
     positions = query.order_by(OrderPosition.priority_order, OrderPosition.created_at).all()
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
@@ -238,8 +234,7 @@ async def get_sorting_schedule(
     query = db.query(OrderPosition).filter(
         OrderPosition.status.in_(SECTION_STATUSES["sorting"])
     )
-    if factory_id:
-        query = query.filter(OrderPosition.factory_id == factory_id)
+    query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
     positions = query.order_by(OrderPosition.priority_order, OrderPosition.created_at).all()
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
@@ -254,8 +249,7 @@ async def get_qc_schedule(
     query = db.query(OrderPosition).filter(
         OrderPosition.status.in_(SECTION_STATUSES["qc"])
     )
-    if factory_id:
-        query = query.filter(OrderPosition.factory_id == factory_id)
+    query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
     positions = query.order_by(OrderPosition.priority_order, OrderPosition.created_at).all()
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
@@ -271,8 +265,7 @@ async def get_kiln_schedule(
         Resource.resource_type == ResourceType.KILN,
         Resource.is_active == True,
     )
-    if factory_id:
-        query = query.filter(Resource.factory_id == factory_id)
+    query = apply_factory_filter(query, current_user, factory_id, Resource)
     kilns = query.order_by(Resource.name).all()
 
     result = []

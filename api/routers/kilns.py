@@ -12,6 +12,7 @@ from api.database import get_db
 from api.auth import get_current_user
 from api.roles import require_management
 from api.models import Resource, KilnLoadingRule, Factory, Collection
+from api.enums import ResourceType
 
 router = APIRouter()
 
@@ -93,7 +94,7 @@ async def list_kilns(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    query = db.query(Resource).filter(Resource.resource_type == "kiln")
+    query = db.query(Resource).filter(Resource.resource_type == ResourceType.KILN)
 
     if factory_id:
         query = query.filter(Resource.factory_id == UUID(factory_id))
@@ -117,7 +118,7 @@ async def get_kiln(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    kiln = db.query(Resource).filter(Resource.id == kiln_id, Resource.resource_type == "kiln").first()
+    kiln = db.query(Resource).filter(Resource.id == kiln_id, Resource.resource_type == ResourceType.KILN).first()
     if not kiln:
         raise HTTPException(404, "Kiln not found")
     return _serialize_kiln(kiln, db)
@@ -159,7 +160,7 @@ async def update_kiln(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
-    kiln = db.query(Resource).filter(Resource.id == kiln_id, Resource.resource_type == "kiln").first()
+    kiln = db.query(Resource).filter(Resource.id == kiln_id, Resource.resource_type == ResourceType.KILN).first()
     if not kiln:
         raise HTTPException(404, "Kiln not found")
 
@@ -200,7 +201,7 @@ async def update_kiln_status(
     if status not in VALID_STATUSES:
         raise HTTPException(422, f"Invalid status '{status}'. Valid: {', '.join(VALID_STATUSES)}")
 
-    kiln = db.query(Resource).filter(Resource.id == kiln_id, Resource.resource_type == "kiln").first()
+    kiln = db.query(Resource).filter(Resource.id == kiln_id, Resource.resource_type == ResourceType.KILN).first()
     if not kiln:
         raise HTTPException(404, "Kiln not found")
 
@@ -219,7 +220,7 @@ async def delete_kiln(
     current_user=Depends(require_management),
 ):
     """Delete a kiln. Removes associated loading rules via CASCADE."""
-    kiln = db.query(Resource).filter(Resource.id == kiln_id, Resource.resource_type == "kiln").first()
+    kiln = db.query(Resource).filter(Resource.id == kiln_id, Resource.resource_type == ResourceType.KILN).first()
     if not kiln:
         raise HTTPException(404, "Kiln not found")
 

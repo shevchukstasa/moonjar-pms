@@ -42,11 +42,12 @@ export default function ManagerSchedulePage() {
   const activeFactoryId = useUiStore((s) => s.activeFactoryId);
   const [tab, setTab] = useState('glazing');
 
-  const { data: glazingData, isLoading: glazingLoading } = useGlazingSchedule(activeFactoryId);
-  const { data: firingData, isLoading: firingLoading } = useFiringSchedule(activeFactoryId);
-  const { data: sortingData, isLoading: sortingLoading } = useSortingSchedule(activeFactoryId);
-  const { data: qcData, isLoading: qcLoading } = useQcSchedule(activeFactoryId);
-  const { data: kilnData, isLoading: kilnLoading } = useKilnSchedule(activeFactoryId);
+  const { data: glazingData, isLoading: glazingLoading, isError: glazingError } = useGlazingSchedule(activeFactoryId);
+  const { data: firingData, isLoading: firingLoading, isError: firingError } = useFiringSchedule(activeFactoryId);
+  const { data: sortingData, isLoading: sortingLoading, isError: sortingError } = useSortingSchedule(activeFactoryId);
+  const { data: qcData, isLoading: qcLoading, isError: qcError } = useQcSchedule(activeFactoryId);
+  const { data: kilnData, isLoading: kilnLoading, isError: kilnError } = useKilnSchedule(activeFactoryId);
+  const hasError = glazingError || firingError || sortingError || qcError || kilnError;
 
   const isLoading =
     (tab === 'glazing' && glazingLoading) ||
@@ -104,6 +105,13 @@ export default function ManagerSchedulePage() {
 
       {/* Tabs */}
       <Tabs tabs={SECTION_TABS} activeTab={tab} onChange={setTab} />
+
+      {/* API Error */}
+      {hasError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm font-medium text-red-800">⚠ Error loading schedule data. Try refreshing.</p>
+        </div>
+      )}
 
       {/* Content */}
       {isLoading ? (

@@ -17,8 +17,8 @@ export default function OwnerDashboard() {
   const [period, setPeriod] = useState<'week' | 'month' | 'quarter' | 'year'>('month');
   const dateRange = periodToDateRange(period);
 
-  const { data: summary, isLoading: loadingSummary } = useDashboardSummary(dateRange);
-  const { data: factories, isLoading: loadingFactories } = useFactoryComparison();
+  const { data: summary, isLoading: loadingSummary, isError: summaryError } = useDashboardSummary(dateRange);
+  const { data: factories, isLoading: loadingFactories, isError: factoriesError } = useFactoryComparison();
   const { data: financials, isLoading: loadingFinancials } = useFinancialSummary(dateRange);
   const { data: outputTrend } = useTrendData('output', undefined, 6);
   const { data: onTimeTrend } = useTrendData('on_time', undefined, 6);
@@ -68,6 +68,16 @@ export default function OwnerDashboard() {
           </button>
         </div>
       </div>
+
+      {/* API Error Banner */}
+      {(summaryError || factoriesError) && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm font-medium text-red-800">
+            ⚠ Error loading dashboard data.{summaryError ? ' Analytics API failed.' : ''}{factoriesError ? ' Factory comparison failed.' : ''}
+          </p>
+          <p className="mt-1 text-xs text-red-600">Try refreshing the page. If the issue persists, check backend logs.</p>
+        </div>
+      )}
 
       {/* KPI Cards */}
       {summary && (

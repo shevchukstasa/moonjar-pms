@@ -41,7 +41,7 @@ export default function AdminSuppliersPage() {
   const [editItem, setEditItem] = useState<SupplierItem | null>(null);
   const [form, setForm] = useState<SupplierForm>(emptyForm);
 
-  const { data, isLoading } = useSuppliers();
+  const { data, isLoading, isError } = useSuppliers();
   const items = data?.items ?? [];
 
   const createMutation = useMutation({
@@ -151,7 +151,12 @@ export default function AdminSuppliersPage() {
         </div>
       </div>
 
-      {isLoading ? (
+      {isError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
+          <p className="text-sm font-medium text-red-800">⚠ Error loading suppliers from API</p>
+          <p className="mt-1 text-xs text-red-600">Check backend or refresh the page.</p>
+        </div>
+      ) : isLoading ? (
         <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>
       ) : items.length === 0 ? (
         <Card><p className="py-8 text-center text-gray-400">No suppliers found</p></Card>

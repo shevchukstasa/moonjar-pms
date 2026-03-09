@@ -27,16 +27,17 @@ export default function TabloDashboard() {
   const { activeTab, setActiveTab } = useTabloStore();
 
   // Fetch data for all sections
-  const { data: glazingData, isLoading: glazingLoading } = useGlazingSchedule(activeFactoryId);
-  const { data: firingData, isLoading: firingLoading } = useFiringSchedule(activeFactoryId);
-  const { data: sortingData, isLoading: sortingLoading } = useSortingSchedule(activeFactoryId);
-  const { data: kilnData, isLoading: kilnLoading } = useKilnSchedule(activeFactoryId);
+  const { data: glazingData, isLoading: glazingLoading, isError: glazingError } = useGlazingSchedule(activeFactoryId);
+  const { data: firingData, isLoading: firingLoading, isError: firingError } = useFiringSchedule(activeFactoryId);
+  const { data: sortingData, isLoading: sortingLoading, isError: sortingError } = useSortingSchedule(activeFactoryId);
+  const { data: kilnData, isLoading: kilnLoading, isError: kilnError } = useKilnSchedule(activeFactoryId);
 
   const isLoading =
     (activeTab === 'glazing' && glazingLoading) ||
     (activeTab === 'firing' && firingLoading) ||
     (activeTab === 'sorting' && sortingLoading) ||
     (activeTab === 'kilns' && kilnLoading);
+  const hasError = glazingError || firingError || sortingError || kilnError;
 
   const glazingPositions: PositionItem[] = glazingData?.items || [];
   const firingPositions: PositionItem[] = firingData?.items || [];
@@ -94,6 +95,13 @@ export default function TabloDashboard() {
 
       {/* Filters */}
       {activeTab !== 'kilns' && <TabloFilters />}
+
+      {/* API Error */}
+      {hasError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm font-medium text-red-800">⚠ Error loading schedule data. Try refreshing.</p>
+        </div>
+      )}
 
       {/* Content */}
       {isLoading ? (

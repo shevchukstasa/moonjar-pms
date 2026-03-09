@@ -27,7 +27,7 @@ export default function PurchaserDashboard() {
   const activeFactoryId = useUiStore((s) => s.activeFactoryId);
   const [tab, setTab] = useState('active');
 
-  const { data: stats, isLoading: statsLoading } = usePurchaserStats(
+  const { data: stats, isLoading: statsLoading, isError: statsError } = usePurchaserStats(
     activeFactoryId || undefined,
   );
 
@@ -60,6 +60,13 @@ export default function PurchaserDashboard() {
           Purchase requests, deliveries, suppliers
         </p>
       </div>
+
+      {/* API Error */}
+      {statsError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm font-medium text-red-800">⚠ Error loading purchaser data. Try refreshing.</p>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">

@@ -11,14 +11,26 @@ import { DataTable } from '@/components/ui/Table';
 export default function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
-  const { data: order, isLoading } = useOrder(orderId);
+  const { data: order, isLoading, isError } = useOrder(orderId);
   const [tab, setTab] = useState('positions');
 
   if (isLoading) {
     return <div className="flex justify-center py-20"><Spinner className="h-10 w-10" /></div>;
   }
 
-  if (!order) {
+  if (isError) {
+    return (
+      <div className="space-y-4">
+        <button className="text-sm text-gray-500 hover:text-gray-700" onClick={() => navigate("/manager")}>2190 Back</button>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
+          <p className="font-medium text-red-800">26a0 Error loading order</p>
+          <p className="mt-1 text-sm text-red-600">Please refresh the page or go back.</p>
+        </div>
+      </div>
+    );
+  }
+
+    if (!order) {
     return (
       <div className="space-y-4">
         <Button variant="ghost" onClick={() => navigate('/manager')}>&larr; Back</Button>

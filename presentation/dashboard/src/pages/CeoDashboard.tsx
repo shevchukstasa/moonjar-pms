@@ -21,12 +21,12 @@ import apiClient from '@/api/client';
 
 export default function CeoDashboard() {
   const { factoryId, setFactoryId } = useFactory();
-  const { data: factoriesData } = useFactories();
+  const { data: factoriesData, isError: factoriesError } = useFactories();
   const factories = factoriesData?.items ?? [];
 
   const params = factoryId ? { factory_id: factoryId } : undefined;
 
-  const { data: summary, isLoading: loadingSummary } = useDashboardSummary(params);
+  const { data: summary, isLoading: loadingSummary, isError: summaryError } = useDashboardSummary(params);
   const { data: production, isLoading: loadingProduction } = useProductionMetrics(params);
   const { data: materials } = useMaterialMetrics(params);
   const { data: bufferData } = useBufferHealth(params);
@@ -86,6 +86,16 @@ export default function CeoDashboard() {
           </button>
         </div>
       </div>
+
+      {/* API Error Banner */}
+      {(summaryError || factoriesError) && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm font-medium text-red-800">
+            ⚠ Error loading dashboard data.{summaryError ? ' Analytics API failed.' : ''}{factoriesError ? ' Factories API failed.' : ''}
+          </p>
+          <p className="mt-1 text-xs text-red-600">Try refreshing the page.</p>
+        </div>
+      )}
 
       {/* KPI Cards */}
       {summary && (

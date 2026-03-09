@@ -48,6 +48,65 @@ async def integration_health():
     }
 
 
+@router.get("/db-check")
+async def db_check(db: Session = Depends(get_db)):
+    """Public diagnostic: check actual database state — alembic version, key tables, row counts."""
+    from sqlalchemy import text as sa_text
+    result = {}
+    try:
+        # Alembic version
+        try:
+            row = db.execute(sa_text("SELECT version_num FROM alembic_version LIMIT 1")).fetchone()
+            result["alembic_version"] = row[0] if row else "no_version"
+        except Exception as e:
+            result["alembic_version"] = f"error: {e}"
+
+        # Check key columns existence
+        col_checks = [
+            ("order_positions", "firing_round"),
+            ("order_positions", "quantity_sqm"),
+            ("order_positions", "color_2"),
+            ("factories", "served_locations"),
+            ("production_orders", "shipped_at"),
+            ("tasks", "metadata_json"),
+            ("colors", "is_basic"),
+        ]
+        missing_cols = []
+        for table, col in col_checks:
+            try:
+                db.execute(sa_text(f"SELECT {col} FROM {table} LIMIT 0"))
+            except Exception:
+                missing_cols.append(f"{table}.{col}")
+                db.rollback()
+        result["missing_columns"] = missing_cols
+
+        # Row counts for key tables
+        count_tables = ["factories", "colors", "sizes", "collections", "production_stages",
+                        "resources", "warehouse_sections", "shifts", "kiln_constants"]
+        counts = {}
+        for t in count_tables:
+            try:
+                row = db.execute(sa_text(f"SELECT COUNT(*) FROM {t}")).fetchone()
+                counts[t] = row[0]
+            except Exception:
+                counts[t] = "table_missing"
+                db.rollback()
+        result["row_counts"] = counts
+
+        # Check firing_profiles table
+        try:
+            row = db.execute(sa_text("SELECT COUNT(*) FROM firing_profiles")).fetchone()
+            counts["firing_profiles"] = row[0]
+        except Exception:
+            counts["firing_profiles"] = "table_missing"
+            db.rollback()
+
+    except Exception as e:
+        result["error"] = str(e)
+
+    return result
+
+
 # ---------- Production Status API (for Sales app) ----------
 
 @router.get("/orders/{external_id}/production-status")

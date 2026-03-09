@@ -1,6 +1,6 @@
 """Add columns that may be missing from databases created before schema was finalized.
 
-Uses PostgreSQL ADD COLUMN IF NOT EXISTS — safe to run multiple times.
+Uses PostgreSQL DO $$ blocks with table existence checks — safe to run on any state.
 Covers all columns from migration batches 007–015 in DATABASE_SCHEMA.sql.
 
 Revision ID: 002_missing_cols
@@ -16,57 +16,51 @@ branch_labels = None
 depends_on = None
 
 
+def _safe_add_column(conn, table: str, column_def: str):
+    """Add column only if table exists. Uses DO $$ to avoid errors on missing tables."""
+    conn.execute(text(f"""
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = '{table}') THEN
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column_def};
+            ELSE
+                RAISE NOTICE 'Table {table} does not exist — skipping ADD COLUMN';
+            END IF;
+        END $$
+    """))
+
+
 def upgrade() -> None:
     conn = op.get_bind()
 
+    print("INFO: Migration 002 starting — adding missing columns...")
+
     # --- Migration 007: tasks.metadata_json ---
-    conn.execute(text(
-        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS metadata_json JSONB"
-    ))
+    _safe_add_column(conn, "tasks", "metadata_json JSONB")
 
     # --- Migration 008: colors.is_basic ---
-    conn.execute(text(
-        "ALTER TABLE colors ADD COLUMN IF NOT EXISTS is_basic BOOLEAN NOT NULL DEFAULT FALSE"
-    ))
+    _safe_add_column(conn, "colors", "is_basic BOOLEAN NOT NULL DEFAULT FALSE")
 
     # --- Migration 009: production_orders.shipped_at ---
-    conn.execute(text(
-        "ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ"
-    ))
+    _safe_add_column(conn, "production_orders", "shipped_at TIMESTAMPTZ")
 
     # --- Migration 011: order_positions.quantity_sqm ---
-    conn.execute(text(
-        "ALTER TABLE order_positions ADD COLUMN IF NOT EXISTS quantity_sqm NUMERIC(10,3)"
-    ))
+    _safe_add_column(conn, "order_positions", "quantity_sqm NUMERIC(10,3)")
 
     # --- Migration 012: production_orders.sales_manager_contact ---
-    conn.execute(text(
-        "ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS sales_manager_contact VARCHAR(300)"
-    ))
+    _safe_add_column(conn, "production_orders", "sales_manager_contact VARCHAR(300)")
 
     # --- Migration 013: color_2 ---
-    conn.execute(text(
-        "ALTER TABLE production_order_items ADD COLUMN IF NOT EXISTS color_2 VARCHAR(100)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE order_positions ADD COLUMN IF NOT EXISTS color_2 VARCHAR(200)"
-    ))
+    _safe_add_column(conn, "production_order_items", "color_2 VARCHAR(100)")
+    _safe_add_column(conn, "order_positions", "color_2 VARCHAR(200)")
 
     # --- Migration 014: factories.served_locations ---
-    conn.execute(text(
-        "ALTER TABLE factories ADD COLUMN IF NOT EXISTS served_locations JSONB"
-    ))
+    _safe_add_column(conn, "factories", "served_locations JSONB")
 
     # --- Migration 015: firing_round, firing profiles ---
-    conn.execute(text(
-        "ALTER TABLE order_positions ADD COLUMN IF NOT EXISTS firing_round INTEGER NOT NULL DEFAULT 1"
-    ))
-    conn.execute(text(
-        "ALTER TABLE batches ADD COLUMN IF NOT EXISTS firing_profile_id UUID"
-    ))
-    conn.execute(text(
-        "ALTER TABLE batches ADD COLUMN IF NOT EXISTS target_temperature INTEGER"
-    ))
+    _safe_add_column(conn, "order_positions", "firing_round INTEGER NOT NULL DEFAULT 1")
+    _safe_add_column(conn, "batches", "firing_profile_id UUID")
+    _safe_add_column(conn, "batches", "target_temperature INTEGER")
 
     # --- Table: firing_profiles (Migration 015) ---
     conn.execute(text("""
@@ -133,17 +127,20 @@ def upgrade() -> None:
     """))
 
     # --- FK: batches.firing_profile_id → firing_profiles(id) ---
-    # Only add if not already present
     conn.execute(text("""
         DO $$
         BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.table_constraints
-                WHERE constraint_name = 'fk_batches_firing_profile'
-                  AND table_name = 'batches'
-            ) THEN
-                ALTER TABLE batches ADD CONSTRAINT fk_batches_firing_profile
-                    FOREIGN KEY (firing_profile_id) REFERENCES firing_profiles(id);
+            IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'batches')
+               AND EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'firing_profiles')
+            THEN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.table_constraints
+                    WHERE constraint_name = 'fk_batches_firing_profile'
+                      AND table_name = 'batches'
+                ) THEN
+                    ALTER TABLE batches ADD CONSTRAINT fk_batches_firing_profile
+                        FOREIGN KEY (firing_profile_id) REFERENCES firing_profiles(id);
+                END IF;
             END IF;
         END $$
     """))

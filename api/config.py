@@ -86,22 +86,26 @@ def get_settings() -> Settings:
         os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("ENV", "").lower() == "production"
     )
     # In production, REFUSE to start with insecure default secrets
-    insecure = []
+    # Critical secrets block startup; non-critical ones only warn
+    critical_insecure = []
+    warn_insecure = []
     if s.SECRET_KEY in _INSECURE_DEFAULTS:
-        insecure.append("SECRET_KEY")
+        critical_insecure.append("SECRET_KEY")
     if s.OWNER_KEY in _INSECURE_DEFAULTS:
-        insecure.append("OWNER_KEY")
+        critical_insecure.append("OWNER_KEY")
+    # TOTP is not yet implemented — warn only, don't block startup
     if s.TOTP_ENCRYPTION_KEY in _INSECURE_DEFAULTS:
-        insecure.append("TOTP_ENCRYPTION_KEY")
+        warn_insecure.append("TOTP_ENCRYPTION_KEY")
 
-    if insecure and _is_production:
+    if critical_insecure and _is_production:
         raise RuntimeError(
-            f"FATAL: insecure default values for: {', '.join(insecure)}. "
+            f"FATAL: insecure default values for: {', '.join(critical_insecure)}. "
             f"Set proper secrets via environment variables before starting in production."
         )
-    elif insecure:
+    all_insecure = critical_insecure + warn_insecure
+    if all_insecure:
         _config_logger.warning(
-            f"⚠ Insecure default secrets detected: {', '.join(insecure)}. "
+            f"⚠ Insecure default secrets detected: {', '.join(all_insecure)}. "
             f"Set proper values in .env before deploying to production."
         )
     return s

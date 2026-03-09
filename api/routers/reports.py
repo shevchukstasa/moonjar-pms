@@ -22,7 +22,7 @@ from api.enums import (
 router = APIRouter()
 
 
-@router.get("/")
+@router.get("")
 async def list_reports(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),

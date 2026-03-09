@@ -13,7 +13,7 @@ from api.schemas import QmBlockCreate, QmBlockUpdate, QmBlockResponse
 router = APIRouter()
 
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def list_qm_blocks(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -41,7 +41,7 @@ async def get_qm_blocks_item(
     return item
 
 
-@router.post("/", response_model=QmBlockResponse, status_code=201)
+@router.post("", response_model=QmBlockResponse, status_code=201)
 async def create_qm_blocks_item(
     data: QmBlockCreate,
     db: Session = Depends(get_db),

@@ -337,6 +337,7 @@ app = FastAPI(
     version="1.0.0",
     description="Production Management System for stone products",
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 

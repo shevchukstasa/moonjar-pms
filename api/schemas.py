@@ -62,16 +62,17 @@ class FactoryResponse(BaseModel):
     address: Optional[str] = None
     region: Optional[str] = None
     settings: Optional[dict] = None
-    timezone: str
+    timezone: Optional[str] = "Asia/Makassar"
     masters_group_chat_id: Optional[int] = None
     purchaser_chat_id: Optional[int] = None
-    telegram_language: str
-    require_pm_approval_receiving: bool
-    kiln_constants_mode: str
+    telegram_language: Optional[str] = "id"
+    require_pm_approval_receiving: Optional[bool] = False
+    kiln_constants_mode: Optional[str] = "manual"
     rotation_rules: Optional[dict] = None
     served_locations: Optional[list] = None
-    is_active: bool
-    created_at: datetime
+    is_active: Optional[bool] = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -111,14 +112,14 @@ class UserResponse(BaseModel):
     role: str
     google_id: Optional[str] = None
     telegram_user_id: Optional[int] = None
-    language: str
-    is_active: bool
-    failed_login_count: int
+    language: Optional[str] = "en"
+    is_active: Optional[bool] = True
+    failed_login_count: Optional[int] = 0
     locked_until: Optional[datetime] = None
-    totp_enabled: bool
+    totp_enabled: Optional[bool] = False
     last_password_change: Optional[datetime] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -757,20 +758,20 @@ class ResourceUpdate(BaseModel):
 class ResourceResponse(BaseModel):
     id: UUID
     name: str
-    resource_type: str
-    factory_id: UUID
+    resource_type: Optional[str] = None
+    factory_id: Optional[UUID] = None
     capacity_sqm: Optional[float] = None
     capacity_pcs: Optional[int] = None
     num_levels: Optional[int] = None
-    status: str
+    status: Optional[str] = "active"
     kiln_dimensions_cm: Optional[dict] = None
     kiln_working_area_cm: Optional[dict] = None
     kiln_multi_level: Optional[bool] = None
     kiln_coefficient: Optional[float] = None
     kiln_type: Optional[str] = None
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
+    is_active: Optional[bool] = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

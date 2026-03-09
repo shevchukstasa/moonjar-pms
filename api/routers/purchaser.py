@@ -68,7 +68,7 @@ class StatusChangeInput(BaseModel):
 
 # ── endpoints ────────────────────────────────────────────────────────────
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def list_purchaser(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -176,7 +176,7 @@ async def get_purchaser_item(
     return _serialize_request(pr, db)
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_purchaser_item(
     data: MaterialPurchaseRequestCreate,
     db: Session = Depends(get_db),

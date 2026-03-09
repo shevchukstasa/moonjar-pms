@@ -51,7 +51,7 @@ def _serialize_photo(p) -> dict:
     }
 
 
-@router.get("/")
+@router.get("")
 async def list_packing_photos(
     position_id: UUID | None = None,
     order_id: UUID | None = None,
@@ -83,7 +83,7 @@ async def list_packing_photos(
     }
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_packing_photo(
     data: PackingPhotoCreate,
     db: Session = Depends(get_db),

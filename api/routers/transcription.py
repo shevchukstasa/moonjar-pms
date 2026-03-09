@@ -5,7 +5,7 @@ from fastapi import APIRouter
 router = APIRouter()
 
 
-@router.get("/")
+@router.get("")
 async def list_transcriptions():
     # TODO: Implement transcription log tracking
     return {"items": [], "total": 0, "page": 1, "per_page": 50}

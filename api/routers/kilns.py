@@ -85,7 +85,7 @@ async def list_collections(
     return {"items": [{"id": str(c.id), "name": c.name} for c in items]}
 
 
-@router.get("/")
+@router.get("")
 async def list_kilns(
     factory_id: str | None = None,
     status: str | None = None,
@@ -124,7 +124,7 @@ async def get_kiln(
     return _serialize_kiln(kiln, db)
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_kiln(
     data: KilnCreateInput,
     db: Session = Depends(get_db),

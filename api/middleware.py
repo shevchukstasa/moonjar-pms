@@ -23,15 +23,19 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     # Paths that don't need CSRF (webhooks, auth login, health, internal cron)
     SKIP_PREFIXES = (
         "/api/integration/",
+        "/api/integration",
         "/api/health",
         "/api/internal/",
+        "/api/internal",
         "/api/auth/login",
         "/api/auth/google",
         "/api/auth/refresh",
         "/api/auth/logout",
         "/api/auth/verify-owner-key",
         "/api/telegram/webhook",
+        "/api/ai-chat",
         "/api/ws/",
+        "/api/ws",
     )
 
     async def dispatch(self, request: Request, call_next):

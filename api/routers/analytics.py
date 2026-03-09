@@ -136,7 +136,7 @@ async def buffer_health(
 
 @router.get("/trend-data")
 async def trend_data(
-    metric: str = Query(..., regex="^(output|on_time|defects|revenue)$"),
+    metric: str = Query(..., pattern="^(output|on_time|defects|revenue)$"),
     factory_id: UUID | None = None,
     months: int = Query(6, ge=1, le=24),
     db: Session = Depends(get_db),

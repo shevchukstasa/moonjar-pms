@@ -117,7 +117,7 @@ async def financial_summary(
     }
 
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def list_financials(
     factory_id: UUID | None = None,
     page: int = Query(1, ge=1),
@@ -145,7 +145,7 @@ async def get_financials_item(
     return item
 
 
-@router.post("/", response_model=FinancialEntryResponse, status_code=201)
+@router.post("", response_model=FinancialEntryResponse, status_code=201)
 async def create_financials_item(
     data: FinancialEntryCreate,
     db: Session = Depends(get_db),

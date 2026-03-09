@@ -160,7 +160,7 @@ class StatusChangeInput(BaseModel):
     notes: Optional[str] = None
 
 
-@router.get("/")
+@router.get("")
 async def list_positions(
     page: int = Query(1, ge=1),
     per_page: int = Query(100, ge=1, le=500),

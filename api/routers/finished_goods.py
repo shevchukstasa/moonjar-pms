@@ -36,7 +36,7 @@ def _serialize_stock(s) -> dict:
 
 
 # --- List ---
-@router.get("/")
+@router.get("")
 async def list_finished_goods(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -82,7 +82,7 @@ class StockUpsertInput(BaseModel):
     reserved_quantity: int = 0
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def upsert_finished_goods(
     data: StockUpsertInput,
     db: Session = Depends(get_db),

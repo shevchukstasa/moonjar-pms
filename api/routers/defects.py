@@ -13,7 +13,7 @@ from api.schemas import DefectCauseCreate, DefectCauseUpdate, DefectCauseRespons
 router = APIRouter()
 
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def list_defects(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -38,7 +38,7 @@ async def get_defects_item(
     return item
 
 
-@router.post("/", response_model=DefectCauseResponse, status_code=201)
+@router.post("", response_model=DefectCauseResponse, status_code=201)
 async def create_defects_item(
     data: DefectCauseCreate,
     db: Session = Depends(get_db),

@@ -13,7 +13,7 @@ from api.schemas import WarehouseSectionCreate, WarehouseSectionUpdate, Warehous
 router = APIRouter()
 
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def list_warehouse_sections(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -41,7 +41,7 @@ async def get_warehouse_sections_item(
     return item
 
 
-@router.post("/", response_model=WarehouseSectionResponse, status_code=201)
+@router.post("", response_model=WarehouseSectionResponse, status_code=201)
 async def create_warehouse_sections_item(
     data: WarehouseSectionCreate,
     db: Session = Depends(get_db),

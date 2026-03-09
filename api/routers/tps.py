@@ -154,7 +154,7 @@ def _serialize_metric(m) -> dict:
     }
 
 
-@router.get("/")
+@router.get("")
 async def list_shift_metrics(
     factory_id: UUID | None = None,
     date_from: str | None = None,
@@ -188,7 +188,7 @@ async def list_shift_metrics(
     return {"items": [_serialize_metric(m) for m in items], "total": total, "page": page, "per_page": per_page}
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_shift_metric(
     data: ShiftMetricCreate,
     db: Session = Depends(get_db),

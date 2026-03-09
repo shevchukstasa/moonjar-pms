@@ -14,7 +14,7 @@ from api.schemas import UserDashboardAccessCreate, UserDashboardAccessUpdate, Us
 router = APIRouter()
 
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def list_dashboard_access(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -39,7 +39,7 @@ async def get_dashboard_access_item(
     return item
 
 
-@router.post("/", response_model=UserDashboardAccessResponse, status_code=201)
+@router.post("", response_model=UserDashboardAccessResponse, status_code=201)
 async def create_dashboard_access_item(
     data: UserDashboardAccessCreate,
     db: Session = Depends(get_db),

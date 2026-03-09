@@ -162,7 +162,7 @@ def _order_detail(order, db: Session) -> dict:
 
 # --- Endpoints ---
 
-@router.get("/")
+@router.get("")
 async def list_orders(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -224,7 +224,7 @@ async def get_order(
     return _order_detail(order, db)
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_order(
     data: OrderCreateInput,
     db: Session = Depends(get_db),

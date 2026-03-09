@@ -63,7 +63,7 @@ class UserUpdateInput(BaseModel):
 
 # --- Endpoints ---
 
-@router.get("/")
+@router.get("")
 async def list_users(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -111,7 +111,7 @@ async def get_user(
     return _serialize_user(user, db)
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_user(
     data: UserCreateInput,
     db: Session = Depends(get_db),

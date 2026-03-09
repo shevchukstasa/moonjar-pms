@@ -53,7 +53,7 @@ def _serialize_task(t, db) -> dict:
     }
 
 
-@router.get("/")
+@router.get("")
 async def list_tasks(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -119,7 +119,7 @@ class TaskCreateInput(BaseModel):
     metadata_json: dict | None = None
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_task(
     data: TaskCreateInput,
     db: Session = Depends(get_db),

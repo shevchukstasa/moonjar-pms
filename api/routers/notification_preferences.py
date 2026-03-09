@@ -13,7 +13,7 @@ from api.schemas import NotificationPreferenceCreate, NotificationPreferenceUpda
 router = APIRouter()
 
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def list_notification_preferences(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -38,7 +38,7 @@ async def get_notification_preferences_item(
     return item
 
 
-@router.post("/", response_model=NotificationPreferenceResponse, status_code=201)
+@router.post("", response_model=NotificationPreferenceResponse, status_code=201)
 async def create_notification_preferences_item(
     data: NotificationPreferenceCreate,
     db: Session = Depends(get_db),

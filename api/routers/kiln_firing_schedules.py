@@ -13,7 +13,7 @@ from api.schemas import KilnFiringScheduleCreate, KilnFiringScheduleUpdate, Kiln
 router = APIRouter()
 
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def list_kiln_firing_schedules(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -38,7 +38,7 @@ async def get_kiln_firing_schedules_item(
     return item
 
 
-@router.post("/", response_model=KilnFiringScheduleResponse, status_code=201)
+@router.post("", response_model=KilnFiringScheduleResponse, status_code=201)
 async def create_kiln_firing_schedules_item(
     data: KilnFiringScheduleCreate,
     db: Session = Depends(get_db),

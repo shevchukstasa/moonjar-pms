@@ -30,7 +30,7 @@ def _serialize_supplier(s) -> dict:
     }
 
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def list_suppliers(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -55,7 +55,7 @@ async def get_suppliers_item(
     return _serialize_supplier(item)
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_suppliers_item(
     data: SupplierCreate,
     db: Session = Depends(get_db),

@@ -116,7 +116,7 @@ class PurchaseRequestInput(BaseModel):
 
 # ── endpoints ────────────────────────────────────────────────────────────
 
-@router.get("/")
+@router.get("")
 async def list_materials(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -269,7 +269,7 @@ async def get_material(
     return _serialize_material(m, db)
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_material(
     data: MaterialCreateInput,
     db: Session = Depends(get_db),

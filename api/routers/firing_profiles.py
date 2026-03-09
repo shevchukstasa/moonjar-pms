@@ -20,7 +20,7 @@ from api.schemas import (
 router = APIRouter()
 
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def list_firing_profiles(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -56,7 +56,7 @@ async def get_firing_profile(
     return item
 
 
-@router.post("/", response_model=FiringProfileResponse, status_code=201)
+@router.post("", response_model=FiringProfileResponse, status_code=201)
 async def create_firing_profile(
     data: FiringProfileCreate,
     db: Session = Depends(get_db),

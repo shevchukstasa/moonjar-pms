@@ -24,6 +24,9 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+Icon
+Icon?
+Icon$'\r'
 
 # Docker
 pgdata/

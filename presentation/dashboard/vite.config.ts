@@ -18,4 +18,22 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // React core — loaded first, always needed
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          // Data-fetching + state
+          'vendor-query': ['@tanstack/react-query', 'zustand', 'axios'],
+          // Charts — heavy, only needed on analytics pages
+          'vendor-charts': ['recharts'],
+          // Form utilities
+          'vendor-forms': ['react-hook-form', '@hookform/resolvers', 'zod'],
+          // Table
+          'vendor-table': ['@tanstack/react-table'],
+        },
+      },
+    },
+  },
 });

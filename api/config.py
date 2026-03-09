@@ -74,6 +74,20 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
+    def model_post_init(self, __context) -> None:
+        """Strip whitespace from all secret/key fields to prevent copy-paste issues."""
+        for field in (
+            "SECRET_KEY", "SECRET_KEY_PREVIOUS", "OWNER_KEY",
+            "TOTP_ENCRYPTION_KEY", "BACKUP_ENCRYPTION_KEY",
+            "SALES_APP_API_KEY", "PRODUCTION_WEBHOOK_BEARER_TOKEN",
+            "PRODUCTION_WEBHOOK_HMAC_SECRET", "GOOGLE_OAUTH_CLIENT_ID",
+            "TELEGRAM_BOT_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+            "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY",
+        ):
+            val = getattr(self, field, None)
+            if val and val != val.strip():
+                object.__setattr__(self, field, val.strip())
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

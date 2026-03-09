@@ -19,6 +19,13 @@ import SorterPackerDashboard from '@/pages/SorterPackerDashboard';
 import PurchaserDashboard from '@/pages/PurchaserDashboard';
 import UsersPage from '@/pages/UsersPage';
 import AdminPanelPage from '@/pages/AdminPanelPage';
+import AdminRecipesPage from '@/pages/AdminRecipesPage';
+import AdminSuppliersPage from '@/pages/AdminSuppliersPage';
+import AdminCollectionsPage from '@/pages/AdminCollectionsPage';
+import AdminColorsPage from '@/pages/AdminColorsPage';
+import AdminAppTypesPage from '@/pages/AdminAppTypesPage';
+import AdminPoaPage from '@/pages/AdminPoaPage';
+import AdminFinishingPage from '@/pages/AdminFinishingPage';
 import AppLayout from '@/components/layout/AppLayout';
 import { Spinner } from '@/components/ui/Spinner';
 
@@ -77,6 +84,13 @@ export default function App() {
         </Route>
         <Route element={<RequireRole roles={['owner', 'administrator']} />}>
           <Route path="/admin" element={<AdminPanelPage />} />
+          <Route path="/admin/recipes" element={<AdminRecipesPage />} />
+          <Route path="/admin/suppliers" element={<AdminSuppliersPage />} />
+          <Route path="/admin/collections" element={<AdminCollectionsPage />} />
+          <Route path="/admin/colors" element={<AdminColorsPage />} />
+          <Route path="/admin/application-types" element={<AdminAppTypesPage />} />
+          <Route path="/admin/places-of-application" element={<AdminPoaPage />} />
+          <Route path="/admin/finishing-types" element={<AdminFinishingPage />} />
         </Route>
         <Route element={<RequireRole roles={['owner', 'administrator', 'ceo']} />}>
           <Route path="/users" element={<UsersPage />} />
@@ -92,9 +106,15 @@ export default function App() {
         <Route element={<RequireRole roles={['quality_manager', 'owner', 'administrator']} />}>
           <Route path="/quality" element={<QualityManagerDashboard />} />
         </Route>
-        <Route path="/warehouse" element={<WarehouseDashboard />} />
-        <Route path="/packing" element={<SorterPackerDashboard />} />
-        <Route path="/purchaser" element={<PurchaserDashboard />} />
+        <Route element={<RequireRole roles={['warehouse', 'owner', 'administrator', 'production_manager']} />}>
+          <Route path="/warehouse" element={<WarehouseDashboard />} />
+        </Route>
+        <Route element={<RequireRole roles={['sorter_packer', 'owner', 'administrator', 'production_manager']} />}>
+          <Route path="/packing" element={<SorterPackerDashboard />} />
+        </Route>
+        <Route element={<RequireRole roles={['purchaser', 'owner', 'administrator', 'production_manager']} />}>
+          <Route path="/purchaser" element={<PurchaserDashboard />} />
+        </Route>
       </Route>
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

@@ -137,7 +137,7 @@ export function OrderCreateDialog({ open, onClose }: Props) {
                   <Input label="Quantity" type="number" {...register(`items.${idx}.quantity_pcs`)} error={errors.items?.[idx]?.quantity_pcs?.message} />
                   <Input label="Application" {...register(`items.${idx}.application`)} placeholder="Wall" />
                   <Input label="Finishing" {...register(`items.${idx}.finishing`)} placeholder="Matte" />
-                  <Input label="Collection" {...register(`items.${idx}.collection`)} placeholder="e.g. Сток" />
+                  <Input label="Collection" {...register(`items.${idx}.collection`)} placeholder="e.g. Stock" />
                   <Select label="Product Type" {...register(`items.${idx}.product_type`)} options={PRODUCT_TYPES} />
                 </div>
               </div>

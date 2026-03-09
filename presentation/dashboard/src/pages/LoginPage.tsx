@@ -4,7 +4,7 @@ import { GoogleLogin } from '@react-oauth/google';
 import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import apiClient, { setCsrfToken } from '@/api/client';
+import apiClient from '@/api/client';
 import { roleRoutes } from '@/lib/roleRoutes';
 
 export default function LoginPage() {
@@ -15,8 +15,7 @@ export default function LoginPage() {
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
 
-  const handleLoginSuccess = (data: { csrf_token?: string; user: { id: string; email: string; role: string; name: string } }) => {
-    if (data.csrf_token) setCsrfToken(data.csrf_token);
+  const handleLoginSuccess = (data: { user: { id: string; email: string; role: string; name: string } }) => {
     login(data.user);
     navigate(roleRoutes[data.user.role] || '/');
   };

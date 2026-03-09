@@ -239,12 +239,40 @@ export default function AdminPanelPage() {
 
       {/* Quick Links */}
       <Card title="Quick Links">
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <Button variant="secondary" onClick={() => navigate('/users')}>
             Manage Users &rarr;
           </Button>
           <Button variant="secondary" onClick={() => navigate('/tablo')}>
             Production Tablo &rarr;
+          </Button>
+        </div>
+      </Card>
+
+      {/* Reference Data */}
+      <Card title="Reference Data">
+        <p className="mb-3 text-sm text-gray-500">Manage product reference data and catalogs</p>
+        <div className="flex flex-wrap gap-3">
+          <Button variant="secondary" onClick={() => navigate('/admin/recipes')}>
+            Recipes &rarr;
+          </Button>
+          <Button variant="secondary" onClick={() => navigate('/admin/suppliers')}>
+            Suppliers &rarr;
+          </Button>
+          <Button variant="secondary" onClick={() => navigate('/admin/collections')}>
+            Collections &rarr;
+          </Button>
+          <Button variant="secondary" onClick={() => navigate('/admin/colors')}>
+            Colors &rarr;
+          </Button>
+          <Button variant="secondary" onClick={() => navigate('/admin/application-types')}>
+            Application Types &rarr;
+          </Button>
+          <Button variant="secondary" onClick={() => navigate('/admin/places-of-application')}>
+            Places of Application &rarr;
+          </Button>
+          <Button variant="secondary" onClick={() => navigate('/admin/finishing-types')}>
+            Finishing Types &rarr;
           </Button>
         </div>
       </Card>

@@ -19,12 +19,16 @@ const apiClient = axios.create({
   withCredentials: true,
 });
 
-let csrfToken: string | null = null;
-export const setCsrfToken = (token: string) => { csrfToken = token; };
+/** Read CSRF token from non-HttpOnly cookie (set by backend on login/refresh). */
+function getCsrfFromCookie(): string | null {
+  const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
 
 apiClient.interceptors.request.use((config) => {
-  if (csrfToken && ['post', 'put', 'patch', 'delete'].includes(config.method || '')) {
-    config.headers['X-CSRF-Token'] = csrfToken;
+  if (['post', 'put', 'patch', 'delete'].includes(config.method || '')) {
+    const csrf = getCsrfFromCookie();
+    if (csrf) config.headers['X-CSRF-Token'] = csrf;
   }
   return config;
 });

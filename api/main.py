@@ -148,8 +148,8 @@ def _ensure_schema():
             """))
 
             # --- Seed missing reference data ---
-            # Warehouse sections
-            for fid_name in [("Bali Factory", "Bali"), ("Java Factory", "Java")]:
+            # Warehouse sections (match both "Bali Factory" and "Bali" naming)
+            for fid_name in [("Bali Factory", "Bali"), ("Java Factory", "Java"), ("Bali", "Bali"), ("Java", "Java")]:
                 row = conn.execute(text(f"SELECT id FROM factories WHERE name = '{fid_name[0]}' LIMIT 1")).fetchone()
                 if not row:
                     continue
@@ -160,7 +160,7 @@ def _ensure_schema():
                         conn.execute(text(f"INSERT INTO warehouse_sections (id, factory_id, code, name, is_default) VALUES (gen_random_uuid(), '{fid}', '{code}', '{fid_name[1]} {label}', TRUE)"))
 
             # Shifts
-            for fname in ["Bali Factory", "Java Factory"]:
+            for fname in ["Bali Factory", "Java Factory", "Bali", "Java"]:
                 row = conn.execute(text(f"SELECT id FROM factories WHERE name = '{fname}' LIMIT 1")).fetchone()
                 if not row:
                     continue
@@ -177,7 +177,7 @@ def _ensure_schema():
                 """))
 
             # Quality assignment config
-            for fname in ["Bali Factory", "Java Factory"]:
+            for fname in ["Bali Factory", "Java Factory", "Bali", "Java"]:
                 row = conn.execute(text(f"SELECT id FROM factories WHERE name = '{fname}' LIMIT 1")).fetchone()
                 if not row:
                     continue
@@ -190,7 +190,7 @@ def _ensure_schema():
                     """))
 
             # Kilns — ensure 6 total (3 per factory)
-            for fname, prefix in [("Bali Factory", "Bali"), ("Java Factory", "Java")]:
+            for fname, prefix in [("Bali Factory", "Bali"), ("Java Factory", "Java"), ("Bali", "Bali"), ("Java", "Java")]:
                 row = conn.execute(text(f"SELECT id FROM factories WHERE name = '{fname}' LIMIT 1")).fetchone()
                 if not row:
                     continue

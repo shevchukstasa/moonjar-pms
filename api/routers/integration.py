@@ -320,9 +320,13 @@ async def receive_sales_order(
         try:
             order = _create_order_from_webhook(db, order_data, body)
             event.processed = True
+
+            # Schedule deadline estimation BEFORE commit (same db session)
+            estimated_completion = _estimate_completion(db, order)
+
             db.commit()
 
-            # Notify Production Managers of the assigned factory (best-effort)
+            # Notify Production Managers of the assigned factory (best-effort, after commit)
             try:
                 from business.services.notifications import notify_pm
                 positions_count = db.query(OrderPosition).filter(
@@ -343,10 +347,6 @@ async def receive_sales_order(
                 )
             except Exception as e:
                 logger.warning(f"Failed to notify PM about new order: {e}")
-
-            # Schedule deadline estimation (stub — returns placeholder until
-            # factory/kiln configuration is complete)
-            estimated_completion = _estimate_completion_stub(order)
 
             # Return factory info + estimated completion so Sales can show delivery date
             factory = db.query(Factory).filter(Factory.id == order.factory_id).first()
@@ -552,29 +552,22 @@ _stubs_state = {
 }
 
 
-def _estimate_completion_stub(order: ProductionOrder) -> Optional[str]:
+def _estimate_completion(db: Session, order: ProductionOrder) -> Optional[str]:
     """
-    Stub: return placeholder estimated completion date.
-    When disabled, will use real schedule_estimation service.
+    Estimate completion date for an order.
+    Uses the same db session as the caller to avoid detached object errors.
+    When schedule_estimation stub is off, uses real calculation.
     """
     if not _stubs_state["schedule_estimation"]:
-        # Real calculation — use schedule_estimation service
         try:
             from business.services.schedule_estimation import calculate_schedule_deadline
-            from api.database import SessionLocal
-            db = SessionLocal()
-            try:
-                result = calculate_schedule_deadline(db, order)
-                if order.schedule_deadline:
-                    return str(order.schedule_deadline)
-            except Exception as e:
-                logger.warning(f"Schedule estimation failed, falling back: {e}")
-            finally:
-                db.close()
-        except ImportError:
-            pass
+            calculate_schedule_deadline(db, order)
+            if order.schedule_deadline:
+                return str(order.schedule_deadline)
+        except Exception as e:
+            logger.warning(f"Schedule estimation failed, falling back: {e}")
 
-    # Stub: return final_deadline if available, else None
+    # Fallback: return final_deadline if available, else None
     if order.schedule_deadline:
         return str(order.schedule_deadline)
     if order.final_deadline:

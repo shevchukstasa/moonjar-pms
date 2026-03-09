@@ -118,6 +118,101 @@ async def get_production_status(
     }
 
 
+@router.get("/orders/status-updates")
+async def get_all_production_statuses(
+    since: Optional[str] = Query(None, description="ISO date: only orders updated since this date"),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Bulk status endpoint for Sales polling (every 30 min).
+    Returns all Sales-originated orders with current status, stage, progress, ETA.
+    Auth: X-API-Key header or Bearer token.
+    """
+    settings = get_settings()
+
+    # Authenticate (same as single-order endpoint)
+    authenticated = False
+    if x_api_key and settings.SALES_APP_API_KEY and x_api_key == settings.SALES_APP_API_KEY:
+        authenticated = True
+    elif authorization and authorization.startswith("Bearer "):
+        bearer = authorization[7:]
+        if bearer and (
+            (settings.SALES_APP_API_KEY and bearer == settings.SALES_APP_API_KEY)
+            or (settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and bearer == settings.PRODUCTION_WEBHOOK_BEARER_TOKEN)
+        ):
+            authenticated = True
+
+    if not authenticated:
+        raise HTTPException(401, "Invalid API key")
+
+    # Query all Sales-originated orders (active ones)
+    query = db.query(ProductionOrder).filter(
+        ProductionOrder.source == OrderSource.SALES_WEBHOOK,
+        ProductionOrder.status.notin_([
+            OrderStatus.CANCELLED.value,
+        ]),
+    )
+
+    # If 'since' provided, only return orders updated after that date
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since)
+            query = query.filter(ProductionOrder.updated_at >= since_dt)
+        except ValueError:
+            raise HTTPException(400, "Invalid 'since' date format. Use ISO format: YYYY-MM-DD")
+
+    orders = query.order_by(ProductionOrder.updated_at.desc()).limit(200).all()
+
+    stage_map = {
+        'planned': 'planning', 'insufficient_materials': 'planning',
+        'awaiting_recipe': 'planning', 'awaiting_stencil_silkscreen': 'planning',
+        'awaiting_color_matching': 'planning',
+        'engobe_applied': 'glazing', 'engobe_check': 'glazing',
+        'glazed': 'glazing', 'pre_kiln_check': 'glazing', 'sent_to_glazing': 'glazing',
+        'loaded_in_kiln': 'firing', 'fired': 'firing', 'refire': 'firing',
+        'transferred_to_sorting': 'sorting', 'packed': 'packing',
+        'sent_to_quality_check': 'quality', 'quality_check_done': 'quality',
+        'blocked_by_qm': 'quality',
+        'ready_for_shipment': 'ready', 'shipped': 'shipped',
+    }
+
+    results = []
+    for order in orders:
+        positions = db.query(OrderPosition).filter(
+            OrderPosition.order_id == order.id,
+            OrderPosition.split_category.is_(None),
+        ).all()
+
+        total = len(positions)
+        ready = sum(1 for p in positions if _ev(p.status) in ('ready_for_shipment', 'shipped'))
+
+        if positions:
+            stages = [stage_map.get(_ev(p.status), 'unknown') for p in positions]
+            current_stage = max(set(stages), key=stages.count)
+        else:
+            current_stage = 'unknown'
+
+        factory = db.query(Factory).filter(Factory.id == order.factory_id).first()
+
+        results.append({
+            "external_id": order.external_id,
+            "order_number": order.order_number,
+            "client": order.client,
+            "status": _ev(order.status),
+            "current_stage": current_stage,
+            "factory_name": factory.name if factory else None,
+            "positions_total": total,
+            "positions_ready": ready,
+            "progress_percent": round(ready / total * 100, 1) if total else 0,
+            "estimated_completion_date": str(order.schedule_deadline) if order.schedule_deadline else None,
+            "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
+            "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+        })
+
+    return {"items": results, "total": len(results)}
+
+
 # ---------- Incoming Webhook (from Sales) ----------
 
 class SalesOrderWebhookPayload(BaseModel):
@@ -450,10 +545,10 @@ def _parse_date(val) -> Optional[date]:
 # Can be toggled via GET/POST /api/integration/stubs endpoints.
 # ────────────────────────────────────────────────────────────────
 
-# In-memory stub toggle state (persists until server restart)
+# Stub toggle state — both OFF by default (real logic active)
 _stubs_state = {
-    "schedule_estimation": True,       # True = stub active (returns placeholder)
-    "intermediate_callbacks": True,     # True = stub active (skips callbacks)
+    "schedule_estimation": False,       # False = real schedule estimation active
+    "intermediate_callbacks": False,    # False = real callbacks active
 }
 
 

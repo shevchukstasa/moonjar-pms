@@ -4,7 +4,7 @@ from datetime import datetime, date, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -244,10 +244,44 @@ async def update_inspection(
 @router.post("/inspections/{inspection_id}/photo")
 async def upload_inspection_photo(
     inspection_id: UUID,
+    file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    raise HTTPException(501, "Photo upload requires Supabase Storage — V2 feature")
+    """Upload a photo for a QC inspection. Stores as base64 data URL in DB."""
+    import base64
+
+    qc = db.query(QualityCheck).filter(QualityCheck.id == inspection_id).first()
+    if not qc:
+        raise HTTPException(404, "Inspection not found")
+
+    # Validate file type
+    content_type = file.content_type or "image/jpeg"
+    if not content_type.startswith("image/"):
+        raise HTTPException(400, "Only image files are allowed")
+
+    # Read and encode (max 5MB)
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 5MB)")
+
+    b64 = base64.b64encode(content).decode("utf-8")
+    data_url = f"data:{content_type};base64,{b64}"
+
+    # Append to photos array
+    photos = list(qc.photos or [])
+    photos.append(data_url)
+    qc.photos = photos
+
+    db.commit()
+    db.refresh(qc)
+
+    return {
+        "status": "uploaded",
+        "inspection_id": str(inspection_id),
+        "photo_index": len(photos) - 1,
+        "photos_count": len(photos),
+    }
 
 
 @router.get("/positions-for-qc")

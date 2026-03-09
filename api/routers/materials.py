@@ -183,7 +183,78 @@ async def get_effective_balance(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    raise HTTPException(501, "Not implemented — V2 feature")
+    """Effective balance = current balance minus reserved for active orders.
+    Shows how much material is truly available for new orders.
+    """
+    from api.models import RecipeMaterial, OrderPosition, ProductionOrderItem, Recipe
+    from api.enums import PositionStatus
+
+    query = db.query(Material)
+    if factory_id:
+        query = query.filter(Material.factory_id == factory_id)
+    else:
+        query = apply_factory_filter(query, Material, current_user, db)
+
+    materials = query.all()
+
+    # Active position statuses that consume materials
+    active_statuses = [
+        PositionStatus.PLANNED.value,
+        PositionStatus.SENT_TO_GLAZING.value,
+        PositionStatus.ENGOBE_APPLIED.value,
+        PositionStatus.ENGOBE_CHECK.value,
+        PositionStatus.GLAZED.value,
+        PositionStatus.AWAITING_RECIPE.value,
+        PositionStatus.AWAITING_COLOR_MATCHING.value,
+    ]
+
+    result = []
+    for m in materials:
+        balance = float(m.balance or 0)
+
+        # Calculate reserved: sum of (recipe_material.quantity * position.quantity)
+        # for all active positions that use a recipe consuming this material
+        reserved = 0.0
+        try:
+            # Find recipes that use this material
+            recipe_mats = db.query(RecipeMaterial).filter(
+                RecipeMaterial.material_id == m.id,
+            ).all()
+
+            for rm in recipe_mats:
+                # Find active positions using this recipe
+                active_positions = db.query(OrderPosition).join(
+                    ProductionOrderItem, OrderPosition.order_item_id == ProductionOrderItem.id
+                ).filter(
+                    OrderPosition.factory_id == m.factory_id,
+                    OrderPosition.status.in_(active_statuses),
+                    ProductionOrderItem.recipe_id == rm.recipe_id,
+                ).all()
+
+                for pos in active_positions:
+                    qty = float(pos.quantity or 0)
+                    recipe_qty = float(rm.quantity_per_unit or 0)
+                    reserved += qty * recipe_qty
+        except Exception:
+            pass  # If recipe linkage doesn't exist, reserved stays 0
+
+        effective = balance - reserved
+        min_bal = float(m.min_balance or 0)
+
+        result.append({
+            "id": str(m.id),
+            "name": m.name,
+            "factory_id": str(m.factory_id),
+            "unit": m.unit,
+            "material_type": _ev(m.material_type),
+            "balance": balance,
+            "reserved": round(reserved, 3),
+            "effective_balance": round(effective, 3),
+            "min_balance": min_bal,
+            "is_low_stock": effective < min_bal if min_bal > 0 else False,
+        })
+
+    return {"items": result, "total": len(result)}
 
 
 @router.get("/{material_id}")

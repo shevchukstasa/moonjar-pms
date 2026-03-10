@@ -13,8 +13,8 @@ from sqlalchemy import or_, func
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
-from api.models import ProductionOrder, ProductionOrderItem, OrderPosition, Factory, FinishedGoodsStock
-from api.enums import OrderStatus, OrderSource, PositionStatus, is_stock_collection
+from api.models import ProductionOrder, ProductionOrderItem, OrderPosition, Factory, FinishedGoodsStock, Task
+from api.enums import OrderStatus, OrderSource, PositionStatus, TaskStatus, is_stock_collection
 
 router = APIRouter()
 
@@ -200,6 +200,20 @@ def _stage_map_label(status_str: str) -> str:
         'ready_for_shipment': 'Ready', 'shipped': 'Shipped',
     }
     return _map.get(status_str, status_str.replace("_", " ").title())
+
+
+def _cancel_order_tasks(db: Session, order_id) -> int:
+    """Cancel all non-terminal tasks linked to the order. Returns count of cancelled tasks.
+    Records are kept in DB (soft-cancel) — only status changes to CANCELLED.
+    Tasks that are already DONE or CANCELLED are left untouched.
+    """
+    result = db.query(Task).filter(
+        Task.related_order_id == order_id,
+        Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+    ).all()
+    for task in result:
+        task.status = TaskStatus.CANCELLED
+    return len(result)
 
 
 def _order_queue_summary(order, db: Session) -> dict:
@@ -490,6 +504,7 @@ async def cancel_order(
     db.query(OrderPosition).filter(OrderPosition.order_id == order_id).update(
         {"status": PositionStatus.CANCELLED}
     )
+    _cancel_order_tasks(db, order_id)
     db.commit()
 
 
@@ -585,6 +600,9 @@ async def accept_cancellation(
     db.query(OrderPosition).filter(OrderPosition.order_id == order_id).update(
         {"status": PositionStatus.CANCELLED}
     )
+    # Cancel all pending/in-progress tasks linked to this order
+    # (records stay in DB — only status changes, for full audit trail)
+    tasks_cancelled = _cancel_order_tasks(db, order_id)
     db.commit()
 
     # Async: notify Sales App of cancellation (fire-and-forget)
@@ -617,6 +635,7 @@ async def accept_cancellation(
         "order_id": str(order_id),
         "order_number": order.order_number,
         "decided_by": current_user.name,
+        "tasks_cancelled": tasks_cancelled,
     }
 
 

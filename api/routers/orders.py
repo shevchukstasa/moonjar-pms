@@ -571,6 +571,194 @@ async def reject_cancellation(
     }
 
 
+# --- Change request management (PM side) ---
+
+@router.get("/change-requests")
+async def list_change_requests(
+    factory_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """List orders with pending change requests from Sales. PM dashboard uses this."""
+    query = db.query(ProductionOrder).filter(
+        ProductionOrder.change_req_status == "pending"
+    )
+    query = apply_factory_filter(query, current_user, factory_id, ProductionOrder)
+    orders = query.order_by(ProductionOrder.change_req_requested_at.desc()).all()
+
+    results = []
+    for order in orders:
+        positions = db.query(OrderPosition).filter(OrderPosition.order_id == order.id).all()
+        pos_count = len(positions)
+        pos_ready = sum(1 for p in positions if _ev(p.status) in ("ready_for_shipment", "shipped"))
+
+        stage_map = {
+            'planned': 'Planning', 'insufficient_materials': 'Planning',
+            'awaiting_recipe': 'Planning', 'awaiting_stencil_silkscreen': 'Planning',
+            'awaiting_color_matching': 'Planning',
+            'engobe_applied': 'Glazing', 'engobe_check': 'Glazing',
+            'glazed': 'Glazing', 'pre_kiln_check': 'Glazing', 'sent_to_glazing': 'Glazing',
+            'in_kiln': 'Firing', 'fired': 'Fired',
+            'sorting': 'Sorting', 'packing': 'Packing',
+            'ready_for_shipment': 'Ready', 'shipped': 'Shipped',
+        }
+        if positions:
+            statuses = [_ev(p.status) for p in positions]
+            most_common = max(set(statuses), key=statuses.count)
+            current_stage = stage_map.get(most_common, most_common.replace("_", " ").title())
+        else:
+            current_stage = "No positions"
+
+        # Build a simple summary of what changed from the payload
+        payload = order.change_req_payload or {}
+        change_summary = {}
+        for field in ("client", "final_deadline", "desired_delivery_date", "notes", "items"):
+            if field in payload:
+                change_summary[field] = payload[field]
+
+        results.append({
+            "id": str(order.id),
+            "order_number": order.order_number,
+            "client": order.client,
+            "client_location": order.client_location,
+            "factory_id": str(order.factory_id),
+            "factory_name": order.factory.name if order.factory else "",
+            "status": _ev(order.status),
+            "current_stage": current_stage,
+            "positions_count": pos_count,
+            "positions_ready": pos_ready,
+            "final_deadline": str(order.final_deadline) if order.final_deadline else None,
+            "external_id": order.external_id,
+            "change_req_requested_at": order.change_req_requested_at.isoformat() if order.change_req_requested_at else None,
+            "change_req_status": order.change_req_status,
+            "change_req_payload": order.change_req_payload,
+            "change_summary": change_summary,
+        })
+
+    return {"items": results, "total": len(results)}
+
+
+@router.post("/{order_id}/approve-change")
+async def approve_change_request(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """PM approves the change request → apply stored payload changes to the order."""
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if order.change_req_status != "pending":
+        raise HTTPException(400, "No pending change request for this order")
+
+    payload = order.change_req_payload or {}
+
+    # Apply updatable fields from payload
+    updatable_fields = ("client", "client_location", "final_deadline", "desired_delivery_date",
+                        "notes", "sales_manager_name", "sales_manager_contact", "mandatory_qc")
+    for field in updatable_fields:
+        if field in payload:
+            val = payload[field]
+            if field in ("final_deadline", "desired_delivery_date") and isinstance(val, str):
+                try:
+                    from datetime import date as date_type
+                    val = date_type.fromisoformat(val)
+                except (ValueError, TypeError):
+                    val = None
+            setattr(order, field, val)
+
+    order.change_req_status = "approved"
+    order.change_req_decided_at = datetime.now(timezone.utc)
+    order.change_req_decided_by = current_user.id
+    order.change_req_payload = None
+    order.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    # Notify Sales App (fire-and-forget)
+    if order.external_id:
+        try:
+            from api.config import get_settings
+            settings = get_settings()
+            if settings.SALES_APP_URL and settings.PRODUCTION_WEBHOOK_ENABLED:
+                import httpx
+                notify_payload = {
+                    "event": "change_request_approved",
+                    "external_id": order.external_id,
+                    "order_number": order.order_number,
+                    "decided_by": current_user.name,
+                    "decided_at": order.change_req_decided_at.isoformat(),
+                }
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"{settings.SALES_APP_URL}/api/webhooks/production-status",
+                        json=notify_payload,
+                        headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
+                        timeout=10,
+                    )
+        except Exception:
+            pass
+
+    return {
+        "status": "approved",
+        "order_id": str(order_id),
+        "order_number": order.order_number,
+        "decided_by": current_user.name,
+    }
+
+
+@router.post("/{order_id}/reject-change")
+async def reject_change_request(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """PM rejects the change request → discard stored changes."""
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if order.change_req_status != "pending":
+        raise HTTPException(400, "No pending change request for this order")
+
+    order.change_req_status = "rejected"
+    order.change_req_decided_at = datetime.now(timezone.utc)
+    order.change_req_decided_by = current_user.id
+    order.change_req_payload = None
+    order.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    # Notify Sales App (fire-and-forget)
+    if order.external_id:
+        try:
+            from api.config import get_settings
+            settings = get_settings()
+            if settings.SALES_APP_URL and settings.PRODUCTION_WEBHOOK_ENABLED:
+                import httpx
+                notify_payload = {
+                    "event": "change_request_rejected",
+                    "external_id": order.external_id,
+                    "order_number": order.order_number,
+                    "status": _ev(order.status),
+                    "decided_by": current_user.name,
+                    "decided_at": order.change_req_decided_at.isoformat(),
+                }
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"{settings.SALES_APP_URL}/api/webhooks/production-status",
+                        json=notify_payload,
+                        headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
+                        timeout=10,
+                    )
+        except Exception:
+            pass
+
+    return {
+        "status": "rejected",
+        "order_id": str(order_id),
+        "order_number": order.order_number,
+        "decided_by": current_user.name,
+    }
+
+
 # --- Stock distribution helper ---
 
 def _distribute_stock_position(db: Session, position: OrderPosition, needed_qty: int):

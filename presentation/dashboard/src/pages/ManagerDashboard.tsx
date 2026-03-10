@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { useOrders, useCancellationRequests } from '@/hooks/useOrders';
+import { useOrders, useCancellationRequests, useChangeRequests } from '@/hooks/useOrders';
 import { usePositions } from '@/hooks/usePositions';
 import { useShortageTasksForManager, useTasks } from '@/hooks/useTasks';
 import { useLowStock } from '@/hooks/useMaterials';
@@ -30,12 +30,14 @@ import { defectsApi } from '@/api/defects';
 import { aiChatApi } from '@/api/ai_chat';
 import type { OrderListParams } from '@/api/orders';
 import { CancellationRequestsPanel } from '@/components/dashboard/CancellationRequestsPanel';
+import { ChangeRequestsPanel } from '@/components/dashboard/ChangeRequestsPanel';
+import { NotificationsBell } from '@/components/dashboard/NotificationsBell';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-type DashboardTab = 'orders' | 'tasks' | 'materials' | 'defects' | 'tps' | 'toc' | 'kilns' | 'ai_chat' | 'cancellations';
+type DashboardTab = 'orders' | 'tasks' | 'materials' | 'defects' | 'tps' | 'toc' | 'kilns' | 'ai_chat' | 'cancellations' | 'change_requests';
 
 const DASHBOARD_TABS_BASE: { id: DashboardTab; label: string }[] = [
   { id: 'orders', label: 'Orders' },
@@ -137,7 +139,15 @@ export default function ManagerDashboard() {
   const { data: cancellationData } = useCancellationRequests(cancelParams);
   const pendingCancellations: number = cancellationData?.total ?? 0;
 
-  // Build tabs dynamically — show badge count on Cancellations when > 0
+  // --- Change requests (poll every 60s) ---
+  const changeReqParams = useMemo(
+    () => (activeFactoryId ? { factory_id: activeFactoryId } : undefined),
+    [activeFactoryId],
+  );
+  const { data: changeReqData } = useChangeRequests(changeReqParams);
+  const pendingChangeRequests: number = changeReqData?.total ?? 0;
+
+  // Build tabs dynamically — show badge counts on Cancellations/Change Requests when > 0
   const DASHBOARD_TABS = useMemo(
     () => [
       ...DASHBOARD_TABS_BASE,
@@ -145,8 +155,12 @@ export default function ManagerDashboard() {
         id: 'cancellations' as DashboardTab,
         label: pendingCancellations > 0 ? `Cancellations (${pendingCancellations})` : 'Cancellations',
       },
+      {
+        id: 'change_requests' as DashboardTab,
+        label: pendingChangeRequests > 0 ? `Changes (${pendingChangeRequests})` : 'Changes',
+      },
     ],
-    [pendingCancellations],
+    [pendingCancellations, pendingChangeRequests],
   );
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -184,7 +198,10 @@ export default function ManagerDashboard() {
           <h1 className="text-2xl font-bold text-gray-900">Production Dashboard</h1>
           <p className="mt-1 text-sm text-gray-500">Manage orders, positions, and production schedule</p>
         </div>
-        <FactorySelector />
+        <div className="flex items-center gap-3">
+          <NotificationsBell />
+          <FactorySelector />
+        </div>
       </div>
 
       {/* KPI Cards — dashboard-wide, shown above all tabs */}
@@ -246,6 +263,22 @@ export default function ManagerDashboard() {
         </div>
       )}
 
+      {/* Change request alert banner — shown when requests are pending */}
+      {pendingChangeRequests > 0 && activeTab !== 'change_requests' && (
+        <div
+          className="cursor-pointer rounded-lg border border-blue-300 bg-blue-50 px-4 py-3 flex items-center justify-between gap-3 hover:bg-blue-100 transition-colors"
+          onClick={() => setActiveTab('change_requests')}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-blue-600 text-lg">i</span>
+            <span className="text-sm font-medium text-blue-800">
+              {pendingChangeRequests} pending change request{pendingChangeRequests > 1 ? 's' : ''} from Sales — review and apply or discard
+            </span>
+          </div>
+          <span className="text-xs text-blue-600 underline">View →</span>
+        </div>
+      )}
+
       {/* Main Dashboard Tabs */}
       <Tabs
         tabs={DASHBOARD_TABS}
@@ -290,6 +323,17 @@ export default function ManagerDashboard() {
             </p>
           </div>
           <CancellationRequestsPanel factoryId={activeFactoryId} />
+        </div>
+      )}
+      {activeTab === 'change_requests' && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Change Requests from Sales</h2>
+            <p className="mt-0.5 text-sm text-gray-500">
+              Sales app sent updated order data. Apply changes to update the order, or discard to keep current data.
+            </p>
+          </div>
+          <ChangeRequestsPanel factoryId={activeFactoryId} />
         </div>
       )}
     </div>

@@ -512,7 +512,7 @@ async def receive_sales_order(
         order_data = body
 
     if event_type == "new_order":
-        # Check if order with this external_id already exists (duplicate protection)
+        # Check if order with this external_id already exists
         ext_id = order_data.get("external_id")
         if ext_id:
             existing_order = db.query(ProductionOrder).filter(
@@ -520,16 +520,63 @@ async def receive_sales_order(
                 ProductionOrder.source == OrderSource.SALES_WEBHOOK,
             ).first()
             if existing_order:
-                event.processed = True
-                event.error_message = f"Duplicate: order {ext_id} already exists"
-                db.commit()
-                factory = db.query(Factory).filter(Factory.id == existing_order.factory_id).first()
-                return {
-                    "status": "duplicate",
-                    "order_id": str(existing_order.id),
-                    "factory_name": factory.name if factory else None,
-                    "factory_location": factory.location if factory else None,
-                }
+                # Treat as a change request — store new payload and notify PMs
+                try:
+                    from api.models import Notification, User, UserFactory
+                    from api.enums import NotificationType, RelatedEntityType, UserRole
+
+                    existing_order.change_req_payload = order_data
+                    existing_order.change_req_status = "pending"
+                    existing_order.change_req_requested_at = datetime.now(timezone.utc)
+                    existing_order.updated_at = datetime.now(timezone.utc)
+
+                    # Notify all PMs for the factory
+                    pm_users = (
+                        db.query(User)
+                        .join(UserFactory, UserFactory.user_id == User.id)
+                        .filter(
+                            UserFactory.factory_id == existing_order.factory_id,
+                            User.role == UserRole.PRODUCTION_MANAGER.value,
+                            User.is_active.is_(True),
+                        )
+                        .all()
+                    )
+                    for pm in pm_users:
+                        notif = Notification(
+                            user_id=pm.id,
+                            factory_id=existing_order.factory_id,
+                            type=NotificationType.STATUS_CHANGE,
+                            title=f"Change request: {existing_order.order_number}",
+                            message=(
+                                f"Sales app sent an updated order for {existing_order.order_number}"
+                                + (f" (client: {existing_order.client})" if existing_order.client else "")
+                                + ". Review and apply or discard the changes."
+                            ),
+                            related_entity_type=RelatedEntityType.ORDER,
+                            related_entity_id=existing_order.id,
+                        )
+                        db.add(notif)
+
+                    event.processed = True
+                    db.commit()
+                    logger.info(
+                        "Change request created for order %s (external_id=%s)",
+                        existing_order.order_number, ext_id,
+                    )
+                    factory = db.query(Factory).filter(Factory.id == existing_order.factory_id).first()
+                    return {
+                        "status": "change_request_created",
+                        "order_id": str(existing_order.id),
+                        "factory_name": factory.name if factory else None,
+                        "factory_location": factory.location if factory else None,
+                    }
+                except Exception as e:
+                    db.rollback()
+                    logger.error(f"Failed to create change request for {ext_id}: {e}")
+                    event.error_message = str(e)
+                    db.add(event)
+                    db.commit()
+                    raise HTTPException(422, f"Failed to process change request: {e}")
 
         try:
             order = _create_order_from_webhook(db, order_data, body)

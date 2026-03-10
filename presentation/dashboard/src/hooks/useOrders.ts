@@ -74,3 +74,49 @@ export function useRejectCancellation() {
     },
   });
 }
+
+// --- Change requests ---
+
+export function useChangeRequests(params?: { factory_id?: string }) {
+  return useQuery({
+    queryKey: ['orders', 'change-requests', params],
+    queryFn: () => ordersApi.listChangeRequests(params),
+    // Poll every 60s (less urgent than cancellations)
+    refetchInterval: 60_000,
+    staleTime: 50_000,
+  });
+}
+
+export function useApproveChange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => ordersApi.approveChange(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['orders', 'change-requests'] });
+    },
+  });
+}
+
+export function useRejectChange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => ordersApi.rejectChange(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['orders', 'change-requests'] });
+    },
+  });
+}
+
+// --- Ship order ---
+
+export function useShipOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => ordersApi.ship(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+    },
+  });
+}

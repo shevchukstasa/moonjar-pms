@@ -216,6 +216,12 @@ class ProductionOrder(Base):
     cancellation_decision = Column(sa.String(20), nullable=True)
     cancellation_decided_at = Column(sa.DateTime(timezone=True), nullable=True)
     cancellation_decided_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    # Change request fields (set by Sales App via webhook when order already exists)
+    change_req_payload = Column(JSONB, nullable=True)
+    change_req_status = Column(sa.String(20), nullable=False, server_default='none')
+    change_req_requested_at = Column(sa.DateTime(timezone=True), nullable=True)
+    change_req_decided_at = Column(sa.DateTime(timezone=True), nullable=True)
+    change_req_decided_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 

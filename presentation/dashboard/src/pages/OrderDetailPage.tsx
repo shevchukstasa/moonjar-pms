@@ -1,18 +1,40 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useOrder } from '@/hooks/useOrders';
+import { useOrder, useShipOrder, useUpdateOrder } from '@/hooks/useOrders';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Tabs } from '@/components/ui/Tabs';
 import { Spinner } from '@/components/ui/Spinner';
 import { DataTable } from '@/components/ui/Table';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+
+const VALID_STATUSES = [
+  { value: 'new', label: 'New' },
+  { value: 'in_production', label: 'In Production' },
+  { value: 'partially_ready', label: 'Partially Ready' },
+  { value: 'ready_for_shipment', label: 'Ready for Shipment' },
+  { value: 'shipped', label: 'Shipped' },
+  { value: 'cancelled', label: 'Cancelled' },
+];
 
 export default function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
   const { data: order, isLoading, isError } = useOrder(orderId);
   const [tab, setTab] = useState('positions');
+
+  // Ship order
+  const shipOrder = useShipOrder();
+  const [showShipConfirm, setShowShipConfirm] = useState(false);
+  const [shipSuccess, setShipSuccess] = useState(false);
+
+  // Status override
+  const updateOrder = useUpdateOrder();
+  const [showOverride, setShowOverride] = useState(false);
+  const [overrideStatus, setOverrideStatus] = useState('');
+  const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
+  const [overrideSuccess, setOverrideSuccess] = useState(false);
 
   if (isLoading) {
     return <div className="flex justify-center py-20"><Spinner className="h-10 w-10" /></div>;
@@ -21,16 +43,16 @@ export default function OrderDetailPage() {
   if (isError) {
     return (
       <div className="space-y-4">
-        <button className="text-sm text-gray-500 hover:text-gray-700" onClick={() => navigate("/manager")}>2190 Back</button>
+        <button className="text-sm text-gray-500 hover:text-gray-700" onClick={() => navigate("/manager")}>← Back</button>
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
-          <p className="font-medium text-red-800">26a0 Error loading order</p>
+          <p className="font-medium text-red-800">Error loading order</p>
           <p className="mt-1 text-sm text-red-600">Please refresh the page or go back.</p>
         </div>
       </div>
     );
   }
 
-    if (!order) {
+  if (!order) {
     return (
       <div className="space-y-4">
         <Button variant="ghost" onClick={() => navigate('/manager')}>&larr; Back</Button>
@@ -41,6 +63,8 @@ export default function OrderDetailPage() {
 
   const positions = order.positions || [];
   const items = order.items || [];
+  const isReadyForShipment = order.status === 'ready_for_shipment';
+  const isShipped = order.status === 'shipped';
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const positionColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
@@ -86,12 +110,89 @@ export default function OrderDetailPage() {
       <div className="flex items-center gap-4">
         <Button variant="ghost" onClick={() => navigate('/manager')}>&larr; Back</Button>
         <div className="flex-1">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">Order {order.order_number}</h1>
             <Badge status={order.status} />
+
+            {/* Override status button */}
+            <div className="relative">
+              <button
+                className="text-xs text-gray-400 hover:text-gray-600 underline ml-1"
+                onClick={() => {
+                  setOverrideStatus(order.status);
+                  setShowOverride((v) => !v);
+                }}
+              >
+                Override status
+              </button>
+              {showOverride && (
+                <div className="absolute left-0 top-6 z-10 rounded-lg border border-gray-200 bg-white shadow-lg p-3 min-w-[220px]">
+                  <p className="text-xs font-medium text-orange-600 mb-2">
+                    Manual override bypasses automatic status calculation
+                  </p>
+                  <select
+                    value={overrideStatus}
+                    onChange={(e) => setOverrideStatus(e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm mb-2"
+                  >
+                    {VALID_STATUSES.map((s) => (
+                      <option key={s.value} value={s.value}>{s.label}</option>
+                    ))}
+                  </select>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      disabled={updateOrder.isPending || overrideStatus === order.status}
+                      onClick={() => {
+                        setShowOverride(false);
+                        setShowOverrideConfirm(true);
+                      }}
+                    >
+                      Apply
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setShowOverride(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
+
+        {/* Ship Order button — only when ready for shipment */}
+        {isReadyForShipment && !isShipped && (
+          <Button
+            className="bg-green-600 hover:bg-green-700 text-white"
+            onClick={() => setShowShipConfirm(true)}
+            disabled={shipOrder.isPending}
+          >
+            {shipOrder.isPending ? <Spinner className="h-4 w-4 mr-2" /> : null}
+            Ship Order
+          </Button>
+        )}
+        {isShipped && order.shipped_at && (
+          <span className="text-sm text-gray-500">
+            Shipped {new Date(order.shipped_at).toLocaleDateString()}
+          </span>
+        )}
       </div>
+
+      {/* Success banners */}
+      {shipSuccess && (
+        <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+          Order shipped successfully. Sales has been notified.
+        </div>
+      )}
+      {overrideSuccess && (
+        <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">
+          Order status overridden manually.
+        </div>
+      )}
 
       {/* Order Info */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -107,7 +208,7 @@ export default function OrderDetailPage() {
         </Card>
         <Card>
           <div className="text-xs text-gray-500">Factory</div>
-          <div className="mt-1 font-medium text-gray-900">{order.factory_id || '\u2014'}</div>
+          <div className="mt-1 font-medium text-gray-900">{order.factory_name || order.factory_id || '\u2014'}</div>
         </Card>
         <Card>
           <div className="text-xs text-gray-500">Positions</div>
@@ -153,6 +254,35 @@ export default function OrderDetailPage() {
           <div className="py-8 text-center text-gray-400">No items</div>
         )
       )}
+
+      {/* Confirm Ship */}
+      <ConfirmDialog
+        open={showShipConfirm}
+        onClose={() => setShowShipConfirm(false)}
+        onConfirm={async () => {
+          if (!orderId) return;
+          await shipOrder.mutateAsync(orderId);
+          setShipSuccess(true);
+        }}
+        title="Confirm Shipment"
+        message={`Confirm shipment of order #${order.order_number}? This will notify Sales and mark the order as shipped.`}
+      />
+
+      {/* Confirm Status Override */}
+      <ConfirmDialog
+        open={showOverrideConfirm}
+        onClose={() => setShowOverrideConfirm(false)}
+        onConfirm={async () => {
+          if (!orderId) return;
+          await updateOrder.mutateAsync({
+            id: orderId,
+            data: { status: overrideStatus, status_override: true },
+          });
+          setOverrideSuccess(true);
+        }}
+        title="Override Order Status"
+        message={`Manually set order #${order.order_number} status to "${VALID_STATUSES.find((s) => s.value === overrideStatus)?.label ?? overrideStatus}"? This bypasses automatic status calculation.`}
+      />
     </div>
   );
 }

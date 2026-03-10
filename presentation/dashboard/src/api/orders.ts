@@ -29,6 +29,25 @@ export interface CancellationRequestItem {
   cancellation_decided_at: string | null;
 }
 
+export interface ChangeRequestItem {
+  id: string;
+  order_number: string;
+  client: string;
+  client_location: string | null;
+  factory_id: string;
+  factory_name: string;
+  status: string;
+  current_stage: string;
+  positions_count: number;
+  positions_ready: number;
+  final_deadline: string | null;
+  external_id: string | null;
+  change_req_requested_at: string | null;
+  change_req_status: 'pending' | 'approved' | 'rejected' | 'none';
+  change_req_payload: Record<string, unknown> | null;
+  change_summary: Record<string, unknown>;
+}
+
 export const ordersApi = {
   list: (params?: OrderListParams) =>
     apiClient.get('/orders', { params }).then((r) => r.data),
@@ -49,4 +68,11 @@ export const ordersApi = {
     apiClient.post(`/orders/${id}/accept-cancellation`).then((r) => r.data),
   rejectCancellation: (id: string) =>
     apiClient.post(`/orders/${id}/reject-cancellation`).then((r) => r.data),
+  // Change request management
+  listChangeRequests: (params?: { factory_id?: string }) =>
+    apiClient.get('/orders/change-requests', { params }).then((r) => r.data),
+  approveChange: (id: string) =>
+    apiClient.post(`/orders/${id}/approve-change`).then((r) => r.data),
+  rejectChange: (id: string) =>
+    apiClient.post(`/orders/${id}/reject-change`).then((r) => r.data),
 };

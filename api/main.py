@@ -123,6 +123,32 @@ def _ensure_schema():
 
     _run_section("columns", _add_columns)
 
+    # --- Section 1a: Enum value additions (AUTOCOMMIT required by PostgreSQL) ---
+    # ALTER TYPE ... ADD VALUE cannot run inside a transaction.
+    _enum_values_to_add = [
+        ("notification_type", "cancellation_request"),
+        ("notification_type", "change_request"),   # pre-add for future use
+    ]
+    try:
+        raw_conn = engine.raw_connection()
+        try:
+            raw_conn.set_isolation_level(0)  # AUTOCOMMIT
+            cur = raw_conn.cursor()
+            for enum_type, enum_val in _enum_values_to_add:
+                try:
+                    cur.execute(
+                        f"ALTER TYPE {enum_type} ADD VALUE IF NOT EXISTS %s",
+                        (enum_val,),
+                    )
+                    logger.info(f"_ensure_schema [enum]: ensured {enum_type}.{enum_val}")
+                except Exception as e:
+                    logger.warning(f"_ensure_schema [enum]: skip {enum_type}.{enum_val}: {e}")
+            cur.close()
+        finally:
+            raw_conn.close()
+    except Exception as e:
+        logger.error(f"_ensure_schema [enum]: failed to obtain raw connection: {e}")
+
     # --- Section 1b: Backfill position_number / split_index for existing rows ---
     def _backfill_position_numbers(conn):
         # Root positions: assign sequential numbers within each order by created_at

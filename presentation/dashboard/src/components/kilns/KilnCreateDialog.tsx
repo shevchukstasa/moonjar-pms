@@ -87,8 +87,13 @@ export function KilnCreateDialog({ open, onClose, factoryId }: Props) {
       reset();
       onClose();
     } catch (err: unknown) {
-      const resp = (err as { response?: { data?: { detail?: string } } })?.response?.data;
-      setSubmitError(resp?.detail || 'Failed to create kiln');
+      const resp = (err as { response?: { data?: { detail?: unknown } } })?.response?.data;
+      const detail = resp?.detail;
+      if (Array.isArray(detail)) {
+        setSubmitError(detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ') || 'Validation error');
+      } else {
+        setSubmitError((detail as string | undefined) || 'Failed to create kiln');
+      }
     }
   };
 

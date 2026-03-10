@@ -102,10 +102,11 @@ export const KILN_STATUS_OPTIONS = [
   { value: 'inactive', label: 'Inactive' },
 ] as const;
 
+// height is optional — working area of single-level kilns has no height
 const dimensionSchema = z.object({
   width: z.coerce.number().positive('Width required'),
   depth: z.coerce.number().positive('Depth required'),
-  height: z.coerce.number().positive('Height required'),
+  height: z.coerce.number().min(0).optional().nullable(),
 });
 
 export const kilnCreateSchema = z.object({
@@ -114,7 +115,8 @@ export const kilnCreateSchema = z.object({
   kiln_dimensions_cm: dimensionSchema,
   kiln_working_area_cm: dimensionSchema,
   kiln_multi_level: z.boolean().default(false),
-  kiln_coefficient: z.coerce.number().min(0).max(1).default(0.8),
+  // coefficient can be > 1 for some kilns (e.g. raku with attrition)
+  kiln_coefficient: z.coerce.number().min(0).max(2).default(0.8),
 });
 export type KilnCreateFormData = z.infer<typeof kilnCreateSchema>;
 
@@ -124,6 +126,6 @@ export const kilnEditSchema = z.object({
   kiln_dimensions_cm: dimensionSchema,
   kiln_working_area_cm: dimensionSchema,
   kiln_multi_level: z.boolean().default(false),
-  kiln_coefficient: z.coerce.number().min(0).max(1).default(0.8),
+  kiln_coefficient: z.coerce.number().min(0).max(2).default(0.8),
 });
 export type KilnEditFormData = z.infer<typeof kilnEditSchema>;

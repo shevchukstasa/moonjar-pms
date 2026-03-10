@@ -24,6 +24,27 @@ def _ev(val):
     return val.value if hasattr(val, "value") else str(val) if val else None
 
 
+def _norm_dims(d: Optional[dict]) -> Optional[dict]:
+    """
+    Normalise kiln dimension dict to plain {width, depth, height?} keys.
+    Accepts both {width_cm, depth_cm, height_cm} (seed format) and
+    {width, depth, height} (frontend format).  height is optional.
+    """
+    if not d:
+        return d
+    w = d.get("width") if d.get("width") is not None else d.get("width_cm")
+    dp = d.get("depth") if d.get("depth") is not None else d.get("depth_cm")
+    h = d.get("height") if d.get("height") is not None else d.get("height_cm")
+    result = {}
+    if w is not None:
+        result["width"] = float(w)
+    if dp is not None:
+        result["depth"] = float(dp)
+    if h is not None:
+        result["height"] = float(h)
+    return result if result else None
+
+
 def _serialize_kiln(resource: Resource, db: Session) -> dict:
     """Serialize a kiln resource with loading rules and factory name."""
     rules = db.query(KilnLoadingRule).filter(KilnLoadingRule.kiln_id == resource.id).first()
@@ -35,8 +56,8 @@ def _serialize_kiln(resource: Resource, db: Session) -> dict:
         "factory_name": factory.name if factory else None,
         "kiln_type": resource.kiln_type,
         "status": _ev(resource.status),
-        "kiln_dimensions_cm": resource.kiln_dimensions_cm,
-        "kiln_working_area_cm": resource.kiln_working_area_cm,
+        "kiln_dimensions_cm": _norm_dims(resource.kiln_dimensions_cm),
+        "kiln_working_area_cm": _norm_dims(resource.kiln_working_area_cm),
         "kiln_multi_level": resource.kiln_multi_level,
         "kiln_coefficient": float(resource.kiln_coefficient) if resource.kiln_coefficient else None,
         "num_levels": resource.num_levels,
@@ -138,8 +159,8 @@ async def create_kiln(
         resource_type="kiln",
         factory_id=UUID(data.factory_id),
         kiln_type=data.kiln_type,
-        kiln_dimensions_cm=data.kiln_dimensions_cm,
-        kiln_working_area_cm=data.kiln_working_area_cm,
+        kiln_dimensions_cm=_norm_dims(data.kiln_dimensions_cm),
+        kiln_working_area_cm=_norm_dims(data.kiln_working_area_cm),
         kiln_multi_level=data.kiln_multi_level,
         kiln_coefficient=data.kiln_coefficient,
         capacity_sqm=data.capacity_sqm,
@@ -173,9 +194,9 @@ async def update_kiln(
             raise HTTPException(404, "Factory not found")
         kiln.factory_id = UUID(data.factory_id)
     if data.kiln_dimensions_cm is not None:
-        kiln.kiln_dimensions_cm = data.kiln_dimensions_cm
+        kiln.kiln_dimensions_cm = _norm_dims(data.kiln_dimensions_cm)
     if data.kiln_working_area_cm is not None:
-        kiln.kiln_working_area_cm = data.kiln_working_area_cm
+        kiln.kiln_working_area_cm = _norm_dims(data.kiln_working_area_cm)
     if data.kiln_multi_level is not None:
         kiln.kiln_multi_level = data.kiln_multi_level
     if data.kiln_coefficient is not None:

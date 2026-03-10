@@ -42,13 +42,24 @@ export function KilnEditDialog({ open, onClose, kiln }: Props) {
 
   useEffect(() => {
     if (kiln) {
+      // Backend normalises _cm-suffix keys to plain keys; both are handled here
+      const dims = kiln.kiln_dimensions_cm as Record<string, number> | null ?? {};
+      const work = kiln.kiln_working_area_cm as Record<string, number> | null ?? {};
       reset({
         name: kiln.name,
         factory_id: kiln.factory_id,
-        kiln_dimensions_cm: kiln.kiln_dimensions_cm || { width: 0, depth: 0, height: 0 },
-        kiln_working_area_cm: kiln.kiln_working_area_cm || { width: 0, depth: 0, height: 0 },
+        kiln_dimensions_cm: {
+          width:  dims.width  ?? 0,
+          depth:  dims.depth  ?? 0,
+          height: dims.height ?? undefined,
+        },
+        kiln_working_area_cm: {
+          width:  work.width  ?? 0,
+          depth:  work.depth  ?? 0,
+          height: work.height ?? undefined,  // optional — single-level kilns have no height
+        },
         kiln_multi_level: kiln.kiln_multi_level,
-        kiln_coefficient: kiln.kiln_coefficient || 0.8,
+        kiln_coefficient: kiln.kiln_coefficient ?? 0.8,
       });
       setConfirmDelete(false);
     }
@@ -61,8 +72,14 @@ export function KilnEditDialog({ open, onClose, kiln }: Props) {
       await updateKiln.mutateAsync({ id: kiln.id, data });
       onClose();
     } catch (err: unknown) {
-      const resp = (err as { response?: { data?: { detail?: string } } })?.response?.data;
-      setSubmitError(resp?.detail || 'Failed to update kiln');
+      const resp = (err as { response?: { data?: { detail?: unknown } } })?.response?.data;
+      const detail = resp?.detail;
+      if (Array.isArray(detail)) {
+        // FastAPI 422 returns detail as array of {loc, msg, type}
+        setSubmitError(detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ') || 'Validation error');
+      } else {
+        setSubmitError((detail as string | undefined) || 'Failed to update kiln');
+      }
     }
   };
 

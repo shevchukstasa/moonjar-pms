@@ -545,8 +545,8 @@ async def receive_sales_order(
                 ProductionOrder.external_id == ext_id,
                 ProductionOrder.source == OrderSource.SALES_WEBHOOK,
             ).first()
-            if existing_order:
-                # Treat as a change request — store new payload and notify PMs
+            if existing_order and _ev(existing_order.status) != "cancelled":
+                # Active order with same external_id → treat as change request
                 try:
                     from api.models import Notification, User, UserFactory
                     from api.enums import NotificationType, RelatedEntityType, UserRole

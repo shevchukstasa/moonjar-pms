@@ -11,12 +11,16 @@ import {
 
 const PRODUCT_TYPES = ['tile', 'countertop', 'sink', '3d'];
 
-// Default constants (match business/kiln/constants.py)
+// Default constants (match business/kiln/constants.py + kiln_constants table)
 const DEFAULTS = {
   gap_x_cm: 1.2,
   gap_y_cm: 1.2,
   air_gap_cm: 2.0,
   shelf_thickness_cm: 3.0,
+  max_edge_height_cm: 15,
+  flat_on_edge_coefficient: 0.30,
+  filler_coefficient: 0.50,
+  min_space_to_fill_cm: 21,
 };
 
 interface Props {
@@ -47,6 +51,12 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
 
   // Edge loading
   const [edgeAllowed, setEdgeAllowed] = useState(true);
+  const [maxEdgeHeight, setMaxEdgeHeight] = useState(DEFAULTS.max_edge_height_cm);
+
+  // Configurable loading coefficients
+  const [flatOnEdgeCoeff, setFlatOnEdgeCoeff] = useState(DEFAULTS.flat_on_edge_coefficient);
+  const [fillerCoeff, setFillerCoeff] = useState(DEFAULTS.filler_coefficient);
+  const [minSpaceToFill, setMinSpaceToFill] = useState(DEFAULTS.min_space_to_fill_cm);
 
   // Allowed collections
   const [allowedCollections, setAllowedCollections] = useState<string[]>([]);
@@ -62,6 +72,10 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
       setMaxProductWidth((r.max_product_width_cm as number) || '');
       setMaxProductHeight((r.max_product_height_cm as number) || '');
       setEdgeAllowed((r.edge_loading_allowed as boolean) ?? true);
+      setMaxEdgeHeight((r.max_edge_height_cm as number) ?? DEFAULTS.max_edge_height_cm);
+      setFlatOnEdgeCoeff((r.flat_on_edge_coefficient as number) ?? DEFAULTS.flat_on_edge_coefficient);
+      setFillerCoeff((r.filler_coefficient as number) ?? DEFAULTS.filler_coefficient);
+      setMinSpaceToFill((r.min_space_to_fill_cm as number) ?? DEFAULTS.min_space_to_fill_cm);
       setAllowedCollections((r.allowed_collections as string[]) || []);
     } else if (kiln) {
       setAllowedTypes(PRODUCT_TYPES);
@@ -72,6 +86,10 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
       setMaxProductWidth('');
       setMaxProductHeight('');
       setEdgeAllowed(true);
+      setMaxEdgeHeight(DEFAULTS.max_edge_height_cm);
+      setFlatOnEdgeCoeff(DEFAULTS.flat_on_edge_coefficient);
+      setFillerCoeff(DEFAULTS.filler_coefficient);
+      setMinSpaceToFill(DEFAULTS.min_space_to_fill_cm);
       setAllowedCollections([]);
     }
   }, [kiln]);
@@ -99,6 +117,10 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
       air_gap_cm: airGap,
       shelf_thickness_cm: shelfThickness,
       edge_loading_allowed: edgeAllowed,
+      max_edge_height_cm: maxEdgeHeight,
+      flat_on_edge_coefficient: flatOnEdgeCoeff,
+      filler_coefficient: fillerCoeff,
+      min_space_to_fill_cm: minSpaceToFill,
       allowed_collections: allowedCollections,
     };
 
@@ -221,15 +243,68 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
         </div>
 
         {/* Edge loading */}
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={edgeAllowed}
-            onChange={(e) => setEdgeAllowed(e.target.checked)}
-            className="rounded border-gray-300"
-          />
-          Edge loading allowed
-        </label>
+        <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+          <label className="mb-2 block text-sm font-semibold text-gray-700">
+            Edge Loading
+          </label>
+          <label className="mb-3 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={edgeAllowed}
+              onChange={(e) => setEdgeAllowed(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            Edge loading allowed for this kiln
+          </label>
+          {edgeAllowed && (
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Max Edge Height (cm)"
+                type="number"
+                step="1"
+                value={maxEdgeHeight}
+                onChange={(e) => setMaxEdgeHeight(Number(e.target.value))}
+              />
+              <Input
+                label="Flat-on-top fraction"
+                type="number"
+                step="0.01"
+                min="0"
+                max="1"
+                value={flatOnEdgeCoeff}
+                onChange={(e) => setFlatOnEdgeCoeff(Number(e.target.value))}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Filler (small-kiln leftover space) */}
+        <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+          <label className="mb-2 block text-sm font-semibold text-gray-700">
+            Filler Tiles (leftover space)
+          </label>
+          <p className="mb-3 text-xs text-gray-500">
+            When free shelf space exceeds the threshold, it is filled with 10×10 tiles on edge.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Min space to fill (cm)"
+              type="number"
+              step="1"
+              value={minSpaceToFill}
+              onChange={(e) => setMinSpaceToFill(Number(e.target.value))}
+            />
+            <Input
+              label="Filler load factor"
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={fillerCoeff}
+              onChange={(e) => setFillerCoeff(Number(e.target.value))}
+            />
+          </div>
+        </div>
 
         {/* Allowed collections */}
         <div>

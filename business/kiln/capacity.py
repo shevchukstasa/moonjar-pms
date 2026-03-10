@@ -441,12 +441,19 @@ def calculate_edge_loading(
         return {"method": "edge", "total_pieces": 0, "total_area_sqm": 0.0,
                 "reason": "no pieces fit on edge"}
 
-    # Flat-on-top: flat_on_edge_coefficient of shelf area
-    shelf_m2 = (eff_kw * eff_kd) / 10000.0
-    flat_area_avail = shelf_m2 * p["flat_on_edge_coeff"]
+    # Flat-on-top: tiles lying face-up on top of the edge-standing rows.
+    # Only valid for rectangular/square tiles with face-only glaze:
+    #   - triangle pairs cannot be safely stacked flat on top
+    #   - face-2-edges glaze would touch adjacent standing tiles → glaze damage
     area_pp = _product_area(product)
-    flat_per_level = floor(flat_area_avail / area_pp) if area_pp > 0 else 0
-    flat_per_level = min(flat_per_level, edge_per_level * 2)  # physical cap
+    flat_on_top_allowed = (shape == "rectangle" and glaze == "face-only")
+    if flat_on_top_allowed:
+        shelf_m2 = (eff_kw * eff_kd) / 10000.0
+        flat_area_avail = shelf_m2 * p["flat_on_edge_coeff"]
+        flat_per_level = floor(flat_area_avail / area_pp) if area_pp > 0 else 0
+        flat_per_level = min(flat_per_level, edge_per_level * 2)  # physical cap
+    else:
+        flat_per_level = 0
 
     level_h = vertical_dim + p["air_gap"] + p["shelf_thickness"] + T
 

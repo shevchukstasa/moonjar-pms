@@ -131,6 +131,8 @@ def _small_kiln_filler(
     product: dict,
     tiles_w: int,
     tiles_d: int,
+    tile_depth_cm: float,   # effective tile dim along kiln depth (chosen orientation)
+    tile_width_cm: float,   # effective tile dim along kiln width (chosen orientation)
     filler_size: float,
     filler_coeff: float,
     min_space: float,
@@ -141,7 +143,7 @@ def _small_kiln_filler(
     if not cfg["is_small"]:
         return None
 
-    eff_l, eff_w, _ = _effective_dims(product, 1.5)
+    eff_l, eff_w = tile_depth_cm, tile_width_cm
     gap = _product_gap(product, tile_gap)
 
     max_dim = max(eff_l, eff_w)
@@ -215,6 +217,7 @@ def _resolve_params(constants: dict, loading_rules: dict) -> dict:
         "max_product_width_cm":  lr.get("max_product_width_cm"),   # None = no limit
         "max_product_height_cm": lr.get("max_product_height_cm"),  # None = no limit
         "allowed_product_types": lr.get("allowed_product_types"),  # None = all
+        "filler_enabled":        lr.get("filler_enabled", True),
     }
 
 
@@ -286,16 +289,20 @@ def calculate_flat_loading(
             if max_d <= 100:
                 eff_kw, eff_kd = 100.0, 150.0
 
-    tiles_w = _tiles_along(eff_kw, eff_W, gap)
-    tiles_d = _tiles_along(eff_kd, eff_L, gap)
+    # Try both orientations and pick the one that fits more tiles per level.
+    # Orientation A: eff_W along kiln width, eff_L along kiln depth (default)
+    # Orientation B: eff_L along kiln width, eff_W along kiln depth (rotated 90°)
+    tw_a = _tiles_along(eff_kw, eff_W, gap)
+    td_a = _tiles_along(eff_kd, eff_L, gap)
+    tw_b = _tiles_along(eff_kw, eff_L, gap)
+    td_b = _tiles_along(eff_kd, eff_W, gap)
 
-    # Try both orientations for sinks/countertops in small kiln
-    if cfg["is_small"] and ptype in ("sink", "countertop"):
-        opt1 = tiles_w * tiles_d
-        tw2 = _tiles_along(eff_kw, eff_L, gap)
-        td2 = _tiles_along(eff_kd, eff_W, gap)
-        if tw2 * td2 > opt1:
-            tiles_w, tiles_d = tw2, td2
+    if tw_b * td_b > tw_a * td_a:
+        tiles_w, tiles_d = tw_b, td_b
+        tile_depth_cm, tile_width_cm = eff_W, eff_L   # eff_W now runs along depth
+    else:
+        tiles_w, tiles_d = tw_a, td_a
+        tile_depth_cm, tile_width_cm = eff_L, eff_W   # eff_L runs along depth
 
     per_level = tiles_w * tiles_d * (2 if is_pair else 1)
 
@@ -324,14 +331,16 @@ def calculate_flat_loading(
         "total_area_sqm": total_area,
     }
 
-    filler = _small_kiln_filler(
-        cfg, product, tiles_w, tiles_d,
-        p["filler_size"], p["filler_coeff"],
-        p["min_space_to_fill"], p["max_filler_m2"],
-        p["tile_gap_x"],
-    )
-    if filler:
-        result["filler"] = filler
+    if p.get("filler_enabled", True):
+        filler = _small_kiln_filler(
+            cfg, product, tiles_w, tiles_d,
+            tile_depth_cm, tile_width_cm,
+            p["filler_size"], p["filler_coeff"],
+            p["min_space_to_fill"], p["max_filler_m2"],
+            p["tile_gap_x"],
+        )
+        if filler:
+            result["filler"] = filler
 
     return result
 
@@ -383,12 +392,7 @@ def calculate_edge_loading(
         return {"method": "edge", "total_pieces": 0, "total_area_sqm": 0.0,
                 "reason": "product type cannot be placed on edge"}
 
-    # Per-kiln max edge height (configurable)
-    if L > p["max_edge_height"]:
-        return {"method": "edge", "total_pieces": 0, "total_area_sqm": 0.0,
-                "reason": f"product height {L} cm > max_edge_height {p['max_edge_height']} cm for this kiln"}
-
-    # Glaze blocks edge loading
+    # Glaze blocks edge loading (regardless of orientation)
     if glaze in ("face-3-4-edges", "face-with-back"):
         return {"method": "edge", "total_pieces": 0, "total_area_sqm": 0.0,
                 "reason": "glaze coverage prevents edge loading"}
@@ -410,8 +414,28 @@ def calculate_edge_loading(
 
     pair_w = T * 2
     pairs_w = _tiles_along(eff_kw, pair_w, p["tile_gap_x"])
-    rows_d = _tiles_along(eff_kd, W, p["tile_gap_y"])
-    edge_per_level = pairs_w * 2 * rows_d
+
+    # Try both edge orientations and pick the one with maximum pieces.
+    # Normal:  tile stands on its L edge (vertical height = L, rows fit by W).
+    # Rotated: tile stands on its W edge (vertical height = W, rows fit by L).
+    # Each orientation is only valid if its vertical dimension ≤ max_edge_height.
+    rows_normal  = _tiles_along(eff_kd, W, p["tile_gap_y"]) if L <= p["max_edge_height"] else 0
+    rows_rotated = _tiles_along(eff_kd, L, p["tile_gap_y"]) if W <= p["max_edge_height"] else 0
+
+    edge_normal  = pairs_w * 2 * rows_normal
+    edge_rotated = pairs_w * 2 * rows_rotated
+
+    if edge_normal == 0 and edge_rotated == 0:
+        return {"method": "edge", "total_pieces": 0, "total_area_sqm": 0.0,
+                "reason": f"product too tall for edge loading "
+                          f"(L={L} cm, W={W} cm, limit={p['max_edge_height']} cm)"}
+
+    if edge_normal >= edge_rotated:
+        edge_per_level = edge_normal
+        vertical_dim = L   # tile height when standing on edge (normal)
+    else:
+        edge_per_level = edge_rotated
+        vertical_dim = W   # tile height when rotated
 
     if edge_per_level == 0:
         return {"method": "edge", "total_pieces": 0, "total_area_sqm": 0.0,
@@ -424,7 +448,7 @@ def calculate_edge_loading(
     flat_per_level = floor(flat_area_avail / area_pp) if area_pp > 0 else 0
     flat_per_level = min(flat_per_level, edge_per_level * 2)  # physical cap
 
-    level_h = L + p["air_gap"] + p["shelf_thickness"] + T
+    level_h = vertical_dim + p["air_gap"] + p["shelf_thickness"] + T
 
     levels = 1
     if cfg["multi_level"] and cfg["working_height"]:

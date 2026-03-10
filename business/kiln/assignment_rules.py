@@ -21,6 +21,7 @@ def get_loading_rules(db: Session, kiln_id: UUID) -> dict:
       edge_loading_allowed,
       max_edge_height_cm,           ← per-kiln configurable
       flat_on_edge_coefficient,     ← per-kiln configurable (default 0.30)
+      filler_enabled,               ← enable/disable filler tile calculation (default True)
       filler_coefficient,           ← per-kiln configurable (default 0.50)
       min_space_to_fill_cm,         ← per-kiln configurable (default 21 cm)
       max_product_width_cm,
@@ -43,6 +44,7 @@ def get_loading_rules(db: Session, kiln_id: UUID) -> dict:
         "edge_loading_allowed": True,
         "max_edge_height_cm": None,          # None → global constant applies
         "flat_on_edge_coefficient": None,    # None → global constant applies
+        "filler_enabled": True,              # disable to skip filler tile calculation
         "filler_coefficient": None,          # None → global constant applies
         "min_space_to_fill_cm": None,        # None → global constant applies
         "max_product_width_cm": None,

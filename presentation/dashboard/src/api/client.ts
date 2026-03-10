@@ -19,22 +19,36 @@ const apiClient = axios.create({
   withCredentials: true,
 });
 
-/** Read CSRF token from non-HttpOnly cookie (set by backend on login/refresh). */
-function getCsrfFromCookie(): string | null {
-  const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : null;
+/**
+ * CSRF token resolution — two sources:
+ * 1. Cookie (works for same-origin deployments, e.g. localhost)
+ * 2. sessionStorage (works for cross-origin Railway deployments where the backend
+ *    sets the cookie on its domain which JS on the frontend domain can't read;
+ *    the backend also sends X-CSRF-Token response header which we store here)
+ */
+function getCsrfToken(): string | null {
+  const fromCookie = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/)?.[1];
+  if (fromCookie) return decodeURIComponent(fromCookie);
+  return sessionStorage.getItem('csrf_token');
 }
 
 apiClient.interceptors.request.use((config) => {
   if (['post', 'put', 'patch', 'delete'].includes(config.method || '')) {
-    const csrf = getCsrfFromCookie();
+    const csrf = getCsrfToken();
     if (csrf) config.headers['X-CSRF-Token'] = csrf;
   }
   return config;
 });
 
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Store CSRF token from response header (set by backend on login/refresh).
+    // This allows cross-origin Railway deployments to work even when
+    // document.cookie can't read the backend-domain cookie.
+    const csrf = response.headers['x-csrf-token'];
+    if (csrf) sessionStorage.setItem('csrf_token', csrf);
+    return response;
+  },
   async (error) => {
     const status = error.response?.status;
     const url = error.config?.url || '';

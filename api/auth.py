@@ -110,6 +110,11 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str, 
         path="/",
         max_age=settings.JWT_ACCESS_EXPIRE_MINUTES * 60,
     )
+    # Also expose CSRF token in response header so the frontend can read it
+    # even in cross-origin Railway deployments (where document.cookie is
+    # scoped to the backend domain and JS on the frontend domain can't read it).
+    # X-CSRF-Token is in CORS expose_headers so the browser allows JS to read it.
+    response.headers["X-CSRF-Token"] = csrf_token
 
 def clear_auth_cookies(response: Response):
     response.delete_cookie("access_token", path="/")

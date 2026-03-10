@@ -55,6 +55,7 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
 
   // Configurable loading coefficients
   const [flatOnEdgeCoeff, setFlatOnEdgeCoeff] = useState(DEFAULTS.flat_on_edge_coefficient);
+  const [fillerEnabled, setFillerEnabled] = useState(true);
   const [fillerCoeff, setFillerCoeff] = useState(DEFAULTS.filler_coefficient);
   const [minSpaceToFill, setMinSpaceToFill] = useState(DEFAULTS.min_space_to_fill_cm);
 
@@ -74,6 +75,7 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
       setEdgeAllowed((r.edge_loading_allowed as boolean) ?? true);
       setMaxEdgeHeight((r.max_edge_height_cm as number) ?? DEFAULTS.max_edge_height_cm);
       setFlatOnEdgeCoeff((r.flat_on_edge_coefficient as number) ?? DEFAULTS.flat_on_edge_coefficient);
+      setFillerEnabled((r.filler_enabled as boolean) ?? true);
       setFillerCoeff((r.filler_coefficient as number) ?? DEFAULTS.filler_coefficient);
       setMinSpaceToFill((r.min_space_to_fill_cm as number) ?? DEFAULTS.min_space_to_fill_cm);
       setAllowedCollections((r.allowed_collections as string[]) || []);
@@ -88,6 +90,7 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
       setEdgeAllowed(true);
       setMaxEdgeHeight(DEFAULTS.max_edge_height_cm);
       setFlatOnEdgeCoeff(DEFAULTS.flat_on_edge_coefficient);
+      setFillerEnabled(true);
       setFillerCoeff(DEFAULTS.filler_coefficient);
       setMinSpaceToFill(DEFAULTS.min_space_to_fill_cm);
       setAllowedCollections([]);
@@ -119,6 +122,7 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
       edge_loading_allowed: edgeAllowed,
       max_edge_height_cm: maxEdgeHeight,
       flat_on_edge_coefficient: flatOnEdgeCoeff,
+      filler_enabled: fillerEnabled,
       filler_coefficient: fillerCoeff,
       min_space_to_fill_cm: minSpaceToFill,
       allowed_collections: allowedCollections,
@@ -140,9 +144,19 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
       }
       onClose();
     } catch (err: unknown) {
-      const resp = (err as { response?: { data?: { detail?: string } } })
-        ?.response?.data;
-      setSubmitError(resp?.detail || 'Failed to save loading rules');
+      const data = (err as { response?: { data?: unknown } })?.response?.data;
+      let msg = 'Failed to save loading rules';
+      if (data && typeof data === 'object') {
+        const detail = (data as { detail?: unknown }).detail;
+        if (typeof detail === 'string') {
+          msg = detail;
+        } else if (Array.isArray(detail)) {
+          msg = detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ') || msg;
+        }
+      } else if (typeof data === 'string' && data.length < 200) {
+        msg = data;
+      }
+      setSubmitError(msg);
     }
   };
 
@@ -283,27 +297,35 @@ export function LoadingRulesDialog({ open, onClose, kiln }: Props) {
           <label className="mb-2 block text-sm font-semibold text-gray-700">
             Filler Tiles (leftover space)
           </label>
-          <p className="mb-3 text-xs text-gray-500">
-            When free shelf space exceeds the threshold, it is filled with 10×10 tiles on edge.
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="Min space to fill (cm)"
-              type="number"
-              step="1"
-              value={minSpaceToFill}
-              onChange={(e) => setMinSpaceToFill(Number(e.target.value))}
+          <label className="mb-3 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={fillerEnabled}
+              onChange={(e) => setFillerEnabled(e.target.checked)}
+              className="rounded border-gray-300"
             />
-            <Input
-              label="Filler load factor"
-              type="number"
-              step="0.05"
-              min="0"
-              max="1"
-              value={fillerCoeff}
-              onChange={(e) => setFillerCoeff(Number(e.target.value))}
-            />
-          </div>
+            Fill leftover shelf space with 10×10 tiles on edge
+          </label>
+          {fillerEnabled && (
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Min space to fill (cm)"
+                type="number"
+                step="1"
+                value={minSpaceToFill}
+                onChange={(e) => setMinSpaceToFill(Number(e.target.value))}
+              />
+              <Input
+                label="Filler load factor"
+                type="number"
+                step="0.05"
+                min="0"
+                max="1"
+                value={fillerCoeff}
+                onChange={(e) => setFillerCoeff(Number(e.target.value))}
+              />
+            </div>
+          )}
         </div>
 
         {/* Allowed collections */}

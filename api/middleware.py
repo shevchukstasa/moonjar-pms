@@ -10,7 +10,6 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from api.auth import validate_csrf
 from api.config import get_settings
 
 settings = get_settings()
@@ -41,9 +40,18 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method in ("POST", "PATCH", "PUT", "DELETE"):
             if not request.url.path.startswith(self.SKIP_PREFIXES):
-                validate_csrf(request)
-        response = await call_next(request)
-        return response
+                csrf_cookie = request.cookies.get("csrf_token")
+                csrf_header = request.headers.get("X-CSRF-Token")
+                if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+                    # Return JSON directly — do NOT raise HTTPException here.
+                    # Raising inside BaseHTTPMiddleware bypasses ExceptionMiddleware
+                    # (it's inner) and hits ServerErrorMiddleware (outer) which
+                    # returns a plain-text 500, not a JSON 403.
+                    return JSONResponse(
+                        {"detail": "CSRF token mismatch"},
+                        status_code=403,
+                    )
+        return await call_next(request)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):

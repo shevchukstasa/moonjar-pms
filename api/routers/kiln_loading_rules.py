@@ -45,6 +45,18 @@ async def create_kiln_loading_rules_item(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
+    # UPSERT: if a rule already exists for this kiln (e.g. stale frontend cache
+    # sent POST instead of PATCH), update it rather than failing with a
+    # UniqueConstraint violation which would produce an unhandled 500.
+    existing = db.query(KilnLoadingRule).filter(
+        KilnLoadingRule.kiln_id == data.kiln_id
+    ).first()
+    if existing:
+        if data.rules is not None:
+            existing.rules = data.rules
+        db.commit()
+        db.refresh(existing)
+        return existing
     item = KilnLoadingRule(**data.model_dump())
     db.add(item)
     db.commit()

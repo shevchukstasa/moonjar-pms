@@ -20,6 +20,15 @@ const SECTION_TABS = [
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const positionColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
+  {
+    key: 'position_label',
+    header: '#',
+    render: (item) => (
+      <span className="font-mono text-xs font-semibold text-gray-700">
+        {item.position_label ?? (item.position_number != null ? `#${item.position_number}` : '—')}
+      </span>
+    ),
+  },
   { key: 'order_number', header: 'Order' },
   { key: 'color', header: 'Color' },
   { key: 'size', header: 'Size' },

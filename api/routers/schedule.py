@@ -83,11 +83,22 @@ def _serialize_batch(b, db: Session) -> dict:
     }
 
 
+def _position_label_brief(p) -> str | None:
+    """Compute #N or #N.M label from position_number + split_index."""
+    num = getattr(p, "position_number", None)
+    idx = getattr(p, "split_index", None)
+    if num is None:
+        return None
+    return f"#{num}.{idx}" if idx is not None else f"#{num}"
+
+
 def _serialize_position_brief(p) -> dict:
     return {
         "id": str(p.id),
         "order_id": str(p.order_id),
         "order_number": p.order.order_number if p.order else "",
+        "client": p.order.client if p.order else None,
+        "final_deadline": str(p.order.final_deadline) if p.order and p.order.final_deadline else None,
         "status": _ev(p.status),
         "color": p.color,
         "size": p.size,
@@ -96,6 +107,10 @@ def _serialize_position_brief(p) -> dict:
         "delay_hours": float(p.delay_hours) if p.delay_hours else 0,
         "priority_order": p.priority_order,
         "batch_id": str(p.batch_id) if p.batch_id else None,
+        # Position numbering — for display in schedule and tablo
+        "position_number": getattr(p, "position_number", None),
+        "split_index": getattr(p, "split_index", None),
+        "position_label": _position_label_brief(p),
     }
 
 

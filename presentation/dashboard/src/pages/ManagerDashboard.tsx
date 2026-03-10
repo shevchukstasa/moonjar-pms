@@ -168,9 +168,47 @@ export default function ManagerDashboard() {
     { key: 'order_number', header: 'Order #' },
     { key: 'client', header: 'Client' },
     {
+      key: 'sales_manager_name',
+      header: 'Manager',
+      render: (item) => item.sales_manager_name
+        ? <span className="text-sm text-gray-700">{item.sales_manager_name}</span>
+        : <span className="text-gray-400">&mdash;</span>,
+    },
+    {
+      key: 'created_at',
+      header: 'Received',
+      render: (item) => item.created_at
+        ? (
+          <span className="text-sm text-gray-600">
+            {new Date(item.created_at).toLocaleDateString()}{' '}
+            <span className="text-gray-400 text-xs">
+              {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </span>
+        )
+        : <span className="text-gray-400">&mdash;</span>,
+    },
+    {
       key: 'final_deadline',
       header: 'Deadline',
-      render: (item) => item.final_deadline ? new Date(item.final_deadline).toLocaleDateString() : '\u2014',
+      render: (item) => {
+        if (!item.final_deadline) return <span className="text-gray-400">&mdash;</span>;
+        const daysLeft = item.days_remaining;
+        const color = daysLeft == null ? 'text-gray-600'
+          : daysLeft < 0 ? 'text-red-600 font-semibold'
+          : daysLeft <= 3 ? 'text-orange-500 font-medium'
+          : 'text-gray-700';
+        return (
+          <span className={`text-sm ${color}`}>
+            {new Date(item.final_deadline).toLocaleDateString()}
+            {daysLeft != null && (
+              <span className="ml-1 text-xs font-normal text-gray-400">
+                ({daysLeft < 0 ? `${Math.abs(daysLeft)}d late` : `${daysLeft}d`})
+              </span>
+            )}
+          </span>
+        );
+      },
     },
     {
       key: 'status',
@@ -537,6 +575,16 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
       key: 'priority',
       header: 'Priority',
       render: (item) => <span className="text-sm">{item.priority ?? '\u2014'}</span>,
+    },
+    {
+      key: 'created_at',
+      header: 'Created',
+      render: (item) => item.created_at ? (
+        <span className="text-xs text-gray-500">
+          {new Date(item.created_at).toLocaleDateString()}{' '}
+          {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </span>
+      ) : <span className="text-gray-400">&mdash;</span>,
     },
     {
       key: 'due_at',

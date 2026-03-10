@@ -26,7 +26,12 @@ async def list_reconciliations(
         query = query.filter(InventoryReconciliation.factory_id == factory_id)
     total = query.count()
     items = query.offset((page - 1) * per_page).limit(per_page).all()
-    return {"items": items, "total": total, "page": page, "per_page": per_page}
+    return {
+        "items": [InventoryReconciliationResponse.model_validate(item).model_dump(mode="json") for item in items],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 @router.get("/{item_id}", response_model=InventoryReconciliationResponse)

@@ -245,16 +245,41 @@ async def delete_kiln(
     if not kiln:
         raise HTTPException(404, "Kiln not found")
 
-    # Check for active batches
     from api.models import Batch
+    from api.enums import BatchStatus
+
+    # BatchStatus values: suggested | planned | in_progress | done  (no "completed"/"cancelled")
+    # Non-terminal = anything that is NOT done
+    non_done_statuses = [BatchStatus.SUGGESTED, BatchStatus.PLANNED, BatchStatus.IN_PROGRESS]
     active_batches = db.query(Batch).filter(
         Batch.resource_id == kiln_id,
-        Batch.status.notin_(["completed", "cancelled"]),
+        Batch.status.in_(non_done_statuses),
     ).count()
     if active_batches > 0:
         raise HTTPException(
-            409, f"Cannot delete kiln with {active_batches} active batch(es). Complete or cancel them first."
+            409,
+            f"Cannot delete kiln: {active_batches} active batch(es) are in progress. "
+            "Complete or reassign them first.",
         )
 
-    db.delete(kiln)
-    db.commit()
+    # Even done batches reference the kiln via FK — deleting the kiln would
+    # violate the constraint.  Prefer setting status to 'inactive' for kilns
+    # with historical data.
+    historical_batches = db.query(Batch).filter(Batch.resource_id == kiln_id).count()
+    if historical_batches > 0:
+        raise HTTPException(
+            409,
+            f"Cannot delete kiln: {historical_batches} historical batch record(s) still reference it. "
+            "Set the kiln status to 'inactive' instead of deleting.",
+        )
+
+    try:
+        db.delete(kiln)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            409,
+            "Cannot delete kiln: other records still reference it. "
+            "Set the kiln status to 'inactive' instead of deleting.",
+        )

@@ -45,7 +45,7 @@ async def list_notifications(
     )
 
     return {
-        "items": [NotificationResponse.model_validate(n) for n in items],
+        "items": [NotificationResponse.model_validate(n).model_dump(mode="json") for n in items],
         "total": total,
         "unread_count": unread_count,
         "page": page,

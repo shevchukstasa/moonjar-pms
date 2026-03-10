@@ -23,7 +23,12 @@ async def list_kiln_firing_schedules(
     query = db.query(KilnFiringSchedule)
     total = query.count()
     items = query.offset((page - 1) * per_page).limit(per_page).all()
-    return {"items": items, "total": total, "page": page, "per_page": per_page}
+    return {
+        "items": [KilnFiringScheduleResponse.model_validate(item).model_dump(mode="json") for item in items],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 @router.get("/{item_id}", response_model=KilnFiringScheduleResponse)

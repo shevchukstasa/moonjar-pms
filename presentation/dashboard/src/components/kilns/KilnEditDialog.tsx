@@ -102,8 +102,21 @@ export function KilnEditDialog({ open, onClose, kiln }: Props) {
       await deleteKiln.mutateAsync(kiln.id);
       onClose();
     } catch (err: unknown) {
-      const resp = (err as { response?: { data?: { detail?: string } } })?.response?.data;
-      setSubmitError(resp?.detail || 'Failed to delete kiln');
+      // Axios errors carry response.data; network/CORS errors don't have response.
+      const axiosErr = err as { response?: { data?: unknown }; message?: string };
+      const data = axiosErr?.response?.data;
+      let msg = 'Failed to delete kiln';
+      if (data && typeof data === 'object' && 'detail' in data) {
+        const detail = (data as Record<string, unknown>).detail;
+        msg = Array.isArray(detail)
+          ? detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('; ') || msg
+          : String(detail) || msg;
+      } else if (typeof data === 'string' && data) {
+        msg = data;
+      } else if (axiosErr?.message && axiosErr.message !== 'Network Error') {
+        msg = axiosErr.message;
+      }
+      setSubmitError(msg);
       setConfirmDelete(false);
     }
   };

@@ -41,7 +41,12 @@ async def list_firing_profiles(
     items = query.order_by(FiringProfile.match_priority.desc()).offset(
         (page - 1) * per_page
     ).limit(per_page).all()
-    return {"items": items, "total": total, "page": page, "per_page": per_page}
+    return {
+        "items": [FiringProfileResponse.model_validate(item).model_dump(mode="json") for item in items],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 @router.get("/{item_id}", response_model=FiringProfileResponse)

@@ -37,6 +37,32 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         "/api/ws",
     )
 
+    def _cors_headers(self, request: Request) -> dict:
+        """
+        Build minimal CORS headers for early-return responses.
+
+        CORSMiddleware sits INSIDE CSRFMiddleware in the middleware stack
+        (add_middleware stacks in reverse: last-added = outermost).
+        When CSRFMiddleware returns a response without calling call_next,
+        CORSMiddleware is never invoked — so the response has no
+        Access-Control-Allow-Origin and the browser blocks it as a CORS error.
+        JS then sees error.response = null → generic fallback message.
+
+        We replicate the minimal CORS headers here so the browser lets JS
+        read the actual 403 error body.
+        """
+        origin = request.headers.get("origin", "")
+        if not origin:
+            return {}
+        allowed = settings.cors_origins_list
+        if origin in allowed or "*" in allowed:
+            return {
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Expose-Headers": "X-CSRF-Token",
+            }
+        return {}
+
     async def dispatch(self, request: Request, call_next):
         if request.method in ("POST", "PATCH", "PUT", "DELETE"):
             if not request.url.path.startswith(self.SKIP_PREFIXES):
@@ -47,11 +73,27 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     # Raising inside BaseHTTPMiddleware bypasses ExceptionMiddleware
                     # (it's inner) and hits ServerErrorMiddleware (outer) which
                     # returns a plain-text 500, not a JSON 403.
+                    # Add CORS headers manually (CORSMiddleware is inner → bypassed).
                     return JSONResponse(
                         {"detail": "CSRF token mismatch"},
                         status_code=403,
+                        headers=self._cors_headers(request),
                     )
-        return await call_next(request)
+
+        response = await call_next(request)
+
+        # Echo X-CSRF-Token on every successful response so the frontend can
+        # populate sessionStorage from any request (GET included).
+        # This solves the cross-origin Railway case: the csrf_token cookie is
+        # set on the backend domain, JS on the frontend domain cannot read it
+        # via document.cookie, but the backend CAN read it from the request
+        # and echo it here — giving the frontend a token before its first
+        # mutating request.
+        csrf_token = request.cookies.get("csrf_token")
+        if csrf_token and "X-CSRF-Token" not in response.headers:
+            response.headers["X-CSRF-Token"] = csrf_token
+
+        return response
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):

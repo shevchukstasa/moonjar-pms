@@ -105,6 +105,9 @@ def _ensure_schema():
             ("factories", "served_locations JSONB"),
             ("batches", "firing_profile_id UUID"),
             ("batches", "target_temperature INTEGER"),
+            # Position numbering — sequential per order
+            ("order_positions", "position_number INTEGER"),
+            ("order_positions", "split_index INTEGER"),
         ]
         for table, col_def in add_cols:
             try:
@@ -119,6 +122,37 @@ def _ensure_schema():
                 logger.warning(f"_ensure_schema: skip {table}.{col_def.split()[0]}: {e}")
 
     _run_section("columns", _add_columns)
+
+    # --- Section 1b: Backfill position_number / split_index for existing rows ---
+    def _backfill_position_numbers(conn):
+        # Root positions: assign sequential numbers within each order by created_at
+        conn.execute(text("""
+            UPDATE order_positions op
+            SET position_number = sub.rn
+            FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY created_at, id) AS rn
+                FROM order_positions
+                WHERE parent_position_id IS NULL
+            ) sub
+            WHERE op.id = sub.id
+              AND op.position_number IS NULL
+        """))
+        # Split sub-positions: assign sequential split_index within each parent
+        conn.execute(text("""
+            UPDATE order_positions op
+            SET split_index = sub.rn
+            FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (PARTITION BY parent_position_id ORDER BY created_at, id) AS rn
+                FROM order_positions
+                WHERE parent_position_id IS NOT NULL
+            ) sub
+            WHERE op.id = sub.id
+              AND op.split_index IS NULL
+        """))
+
+    _run_section("position_numbers_backfill", _backfill_position_numbers)
 
     # --- Section 2: Missing tables ---
     def _create_tables(conn):

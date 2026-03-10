@@ -475,6 +475,12 @@ class OrderPosition(Base):
     is_merged = Column(sa.Boolean, nullable=False, default=False)
     priority_order = Column(sa.Integer, default=0)
     firing_round = Column(sa.Integer, nullable=False, default=1)
+    # Human-readable position numbering within the order:
+    #   position_number — sequential integer for root positions (1, 2, 3, …)
+    #   split_index     — NULL for roots; 1, 2, 3 for split sub-positions
+    # Display: root → "#3", sub → "#3.1"
+    position_number = Column(sa.Integer, nullable=True)
+    split_index = Column(sa.Integer, nullable=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 

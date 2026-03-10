@@ -846,6 +846,14 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
         else:
             initial_status = PositionStatus.PLANNED
 
+        # Compute next position_number for this order (sequential within order)
+        from sqlalchemy import func as _func
+        _max_pn = db.query(_func.max(OrderPosition.position_number)).filter(
+            OrderPosition.order_id == order.id,
+            OrderPosition.parent_position_id.is_(None),
+        ).scalar()
+        _next_pn = (_max_pn or 0) + 1
+
         position = OrderPosition(
             id=uuid_mod.uuid4(),
             order_id=order.id,
@@ -865,6 +873,7 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
             product_type=item_data.get("product_type", "tile"),
             thickness_mm=thickness_mm,
             mandatory_qc=order_data.get("mandatory_qc", False),
+            position_number=_next_pn,
         )
         db.add(position)
         db.flush()

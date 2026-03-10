@@ -15,6 +15,9 @@ export interface PositionItem {
   delay_hours: number;
   priority_order: number;
   batch_id: string | null;
+  position_number?: number | null;
+  split_index?: number | null;
+  position_label?: string | null;
 }
 
 interface Props {
@@ -63,7 +66,14 @@ export function PositionRow({ position, index, section }: Props) {
           ⠿
         </button>
       </td>
-      <td className="px-3 py-2 text-xs text-gray-400">{index + 1}</td>
+      <td className="px-3 py-2 text-xs font-mono font-semibold text-gray-700">
+        {position.position_label
+          ?? (position.position_number != null
+            ? (position.split_index != null
+              ? `#${position.position_number}.${position.split_index}`
+              : `#${position.position_number}`)
+            : `#${index + 1}`)}
+      </td>
       <td className="px-3 py-2 text-sm font-medium text-gray-900">{position.order_number}</td>
       <td className="px-3 py-2 text-sm">{position.color}</td>
       <td className="px-3 py-2 text-sm">{position.size}</td>

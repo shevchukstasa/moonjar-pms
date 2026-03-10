@@ -30,6 +30,36 @@ def _ev(val):
     return val.value if hasattr(val, "value") else str(val) if val else None
 
 
+def _next_position_number(db: Session, order_id) -> int:
+    """Return the next sequential position_number for a root position in this order."""
+    from sqlalchemy import func
+    result = db.query(func.max(OrderPosition.position_number)).filter(
+        OrderPosition.order_id == order_id,
+        OrderPosition.parent_position_id.is_(None),
+    ).scalar()
+    return (result or 0) + 1
+
+
+def _next_split_index(db: Session, parent_position_id) -> int:
+    """Return the next sequential split_index for a sub-position under this parent."""
+    from sqlalchemy import func
+    result = db.query(func.max(OrderPosition.split_index)).filter(
+        OrderPosition.parent_position_id == parent_position_id,
+    ).scalar()
+    return (result or 0) + 1
+
+
+def position_label(p) -> str:
+    """Human-readable label: '#3' for root, '#3.1' for split sub-position."""
+    num = getattr(p, 'position_number', None)
+    idx = getattr(p, 'split_index', None)
+    if num is None:
+        return '—'
+    if idx is not None:
+        return f'#{num}.{idx}'
+    return f'#{num}'
+
+
 def _recalculate_order_status(db: Session, order_id) -> tuple:
     """Recalculate order status based on main position statuses (excluding sub-positions).
 
@@ -124,6 +154,9 @@ def _serialize_position(p) -> dict:
         "order_id": str(p.order_id),
         "order_item_id": str(p.order_item_id),
         "parent_position_id": str(p.parent_position_id) if p.parent_position_id else None,
+        "position_number": p.position_number,
+        "split_index": p.split_index,
+        "position_label": position_label(p),
         "factory_id": str(p.factory_id),
         "status": _ev(p.status),
         "batch_id": str(p.batch_id) if p.batch_id else None,
@@ -379,6 +412,15 @@ async def split_position(
     grinding_record = None
     defect_record = None
 
+    # Split-index counter: sub-positions share parent's position_number,
+    # and get sequential split_index values (1, 2, 3, …).
+    _base_si = _next_split_index(db, p.id) - 1  # will be incremented before each use
+
+    def _si():
+        nonlocal _base_si
+        _base_si += 1
+        return _base_si
+
     # 1. Update parent — good quantity, mark as packed
     p.quantity = data.good_quantity
     p.status = PositionStatus.PACKED
@@ -408,6 +450,8 @@ async def split_position(
             mandatory_qc=p.mandatory_qc,
             split_category=SplitCategory.REPAIR,
             priority_order=p.priority_order,
+            position_number=p.position_number,
+            split_index=_si(),
             created_at=now,
             updated_at=now,
         )
@@ -454,6 +498,8 @@ async def split_position(
             mandatory_qc=p.mandatory_qc,
             split_category=SplitCategory.COLOR_MISMATCH,
             priority_order=p.priority_order,
+            position_number=p.position_number,
+            split_index=_si(),
             created_at=now,
             updated_at=now,
         )

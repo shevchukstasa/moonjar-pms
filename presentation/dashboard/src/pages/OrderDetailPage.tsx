@@ -68,6 +68,17 @@ export default function OrderDetailPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const positionColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
+    {
+      key: 'position_label',
+      header: '#',
+      render: (p) => (
+        <span className="font-mono text-xs font-semibold text-gray-700">
+          {p.position_label ?? (p.position_number != null
+            ? (p.split_index != null ? `#${p.position_number}.${p.split_index}` : `#${p.position_number}`)
+            : '—')}
+        </span>
+      ),
+    },
     { key: 'color', header: 'Color' },
     { key: 'size', header: 'Size' },
     { key: 'quantity', header: 'Qty' },

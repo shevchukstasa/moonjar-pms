@@ -265,6 +265,14 @@ async def create_order(
         db.add(item)
         db.flush()
 
+        # Compute next position_number for this order (sequential within order)
+        from sqlalchemy import func as _func
+        _max_pn = db.query(_func.max(OrderPosition.position_number)).filter(
+            OrderPosition.order_id == order.id,
+            OrderPosition.parent_position_id.is_(None),
+        ).scalar()
+        _next_pn = (_max_pn or 0) + 1
+
         position = OrderPosition(
             order_id=order.id, order_item_id=item.id,
             factory_id=UUID(data.factory_id),
@@ -282,6 +290,7 @@ async def create_order(
             product_type=item_data.product_type,
             thickness_mm=item_data.thickness,
             mandatory_qc=data.mandatory_qc,
+            position_number=_next_pn,
         )
         db.add(position)
         db.flush()

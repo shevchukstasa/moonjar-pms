@@ -217,6 +217,13 @@ async def get_production_status(
         "estimated_completion_date": str(order.schedule_deadline) if order.schedule_deadline else None,
         "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
         "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+        # Cancellation request state — so Sales app knows current decision state
+        "cancellation_requested": getattr(order, "cancellation_requested", False) or False,
+        "cancellation_decision": getattr(order, "cancellation_decision", None),
+        "cancellation_requested_at": (
+            order.cancellation_requested_at.isoformat()
+            if getattr(order, "cancellation_requested_at", None) else None
+        ),
     }
 
 
@@ -368,14 +375,28 @@ async def request_cancellation(
 
     # --- Guard: duplicate request ---
     if order.cancellation_requested and order.cancellation_decision == "pending":
-        # Idempotent: Sales can safely retry
-        return {"message": "Cancellation requested"}
+        # Idempotent: Sales can safely retry — already pending PM review
+        logger.info(
+            "Cancellation already pending for order %s (external_id=%s) — idempotent return",
+            order.order_number, external_id,
+        )
+        return {
+            "message": "Cancellation requested",
+            "cancellation_decision": "pending",
+            "order_id": str(order.id),
+            "order_status": _ev(order.status),
+        }
 
     # --- Mark cancellation requested ---
+    prev_decision = order.cancellation_decision  # log for debugging
     order.cancellation_requested = True
     order.cancellation_requested_at = datetime.now(tz.utc)
     order.cancellation_decision = "pending"
     order.updated_at = datetime.now(tz.utc)
+    logger.info(
+        "Cancellation request created for order %s (external_id=%s), prev_decision=%s",
+        order.order_number, external_id, prev_decision,
+    )
 
     # --- Notify all PMs for the factory ---
     pm_users = (
@@ -407,10 +428,15 @@ async def request_cancellation(
 
     db.commit()
     logger.info(
-        "Cancellation requested for order %s (external_id=%s) by Sales App",
-        order.order_number, external_id,
+        "Cancellation requested for order %s (external_id=%s) by Sales App, notified %d PM(s)",
+        order.order_number, external_id, len(pm_users),
     )
-    return {"message": "Cancellation requested"}
+    return {
+        "message": "Cancellation requested",
+        "cancellation_decision": "pending",
+        "order_id": str(order.id),
+        "order_status": _ev(order.status),
+    }
 
 
 # ---------- Incoming Webhook (from Sales) ----------
@@ -626,24 +652,96 @@ async def receive_sales_order(
             raise HTTPException(422, f"Failed to process order: {e}")
 
     elif event_type == "order_cancel":
+        # Sales requests cancellation — route through PM review (same as /request-cancellation).
+        # We do NOT auto-cancel: PM must approve or reject.
         ext_id = order_data.get("external_id")
         order = db.query(ProductionOrder).filter(
             ProductionOrder.external_id == ext_id,
             ProductionOrder.source == OrderSource.SALES_WEBHOOK,
         ).first()
-        if order:
-            order.status = OrderStatus.CANCELLED
-            order.updated_at = datetime.now(timezone.utc)
-            db.query(OrderPosition).filter(
-                OrderPosition.order_id == order.id,
-            ).update({"status": PositionStatus.CANCELLED})
-            event.processed = True
-            db.commit()
-            return {"status": "cancelled", "order_id": str(order.id)}
-        else:
+        if not order:
             event.error_message = f"Order not found: {ext_id}"
             db.commit()
+            logger.warning("order_cancel webhook: order not found for external_id=%s", ext_id)
             return {"status": "not_found"}
+
+        if _ev(order.status) == "cancelled":
+            # Already cancelled — idempotent
+            event.processed = True
+            db.commit()
+            return {"status": "already_cancelled", "order_id": str(order.id)}
+
+        if order.cancellation_requested and order.cancellation_decision == "pending":
+            # Already pending PM review — idempotent
+            event.processed = True
+            db.commit()
+            logger.info(
+                "order_cancel webhook: cancellation already pending for order %s (external_id=%s)",
+                order.order_number, ext_id,
+            )
+            return {
+                "status": "cancellation_pending_review",
+                "order_id": str(order.id),
+                "message": "Cancellation request is pending PM review",
+            }
+
+        # Create cancellation request → PM must decide
+        try:
+            from api.models import Notification, User, UserFactory
+            from api.enums import NotificationType, RelatedEntityType, UserRole
+
+            order.cancellation_requested = True
+            order.cancellation_requested_at = datetime.now(timezone.utc)
+            order.cancellation_decision = "pending"
+            order.updated_at = datetime.now(timezone.utc)
+
+            # Notify all PMs for the factory
+            pm_users = (
+                db.query(User)
+                .join(UserFactory, UserFactory.user_id == User.id)
+                .filter(
+                    UserFactory.factory_id == order.factory_id,
+                    User.role == UserRole.PRODUCTION_MANAGER.value,
+                    User.is_active.is_(True),
+                )
+                .all()
+            )
+            for pm in pm_users:
+                notif = Notification(
+                    user_id=pm.id,
+                    factory_id=order.factory_id,
+                    type=NotificationType.CANCELLATION_REQUEST,
+                    title=f"Cancellation request: {order.order_number}",
+                    message=(
+                        f"Sales app requested cancellation of order {order.order_number}"
+                        + (f" (client: {order.client})" if order.client else "")
+                        + f". Current status: {_ev(order.status)}. "
+                        "Review the request in the dashboard."
+                    ),
+                    related_entity_type=RelatedEntityType.ORDER,
+                    related_entity_id=order.id,
+                )
+                db.add(notif)
+
+            event.processed = True
+            db.commit()
+            logger.info(
+                "order_cancel webhook: cancellation request created for order %s (external_id=%s), "
+                "notified %d PM(s)",
+                order.order_number, ext_id, len(pm_users),
+            )
+            return {
+                "status": "cancellation_requested",
+                "order_id": str(order.id),
+                "message": "Cancellation request sent to PM for review",
+            }
+        except Exception as e:
+            db.rollback()
+            logger.error("order_cancel webhook: failed to create cancellation request for %s: %s", ext_id, e)
+            event.error_message = str(e)
+            db.add(event)
+            db.commit()
+            raise HTTPException(422, f"Failed to create cancellation request: {e}")
 
     else:
         event.processed = True

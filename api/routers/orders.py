@@ -89,6 +89,17 @@ def _order_list_item(order, pos_count: int, pos_ready: int) -> dict:
     }
 
 
+def _position_label(p) -> str:
+    """Compute display label like #3 or #3.1 from position_number + split_index."""
+    num = getattr(p, "position_number", None)
+    idx = getattr(p, "split_index", None)
+    if num is None:
+        return None  # frontend falls back to index
+    if idx is not None:
+        return f"#{num}.{idx}"
+    return f"#{num}"
+
+
 def _order_detail(order, db: Session) -> dict:
     items = db.query(ProductionOrderItem).filter(
         ProductionOrderItem.order_id == order.id
@@ -112,13 +123,24 @@ def _order_detail(order, db: Session) -> dict:
         "schedule_deadline": str(order.schedule_deadline) if order.schedule_deadline else None,
         "desired_delivery_date": str(order.desired_delivery_date) if order.desired_delivery_date else None,
         "status": _ev(order.status),
-        "status_override": order.status_override,
+        "status_override": getattr(order, "status_override", None),
         "source": _ev(order.source),
         "mandatory_qc": order.mandatory_qc,
         "notes": order.notes,
         "days_remaining": (order.final_deadline - date.today()).days if order.final_deadline else None,
         "created_at": order.created_at.isoformat() if order.created_at else None,
         "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+        # Cancellation request state — exposed so Sales/frontend can check current state
+        "cancellation_requested": getattr(order, "cancellation_requested", False) or False,
+        "cancellation_decision": getattr(order, "cancellation_decision", None),
+        "cancellation_requested_at": (
+            order.cancellation_requested_at.isoformat()
+            if getattr(order, "cancellation_requested_at", None) else None
+        ),
+        "cancellation_decided_at": (
+            order.cancellation_decided_at.isoformat()
+            if getattr(order, "cancellation_decided_at", None) else None
+        ),
         "items": [
             {
                 "id": str(it.id),
@@ -137,7 +159,7 @@ def _order_detail(order, db: Session) -> dict:
         "positions": [
             {
                 "id": str(p.id),
-                "order_item_id": str(p.order_item_id),
+                "order_item_id": str(p.order_item_id) if p.order_item_id else None,
                 "status": _ev(p.status),
                 "batch_id": str(p.batch_id) if p.batch_id else None,
                 "resource_id": str(p.resource_id) if p.resource_id else None,
@@ -150,6 +172,10 @@ def _order_detail(order, db: Session) -> dict:
                 "delay_hours": float(p.delay_hours) if p.delay_hours else 0,
                 "mandatory_qc": p.mandatory_qc,
                 "priority_order": p.priority_order,
+                # Position numbering fields (added for display)
+                "position_number": getattr(p, "position_number", None),
+                "split_index": getattr(p, "split_index", None),
+                "position_label": _position_label(p),
                 "created_at": p.created_at.isoformat() if p.created_at else None,
             }
             for p in positions
@@ -160,7 +186,39 @@ def _order_detail(order, db: Session) -> dict:
     }
 
 
+# --- Endpoint helpers (avoid duplication between GET and moved static routes) ---
+
+def _stage_map_label(status_str: str) -> str:
+    _map = {
+        'planned': 'Planning', 'insufficient_materials': 'Planning',
+        'awaiting_recipe': 'Planning', 'awaiting_stencil_silkscreen': 'Planning',
+        'awaiting_color_matching': 'Planning',
+        'engobe_applied': 'Glazing', 'engobe_check': 'Glazing',
+        'glazed': 'Glazing', 'pre_kiln_check': 'Glazing', 'sent_to_glazing': 'Glazing',
+        'in_kiln': 'Firing', 'fired': 'Fired',
+        'sorting': 'Sorting', 'packing': 'Packing',
+        'ready_for_shipment': 'Ready', 'shipped': 'Shipped',
+    }
+    return _map.get(status_str, status_str.replace("_", " ").title())
+
+
+def _order_queue_summary(order, db: Session) -> dict:
+    """Shared position summary used by cancellation-requests and change-requests list."""
+    positions = db.query(OrderPosition).filter(OrderPosition.order_id == order.id).all()
+    pos_count = len(positions)
+    pos_ready = sum(1 for p in positions if _ev(p.status) in ("ready_for_shipment", "shipped"))
+    if positions:
+        statuses = [_ev(p.status) for p in positions]
+        most_common = max(set(statuses), key=statuses.count)
+        current_stage = _stage_map_label(most_common)
+    else:
+        current_stage = "No positions"
+    return {"pos_count": pos_count, "pos_ready": pos_ready, "current_stage": current_stage}
+
+
 # --- Endpoints ---
+# IMPORTANT: Static paths (/cancellation-requests, /change-requests) MUST be declared
+# BEFORE parameterized paths (/{order_id}) to avoid route shadowing in Starlette.
 
 @router.get("")
 async def list_orders(
@@ -210,6 +268,102 @@ async def list_orders(
         items.append(_order_list_item(o, pc, pr))
 
     return {"items": items, "total": total, "page": page, "per_page": per_page}
+
+
+@router.get("/cancellation-requests")
+async def list_cancellation_requests_v2(
+    factory_id: UUID | None = None,
+    decision: str = Query("pending", description="Filter by decision: pending|accepted|rejected|all"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """List orders with pending (or all) cancellation requests. PM dashboard uses this.
+    Declared before /{order_id} to avoid route shadowing.
+    """
+    query = db.query(ProductionOrder).filter(
+        ProductionOrder.cancellation_requested.is_(True)
+    )
+    if decision != "all":
+        query = query.filter(ProductionOrder.cancellation_decision == decision)
+
+    query = apply_factory_filter(query, current_user, factory_id, ProductionOrder)
+    orders = query.order_by(ProductionOrder.cancellation_requested_at.desc()).all()
+
+    results = []
+    for order in orders:
+        summary = _order_queue_summary(order, db)
+        results.append({
+            "id": str(order.id),
+            "order_number": order.order_number,
+            "client": order.client,
+            "client_location": order.client_location,
+            "factory_id": str(order.factory_id),
+            "factory_name": order.factory.name if order.factory else "",
+            "status": _ev(order.status),
+            "current_stage": summary["current_stage"],
+            "positions_count": summary["pos_count"],
+            "positions_ready": summary["pos_ready"],
+            "final_deadline": str(order.final_deadline) if order.final_deadline else None,
+            "external_id": order.external_id,
+            "cancellation_requested_at": (
+                order.cancellation_requested_at.isoformat()
+                if order.cancellation_requested_at else None
+            ),
+            "cancellation_decision": order.cancellation_decision,
+            "cancellation_decided_at": (
+                order.cancellation_decided_at.isoformat()
+                if getattr(order, "cancellation_decided_at", None) else None
+            ),
+        })
+    return {"items": results, "total": len(results)}
+
+
+@router.get("/change-requests")
+async def list_change_requests_v2(
+    factory_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """List orders with pending change requests from Sales. PM dashboard uses this.
+    Declared before /{order_id} to avoid route shadowing.
+    """
+    query = db.query(ProductionOrder).filter(
+        ProductionOrder.change_req_status == "pending"
+    )
+    query = apply_factory_filter(query, current_user, factory_id, ProductionOrder)
+    orders = query.order_by(ProductionOrder.change_req_requested_at.desc()).all()
+
+    results = []
+    for order in orders:
+        summary = _order_queue_summary(order, db)
+        payload = order.change_req_payload or {}
+        change_summary = {
+            field: payload[field]
+            for field in ("client", "final_deadline", "desired_delivery_date", "notes", "items")
+            if field in payload
+        }
+        results.append({
+            "id": str(order.id),
+            "order_number": order.order_number,
+            "client": order.client,
+            "client_location": order.client_location,
+            "factory_id": str(order.factory_id),
+            "factory_name": order.factory.name if order.factory else "",
+            "status": _ev(order.status),
+            "current_stage": summary["current_stage"],
+            "positions_count": summary["pos_count"],
+            "positions_ready": summary["pos_ready"],
+            "final_deadline": str(order.final_deadline) if order.final_deadline else None,
+            "external_id": order.external_id,
+            "change_req_requested_at": (
+                order.change_req_requested_at.isoformat()
+                if getattr(order, "change_req_requested_at", None) else None
+            ),
+            "change_req_status": getattr(order, "change_req_status", None),
+            "change_req_payload": order.change_req_payload,
+            "change_summary": change_summary,
+        })
+    return {"items": results, "total": len(results)}
 
 
 @router.get("/{order_id}")
@@ -401,69 +555,7 @@ async def mark_order_shipped(
 
 
 # --- Cancellation request management (PM side) ---
-
-@router.get("/cancellation-requests")
-async def list_cancellation_requests(
-    factory_id: UUID | None = None,
-    decision: str = Query("pending", description="Filter by decision: pending|accepted|rejected|all"),
-    db: Session = Depends(get_db),
-    current_user=Depends(require_management),
-):
-    """List orders with pending (or all) cancellation requests. PM dashboard uses this."""
-    query = db.query(ProductionOrder).filter(
-        ProductionOrder.cancellation_requested.is_(True)
-    )
-    if decision != "all":
-        query = query.filter(ProductionOrder.cancellation_decision == decision)
-
-    query = apply_factory_filter(query, current_user, factory_id, ProductionOrder)
-
-    orders = query.order_by(ProductionOrder.cancellation_requested_at.desc()).all()
-
-    results = []
-    for order in orders:
-        # Get position summary
-        positions = db.query(OrderPosition).filter(OrderPosition.order_id == order.id).all()
-        pos_count = len(positions)
-        pos_ready = sum(1 for p in positions if _ev(p.status) in ("ready_for_shipment", "shipped"))
-
-        # Most common position status (represents "current stage")
-        stage_map = {
-            'planned': 'Planning', 'insufficient_materials': 'Planning',
-            'awaiting_recipe': 'Planning', 'awaiting_stencil_silkscreen': 'Planning',
-            'awaiting_color_matching': 'Planning',
-            'engobe_applied': 'Glazing', 'engobe_check': 'Glazing',
-            'glazed': 'Glazing', 'pre_kiln_check': 'Glazing', 'sent_to_glazing': 'Glazing',
-            'in_kiln': 'Firing', 'fired': 'Fired',
-            'sorting': 'Sorting', 'packing': 'Packing',
-            'ready_for_shipment': 'Ready', 'shipped': 'Shipped',
-        }
-        if positions:
-            statuses = [_ev(p.status) for p in positions]
-            most_common = max(set(statuses), key=statuses.count)
-            current_stage = stage_map.get(most_common, most_common.replace("_", " ").title())
-        else:
-            current_stage = "No positions"
-
-        results.append({
-            "id": str(order.id),
-            "order_number": order.order_number,
-            "client": order.client,
-            "client_location": order.client_location,
-            "factory_id": str(order.factory_id),
-            "factory_name": order.factory.name if order.factory else "",
-            "status": _ev(order.status),
-            "current_stage": current_stage,
-            "positions_count": pos_count,
-            "positions_ready": pos_ready,
-            "final_deadline": str(order.final_deadline) if order.final_deadline else None,
-            "external_id": order.external_id,
-            "cancellation_requested_at": order.cancellation_requested_at.isoformat() if order.cancellation_requested_at else None,
-            "cancellation_decision": order.cancellation_decision,
-            "cancellation_decided_at": order.cancellation_decided_at.isoformat() if order.cancellation_decided_at else None,
-        })
-
-    return {"items": results, "total": len(results)}
+# Note: GET /cancellation-requests is declared earlier (before /{order_id}) to avoid route shadowing.
 
 
 @router.post("/{order_id}/accept-cancellation")
@@ -581,70 +673,7 @@ async def reject_cancellation(
 
 
 # --- Change request management (PM side) ---
-
-@router.get("/change-requests")
-async def list_change_requests(
-    factory_id: UUID | None = None,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_management),
-):
-    """List orders with pending change requests from Sales. PM dashboard uses this."""
-    query = db.query(ProductionOrder).filter(
-        ProductionOrder.change_req_status == "pending"
-    )
-    query = apply_factory_filter(query, current_user, factory_id, ProductionOrder)
-    orders = query.order_by(ProductionOrder.change_req_requested_at.desc()).all()
-
-    results = []
-    for order in orders:
-        positions = db.query(OrderPosition).filter(OrderPosition.order_id == order.id).all()
-        pos_count = len(positions)
-        pos_ready = sum(1 for p in positions if _ev(p.status) in ("ready_for_shipment", "shipped"))
-
-        stage_map = {
-            'planned': 'Planning', 'insufficient_materials': 'Planning',
-            'awaiting_recipe': 'Planning', 'awaiting_stencil_silkscreen': 'Planning',
-            'awaiting_color_matching': 'Planning',
-            'engobe_applied': 'Glazing', 'engobe_check': 'Glazing',
-            'glazed': 'Glazing', 'pre_kiln_check': 'Glazing', 'sent_to_glazing': 'Glazing',
-            'in_kiln': 'Firing', 'fired': 'Fired',
-            'sorting': 'Sorting', 'packing': 'Packing',
-            'ready_for_shipment': 'Ready', 'shipped': 'Shipped',
-        }
-        if positions:
-            statuses = [_ev(p.status) for p in positions]
-            most_common = max(set(statuses), key=statuses.count)
-            current_stage = stage_map.get(most_common, most_common.replace("_", " ").title())
-        else:
-            current_stage = "No positions"
-
-        # Build a simple summary of what changed from the payload
-        payload = order.change_req_payload or {}
-        change_summary = {}
-        for field in ("client", "final_deadline", "desired_delivery_date", "notes", "items"):
-            if field in payload:
-                change_summary[field] = payload[field]
-
-        results.append({
-            "id": str(order.id),
-            "order_number": order.order_number,
-            "client": order.client,
-            "client_location": order.client_location,
-            "factory_id": str(order.factory_id),
-            "factory_name": order.factory.name if order.factory else "",
-            "status": _ev(order.status),
-            "current_stage": current_stage,
-            "positions_count": pos_count,
-            "positions_ready": pos_ready,
-            "final_deadline": str(order.final_deadline) if order.final_deadline else None,
-            "external_id": order.external_id,
-            "change_req_requested_at": order.change_req_requested_at.isoformat() if order.change_req_requested_at else None,
-            "change_req_status": order.change_req_status,
-            "change_req_payload": order.change_req_payload,
-            "change_summary": change_summary,
-        })
-
-    return {"items": results, "total": len(results)}
+# Note: GET /change-requests is declared earlier (before /{order_id}) to avoid route shadowing.
 
 
 @router.post("/{order_id}/approve-change")

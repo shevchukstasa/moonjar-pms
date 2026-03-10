@@ -11,8 +11,8 @@ export interface KilnCreateData {
   name: string;
   factory_id: string;
   kiln_type: string;
-  kiln_dimensions_cm?: { width: number; depth: number; height: number };
-  kiln_working_area_cm?: { width: number; depth: number; height: number };
+  kiln_dimensions_cm?: { width: number; depth: number; height?: number | null };
+  kiln_working_area_cm?: { width: number; depth: number; height?: number | null };
   kiln_multi_level?: boolean;
   kiln_coefficient?: number;
   capacity_sqm?: number;
@@ -22,8 +22,8 @@ export interface KilnCreateData {
 export interface KilnUpdateData {
   name?: string;
   factory_id?: string;
-  kiln_dimensions_cm?: { width: number; depth: number; height: number };
-  kiln_working_area_cm?: { width: number; depth: number; height: number };
+  kiln_dimensions_cm?: { width: number; depth: number; height?: number | null };
+  kiln_working_area_cm?: { width: number; depth: number; height?: number | null };
   kiln_multi_level?: boolean;
   kiln_coefficient?: number;
 }

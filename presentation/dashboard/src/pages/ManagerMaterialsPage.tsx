@@ -1,0 +1,543 @@
+import { useState, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '@/stores/authStore';
+import { useMaterials, useCreateMaterial, useUpdateMaterial, useCreateTransaction, type MaterialItem } from '@/hooks/useMaterials';
+import { useFactories } from '@/hooks/useFactories';
+import { useSuppliers } from '@/hooks/useSuppliers';
+import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
+import { Dialog } from '@/components/ui/Dialog';
+import { Badge } from '@/components/ui/Badge';
+import { Spinner } from '@/components/ui/Spinner';
+
+// ── Material type definitions ─────────────────────────────────────────────
+const MATERIAL_TYPES = [
+  { value: 'stone',           label: 'Камень',               emoji: '🪨' },
+  { value: 'pigment',         label: 'Пигменты',             emoji: '🎨' },
+  { value: 'frit',            label: 'Фритты',               emoji: '⚗️' },
+  { value: 'oxide_carbonate', label: 'Оксиды и карбонаты',   emoji: '🧪' },
+  { value: 'other_bulk',      label: 'Прочее сыпучее',       emoji: '📦' },
+  { value: 'packaging',       label: 'Упаковка',             emoji: '📦' },
+  { value: 'consumable',      label: 'Расходные материалы',  emoji: '🔧' },
+  { value: 'other',           label: 'Прочее',               emoji: '📋' },
+] as const;
+
+type MaterialTypeValue = typeof MATERIAL_TYPES[number]['value'];
+
+const UNIT_OPTIONS = [
+  { value: 'kg',  label: 'кг' },
+  { value: 'g',   label: 'г' },
+  { value: 'l',   label: 'л' },
+  { value: 'pcs', label: 'шт' },
+  { value: 'm',   label: 'м' },
+  { value: 'm2',  label: 'м²' },
+];
+
+function typeLabel(type: string): string {
+  return MATERIAL_TYPES.find((t) => t.value === type)?.label ?? type;
+}
+
+function typeEmoji(type: string): string {
+  return MATERIAL_TYPES.find((t) => t.value === type)?.emoji ?? '📋';
+}
+
+// ── Interfaces ────────────────────────────────────────────────────────────
+interface MaterialForm {
+  name: string;
+  factory_id: string;
+  material_type: MaterialTypeValue | '';
+  unit: string;
+  balance: string;
+  min_balance: string;
+  supplier_id: string;
+  warehouse_section: string;
+}
+
+const emptyForm: MaterialForm = {
+  name: '',
+  factory_id: '',
+  material_type: '',
+  unit: 'kg',
+  balance: '0',
+  min_balance: '0',
+  supplier_id: '',
+  warehouse_section: 'raw_materials',
+};
+
+interface TxForm {
+  type: 'receive' | 'manual_write_off';
+  quantity: string;
+  notes: string;
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────
+export default function ManagerMaterialsPage() {
+  const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+
+  // Filters
+  const { data: factoriesData } = useFactories();
+  const factories = factoriesData?.items ?? [];
+  const [factoryId, setFactoryId] = useState<string>(() => {
+    // Default to user's primary factory if available
+    return '';
+  });
+  const [activeType, setActiveType] = useState<MaterialTypeValue | 'all'>('all');
+  const [search, setSearch] = useState('');
+
+  // Data
+  const { data, isLoading, isError } = useMaterials({
+    factory_id: factoryId || undefined,
+    material_type: activeType !== 'all' ? activeType : undefined,
+    search: search || undefined,
+    per_page: 200,
+  });
+  const items = data?.items ?? [];
+
+  // Suppliers for form dropdown
+  const { data: suppliersData } = useSuppliers();
+  const suppliers = suppliersData?.items ?? [];
+
+  // Mutations
+  const createMaterial = useCreateMaterial();
+  const updateMaterial = useUpdateMaterial();
+  const createTransaction = useCreateTransaction();
+
+  // Dialog state
+  const [editDialog, setEditDialog] = useState<{ open: boolean; item: MaterialItem | null }>({ open: false, item: null });
+  const [form, setForm] = useState<MaterialForm>(emptyForm);
+  const [formError, setFormError] = useState('');
+
+  const [txDialog, setTxDialog] = useState<{ open: boolean; item: MaterialItem | null }>({ open: false, item: null });
+  const [txForm, setTxForm] = useState<TxForm>({ type: 'receive', quantity: '', notes: '' });
+  const [txError, setTxError] = useState('');
+
+  // ── Edit/create dialog ─────────────────────────────────────────────────
+  const openCreate = useCallback((defaultType?: MaterialTypeValue) => {
+    setForm({ ...emptyForm, material_type: defaultType ?? '', factory_id: factoryId });
+    setFormError('');
+    setEditDialog({ open: true, item: null });
+  }, [factoryId]);
+
+  const openEdit = useCallback((item: MaterialItem) => {
+    setForm({
+      name: item.name,
+      factory_id: item.factory_id,
+      material_type: item.material_type as MaterialTypeValue,
+      unit: item.unit,
+      balance: String(item.balance),
+      min_balance: String(item.min_balance),
+      supplier_id: item.supplier_id ?? '',
+      warehouse_section: item.warehouse_section ?? 'raw_materials',
+    });
+    setFormError('');
+    setEditDialog({ open: true, item });
+  }, []);
+
+  const closeEdit = useCallback(() => {
+    setEditDialog({ open: false, item: null });
+    setFormError('');
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!form.name.trim()) { setFormError('Name is required'); return; }
+    if (!form.factory_id) { setFormError('Factory is required'); return; }
+    if (!form.material_type) { setFormError('Type is required'); return; }
+    setFormError('');
+
+    const payload: Record<string, unknown> = {
+      name: form.name.trim(),
+      factory_id: form.factory_id,
+      material_type: form.material_type,
+      unit: form.unit,
+      balance: parseFloat(form.balance) || 0,
+      min_balance: parseFloat(form.min_balance) || 0,
+      supplier_id: form.supplier_id || null,
+      warehouse_section: form.warehouse_section || 'raw_materials',
+    };
+
+    try {
+      if (editDialog.item) {
+        await updateMaterial.mutateAsync({ id: editDialog.item.id, data: payload });
+      } else {
+        await createMaterial.mutateAsync(payload);
+      }
+      closeEdit();
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setFormError(detail ?? 'Save failed');
+    }
+  }, [form, editDialog.item, createMaterial, updateMaterial, closeEdit]);
+
+  // ── Transaction dialog ─────────────────────────────────────────────────
+  const openTx = useCallback((item: MaterialItem) => {
+    setTxForm({ type: 'receive', quantity: '', notes: '' });
+    setTxError('');
+    setTxDialog({ open: true, item });
+  }, []);
+
+  const closeTx = useCallback(() => {
+    setTxDialog({ open: false, item: null });
+    setTxError('');
+  }, []);
+
+  const handleTx = useCallback(async () => {
+    if (!txDialog.item) return;
+    const qty = parseFloat(txForm.quantity);
+    if (!qty || qty <= 0) { setTxError('Enter a valid quantity'); return; }
+    setTxError('');
+    try {
+      await createTransaction.mutateAsync({
+        material_id: txDialog.item.id,
+        type: txForm.type,
+        quantity: qty,
+        notes: txForm.notes || undefined,
+      });
+      closeTx();
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setTxError(detail ?? 'Transaction failed');
+    }
+  }, [txDialog.item, txForm, createTransaction, closeTx]);
+
+  // ── Per-type counts for tab badges ─────────────────────────────────────
+  const countsByType = useMemo(() => {
+    // When filtering active, still want ALL counts — re-fetch would be needed for accuracy,
+    // but for the current items we compute from current page
+    const map: Record<string, number> = {};
+    items.forEach((m) => { map[m.material_type] = (map[m.material_type] ?? 0) + 1; });
+    return map;
+  }, [items]);
+
+  const lowStockCount = useMemo(() => items.filter((m) => m.is_low_stock).length, [items]);
+
+  // ── Filtered display items ─────────────────────────────────────────────
+  const displayItems = useMemo(() => {
+    if (activeType === 'all') return items;
+    return items.filter((m) => m.material_type === activeType);
+  }, [items, activeType]);
+
+  const saving = createMaterial.isPending || updateMaterial.isPending;
+  const txPending = createTransaction.isPending;
+
+  // ── Factory options ────────────────────────────────────────────────────
+  const factoryOptions = [
+    { value: '', label: 'All factories' },
+    ...factories.map((f) => ({ value: f.id, label: f.name })),
+  ];
+
+  // ── Type select options for form ──────────────────────────────────────
+  const typeOptions = MATERIAL_TYPES.map((t) => ({ value: t.value, label: `${t.emoji} ${t.label}` }));
+
+  // ── Render ────────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Materials</h1>
+          <p className="mt-0.5 text-sm text-gray-500">
+            Inventory of raw materials, packaging, and consumables
+            {lowStockCount > 0 && (
+              <span className="ml-2 inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                ⚠ {lowStockCount} low stock
+              </span>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => navigate('/manager')}>← Dashboard</Button>
+          <Button onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}>
+            + Add Material
+          </Button>
+        </div>
+      </div>
+
+      {/* Filters row */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="w-56">
+          <Select
+            options={factoryOptions}
+            value={factoryId}
+            onChange={(e) => setFactoryId(e.target.value)}
+          />
+        </div>
+        <div className="flex-1 min-w-48">
+          <Input
+            placeholder="Search materials…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {/* Type tabs */}
+      <div className="flex flex-wrap gap-1 rounded-lg bg-gray-100 p-1">
+        <button
+          onClick={() => setActiveType('all')}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            activeType === 'all'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          All
+          {items.length > 0 && (
+            <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">{items.length}</span>
+          )}
+        </button>
+        {MATERIAL_TYPES.map((t) => {
+          const count = countsByType[t.value] ?? 0;
+          return (
+            <button
+              key={t.value}
+              onClick={() => setActiveType(t.value)}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                activeType === t.value
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {t.emoji} {t.label}
+              {count > 0 && (
+                <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">{count}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Content */}
+      {isError ? (
+        <Card>
+          <p className="py-8 text-center text-sm text-red-600">⚠ Error loading materials</p>
+        </Card>
+      ) : isLoading ? (
+        <div className="flex justify-center py-16"><Spinner className="h-8 w-8" /></div>
+      ) : displayItems.length === 0 ? (
+        <Card>
+          <div className="py-12 text-center">
+            <p className="text-gray-400">No materials found</p>
+            <Button className="mt-4" variant="secondary" onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}>
+              + Add first material
+            </Button>
+          </div>
+        </Card>
+      ) : (
+        <MaterialsTable
+          items={displayItems}
+          onEdit={openEdit}
+          onTransaction={openTx}
+        />
+      )}
+
+      {/* Create / Edit dialog */}
+      <Dialog
+        open={editDialog.open}
+        onClose={closeEdit}
+        title={editDialog.item ? `Edit: ${editDialog.item.name}` : 'Add Material'}
+        className="w-full max-w-lg"
+      >
+        <div className="space-y-4">
+          <Input
+            label="Name *"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            placeholder="e.g. Zinc Oxide ZnO"
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Factory *</label>
+              <Select
+                options={factories.map((f) => ({ value: f.id, label: f.name }))}
+                value={form.factory_id}
+                onChange={(e) => setForm({ ...form, factory_id: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Type *</label>
+              <Select
+                options={typeOptions}
+                value={form.material_type}
+                onChange={(e) => setForm({ ...form, material_type: e.target.value as MaterialTypeValue })}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Unit</label>
+              <Select
+                options={UNIT_OPTIONS}
+                value={form.unit}
+                onChange={(e) => setForm({ ...form, unit: e.target.value })}
+              />
+            </div>
+            <Input
+              label="Balance"
+              type="number"
+              step="0.001"
+              value={form.balance}
+              onChange={(e) => setForm({ ...form, balance: e.target.value })}
+            />
+            <Input
+              label="Min Balance"
+              type="number"
+              step="0.001"
+              value={form.min_balance}
+              onChange={(e) => setForm({ ...form, min_balance: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Supplier</label>
+            <Select
+              options={[{ value: '', label: '— no supplier —' }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
+              value={form.supplier_id}
+              onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
+            />
+          </div>
+          {formError && <p className="text-sm text-red-600">{formError}</p>}
+          <div className="flex justify-end gap-2 border-t pt-3">
+            <Button variant="secondary" onClick={closeEdit}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : editDialog.item ? 'Update' : 'Create'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Transaction dialog */}
+      <Dialog
+        open={txDialog.open}
+        onClose={closeTx}
+        title={txDialog.item ? `Transaction — ${txDialog.item.name}` : 'Transaction'}
+        className="w-full max-w-sm"
+      >
+        {txDialog.item && (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-gray-50 px-4 py-3 text-sm">
+              <span className="text-gray-500">Current balance: </span>
+              <span className="font-semibold">{txDialog.item.balance} {txDialog.item.unit}</span>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Operation</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setTxForm({ ...txForm, type: 'receive' })}
+                  className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                    txForm.type === 'receive'
+                      ? 'border-green-500 bg-green-50 text-green-700'
+                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  ↑ Receive
+                </button>
+                <button
+                  onClick={() => setTxForm({ ...txForm, type: 'manual_write_off' })}
+                  className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                    txForm.type === 'manual_write_off'
+                      ? 'border-red-500 bg-red-50 text-red-700'
+                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  ↓ Write-off
+                </button>
+              </div>
+            </div>
+            <Input
+              label={`Quantity (${txDialog.item.unit})`}
+              type="number"
+              step="0.001"
+              value={txForm.quantity}
+              onChange={(e) => setTxForm({ ...txForm, quantity: e.target.value })}
+              placeholder="0.000"
+            />
+            <Input
+              label="Notes"
+              value={txForm.notes}
+              onChange={(e) => setTxForm({ ...txForm, notes: e.target.value })}
+              placeholder="Optional comment"
+            />
+            {txError && <p className="text-sm text-red-600">{txError}</p>}
+            <div className="flex justify-end gap-2 border-t pt-3">
+              <Button variant="secondary" onClick={closeTx}>Cancel</Button>
+              <Button
+                onClick={handleTx}
+                disabled={txPending}
+                className={txForm.type === 'manual_write_off' ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500' : ''}
+              >
+                {txPending ? 'Saving…' : txForm.type === 'receive' ? '↑ Receive' : '↓ Write-off'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
+    </div>
+  );
+}
+
+// ── Materials table ───────────────────────────────────────────────────────
+interface MaterialsTableProps {
+  items: MaterialItem[];
+  onEdit: (item: MaterialItem) => void;
+  onTransaction: (item: MaterialItem) => void;
+}
+
+function MaterialsTable({ items, onEdit, onTransaction }: MaterialsTableProps) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-gray-200">
+      <table className="w-full text-left text-sm">
+        <thead className="border-b bg-gray-50 text-xs font-medium uppercase tracking-wider text-gray-500">
+          <tr>
+            <th className="px-4 py-3">Name</th>
+            <th className="px-4 py-3">Type</th>
+            <th className="px-4 py-3 text-right">Balance</th>
+            <th className="px-4 py-3 text-right">Min</th>
+            <th className="px-4 py-3">Unit</th>
+            <th className="px-4 py-3">Supplier</th>
+            <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3"></th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {items.map((m) => (
+            <tr key={m.id} className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}>
+              <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
+              <td className="px-4 py-3">
+                <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
+                  {typeEmoji(m.material_type)} {typeLabel(m.material_type)}
+                </span>
+              </td>
+              <td className={`px-4 py-3 text-right font-mono font-semibold ${m.is_low_stock ? 'text-red-600' : 'text-gray-900'}`}>
+                {Number(m.balance).toFixed(3)}
+              </td>
+              <td className="px-4 py-3 text-right font-mono text-gray-500">
+                {Number(m.min_balance).toFixed(3)}
+              </td>
+              <td className="px-4 py-3 text-gray-500">{m.unit}</td>
+              <td className="px-4 py-3 text-gray-500">{m.supplier_name ?? <span className="text-gray-300">—</span>}</td>
+              <td className="px-4 py-3">
+                {m.is_low_stock ? (
+                  <Badge status="error" label={`Deficit: ${(Number(m.min_balance) - Number(m.balance)).toFixed(1)} ${m.unit}`} />
+                ) : (
+                  <Badge status="active" label="OK" />
+                )}
+              </td>
+              <td className="px-4 py-3">
+                <div className="flex items-center gap-1">
+                  <Button size="sm" variant="ghost" onClick={() => onTransaction(m)}>
+                    ±
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => onEdit(m)}>
+                    Edit
+                  </Button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

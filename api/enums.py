@@ -80,13 +80,14 @@ class TaskStatus(str, Enum):
     CANCELLED = 'cancelled'
 
 class MaterialType(str, Enum):
-    PIGMENT = 'pigment'
-    STONE = 'stone'
-    FRIT = 'frit'
-    GLAZE = 'glaze'
-    STENCIL = 'stencil'
-    SILKSCREEN = 'silkscreen'
-    OTHER = 'other'
+    STONE = 'stone'               # Камень
+    PIGMENT = 'pigment'           # Пигменты
+    FRIT = 'frit'                 # Фритты
+    OXIDE_CARBONATE = 'oxide_carbonate'  # Оксиды и карбонаты
+    OTHER_BULK = 'other_bulk'     # Прочее сыпучее
+    PACKAGING = 'packaging'       # Упаковка
+    CONSUMABLE = 'consumable'     # Расходные материалы
+    OTHER = 'other'               # Прочее
 
 class TransactionType(str, Enum):
     RESERVE = 'reserve'

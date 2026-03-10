@@ -34,6 +34,11 @@ export const statusColors: Record<string, string> = {
   inactive: 'bg-gray-100 text-gray-500',
   maintenance_planned: 'bg-yellow-100 text-yellow-700',
   maintenance_emergency: 'bg-red-100 text-red-700',
+  // Semantic aliases (for components using non-domain status strings)
+  error: 'bg-red-100 text-red-700',
+  warning: 'bg-amber-100 text-amber-700',
+  success: 'bg-green-100 text-green-700',
+  info: 'bg-blue-100 text-blue-700',
   // Generic
   draft: 'bg-gray-100 text-gray-700',
   confirmed: 'bg-blue-100 text-blue-700',

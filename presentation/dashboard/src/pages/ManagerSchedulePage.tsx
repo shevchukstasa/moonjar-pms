@@ -20,6 +20,7 @@ const SECTION_TABS = [
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const positionColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
+  { key: 'order_number', header: 'Order' },
   {
     key: 'position_label',
     header: '#',
@@ -29,9 +30,18 @@ const positionColumns: { key: string; header: string; render?: (item: any) => Re
       </span>
     ),
   },
-  { key: 'order_number', header: 'Order' },
   { key: 'color', header: 'Color' },
   { key: 'size', header: 'Size' },
+  {
+    key: 'application',
+    header: 'Application',
+    render: (item) => item.application ?? '—',
+  },
+  {
+    key: 'collection',
+    header: 'Collection',
+    render: (item) => item.collection ?? '—',
+  },
   { key: 'quantity', header: 'Qty' },
   {
     key: 'status',

@@ -145,10 +145,11 @@ def handle_surplus(db: Session, position: OrderPosition, surplus_quantity: int) 
             total_box_qty = surplus_quantity
 
         # Create PM task when Coaster box exceeds threshold
+        # Note: Coaster box accumulates mixed colors — no color specified in label
         if total_box_qty >= _ACCUMULATION_TASK_THRESHOLD:
             _create_pm_accumulation_task(
                 db, position.factory_id, total_box_qty,
-                f"Coaster box ({color} 10x10)"
+                "Coaster box (10x10 mixed colors)"
             )
 
         disposition = SurplusDisposition(

@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useOrders, useCancellationRequests, useChangeRequests } from '@/hooks/useOrders';
-import { usePositions } from '@/hooks/usePositions';
+import { usePositions, type PositionItem } from '@/hooks/usePositions';
 import { useShortageTasksForManager, useTasks } from '@/hooks/useTasks';
 import { useLowStock } from '@/hooks/useMaterials';
 import { usePurchaseRequests } from '@/hooks/usePurchaseRequests';
@@ -32,12 +32,13 @@ import type { OrderListParams } from '@/api/orders';
 import { CancellationRequestsPanel } from '@/components/dashboard/CancellationRequestsPanel';
 import { ChangeRequestsPanel } from '@/components/dashboard/ChangeRequestsPanel';
 import { NotificationsBell } from '@/components/dashboard/NotificationsBell';
+import { ColorMismatchDecisionDialog } from '@/components/positions/ColorMismatchDecisionDialog';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-type DashboardTab = 'orders' | 'tasks' | 'materials' | 'defects' | 'tps' | 'toc' | 'kilns' | 'ai_chat' | 'cancellations' | 'change_requests';
+type DashboardTab = 'orders' | 'tasks' | 'materials' | 'defects' | 'tps' | 'toc' | 'kilns' | 'ai_chat' | 'cancellations' | 'change_requests' | 'mismatch';
 
 const DASHBOARD_TABS_BASE: { id: DashboardTab; label: string }[] = [
   { id: 'orders', label: 'Orders' },
@@ -147,10 +148,27 @@ export default function ManagerDashboard() {
   const { data: changeReqData } = useChangeRequests(changeReqParams);
   const pendingChangeRequests: number = changeReqData?.total ?? 0;
 
-  // Build tabs dynamically — show badge counts on Cancellations/Change Requests when > 0
+  // --- Color mismatch positions awaiting PM decision ---
+  const mismatchParams = useMemo(
+    () => ({
+      ...(activeFactoryId ? { factory_id: activeFactoryId } : {}),
+      split_category: 'color_mismatch',
+      status: 'planned',
+      per_page: 100,
+    }),
+    [activeFactoryId],
+  );
+  const { data: mismatchData } = usePositions(mismatchParams);
+  const pendingMismatches: number = mismatchData?.total ?? 0;
+
+  // Build tabs dynamically — show badge counts on action-required tabs
   const DASHBOARD_TABS = useMemo(
     () => [
       ...DASHBOARD_TABS_BASE,
+      {
+        id: 'mismatch' as DashboardTab,
+        label: pendingMismatches > 0 ? `Color Mismatch (${pendingMismatches})` : 'Color Mismatch',
+      },
       {
         id: 'cancellations' as DashboardTab,
         label: pendingCancellations > 0 ? `Cancellations (${pendingCancellations})` : 'Cancellations',
@@ -160,7 +178,7 @@ export default function ManagerDashboard() {
         label: pendingChangeRequests > 0 ? `Changes (${pendingChangeRequests})` : 'Changes',
       },
     ],
-    [pendingCancellations, pendingChangeRequests],
+    [pendingMismatches, pendingCancellations, pendingChangeRequests],
   );
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -285,6 +303,22 @@ export default function ManagerDashboard() {
         </div>
       )}
 
+      {/* Color mismatch alert banner — shown when PM decisions are pending */}
+      {pendingMismatches > 0 && activeTab !== 'mismatch' && (
+        <div
+          className="cursor-pointer rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 flex items-center justify-between gap-3 hover:bg-amber-100 transition-colors"
+          onClick={() => setActiveTab('mismatch')}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-amber-600 text-lg">🎨</span>
+            <span className="text-sm font-medium text-amber-800">
+              {pendingMismatches} color mismatch position{pendingMismatches > 1 ? 's' : ''} awaiting your decision
+            </span>
+          </div>
+          <span className="text-xs text-amber-600 underline">Resolve →</span>
+        </div>
+      )}
+
       {/* Cancellation request alert banner — shown above tabs when requests are pending */}
       {pendingCancellations > 0 && activeTab !== 'cancellations' && (
         <div
@@ -352,6 +386,9 @@ export default function ManagerDashboard() {
       {activeTab === 'toc' && <TocTabContent factoryId={activeFactoryId} />}
       {activeTab === 'kilns' && <KilnsTabContent factoryId={activeFactoryId} navigate={navigate} />}
       {activeTab === 'ai_chat' && <AiChatTabContent factoryId={activeFactoryId} />}
+      {activeTab === 'mismatch' && (
+        <ColorMismatchTabContent factoryId={activeFactoryId} />
+      )}
       {activeTab === 'cancellations' && (
         <div className="space-y-4">
           <div>
@@ -1359,6 +1396,89 @@ function AiChatTabContent({ factoryId }: { factoryId: string | null }) {
           </form>
         </div>
       </Card>
+    </div>
+  );
+}
+
+// ===========================================================================
+// TAB — Color Mismatch (PM Decision Queue)
+// ===========================================================================
+
+function ColorMismatchTabContent({ factoryId }: { factoryId: string | null }) {
+  const params = useMemo(
+    () => ({
+      ...(factoryId ? { factory_id: factoryId } : {}),
+      split_category: 'color_mismatch',
+      status: 'planned',
+      per_page: 100,
+    }),
+    [factoryId],
+  );
+  const { data, isLoading } = usePositions(params);
+  const positions = data?.items ?? [];
+
+  const [selectedPosition, setSelectedPosition] = useState<PositionItem | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  function openDialog(pos: PositionItem) {
+    setSelectedPosition(pos);
+    setDialogOpen(true);
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900">Color Mismatch — PM Decision Queue</h2>
+        <p className="mt-0.5 text-sm text-gray-500">
+          These positions have color mismatches identified by the sorter.
+          Decide how to handle each batch: refire only, reglaze + refire, or pack for stock.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-12"><Spinner /></div>
+      ) : positions.length === 0 ? (
+        <EmptyState
+          title="No color mismatch positions"
+          description="All color mismatch batches have been resolved."
+        />
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+          <table className="min-w-full divide-y divide-gray-100">
+            <thead className="bg-gray-50">
+              <tr>
+                {['Order #', 'Color', 'Size', 'Qty (pcs)', 'Product Type', 'Action'].map((h) => (
+                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {positions.map((pos) => (
+                <tr key={pos.id} className="hover:bg-amber-50 transition-colors">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{pos.order_number}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700">{pos.color}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700">{pos.size}</td>
+                  <td className="px-4 py-3 text-sm font-semibold text-gray-900">{pos.quantity}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 capitalize">{pos.product_type.replace(/_/g, ' ')}</td>
+                  <td className="px-4 py-3">
+                    <Button variant="primary" onClick={() => openDialog(pos)}>
+                      Decide
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <ColorMismatchDecisionDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        position={selectedPosition}
+      />
     </div>
   );
 }

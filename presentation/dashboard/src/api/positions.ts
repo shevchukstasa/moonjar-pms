@@ -8,6 +8,14 @@ export interface PositionListParams {
   status?: string;
   batch_id?: string;
   section?: 'glazing' | 'firing' | 'sorting';
+  split_category?: string;   // e.g. 'color_mismatch' to list PM decision queue
+}
+
+export interface ColorMismatchResolveRequest {
+  refire_qty: number;   // Already glazed → re-fire only (skips re-glazing)
+  reglaze_qty: number;  // Needs full re-glaze + re-fire → SENT_TO_GLAZING
+  stock_qty: number;    // Acceptable shade → PACKED (enters QC flow)
+  notes?: string;
 }
 
 export interface SortingSplitRequest {
@@ -33,4 +41,6 @@ export const positionsApi = {
     apiClient.post(`/positions/${id}/split`, data).then((r) => r.data),
   stockAvailability: (id: string) =>
     apiClient.get(`/positions/${id}/stock-availability`).then((r) => r.data),
+  resolveColorMismatch: (id: string, data: ColorMismatchResolveRequest) =>
+    apiClient.post(`/positions/${id}/resolve-color-mismatch`, data).then((r) => r.data),
 };

@@ -23,6 +23,11 @@ from api.enums import (
     is_stock_collection,
 )
 
+# Import handle_surplus lazily to avoid circular imports
+def _handle_surplus(db, position, surplus_qty):
+    from business.services.sorting_split import handle_surplus
+    handle_surplus(db, position, surplus_qty)
+
 router = APIRouter()
 
 
@@ -202,6 +207,7 @@ async def list_positions(
     status: str | None = None,
     section: str | None = None,
     batch_id: UUID | None = None,
+    split_category: str | None = None,
     search: str | None = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -213,6 +219,8 @@ async def list_positions(
         query = query.filter(OrderPosition.order_id == order_id)
     if batch_id:
         query = query.filter(OrderPosition.batch_id == batch_id)
+    if split_category:
+        query = query.filter(OrderPosition.split_category == split_category)
 
     # Filter by section (group of statuses)
     if section and section in SECTION_STATUSES:
@@ -593,6 +601,20 @@ async def split_position(
     if is_stock_collection(p.collection):
         stock_fulfillment = _check_stock_fulfillment(db, p, data.good_quantity)
 
+    # --- Surplus handling for regular (non-stock) orders ---
+    surplus_handled = None
+    if not is_stock_collection(p.collection):
+        surplus = _calculate_surplus(db, p, data.good_quantity)
+        if surplus > 0:
+            try:
+                _handle_surplus(db, p, surplus)
+                db.commit()
+                surplus_handled = surplus
+            except Exception as surplus_err:
+                # Surplus handling is non-critical — log but don't fail the split
+                import logging
+                logging.getLogger(__name__).warning(f"Surplus handling failed: {surplus_err}")
+
     return {
         "parent_position": _serialize_position(p),
         "sub_positions": [_serialize_position(sp) for sp in sub_positions],
@@ -608,7 +630,30 @@ async def split_position(
             "write_off": data.write_off_quantity,
         },
         "stock_fulfillment": stock_fulfillment,
+        "surplus_handled": surplus_handled,
     }
+
+
+# ---------- Surplus Calculation ----------
+
+def _calculate_surplus(db: Session, position: OrderPosition, good_quantity: int) -> int:
+    """Calculate surplus tiles: good_quantity minus what was actually ordered.
+    Only applies to single-factory positions (multi-factory is handled separately).
+    """
+    order_item = db.query(ProductionOrderItem).filter(
+        ProductionOrderItem.id == position.order_item_id
+    ).first()
+    if not order_item:
+        return 0
+    needed = order_item.quantity_pcs or 0
+    # Only calculate surplus for single-factory production (one root position per item)
+    sibling_count = db.query(OrderPosition).filter(
+        OrderPosition.order_item_id == position.order_item_id,
+        OrderPosition.parent_position_id.is_(None),
+    ).count()
+    if sibling_count > 1:
+        return 0  # Multi-factory: surplus determined after all are sorted
+    return max(0, good_quantity - needed)
 
 
 # ---------- Stock Fulfillment Check ----------
@@ -757,6 +802,122 @@ def _check_stock_fulfillment(db: Session, position: OrderPosition, good_quantity
             "shortage": shortage,
             "task_id": str(task.id),
         }
+
+
+# ---------- Color Mismatch Resolution (PM Decision) ----------
+
+class ColorMismatchResolveRequest(BaseModel):
+    refire_qty: int = 0     # Already glazed; bubbles/wrong tone → re-fire only
+    reglaze_qty: int = 0    # Needs full re-glaze + re-fire → SENT_TO_GLAZING
+    stock_qty: int = 0      # Acceptable tiles → PACKED (enters QC → stock)
+    notes: Optional[str] = None
+
+
+@router.post("/{position_id}/resolve-color-mismatch")
+async def resolve_color_mismatch(
+    position_id: UUID,
+    data: ColorMismatchResolveRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """PM resolves a color-mismatch sub-position by directing tiles into up to 3 paths:
+    refire only / re-glaze+refire / accept to stock.
+    The original color-mismatch position is cancelled (quantity zeroed out) and
+    replaced by new sibling sub-positions under the same parent.
+    """
+    p = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not p:
+        raise HTTPException(404, "Position not found")
+    if _ev(p.split_category) != "color_mismatch":
+        raise HTTPException(400, "Position split_category must be 'color_mismatch'")
+    if _ev(p.status) not in ("planned", "insufficient_materials"):
+        raise HTTPException(400, f"Color-mismatch position must have status 'planned', got '{_ev(p.status)}'")
+
+    total = data.refire_qty + data.reglaze_qty + data.stock_qty
+    if total != p.quantity:
+        raise HTTPException(400, f"Total ({total}) must equal position quantity ({p.quantity})")
+
+    now = datetime.now(timezone.utc)
+    new_positions: list[OrderPosition] = []
+
+    # New positions are siblings of this CM position (same parent)
+    parent_id = p.parent_position_id
+    _base_si = _next_split_index(db, parent_id) - 1
+
+    def _si() -> int:
+        nonlocal _base_si
+        _base_si += 1
+        return _base_si
+
+    def _clone(status: PositionStatus, qty: int, split_cat) -> OrderPosition:
+        return OrderPosition(
+            id=uuid_mod.uuid4(),
+            order_id=p.order_id,
+            order_item_id=p.order_item_id,
+            parent_position_id=parent_id,
+            factory_id=p.factory_id,
+            status=status,
+            quantity=qty,
+            color=p.color, size=p.size,
+            application=p.application, finishing=p.finishing,
+            collection=p.collection, application_type=p.application_type,
+            place_of_application=p.place_of_application,
+            product_type=p.product_type, shape=p.shape,
+            thickness_mm=p.thickness_mm, recipe_id=p.recipe_id,
+            mandatory_qc=p.mandatory_qc,
+            split_category=split_cat,
+            priority_order=p.priority_order,
+            position_number=p.position_number,
+            split_index=_si(),
+            created_at=now, updated_at=now,
+        )
+
+    if data.refire_qty > 0:
+        pos = _clone(PositionStatus.REFIRE, data.refire_qty, SplitCategory.REFIRE)
+        db.add(pos)
+        new_positions.append(pos)
+
+    if data.reglaze_qty > 0:
+        pos = _clone(PositionStatus.SENT_TO_GLAZING, data.reglaze_qty, SplitCategory.REPAIR)
+        db.add(pos)
+        new_positions.append(pos)
+        # Track in repair queue for SLA monitoring
+        rq = RepairQueue(
+            id=uuid_mod.uuid4(),
+            factory_id=p.factory_id,
+            color=p.color, size=p.size,
+            quantity=data.reglaze_qty,
+            defect_type="color_mismatch_reglaze",
+            source_order_id=p.order_id,
+            source_position_id=p.id,
+            status=RepairStatus.IN_REPAIR,
+            created_at=now, updated_at=now,
+        )
+        db.add(rq)
+
+    if data.stock_qty > 0:
+        pos = _clone(PositionStatus.PACKED, data.stock_qty, None)
+        db.add(pos)
+        new_positions.append(pos)
+
+    # Mark original color-mismatch position as resolved
+    p.status = PositionStatus.CANCELLED
+    p.quantity = 0
+    p.updated_at = now
+
+    db.commit()
+    for np in new_positions:
+        db.refresh(np)
+
+    return {
+        "resolved_position_id": str(position_id),
+        "new_positions": [_serialize_position(np) for np in new_positions],
+        "breakdown": {
+            "refire": data.refire_qty,
+            "reglaze": data.reglaze_qty,
+            "stock": data.stock_qty,
+        },
+    }
 
 
 # ---------- Stock Availability ----------

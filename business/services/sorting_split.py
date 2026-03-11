@@ -13,9 +13,12 @@ from sqlalchemy.orm import Session
 from api.models import *  # noqa
 from api.schemas import *  # noqa
 from api.enums import (
-    TaskType, SurplusDispositionType,
+    TaskType, TaskStatus, SurplusDispositionType,
     PositionStatus, UserRole, ManuShipmentStatus,
 )
+
+# Threshold for creating a PM decision task for Coaster box and Mana accumulations
+_ACCUMULATION_TASK_THRESHOLD = 100
 
 
 def process_sorting_split(db: Session, position_id: UUID, split_data: dict) -> dict:
@@ -38,13 +41,39 @@ def _check_is_basic_color(db: Session, color_name: str) -> bool:
     return bool(color.is_basic)
 
 
+def _create_pm_accumulation_task(db: Session, factory_id, total_qty: int, label: str) -> None:
+    """Create a PM decision task when Coaster box or Mana shipment exceeds threshold.
+    Skips creation if an active MANU_CONFIRMATION task already exists for this factory.
+    """
+    active_task = db.query(Task).filter(
+        Task.factory_id == factory_id,
+        Task.type == TaskType.MANU_CONFIRMATION,
+        Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+    ).first()
+    if active_task:
+        # Update description to reflect current total
+        active_task.description = (
+            f"{label} accumulated {total_qty} pcs — decide next steps (ship / hold)"
+        )
+        return
+    task = Task(
+        id=uuid_mod.uuid4(),
+        factory_id=factory_id,
+        type=TaskType.MANU_CONFIRMATION,
+        assigned_role=UserRole.PRODUCTION_MANAGER,
+        description=f"{label} accumulated {total_qty} pcs — decide next steps (ship / hold)",
+        priority=2,
+    )
+    db.add(task)
+
+
 def handle_surplus(db: Session, position: OrderPosition, surplus_quantity: int) -> Optional[SurplusDisposition]:
     """
-    After firing: if more tiles than needed, distribute surplus.
+    After sorting: if good tiles > ordered quantity, distribute surplus.
     Rules by size and base color (BUSINESS_LOGIC.md §9):
-      - 10x10 + basic color → showroom (+ photographing task)
-      - 10x10 + non-basic color → casters boxes
-      - All other sizes → Manu
+      - 10x10 + basic color  → Showroom (+ photographing task)
+      - 10x10 + non-basic    → Coaster box (PM decides when > 100 pcs)
+      - All other sizes      → Mana shipment (PM decides when > 100 pcs)
     """
     size = position.size
     color = position.color
@@ -92,8 +121,8 @@ def handle_surplus(db: Session, position: OrderPosition, surplus_quantity: int) 
         return disposition
 
     elif size == '10x10' and not is_basic:
-        # → Casters boxes: accumulate by color+size into casters_boxes table.
-        # When the box has enough tiles it will be shipped to Manu.
+        # → Coaster box: accumulate by color+size into casters_boxes table.
+        # When the box accumulates > 100 pcs, PM decides what to do with it.
         existing_box = db.query(CastersBox).filter(
             CastersBox.factory_id == position.factory_id,
             CastersBox.color == color,
@@ -102,6 +131,7 @@ def handle_surplus(db: Session, position: OrderPosition, surplus_quantity: int) 
         ).first()
         if existing_box:
             existing_box.quantity += surplus_quantity
+            total_box_qty = existing_box.quantity
         else:
             new_box = CastersBox(
                 id=uuid_mod.uuid4(),
@@ -112,6 +142,14 @@ def handle_surplus(db: Session, position: OrderPosition, surplus_quantity: int) 
                 source_order_id=position.order_id,
             )
             db.add(new_box)
+            total_box_qty = surplus_quantity
+
+        # Create PM task when Coaster box exceeds threshold
+        if total_box_qty >= _ACCUMULATION_TASK_THRESHOLD:
+            _create_pm_accumulation_task(
+                db, position.factory_id, total_box_qty,
+                f"Coaster box ({color} 10x10)"
+            )
 
         disposition = SurplusDisposition(
             id=uuid_mod.uuid4(),
@@ -128,8 +166,8 @@ def handle_surplus(db: Session, position: OrderPosition, surplus_quantity: int) 
         return disposition
 
     else:
-        # All other sizes → Manu: accumulate items into the current PENDING manu shipment.
-        # When ready, the manager confirms the shipment.
+        # → Mana: accumulate items into the current PENDING Mana shipment.
+        # When Mana exceeds 100 pcs, PM decides when to ship.
         pending_shipment = db.query(ManuShipment).filter(
             ManuShipment.factory_id == position.factory_id,
             ManuShipment.status == ManuShipmentStatus.PENDING,
@@ -146,13 +184,22 @@ def handle_surplus(db: Session, position: OrderPosition, surplus_quantity: int) 
             current_items.append(item_entry)
             pending_shipment.items_json = current_items
         else:
+            current_items = [item_entry]
             new_shipment = ManuShipment(
                 id=uuid_mod.uuid4(),
                 factory_id=position.factory_id,
-                items_json=[item_entry],
+                items_json=current_items,
                 status=ManuShipmentStatus.PENDING,
             )
             db.add(new_shipment)
+
+        # Create PM task when Mana shipment exceeds threshold
+        total_mana_qty = sum(item.get('quantity', 0) for item in current_items)
+        if total_mana_qty >= _ACCUMULATION_TASK_THRESHOLD:
+            _create_pm_accumulation_task(
+                db, position.factory_id, total_mana_qty,
+                f"Mana shipment ({size})"
+            )
 
         disposition = SurplusDisposition(
             id=uuid_mod.uuid4(),

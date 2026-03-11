@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { positionsApi, type PositionListParams, type SortingSplitRequest } from '@/api/positions';
+import { positionsApi, type PositionListParams, type SortingSplitRequest, type ColorMismatchResolveRequest } from '@/api/positions';
 
 export interface PositionItem {
   id: string;
@@ -74,5 +74,19 @@ export function useStockAvailability(positionId?: string) {
     queryKey: ['stock-availability', positionId],
     queryFn: () => positionsApi.stockAvailability(positionId!),
     enabled: !!positionId,
+  });
+}
+
+export function useResolveColorMismatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: ColorMismatchResolveRequest }) =>
+      positionsApi.resolveColorMismatch(id, data),
+    onSuccess: () => {
+      // Invalidate positions (mismatch list refreshes), orders, tasks (new tasks may appear)
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+    },
   });
 }

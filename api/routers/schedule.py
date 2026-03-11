@@ -102,6 +102,8 @@ def _serialize_position_brief(p) -> dict:
         "status": _ev(p.status),
         "color": p.color,
         "size": p.size,
+        "application": p.application,
+        "collection": p.collection,
         "quantity": p.quantity,
         "product_type": _ev(p.product_type),
         "delay_hours": float(p.delay_hours) if p.delay_hours else 0,

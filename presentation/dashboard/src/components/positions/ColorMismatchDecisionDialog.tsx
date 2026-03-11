@@ -102,6 +102,18 @@ export function ColorMismatchDecisionDialog({
               <span className="font-medium">{position.order_number}</span>
               <span>Color / Size:</span>
               <span className="font-medium">{position.color} {position.size}</span>
+              {position.application && (
+                <>
+                  <span>Application:</span>
+                  <span className="font-medium">{position.application}</span>
+                </>
+              )}
+              {position.collection && (
+                <>
+                  <span>Collection:</span>
+                  <span className="font-medium">{position.collection}</span>
+                </>
+              )}
               <span>Total quantity:</span>
               <span className="font-bold text-gray-900">{total} pcs</span>
             </div>

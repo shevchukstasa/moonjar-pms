@@ -1447,7 +1447,7 @@ function ColorMismatchTabContent({ factoryId }: { factoryId: string | null }) {
           <table className="min-w-full divide-y divide-gray-100">
             <thead className="bg-gray-50">
               <tr>
-                {['Order #', 'Color', 'Size', 'Qty (pcs)', 'Product Type', 'Action'].map((h) => (
+                {['Order #', 'Color', 'Size', 'Application', 'Collection', 'Qty (pcs)', 'Product Type', 'Action'].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                     {h}
                   </th>
@@ -1460,6 +1460,8 @@ function ColorMismatchTabContent({ factoryId }: { factoryId: string | null }) {
                   <td className="px-4 py-3 text-sm font-medium text-gray-900">{pos.order_number}</td>
                   <td className="px-4 py-3 text-sm text-gray-700">{pos.color}</td>
                   <td className="px-4 py-3 text-sm text-gray-700">{pos.size}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700">{pos.application ?? '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700">{pos.collection ?? '—'}</td>
                   <td className="px-4 py-3 text-sm font-semibold text-gray-900">{pos.quantity}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 capitalize">{pos.product_type.replace(/_/g, ' ')}</td>
                   <td className="px-4 py-3">

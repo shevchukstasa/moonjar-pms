@@ -583,6 +583,9 @@ class RecipeCreate(BaseModel):
     finishing_type: Optional[str] = None
     thickness_mm: Optional[float] = None
     description: Optional[str] = None
+    recipe_type: str = 'product'
+    color_type: Optional[str] = None
+    glaze_settings: Optional[dict] = None
     is_active: Optional[bool] = None
 
 
@@ -596,6 +599,9 @@ class RecipeUpdate(BaseModel):
     finishing_type: Optional[str] = None
     thickness_mm: Optional[float] = None
     description: Optional[str] = None
+    recipe_type: Optional[str] = None
+    color_type: Optional[str] = None
+    glaze_settings: Optional[dict] = None
     is_active: Optional[bool] = None
 
 
@@ -610,6 +616,9 @@ class RecipeResponse(BaseModel):
     finishing_type: Optional[str] = None
     thickness_mm: float
     description: Optional[str] = None
+    recipe_type: str
+    color_type: Optional[str] = None
+    glaze_settings: dict
     is_active: bool
     created_at: datetime
     updated_at: datetime

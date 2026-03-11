@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useUiStore } from '@/stores/uiStore';
 import { useFactories } from '@/hooks/useFactories';
 
@@ -5,6 +6,13 @@ export function FactorySelector() {
   const { activeFactoryId, setActiveFactory } = useUiStore();
   const { data } = useFactories();
   const factories = data?.items || [];
+
+  // Auto-select when there is exactly one factory and nothing is selected yet
+  useEffect(() => {
+    if (!activeFactoryId && factories.length === 1) {
+      setActiveFactory(factories[0].id);
+    }
+  }, [factories, activeFactoryId, setActiveFactory]);
 
   return (
     <select

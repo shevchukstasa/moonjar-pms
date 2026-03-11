@@ -311,6 +311,18 @@ class Recipe(Base):
     finishing_type = Column(sa.String(100))
     thickness_mm = Column(sa.Numeric(5, 1), nullable=False, default=11.0)
     description = Column(sa.Text)
+    recipe_type = Column(sa.String(20), nullable=False, default='product')
+    # values: 'product', 'glaze', 'engobe'
+    color_type = Column(sa.String(20))
+    # values: 'base', 'custom', None
+    glaze_settings = Column(JSONB, nullable=False, default=dict)
+    # Stores per-recipe glaze config:
+    # {
+    #   "grams_to_ml_use_default": true,  // if false, use grams_to_ml_ratio
+    #   "grams_to_ml_ratio": 1.0,         // ml per gram (null = use default)
+    #   "consumption_use_default": true,   // if false, use consumption_ml_per_sqm
+    #   "consumption_ml_per_sqm": 1022.7, // ml per sqm (null = use default 450/0.44=1022.7)
+    # }
     is_active = Column(sa.Boolean, nullable=False, default=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())

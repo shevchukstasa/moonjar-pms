@@ -109,6 +109,10 @@ def _ensure_schema():
             # Position numbering — sequential per order
             ("order_positions", "position_number INTEGER"),
             ("order_positions", "split_index INTEGER"),
+            # Recipe type fields
+            ("recipes", "recipe_type VARCHAR(20) NOT NULL DEFAULT 'product'"),
+            ("recipes", "color_type VARCHAR(20)"),
+            ("recipes", "glaze_settings JSONB NOT NULL DEFAULT '{}'"),
         ]
         for table, col_def in add_cols:
             try:
@@ -324,9 +328,37 @@ def _ensure_schema():
 
     _run_section("qc_config", _seed_qc_config)
 
-    # --- Section 7: Kilns (resources) — 3 per factory ---
+    # --- Section 7: Kilns (resources) — 3 per factory (one-time only) ---
     def _seed_kilns(conn):
+        """
+        Seeds 3 default kilns per factory ONLY on first setup.
+        Once a factory has ANY kilns (active or not), or once the
+        'kilns_seeded' flag is set in factory.settings, we never touch
+        the kilns again — the user's manual changes are preserved.
+        """
+        import json as _j
         for fname, fid in factory_ids.items():
+            # Check if kilns were already seeded for this factory
+            frow = conn.execute(text(
+                "SELECT settings FROM factories WHERE id = :fid"
+            ), {"fid": fid}).fetchone()
+            settings = (frow[0] if frow and frow[0] else {}) or {}
+            if settings.get("kilns_seeded"):
+                logger.debug(f"_seed_kilns: factory {fname} already configured, skip")
+                continue  # User has manually configured kilns — never overwrite
+
+            # Also skip if ANY kiln resource already exists for this factory
+            kiln_count = conn.execute(text(
+                "SELECT COUNT(*) FROM resources WHERE factory_id = :fid AND resource_type = 'kiln'"
+            ), {"fid": fid}).scalar() or 0
+            if kiln_count > 0:
+                # Mark as seeded so we won't check again on future deploys
+                settings["kilns_seeded"] = True
+                conn.execute(text(
+                    "UPDATE factories SET settings = cast(:s as JSONB) WHERE id = :fid"
+                ), {"s": _j.dumps(settings), "fid": fid})
+                continue
+
             prefix = fname.replace(" Factory", "")
             kilns_data = [
                 (f"{prefix} Large Kiln", "big",
@@ -340,21 +372,24 @@ def _ensure_schema():
                  {"width_cm": 60, "depth_cm": 100}, False, 0.85),
             ]
             for kname, ktype, dims, work_area, multi, coeff in kilns_data:
-                exists = conn.execute(text(
-                    "SELECT 1 FROM resources WHERE factory_id = :fid AND name = :kname LIMIT 1"
-                ), {"fid": fid, "kname": kname}).fetchone()
-                if not exists:
-                    conn.execute(text(
-                        "INSERT INTO resources (id, factory_id, name, resource_type, kiln_type, "
-                        "kiln_dimensions_cm, kiln_working_area_cm, kiln_multi_level, "
-                        "kiln_coefficient, is_active, status) "
-                        "VALUES (gen_random_uuid(), :fid, :kname, 'kiln', :ktype, "
-                        "cast(:dims as JSONB), cast(:work_area as JSONB), :multi, :coeff, TRUE, 'active')"
-                    ), {
-                        "fid": fid, "kname": kname, "ktype": ktype,
-                        "dims": json_mod.dumps(dims), "work_area": json_mod.dumps(work_area),
-                        "multi": multi, "coeff": coeff,
-                    })
+                conn.execute(text(
+                    "INSERT INTO resources (id, factory_id, name, resource_type, kiln_type, "
+                    "kiln_dimensions_cm, kiln_working_area_cm, kiln_multi_level, "
+                    "kiln_coefficient, is_active, status) "
+                    "VALUES (gen_random_uuid(), :fid, :kname, 'kiln', :ktype, "
+                    "cast(:dims as JSONB), cast(:work_area as JSONB), :multi, :coeff, TRUE, 'active') "
+                    "ON CONFLICT DO NOTHING"
+                ), {
+                    "fid": fid, "kname": kname, "ktype": ktype,
+                    "dims": json_mod.dumps(dims), "work_area": json_mod.dumps(work_area),
+                    "multi": multi, "coeff": coeff,
+                })
+            # Mark factory kilns as seeded
+            settings["kilns_seeded"] = True
+            conn.execute(text(
+                "UPDATE factories SET settings = cast(:s as JSONB) WHERE id = :fid"
+            ), {"s": _j.dumps(settings), "fid": fid})
+            logger.info(f"_seed_kilns: seeded 3 default kilns for {fname}")
 
     _run_section("kilns", _seed_kilns)
 
@@ -370,6 +405,206 @@ def _ensure_schema():
             ), {"name": old_name})
 
     _run_section("cleanup_kilns", _cleanup_duplicate_kilns)
+
+    # --- Section 8b: Seed New Collection glaze recipes ---
+    def _seed_glaze_recipes(conn):
+        """
+        Idempotent seed for New Collection glaze formulas.
+        Stores ingredient fractions (quantity_per_unit = fraction of dry batch).
+        """
+        import json as _json
+
+        GLAZE_DATA = [
+            {
+                "name": "Wabi Beige", "reference_batch_g": 500, "water_fraction": 0.6,
+                "coverage_note": "450ml/2papan", "special_kiln": None,
+                "ingredients": [
+                    ("Fritt Tomat", 0.2), ("Fritt Kasm", 0.8),
+                    ("Black pigment", 0.0004), ("Yellow pigment", 0.0015),
+                    ("Golden brown", 0.0012), ("Bentonite", 0.01), ("Water", 0.6),
+                ],
+            },
+            {
+                "name": "Frosted White", "reference_batch_g": 200, "water_fraction": 0.6,
+                "coverage_note": "450ml/2papan", "special_kiln": None,
+                "ingredients": [
+                    ("Fritt Tomat", 0.2), ("Fritt Kasm", 0.8),
+                    ("Bentonite", 0.01), ("Water", 0.6),
+                ],
+            },
+            {
+                "name": "Matcha Leaf", "reference_batch_g": 11000, "water_fraction": 0.6,
+                "coverage_note": "450ml/2papan; large batch for pigment precision", "special_kiln": None,
+                "ingredients": [
+                    ("Fritt Tomat", 0.2), ("Fritt Kasm", 0.8),
+                    ("Green 9444", 0.008), ("Yellow 9433", 0.03),
+                    ("Bentonite", 0.01), ("Water", 0.6),
+                ],
+            },
+            {
+                "name": "Frost Blue", "reference_batch_g": 300, "water_fraction": 0.6,
+                "coverage_note": "450ml/2papan", "special_kiln": None,
+                "ingredients": [
+                    ("Fritt Tomat", 0.2), ("Fritt Kasm", 0.8),
+                    ("Turquoise 9411", 0.005), ("Bentonite", 0.01), ("Water", 0.6),
+                ],
+            },
+            {
+                "name": "Lavender Ash", "reference_batch_g": 200, "water_fraction": 0.6,
+                "coverage_note": "450ml/2papan", "special_kiln": None,
+                "ingredients": [
+                    ("Fritt Tomat", 0.2), ("Fritt Kasm", 0.8),
+                    ("Grey pigment", 0.012), ("Violet 9474", 0.027),
+                    ("Bentonite", 0.01), ("Water", 0.6),
+                ],
+            },
+            {
+                "name": "Mocha Mousse", "reference_batch_g": 200, "water_fraction": 0.6,
+                "coverage_note": "450ml/2papan", "special_kiln": None,
+                "ingredients": [
+                    ("Fritt Tomat", 0.2), ("Fritt Kasm", 0.8),
+                    ("Golden brown", 0.008), ("Violet 9474", 0.018),
+                    ("Bentonite", 0.01), ("Water", 0.6),
+                ],
+            },
+            {
+                "name": "Wild Olive", "reference_batch_g": 200, "water_fraction": 0.6,
+                "coverage_note": None, "special_kiln": None,
+                "ingredients": [
+                    ("Fritt Tomat", 0.2), ("Fritt Kasm", 0.8),
+                    ("Green pigment", 0.02), ("Golden brown", 0.03),
+                    ("Bentonite", 0.01), ("Water", 0.6),
+                ],
+            },
+            {
+                "name": "Milk Crackle", "reference_batch_g": 500, "water_fraction": 0.6,
+                "coverage_note": None, "special_kiln": None,
+                "ingredients": [
+                    ("Fritt Tomat", 0.2), ("Fritt Kasm", 0.8),
+                    ("Zircosil", 0.1), ("Golden brown", 0.0015), ("Water", 0.6),
+                ],
+            },
+            {
+                "name": "Jade Mist", "reference_batch_g": 800, "water_fraction": 0.6,
+                "coverage_note": None, "special_kiln": None,
+                "ingredients": [
+                    ("Fritt Tomat", 0.2), ("Fritt Kasm", 0.8),
+                    ("Copper carbonate", 0.016), ("Iron oxide", 0.05),
+                    ("Bentonite", 0.01), ("Water", 0.6),
+                ],
+            },
+            {
+                "name": "Lagoon Spark", "reference_batch_g": 6000, "water_fraction": 0.7,
+                "coverage_note": "500ml/2papan", "special_kiln": "New kiln 1012\u00b0C \u2013 5 min hold",
+                "ingredients": [
+                    ("Fritt Tomat", 0.9), ("Kaolin", 0.1),
+                    ("Copper carbonate", 0.05), ("Sodium silicate", 0.006),
+                    ("CMC", 0.0015), ("Water", 0.7),
+                ],
+            },
+            {
+                "name": "Rose Dust", "reference_batch_g": 400, "water_fraction": 0.6,
+                "coverage_note": None, "special_kiln": None,
+                "ingredients": [
+                    ("Fritt Tomat", 0.2), ("Fritt Kasm", 0.8),
+                    ("Coral pigment", 0.004), ("Violet", 0.0024),
+                    ("Bentonite", 0.01), ("Water", 0.6),
+                ],
+            },
+            {
+                "name": "Wild Honey", "reference_batch_g": 100, "water_fraction": 0.6,
+                "coverage_note": None, "special_kiln": None,
+                "ingredients": [
+                    ("Fritt Tomat", 0.2), ("Fritt Kasm", 0.8),
+                    ("Orange pigment", 0.005), ("Yellow pigment", 0.045),
+                    ("Bentonite", 0.01), ("Water", 0.6),
+                ],
+            },
+        ]
+
+        created_recipes = 0
+        created_materials = 0
+        created_rm = 0
+
+        for r in GLAZE_DATA:
+            # 1. Create Recipe if not exists (match by name)
+            existing = conn.execute(
+                text("SELECT id FROM recipes WHERE name = :name"), {"name": r["name"]}
+            ).fetchone()
+            if existing:
+                recipe_id = str(existing[0])
+                # Backfill recipe_type / color_type if they were seeded before these columns existed
+                conn.execute(text(
+                    "UPDATE recipes SET recipe_type='glaze', color_type='base' "
+                    "WHERE id = :id AND (recipe_type = 'product' OR color_type IS NULL)"
+                ), {"id": recipe_id})
+            else:
+                recipe_id = str(__import__('uuid').uuid4())
+                desc = _json.dumps({
+                    "reference_batch_g": r["reference_batch_g"],
+                    "water_fraction": r["water_fraction"],
+                    "coverage_note": r["coverage_note"],
+                    "special_kiln": r["special_kiln"],
+                    "source": "new_collection spreadsheet",
+                }, ensure_ascii=False)
+                # Default glaze_settings: use defaults for g→ml and consumption
+                glaze_settings = _json.dumps({
+                    "grams_to_ml_use_default": True,
+                    "grams_to_ml_ratio": None,
+                    "consumption_use_default": True,
+                    "consumption_ml_per_sqm": None,
+                })
+                conn.execute(text(
+                    "INSERT INTO recipes (id, name, collection, color, description, "
+                    "recipe_type, color_type, glaze_settings, is_active, created_at, updated_at) "
+                    "VALUES (:id, :name, 'new_collection', :color, :desc, "
+                    "'glaze', 'base', cast(:gs as JSONB), TRUE, NOW(), NOW())"
+                ), {
+                    "id": recipe_id, "name": r["name"], "color": r["name"],
+                    "desc": desc, "gs": glaze_settings,
+                })
+                created_recipes += 1
+
+            # 2. Create materials per factory + link to recipe
+            for factory_id in factory_ids.values():
+                for ing_name, fraction in r["ingredients"]:
+                    # Ensure material exists for this factory
+                    mat_row = conn.execute(text(
+                        "SELECT id FROM materials WHERE name = :n AND factory_id = :fid"
+                    ), {"n": ing_name, "fid": factory_id}).fetchone()
+                    if mat_row:
+                        mat_id = str(mat_row[0])
+                    else:
+                        mat_id = str(__import__('uuid').uuid4())
+                        conn.execute(text(
+                            "INSERT INTO materials (id, name, factory_id, balance, min_balance, unit, "
+                            "material_type, warehouse_section, created_at, updated_at) "
+                            "VALUES (:id, :name, :fid, 0, 0, 'kg', 'glaze_ingredient', 'raw_materials', NOW(), NOW())"
+                        ), {"id": mat_id, "name": ing_name, "fid": factory_id})
+                        created_materials += 1
+
+                    # Link recipe ↔ material
+                    grams_in_ref = round(fraction * r["reference_batch_g"], 4)
+                    conn.execute(text(
+                        "INSERT INTO recipe_materials (id, recipe_id, material_id, quantity_per_unit, unit, notes) "
+                        "SELECT :id, :rid, :mid, :qty, 'fraction', :notes "
+                        "WHERE NOT EXISTS ("
+                        "  SELECT 1 FROM recipe_materials WHERE recipe_id = :rid AND material_id = :mid"
+                        ")"
+                    ), {
+                        "id": str(__import__('uuid').uuid4()),
+                        "rid": recipe_id, "mid": mat_id,
+                        "qty": fraction,
+                        "notes": f"{grams_in_ref}g per {r['reference_batch_g']}g ref batch",
+                    })
+                    created_rm += 1  # approximate — includes both new and existing
+
+        logger.info(
+            "_ensure_schema [glaze_recipes]: recipes+=%d materials+=%d recipe_materials~%d",
+            created_recipes, created_materials, created_rm,
+        )
+
+    _run_section("glaze_recipes", _seed_glaze_recipes)
 
     # --- Section 8: Stamp alembic version ---
     def _stamp_alembic(conn):

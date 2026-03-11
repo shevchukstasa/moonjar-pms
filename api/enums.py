@@ -180,9 +180,10 @@ class ShapeType(str, Enum):
     TRIANGLE = 'triangle'
 
 class SplitCategory(str, Enum):
-    REPAIR = 'repair'
-    COLOR_MISMATCH = 'color_mismatch'
-    REGLAZE = 'reglaze'
+    REPAIR = 'repair'                   # Needs re-glazing → SENT_TO_GLAZING
+    REFIRE = 'refire'                   # Already glazed, just needs re-firing → REFIRE status
+    COLOR_MISMATCH = 'color_mismatch'   # Wrong color, re-starts from PLANNED
+    REGLAZE = 'reglaze'                 # Legacy / explicit re-glaze path
 
 class GrindingStatus(str, Enum):
     IN_STOCK = 'in_stock'

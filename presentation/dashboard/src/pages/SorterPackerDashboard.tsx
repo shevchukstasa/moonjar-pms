@@ -243,6 +243,7 @@ function StockAvailabilityPanel({ positionId }: { positionId: string }) {
 function SplitForm({ position, onDone }: { position: PositionItem; onDone: () => void }) {
   const splitMutation = useSplitPosition();
   const [good, setGood] = useState(position.quantity);
+  const [refire, setRefire] = useState(0);
   const [repair, setRepair] = useState(0);
   const [colorMismatch, setColorMismatch] = useState(0);
   const [grinding, setGrinding] = useState(0);
@@ -250,7 +251,7 @@ function SplitForm({ position, onDone }: { position: PositionItem; onDone: () =>
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
 
-  const total = good + repair + colorMismatch + grinding + writeOff;
+  const total = good + refire + repair + colorMismatch + grinding + writeOff;
   const isValid = total === position.quantity && good >= 0;
 
   const handleSubmit = async () => {
@@ -260,6 +261,7 @@ function SplitForm({ position, onDone }: { position: PositionItem; onDone: () =>
         id: position.id,
         data: {
           good_quantity: good,
+          refire_quantity: refire,
           repair_quantity: repair,
           color_mismatch_quantity: colorMismatch,
           grinding_quantity: grinding,
@@ -290,11 +292,12 @@ function SplitForm({ position, onDone }: { position: PositionItem; onDone: () =>
 
       {/* Quantity inputs — large touch targets */}
       <div className="space-y-3">
-        <QtyInput label="Good" value={good} onChange={setGood} color="text-green-700" />
-        <QtyInput label="Repair" value={repair} onChange={setRepair} color="text-yellow-700" />
+        <QtyInput label="Good ✓" value={good} onChange={setGood} color="text-green-700" />
+        <QtyInput label="Refire 🔥" value={refire} onChange={setRefire} color="text-amber-600" />
+        <QtyInput label="Repair 🔧" value={repair} onChange={setRepair} color="text-yellow-700" />
         <QtyInput label="Color Mismatch" value={colorMismatch} onChange={setColorMismatch} color="text-orange-700" />
         <QtyInput label="Grinding" value={grinding} onChange={setGrinding} color="text-gray-700" />
-        <QtyInput label="Write-off" value={writeOff} onChange={setWriteOff} color="text-red-700" />
+        <QtyInput label="Write-off ✗" value={writeOff} onChange={setWriteOff} color="text-red-700" />
       </div>
 
       {/* Total */}

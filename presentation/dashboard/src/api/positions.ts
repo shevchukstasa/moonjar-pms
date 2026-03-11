@@ -12,8 +12,9 @@ export interface PositionListParams {
 
 export interface SortingSplitRequest {
   good_quantity: number;
-  repair_quantity: number;
-  color_mismatch_quantity: number;
+  refire_quantity: number;          // Already glazed; bubbles/underfired → back to kiln
+  repair_quantity: number;          // Needs re-glazing → SENT_TO_GLAZING
+  color_mismatch_quantity: number;  // Wrong color → re-starts from PLANNED
   grinding_quantity: number;
   write_off_quantity: number;
   notes?: string;

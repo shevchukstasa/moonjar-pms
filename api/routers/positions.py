@@ -374,8 +374,9 @@ async def change_position_status(
 
 class SortingSplitRequest(BaseModel):
     good_quantity: int
-    repair_quantity: int = 0
-    color_mismatch_quantity: int = 0
+    refire_quantity: int = 0          # Already glazed, bubbles/underfired → back to kiln (REFIRE status)
+    repair_quantity: int = 0          # Needs re-glazing first → SENT_TO_GLAZING
+    color_mismatch_quantity: int = 0  # Wrong color → re-starts from PLANNED
     grinding_quantity: int = 0
     write_off_quantity: int = 0
     notes: Optional[str] = None
@@ -388,7 +389,7 @@ async def split_position(
     db: Session = Depends(get_db),
     current_user=Depends(require_sorting),
 ):
-    """Sort a fired position: split into good/repair/color_mismatch/grinding/write-off."""
+    """Sort a fired position: split into good/refire/repair/color_mismatch/grinding/write-off."""
 
     p = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
     if not p:
@@ -398,8 +399,8 @@ async def split_position(
         raise HTTPException(400, f"Position status must be 'transferred_to_sorting', got '{_ev(p.status)}'")
 
     total = (
-        data.good_quantity + data.repair_quantity + data.color_mismatch_quantity
-        + data.grinding_quantity + data.write_off_quantity
+        data.good_quantity + data.refire_quantity + data.repair_quantity
+        + data.color_mismatch_quantity + data.grinding_quantity + data.write_off_quantity
     )
     if total != p.quantity:
         raise HTTPException(
@@ -426,7 +427,39 @@ async def split_position(
     p.status = PositionStatus.PACKED
     p.updated_at = now
 
-    # 2. Repair sub-position
+    # 2. Refire sub-position — tile is already glazed, just needs another firing pass
+    if data.refire_quantity > 0:
+        refire_pos = OrderPosition(
+            id=uuid_mod.uuid4(),
+            order_id=p.order_id,
+            order_item_id=p.order_item_id,
+            parent_position_id=p.id,
+            factory_id=p.factory_id,
+            status=PositionStatus.REFIRE,
+            quantity=data.refire_quantity,
+            color=p.color,
+            size=p.size,
+            application=p.application,
+            finishing=p.finishing,
+            collection=p.collection,
+            application_type=p.application_type,
+            place_of_application=p.place_of_application,
+            product_type=p.product_type,
+            shape=p.shape,
+            thickness_mm=p.thickness_mm,
+            recipe_id=p.recipe_id,
+            mandatory_qc=p.mandatory_qc,
+            split_category=SplitCategory.REFIRE,
+            priority_order=p.priority_order,
+            position_number=p.position_number,
+            split_index=_si(),
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(refire_pos)
+        sub_positions.append(refire_pos)
+
+    # 4. Repair sub-position — needs re-glazing before re-firing
     if data.repair_quantity > 0:
         repair_pos = OrderPosition(
             id=uuid_mod.uuid4(),
@@ -474,7 +507,7 @@ async def split_position(
         )
         db.add(rq)
 
-    # 3. Color mismatch sub-position
+    # 5. Color mismatch sub-position
     if data.color_mismatch_quantity > 0:
         cm_pos = OrderPosition(
             id=uuid_mod.uuid4(),
@@ -506,7 +539,7 @@ async def split_position(
         db.add(cm_pos)
         sub_positions.append(cm_pos)
 
-    # 4. Grinding stock
+    # 6. Grinding stock
     if data.grinding_quantity > 0:
         gs = GrindingStock(
             id=uuid_mod.uuid4(),
@@ -528,7 +561,7 @@ async def split_position(
             "quantity": gs.quantity,
         }
 
-    # 5. Write-off defect record
+    # 7. Write-off defect record
     if data.write_off_quantity > 0:
         dr = DefectRecord(
             id=uuid_mod.uuid4(),
@@ -568,6 +601,7 @@ async def split_position(
         "reconciliation": {
             "input_total": total,
             "good": data.good_quantity,
+            "refire": data.refire_quantity,
             "repair": data.repair_quantity,
             "color_mismatch": data.color_mismatch_quantity,
             "grinding": data.grinding_quantity,

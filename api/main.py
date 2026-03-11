@@ -128,6 +128,8 @@ def _ensure_schema():
     _enum_values_to_add = [
         ("notification_type", "cancellation_request"),
         ("notification_type", "change_request"),   # pre-add for future use
+        # New split category for tiles that need re-firing without re-glazing
+        ("split_category", "refire"),
     ]
     try:
         raw_conn = engine.raw_connection()

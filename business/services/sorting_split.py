@@ -14,7 +14,7 @@ from api.models import *  # noqa
 from api.schemas import *  # noqa
 from api.enums import (
     TaskType, SurplusDispositionType,
-    PositionStatus, UserRole,
+    PositionStatus, UserRole, ManuShipmentStatus,
 )
 
 
@@ -92,8 +92,27 @@ def handle_surplus(db: Session, position: OrderPosition, surplus_quantity: int) 
         return disposition
 
     elif size == '10x10' and not is_basic:
-        # → Casters boxes
-        # TODO: add_to_casters_box — accumulate in casters_boxes table
+        # → Casters boxes: accumulate by color+size into casters_boxes table.
+        # When the box has enough tiles it will be shipped to Manu.
+        existing_box = db.query(CastersBox).filter(
+            CastersBox.factory_id == position.factory_id,
+            CastersBox.color == color,
+            CastersBox.size == size,
+            CastersBox.removed_at.is_(None),  # only active boxes
+        ).first()
+        if existing_box:
+            existing_box.quantity += surplus_quantity
+        else:
+            new_box = CastersBox(
+                id=uuid_mod.uuid4(),
+                factory_id=position.factory_id,
+                color=color,
+                size=size,
+                quantity=surplus_quantity,
+                source_order_id=position.order_id,
+            )
+            db.add(new_box)
+
         disposition = SurplusDisposition(
             id=uuid_mod.uuid4(),
             factory_id=position.factory_id,
@@ -109,8 +128,32 @@ def handle_surplus(db: Session, position: OrderPosition, surplus_quantity: int) 
         return disposition
 
     else:
-        # All other sizes → Manu
-        # TODO: add_to_manu_pending — accumulate in manu_shipments
+        # All other sizes → Manu: accumulate items into the current PENDING manu shipment.
+        # When ready, the manager confirms the shipment.
+        pending_shipment = db.query(ManuShipment).filter(
+            ManuShipment.factory_id == position.factory_id,
+            ManuShipment.status == ManuShipmentStatus.PENDING,
+        ).first()
+        item_entry = {
+            "color": color,
+            "size": size,
+            "quantity": surplus_quantity,
+            "source_order_id": str(position.order_id),
+            "source_position_id": str(position.id),
+        }
+        if pending_shipment:
+            current_items = list(pending_shipment.items_json) if pending_shipment.items_json else []
+            current_items.append(item_entry)
+            pending_shipment.items_json = current_items
+        else:
+            new_shipment = ManuShipment(
+                id=uuid_mod.uuid4(),
+                factory_id=position.factory_id,
+                items_json=[item_entry],
+                status=ManuShipmentStatus.PENDING,
+            )
+            db.add(new_shipment)
+
         disposition = SurplusDisposition(
             id=uuid_mod.uuid4(),
             factory_id=position.factory_id,

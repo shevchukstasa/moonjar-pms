@@ -31,14 +31,18 @@ export function SectionTable({ positions, section }: Props) {
   // Sync positions from server, but keep local order during drag
   const sortedPositions = useMemo(() => {
     const sorted = [...positions].sort((a, b) => {
+      // 1. Manual priority
       const pa = a.priority_order ?? 0;
       const pb = b.priority_order ?? 0;
       if (pa !== pb) return pa - pb;
-      // Secondary: position_number within the order
+      // 2. Group by order (order_id keeps same-order positions together)
+      if (a.order_id < b.order_id) return -1;
+      if (a.order_id > b.order_id) return 1;
+      // 3. Position number within the order
       const na = a.position_number ?? 0;
       const nb = b.position_number ?? 0;
       if (na !== nb) return na - nb;
-      // Tertiary: split_index for split positions
+      // 4. Split index for split positions
       return (a.split_index ?? 0) - (b.split_index ?? 0);
     });
     setItems(sorted);

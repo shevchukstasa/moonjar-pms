@@ -12,7 +12,7 @@ from sqlalchemy import func
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
-from api.models import Resource, Batch, OrderPosition, ScheduleSlot
+from api.models import Resource, Batch, OrderPosition, ScheduleSlot, ProductionOrder
 from api.enums import ResourceType, ResourceStatus, BatchStatus, BatchCreator, PositionStatus
 
 router = APIRouter()
@@ -214,6 +214,19 @@ async def create_batch(
     return _serialize_batch(batch, db)
 
 
+def _apply_schedule_order(query):
+    """Sort: manual priority → order deadline (nulls last) → position # → split index."""
+    return query.outerjoin(
+        ProductionOrder, OrderPosition.order_id == ProductionOrder.id
+    ).order_by(
+        OrderPosition.priority_order,
+        ProductionOrder.final_deadline.asc().nullslast(),
+        OrderPosition.position_number,
+        OrderPosition.split_index,
+        OrderPosition.created_at,
+    )
+
+
 @router.get("/glazing-schedule")
 async def get_glazing_schedule(
     factory_id: UUID | None = None,
@@ -224,12 +237,7 @@ async def get_glazing_schedule(
         OrderPosition.status.in_(SECTION_STATUSES["glazing"])
     )
     query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
-    positions = query.order_by(
-        OrderPosition.priority_order,
-        OrderPosition.position_number,
-        OrderPosition.split_index,
-        OrderPosition.created_at,
-    ).all()
+    positions = _apply_schedule_order(query).all()
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
 
@@ -243,12 +251,7 @@ async def get_firing_schedule(
         OrderPosition.status.in_(SECTION_STATUSES["firing"])
     )
     query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
-    positions = query.order_by(
-        OrderPosition.priority_order,
-        OrderPosition.position_number,
-        OrderPosition.split_index,
-        OrderPosition.created_at,
-    ).all()
+    positions = _apply_schedule_order(query).all()
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
 
@@ -262,12 +265,7 @@ async def get_sorting_schedule(
         OrderPosition.status.in_(SECTION_STATUSES["sorting"])
     )
     query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
-    positions = query.order_by(
-        OrderPosition.priority_order,
-        OrderPosition.position_number,
-        OrderPosition.split_index,
-        OrderPosition.created_at,
-    ).all()
+    positions = _apply_schedule_order(query).all()
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
 
@@ -282,12 +280,7 @@ async def get_qc_schedule(
         OrderPosition.status.in_(SECTION_STATUSES["qc"])
     )
     query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
-    positions = query.order_by(
-        OrderPosition.priority_order,
-        OrderPosition.position_number,
-        OrderPosition.split_index,
-        OrderPosition.created_at,
-    ).all()
+    positions = _apply_schedule_order(query).all()
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
 

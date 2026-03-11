@@ -875,18 +875,40 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
         qty_pcs = item_data.get("quantity_pcs") or item_data.get("quantity", 0)
         qty_sqm = item_data.get("quantity_sqm")
 
-        # Parse thickness: accept string "11mm" or number 11.0
+        # Parse thickness: accept string "11mm" or number 11.0; prefer thickness_mm
         raw_thickness = item_data.get("thickness", 11.0)
         if isinstance(raw_thickness, str):
             raw_thickness = float(''.join(c for c in raw_thickness if c.isdigit() or c == '.') or '11')
         thickness_mm = item_data.get("thickness_mm") or raw_thickness
+
+        # Resolve size string — use explicit numeric dims from Sales App if size string absent
+        _size_str = item_data.get("size", "")
+        if not _size_str:
+            _sw = item_data.get("size_width_cm")
+            _sh = item_data.get("size_height_cm")
+            if _sw and _sh:
+                _size_str = f"{_sw:g}x{_sh:g}"
+
+        # qty_sqm fallback — calculate from dimensions × qty_pcs if not provided
+        if not qty_sqm:
+            _sw = item_data.get("size_width_cm")
+            _sh = item_data.get("size_height_cm")
+            if not (_sw and _sh) and _size_str:
+                try:
+                    from business.kiln.capacity import parse_size as _parse_size
+                    _dims = _parse_size(_size_str)
+                    _sw, _sh = _dims.get("width_cm"), _dims.get("height_cm")
+                except Exception:
+                    _sw = _sh = None
+            if _sw and _sh and qty_pcs:
+                qty_sqm = round((float(_sw) * float(_sh) / 10000) * qty_pcs, 3)
 
         item = ProductionOrderItem(
             id=uuid_mod.uuid4(),
             order_id=order.id,
             color=item_data.get("color", ""),
             color_2=item_data.get("color_2"),
-            size=item_data.get("size", ""),
+            size=_size_str,
             application=item_data.get("application"),
             finishing=item_data.get("finishing"),
             thickness=thickness_mm,
@@ -962,7 +984,7 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
             quantity_sqm=qty_sqm,
             color=item_data.get("color", ""),
             color_2=item_data.get("color_2"),
-            size=item_data.get("size", ""),
+            size=_size_str,
             application=item_data.get("application"),
             finishing=item_data.get("finishing"),
             collection=item_data.get("collection"),

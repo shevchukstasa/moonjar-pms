@@ -118,16 +118,46 @@ def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
     items_data = payload.get("items", [])
     created_items = []
     for item_data in items_data:
+        # Parse thickness: prefer thickness_mm, accept string "11mm" or number
+        _raw_t = item_data.get("thickness", 11.0)
+        if isinstance(_raw_t, str):
+            _raw_t = float(''.join(c for c in _raw_t if c.isdigit() or c == '.') or '11')
+        _thickness_val = Decimal(str(item_data.get("thickness_mm") or _raw_t))
+
+        # Resolve size string — construct from explicit dimensions if absent
+        _size_str = item_data.get("size", "")
+        if not _size_str:
+            _sw = item_data.get("size_width_cm")
+            _sh = item_data.get("size_height_cm")
+            if _sw and _sh:
+                _size_str = f"{_sw:g}x{_sh:g}"
+
+        # qty_sqm — fallback to dimension × qty calculation
+        _qty_sqm_raw = item_data.get("quantity_sqm")
+        if not _qty_sqm_raw:
+            _sw = item_data.get("size_width_cm")
+            _sh = item_data.get("size_height_cm")
+            if not (_sw and _sh) and _size_str:
+                try:
+                    from business.kiln.capacity import parse_size as _parse_size
+                    _dims = _parse_size(_size_str)
+                    _sw, _sh = _dims.get("width_cm"), _dims.get("height_cm")
+                except Exception:
+                    _sw = _sh = None
+            _qty_pcs = item_data.get("quantity_pcs", 0)
+            if _sw and _sh and _qty_pcs:
+                _qty_sqm_raw = round((float(_sw) * float(_sh) / 10000) * _qty_pcs, 3)
+
         item = ProductionOrderItem(
             order_id=order.id,
             color=item_data.get("color", ""),
             color_2=item_data.get("color_2"),
-            size=item_data.get("size", ""),
+            size=_size_str,
             application=item_data.get("application"),
             finishing=item_data.get("finishing"),
-            thickness=Decimal(str(item_data.get("thickness", 11.0))),
+            thickness=_thickness_val,
             quantity_pcs=item_data.get("quantity_pcs", 0),
-            quantity_sqm=Decimal(str(item_data.get("quantity_sqm", 0))) if item_data.get("quantity_sqm") else None,
+            quantity_sqm=Decimal(str(_qty_sqm_raw)) if _qty_sqm_raw else None,
             collection=item_data.get("collection"),
             application_type=item_data.get("application_type"),
             place_of_application=item_data.get("place_of_application"),

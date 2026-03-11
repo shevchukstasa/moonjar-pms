@@ -1,0 +1,322 @@
+"""
+TEMPORARY cleanup router — lets PM hard-delete test data.
+Controlled by per-factory toggles set by admin/ceo/owner.
+All deletions are written to Python logger (WARNING level).
+Remove this file once test data is cleaned up.
+"""
+
+import logging
+from uuid import UUID
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from api.database import get_db
+from api.auth import get_current_user, apply_factory_filter
+from api.roles import require_role
+from api.models import (
+    Factory,
+    ProductionOrder,
+    ProductionOrderItem,
+    OrderPosition,
+    Task,
+)
+from api.enums import UserRole
+
+logger = logging.getLogger("moonjar.cleanup")
+
+router = APIRouter()
+
+# ── Role dependencies ──────────────────────────────────────────────────────
+_require_management_roles = require_role(
+    "owner", "administrator", "ceo", "production_manager"
+)
+_require_admin_roles = require_role("owner", "administrator", "ceo")
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────
+
+def _ev(val):
+    return val.value if hasattr(val, "value") else str(val) if val else None
+
+
+def _get_factory_settings(db: Session, factory_id: UUID) -> dict:
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory:
+        raise HTTPException(404, "Factory not found")
+    return factory.settings or {}
+
+
+def _check_pm_permission(db: Session, factory_id: UUID, flag: str, current_user) -> None:
+    """For PM role: check factory toggle. Owner/admin/ceo always allowed."""
+    role = _ev(current_user.role)
+    if role in ("owner", "administrator", "ceo"):
+        return
+    settings = _get_factory_settings(db, factory_id)
+    if not settings.get(flag, False):
+        raise HTTPException(
+            403,
+            f"Cleanup not enabled for this factory. Ask admin/CEO to enable '{flag}'.",
+        )
+
+
+def _delete_tasks_for_position(db: Session, position_id: UUID) -> int:
+    """Hard-delete all tasks linked to a position. Returns count deleted."""
+    tasks = db.query(Task).filter(Task.related_position_id == position_id).all()
+    for t in tasks:
+        db.delete(t)
+    return len(tasks)
+
+
+def _delete_position_tree(db: Session, position: OrderPosition) -> tuple[int, int]:
+    """
+    Delete position + all split children + their tasks.
+    Returns (positions_deleted, tasks_deleted).
+    """
+    positions_deleted = 0
+    tasks_deleted = 0
+
+    # 1. Delete tasks for the root position
+    tasks_deleted += _delete_tasks_for_position(db, position.id)
+
+    # 2. Find and delete split children recursively
+    children = (
+        db.query(OrderPosition)
+        .filter(OrderPosition.parent_position_id == position.id)
+        .all()
+    )
+    for child in children:
+        tasks_deleted += _delete_tasks_for_position(db, child.id)
+        db.delete(child)
+        positions_deleted += 1
+
+    # 3. Delete the root position itself
+    db.delete(position)
+    positions_deleted += 1
+
+    return positions_deleted, tasks_deleted
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# §1  Permissions — read / update factory flags
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/permissions")
+async def get_cleanup_permissions(
+    factory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(_require_management_roles),
+):
+    """Get current PM cleanup toggles for a factory."""
+    settings = _get_factory_settings(db, factory_id)
+    return {
+        "factory_id": str(factory_id),
+        "pm_can_delete_tasks": bool(settings.get("pm_can_delete_tasks", False)),
+        "pm_can_delete_positions": bool(settings.get("pm_can_delete_positions", False)),
+    }
+
+
+class CleanupPermissionsUpdate(BaseModel):
+    factory_id: UUID
+    pm_can_delete_tasks: bool | None = None
+    pm_can_delete_positions: bool | None = None
+
+
+@router.patch("/permissions")
+async def update_cleanup_permissions(
+    body: CleanupPermissionsUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(_require_admin_roles),
+):
+    """Admin/CEO/Owner: toggle PM cleanup permissions for a factory."""
+    factory = db.query(Factory).filter(Factory.id == body.factory_id).first()
+    if not factory:
+        raise HTTPException(404, "Factory not found")
+
+    settings = dict(factory.settings or {})
+    changed = []
+
+    if body.pm_can_delete_tasks is not None:
+        settings["pm_can_delete_tasks"] = body.pm_can_delete_tasks
+        changed.append(f"pm_can_delete_tasks={body.pm_can_delete_tasks}")
+
+    if body.pm_can_delete_positions is not None:
+        settings["pm_can_delete_positions"] = body.pm_can_delete_positions
+        changed.append(f"pm_can_delete_positions={body.pm_can_delete_positions}")
+
+    factory.settings = settings
+    db.commit()
+
+    logger.warning(
+        "CLEANUP PERMISSIONS updated | factory=%s | changes=%s | by %s",
+        factory.name,
+        ", ".join(changed),
+        current_user.email,
+    )
+
+    return {
+        "factory_id": str(body.factory_id),
+        "pm_can_delete_tasks": bool(settings.get("pm_can_delete_tasks", False)),
+        "pm_can_delete_positions": bool(settings.get("pm_can_delete_positions", False)),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# §2  Delete task
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.delete("/tasks/{task_id}")
+async def delete_task(
+    task_id: UUID,
+    factory_id: UUID = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(_require_management_roles),
+):
+    """
+    Hard-delete a task. PM requires pm_can_delete_tasks toggle.
+    Admin/CEO/Owner can always delete.
+    """
+    _check_pm_permission(db, factory_id, "pm_can_delete_tasks", current_user)
+
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(404, "Task not found")
+
+    logger.warning(
+        "CLEANUP DELETE task | id=%s type=%s status=%s order=%s | by %s",
+        task_id,
+        _ev(task.type),
+        _ev(task.status),
+        task.related_order_id,
+        current_user.email,
+    )
+
+    db.delete(task)
+    db.commit()
+    return {"deleted": "task", "id": str(task_id)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# §3  Delete position (+ split children + linked tasks)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.delete("/positions/{position_id}")
+async def delete_position(
+    position_id: UUID,
+    factory_id: UUID = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(_require_management_roles),
+):
+    """
+    Hard-delete a position, its split children and all linked tasks.
+    PM requires pm_can_delete_positions toggle.
+    """
+    _check_pm_permission(db, factory_id, "pm_can_delete_positions", current_user)
+
+    position = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not position:
+        raise HTTPException(404, "Position not found")
+
+    # Don't allow deleting a split child directly — delete the parent
+    if position.parent_position_id is not None:
+        raise HTTPException(
+            400,
+            "This is a split sub-position. Delete the parent position instead.",
+        )
+
+    logger.warning(
+        "CLEANUP DELETE position | id=%s order=%s color=%s size=%s qty=%s | by %s",
+        position_id,
+        position.order_id,
+        position.color,
+        position.size,
+        position.quantity,
+        current_user.email,
+    )
+
+    pos_deleted, tasks_deleted = _delete_position_tree(db, position)
+    db.commit()
+
+    return {
+        "deleted": "position",
+        "id": str(position_id),
+        "positions_deleted": pos_deleted,
+        "tasks_deleted": tasks_deleted,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# §4  Delete order (admin/ceo/owner only — no factory toggle needed)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.delete("/orders/{order_id}")
+async def delete_order(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(_require_admin_roles),
+):
+    """
+    Hard-delete an order + all positions, split children, tasks, and order items.
+    Admin/CEO/Owner only.
+    DB CASCADE handles: positions, items, status_logs.
+    Manual pre-delete: tasks linked to order or positions (no CASCADE in DB).
+    """
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+
+    # Gather all position IDs (to delete linked tasks before CASCADE removes positions)
+    position_ids = [
+        row[0]
+        for row in db.query(OrderPosition.id)
+        .filter(OrderPosition.order_id == order_id)
+        .all()
+    ]
+
+    # Delete tasks linked to any position of this order
+    tasks_deleted = 0
+    if position_ids:
+        pos_tasks = (
+            db.query(Task)
+            .filter(Task.related_position_id.in_(position_ids))
+            .all()
+        )
+        for t in pos_tasks:
+            db.delete(t)
+        tasks_deleted += len(pos_tasks)
+
+    # Delete tasks linked directly to the order
+    order_tasks = (
+        db.query(Task).filter(Task.related_order_id == order_id).all()
+    )
+    for t in order_tasks:
+        if t not in db.deleted:  # avoid double-delete if already queued
+            db.delete(t)
+    tasks_deleted += len(order_tasks)
+
+    pos_count = len(position_ids)
+
+    logger.warning(
+        "CLEANUP DELETE order | id=%s number=%s client=%s "
+        "positions=%d tasks=%d | by %s",
+        order_id,
+        order.order_number,
+        order.client,
+        pos_count,
+        tasks_deleted,
+        current_user.email,
+    )
+
+    # Delete order — CASCADE removes positions, items, status_logs automatically
+    db.delete(order)
+    db.commit()
+
+    return {
+        "deleted": "order",
+        "id": str(order_id),
+        "order_number": order.order_number,
+        "positions_deleted": pos_count,
+        "tasks_deleted": tasks_deleted,
+    }

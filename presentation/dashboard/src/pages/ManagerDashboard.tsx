@@ -1,6 +1,8 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Trash2 } from 'lucide-react';
+import apiClient from '@/api/client';
 import { useOrders, useCancellationRequests, useChangeRequests } from '@/hooks/useOrders';
 import { usePositions, type PositionItem } from '@/hooks/usePositions';
 import { useShortageTasksForManager, useTasks } from '@/hooks/useTasks';
@@ -553,7 +555,34 @@ function OrdersTabContent({
 
 function TasksTabContent({ factoryId }: { factoryId: string | null }) {
   const [taskFilter, setTaskFilter] = useState<string>('');
+  const [canDeleteTasks, setCanDeleteTasks] = useState(false);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!factoryId) return;
+    apiClient.get('/cleanup/permissions', { params: { factory_id: factoryId } })
+      .then((r) => setCanDeleteTasks(r.data.pm_can_delete_tasks))
+      .catch(() => setCanDeleteTasks(false));
+  }, [factoryId]);
+
+  const handleDeleteTask = useCallback(async (taskId: string) => {
+    if (!factoryId) return;
+    if (!window.confirm('Delete this task permanently? This cannot be undone.')) return;
+    setDeletingTaskId(taskId);
+    try {
+      await apiClient.delete(`/cleanup/tasks/${taskId}`, {
+        params: { factory_id: factoryId },
+      });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Delete failed';
+      alert(msg);
+    } finally {
+      setDeletingTaskId(null);
+    }
+  }, [factoryId, queryClient]);
 
   const params = useMemo(() => {
     const p: Record<string, string> = {};
@@ -628,10 +657,35 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
       header: 'Due',
       render: (item) => item.due_at ? new Date(item.due_at).toLocaleDateString() : '\u2014',
     },
+    // Delete column — only shown when PM cleanup is enabled
+    ...(canDeleteTasks ? [{
+      key: '_delete',
+      header: '',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      render: (item: any) => (
+        <button
+          onClick={(e) => { e.stopPropagation(); handleDeleteTask(item.id); }}
+          disabled={deletingTaskId === item.id}
+          className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+          title="Delete task"
+        >
+          {deletingTaskId === item.id
+            ? <span className="text-xs">...</span>
+            : <Trash2 className="h-4 w-4" />}
+        </button>
+      ),
+    }] : []),
   ];
 
   return (
     <div className="space-y-4">
+      {/* Cleanup mode banner */}
+      {canDeleteTasks && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          🗑 Cleanup mode: delete buttons are visible on each task row.
+        </div>
+      )}
+
       {/* Task summary cards */}
       <div className="grid grid-cols-3 gap-4">
         <Card>

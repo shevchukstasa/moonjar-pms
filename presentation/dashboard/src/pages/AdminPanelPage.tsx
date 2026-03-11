@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFactories, type Factory } from '@/hooks/useFactories';
 import { useUsers } from '@/hooks/useUsers';
@@ -13,6 +13,8 @@ import { FactoryDialog } from '@/components/admin/FactoryDialog';
 import { AuditLogViewer } from '@/components/admin/AuditLogViewer';
 import { ActiveSessionsViewer } from '@/components/admin/ActiveSessionsViewer';
 import { StubsToggle } from '@/components/admin/StubsToggle';
+import { Trash2 } from 'lucide-react';
+import apiClient from '@/api/client';
 
 export default function AdminPanelPage() {
   const navigate = useNavigate();
@@ -287,6 +289,9 @@ export default function AdminPanelPage() {
         </div>
       </Card>
 
+      {/* PM Cleanup Permissions */}
+      <AdminCleanupCard factories={factories} />
+
       {/* Factory Dialog */}
       <FactoryDialog
         open={factoryDialogOpen}
@@ -297,5 +302,82 @@ export default function AdminPanelPage() {
         factory={editFactory}
       />
     </div>
+  );
+}
+
+function AdminCleanupCard({ factories }: { factories: Factory[] }) {
+  const [selectedFactory, setSelectedFactory] = useState<string>('');
+  const [canDeleteTasks, setCanDeleteTasks] = useState(false);
+  const [canDeletePositions, setCanDeletePositions] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const factoryId = selectedFactory || (factories[0]?.id ?? '');
+
+  useEffect(() => {
+    if (!factoryId) return;
+    apiClient.get('/cleanup/permissions', { params: { factory_id: factoryId } })
+      .then((r) => {
+        setCanDeleteTasks(r.data.pm_can_delete_tasks);
+        setCanDeletePositions(r.data.pm_can_delete_positions);
+      })
+      .catch(() => {});
+  }, [factoryId]);
+
+  const toggle = async (field: 'pm_can_delete_tasks' | 'pm_can_delete_positions', value: boolean) => {
+    if (!factoryId) return;
+    setSaving(true);
+    try {
+      const r = await apiClient.patch('/cleanup/permissions', {
+        factory_id: factoryId,
+        [field]: value,
+      });
+      setCanDeleteTasks(r.data.pm_can_delete_tasks);
+      setCanDeletePositions(r.data.pm_can_delete_positions);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <div className="flex items-center gap-2 mb-3">
+        <Trash2 className="h-4 w-4 text-red-500" />
+        <span className="text-sm font-semibold text-gray-700">PM Cleanup Permissions</span>
+        <span className="ml-auto text-xs text-amber-600 font-medium">⚠ Temporary</span>
+      </div>
+      {factories.length > 1 && (
+        <select
+          value={selectedFactory}
+          onChange={(e) => setSelectedFactory(e.target.value)}
+          className="mb-3 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+        >
+          {factories.map((f) => (
+            <option key={f.id} value={f.id}>{f.name}</option>
+          ))}
+        </select>
+      )}
+      <div className="space-y-2">
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={canDeleteTasks}
+            disabled={saving || !factoryId}
+            onChange={(e) => toggle('pm_can_delete_tasks', e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+          />
+          <span className="text-sm text-gray-700">PM can delete tasks</span>
+        </label>
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={canDeletePositions}
+            disabled={saving || !factoryId}
+            onChange={(e) => toggle('pm_can_delete_positions', e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+          />
+          <span className="text-sm text-gray-700">PM can delete positions</span>
+        </label>
+      </div>
+    </Card>
   );
 }

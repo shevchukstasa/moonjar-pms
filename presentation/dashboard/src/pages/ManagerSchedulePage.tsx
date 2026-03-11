@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import { Trash2 } from 'lucide-react';
 import { useUiStore } from '@/stores/uiStore';
 import { useGlazingSchedule, useFiringSchedule, useSortingSchedule, useQcSchedule, useKilnSchedule } from '@/hooks/useSchedule';
 import { Badge } from '@/components/ui/Badge';
@@ -9,6 +11,7 @@ import { Tabs } from '@/components/ui/Tabs';
 import { Spinner } from '@/components/ui/Spinner';
 import { DataTable } from '@/components/ui/Table';
 import { FactorySelector } from '@/components/layout/FactorySelector';
+import apiClient from '@/api/client';
 
 const SECTION_TABS = [
   { id: 'glazing', label: 'Glazing' },
@@ -18,48 +21,13 @@ const SECTION_TABS = [
   { id: 'kilns', label: 'Kilns' },
 ];
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const positionColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
-  { key: 'order_number', header: 'Order' },
-  {
-    key: 'position_label',
-    header: '#',
-    render: (item) => (
-      <span className="font-mono text-xs font-semibold text-gray-700">
-        {item.position_label ?? (item.position_number != null ? `#${item.position_number}` : '—')}
-      </span>
-    ),
-  },
-  { key: 'color', header: 'Color' },
-  { key: 'size', header: 'Size' },
-  {
-    key: 'application',
-    header: 'Application',
-    render: (item) => item.application ?? '—',
-  },
-  {
-    key: 'collection',
-    header: 'Collection',
-    render: (item) => item.collection ?? '—',
-  },
-  { key: 'quantity', header: 'Qty' },
-  {
-    key: 'status',
-    header: 'Status',
-    render: (item) => <Badge status={item.status} />,
-  },
-  { key: 'product_type', header: 'Type' },
-  {
-    key: 'priority_order',
-    header: 'Priority',
-    render: (item) => item.priority_order != null ? item.priority_order : '\u2014',
-  },
-];
-
 export default function ManagerSchedulePage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const activeFactoryId = useUiStore((s) => s.activeFactoryId);
   const [tab, setTab] = useState('glazing');
+  const [canDeletePositions, setCanDeletePositions] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const { data: glazingData, isLoading: glazingLoading, isError: glazingError } = useGlazingSchedule(activeFactoryId);
   const { data: firingData, isLoading: firingLoading, isError: firingError } = useFiringSchedule(activeFactoryId);
@@ -67,6 +35,36 @@ export default function ManagerSchedulePage() {
   const { data: qcData, isLoading: qcLoading, isError: qcError } = useQcSchedule(activeFactoryId);
   const { data: kilnData, isLoading: kilnLoading, isError: kilnError } = useKilnSchedule(activeFactoryId);
   const hasError = glazingError || firingError || sortingError || qcError || kilnError;
+
+  // Fetch PM cleanup permissions for this factory
+  useEffect(() => {
+    if (!activeFactoryId) return;
+    apiClient.get('/cleanup/permissions', { params: { factory_id: activeFactoryId } })
+      .then((r) => setCanDeletePositions(r.data.pm_can_delete_positions))
+      .catch(() => setCanDeletePositions(false));
+  }, [activeFactoryId]);
+
+  const handleDeletePosition = useCallback(async (positionId: string) => {
+    if (!activeFactoryId) return;
+    if (!window.confirm('Delete this position and all its linked tasks? This cannot be undone.')) return;
+    setDeletingId(positionId);
+    try {
+      await apiClient.delete(`/cleanup/positions/${positionId}`, {
+        params: { factory_id: activeFactoryId },
+      });
+      // Refresh all schedule tabs
+      queryClient.invalidateQueries({ queryKey: ['schedule'] });
+      queryClient.invalidateQueries({ queryKey: ['glazing-schedule'] });
+      queryClient.invalidateQueries({ queryKey: ['firing-schedule'] });
+      queryClient.invalidateQueries({ queryKey: ['sorting-schedule'] });
+      queryClient.invalidateQueries({ queryKey: ['qc-schedule'] });
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Delete failed';
+      alert(msg);
+    } finally {
+      setDeletingId(null);
+    }
+  }, [activeFactoryId, queryClient]);
 
   const isLoading =
     (tab === 'glazing' && glazingLoading) ||
@@ -83,6 +81,61 @@ export default function ManagerSchedulePage() {
   };
 
   const kilns = kilnData?.items || [];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const positionColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
+    { key: 'order_number', header: 'Order' },
+    {
+      key: 'position_label',
+      header: '#',
+      render: (item) => (
+        <span className="font-mono text-xs font-semibold text-gray-700">
+          {item.position_label ?? (item.position_number != null ? `#${item.position_number}` : '—')}
+        </span>
+      ),
+    },
+    { key: 'color', header: 'Color' },
+    { key: 'size', header: 'Size' },
+    {
+      key: 'application',
+      header: 'Application',
+      render: (item) => item.application ?? '—',
+    },
+    {
+      key: 'collection',
+      header: 'Collection',
+      render: (item) => item.collection ?? '—',
+    },
+    { key: 'quantity', header: 'Qty' },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (item) => <Badge status={item.status} />,
+    },
+    { key: 'product_type', header: 'Type' },
+    {
+      key: 'priority_order',
+      header: 'Priority',
+      render: (item) => item.priority_order != null ? item.priority_order : '\u2014',
+    },
+    // Delete column — only shown when PM cleanup is enabled
+    ...(canDeletePositions ? [{
+      key: '_delete',
+      header: '',
+      render: (item: { id: string }) => (
+        <button
+          onClick={(e) => { e.stopPropagation(); handleDeletePosition(item.id); }}
+          disabled={deletingId === item.id}
+          className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+          title="Delete position"
+        >
+          {deletingId === item.id
+            ? <span className="text-xs">...</span>
+            : <Trash2 className="h-4 w-4" />}
+        </button>
+      ),
+    }] : []),
+  ];
 
   return (
     <div className="space-y-6">
@@ -129,6 +182,13 @@ export default function ManagerSchedulePage() {
       {hasError && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
           <p className="text-sm font-medium text-red-800">⚠ Error loading schedule data. Try refreshing.</p>
+        </div>
+      )}
+
+      {/* Cleanup mode banner */}
+      {canDeletePositions && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          🗑 Cleanup mode: delete buttons are visible on each position row.
         </div>
       )}
 

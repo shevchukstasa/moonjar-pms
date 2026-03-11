@@ -1,4 +1,4 @@
-import { BarChart3, Clock, AlertTriangle, Percent, Flame, Activity, Download } from 'lucide-react';
+import { BarChart3, Clock, AlertTriangle, Percent, Flame, Activity, Download, Trash2 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import { KpiCard } from '@/components/dashboard/KpiCard';
@@ -18,6 +18,72 @@ import {
 import { useFactory } from '@/hooks/useFactory';
 import { useFactories } from '@/hooks/useFactories';
 import apiClient from '@/api/client';
+import { useState, useEffect } from 'react';
+
+function CleanupPermissionsCard({ factoryId }: { factoryId: string | null }) {
+  const [canDeleteTasks, setCanDeleteTasks] = useState(false);
+  const [canDeletePositions, setCanDeletePositions] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!factoryId) return;
+    apiClient.get('/cleanup/permissions', { params: { factory_id: factoryId } })
+      .then((r) => {
+        setCanDeleteTasks(r.data.pm_can_delete_tasks);
+        setCanDeletePositions(r.data.pm_can_delete_positions);
+      })
+      .catch(() => {});
+  }, [factoryId]);
+
+  const toggle = async (field: 'pm_can_delete_tasks' | 'pm_can_delete_positions', value: boolean) => {
+    if (!factoryId) return;
+    setSaving(true);
+    try {
+      const r = await apiClient.patch('/cleanup/permissions', {
+        factory_id: factoryId,
+        [field]: value,
+      });
+      setCanDeleteTasks(r.data.pm_can_delete_tasks);
+      setCanDeletePositions(r.data.pm_can_delete_positions);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!factoryId) return null;
+
+  return (
+    <Card>
+      <div className="flex items-center gap-2 mb-3">
+        <Trash2 className="h-4 w-4 text-red-500" />
+        <span className="text-sm font-semibold text-gray-700">PM Cleanup Permissions</span>
+        <span className="ml-auto text-xs text-amber-600 font-medium">⚠ Temporary</span>
+      </div>
+      <div className="space-y-2">
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={canDeleteTasks}
+            disabled={saving}
+            onChange={(e) => toggle('pm_can_delete_tasks', e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+          />
+          <span className="text-sm text-gray-700">PM can delete tasks</span>
+        </label>
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={canDeletePositions}
+            disabled={saving}
+            onChange={(e) => toggle('pm_can_delete_positions', e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+          />
+          <span className="text-sm text-gray-700">PM can delete positions</span>
+        </label>
+      </div>
+    </Card>
+  );
+}
 
 export default function CeoDashboard() {
   const { factoryId, setFactoryId } = useFactory();
@@ -149,6 +215,11 @@ export default function CeoDashboard() {
           </div>
           {activity ? <ActivityFeed items={activity} /> : <Spinner />}
         </Card>
+      </div>
+
+      {/* PM Cleanup Permissions */}
+      <div className="max-w-xs">
+        <CleanupPermissionsCard factoryId={factoryId} />
       </div>
     </div>
   );

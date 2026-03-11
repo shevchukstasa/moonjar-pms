@@ -62,6 +62,7 @@ from api.routers import ws
 from api.routers import packing_photos
 from api.routers import finished_goods
 from api.routers import firing_profiles
+from api.routers import cleanup
 
 
 def _ensure_schema():
@@ -508,5 +509,6 @@ def setup_routers():
     app.include_router(packing_photos.router, prefix="/api/packing-photos", tags=["packing-photos"])
     app.include_router(finished_goods.router, prefix="/api/finished-goods", tags=["finished-goods"])
     app.include_router(firing_profiles.router, prefix="/api/firing-profiles", tags=["firing-profiles"])
+    app.include_router(cleanup.router, prefix="/api/cleanup", tags=["cleanup"])
 
 setup_routers()

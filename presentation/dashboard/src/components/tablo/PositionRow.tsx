@@ -10,6 +10,8 @@ export interface PositionItem {
   status: string;
   color: string;
   size: string;
+  application?: string | null;
+  collection?: string | null;
   quantity: number;
   product_type: string;
   delay_hours: number;
@@ -56,6 +58,7 @@ export function PositionRow({ position, index, section }: Props) {
 
   return (
     <tr ref={setNodeRef} style={style} className={`border-b ${rowBg}`}>
+      {/* drag handle */}
       <td className="w-8 px-2 py-2 text-center">
         <button
           {...attributes}
@@ -66,6 +69,7 @@ export function PositionRow({ position, index, section }: Props) {
           ⠿
         </button>
       </td>
+      <td className="px-3 py-2 text-sm font-medium text-gray-900">{position.order_number}</td>
       <td className="px-3 py-2 text-xs font-mono font-semibold text-gray-700">
         {position.position_label
           ?? (position.position_number != null
@@ -74,11 +78,11 @@ export function PositionRow({ position, index, section }: Props) {
               : `#${position.position_number}`)
             : `#${index + 1}`)}
       </td>
-      <td className="px-3 py-2 text-sm font-medium text-gray-900">{position.order_number}</td>
       <td className="px-3 py-2 text-sm">{position.color}</td>
       <td className="px-3 py-2 text-sm">{position.size}</td>
+      <td className="px-3 py-2 text-sm">{position.application ?? '\u2014'}</td>
+      <td className="px-3 py-2 text-sm">{position.collection ?? '\u2014'}</td>
       <td className="px-3 py-2 text-sm text-right">{position.quantity}</td>
-      <td className="px-3 py-2 text-sm">{position.product_type}</td>
       <td className="px-3 py-2">
         <StatusDropdown
           positionId={position.id}
@@ -86,6 +90,7 @@ export function PositionRow({ position, index, section }: Props) {
           section={section}
         />
       </td>
+      <td className="px-3 py-2 text-sm">{position.product_type}</td>
       <td className={`px-3 py-2 text-xs text-right ${delay > 72 ? 'font-semibold text-red-600' : delay > 24 ? 'text-yellow-600' : 'text-gray-500'}`}>
         {delay > 0 ? delayDisplay : '\u2014'}
       </td>

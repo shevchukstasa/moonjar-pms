@@ -87,13 +87,15 @@ export function SectionTable({ positions, section }: Props) {
             <thead className="border-b bg-gray-50 text-xs font-medium uppercase text-gray-500">
               <tr>
                 <th className="w-8 px-2 py-2" />
-                <th className="px-3 py-2">#</th>
                 <th className="px-3 py-2">Order</th>
+                <th className="px-3 py-2">#</th>
                 <th className="px-3 py-2">Color</th>
                 <th className="px-3 py-2">Size</th>
+                <th className="px-3 py-2">Application</th>
+                <th className="px-3 py-2">Collection</th>
                 <th className="px-3 py-2 text-right">Qty</th>
-                <th className="px-3 py-2">Type</th>
                 <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Type</th>
                 <th className="px-3 py-2 text-right">Delay</th>
               </tr>
             </thead>
@@ -109,7 +111,7 @@ export function SectionTable({ positions, section }: Props) {
             </tbody>
             <tfoot className="border-t bg-gray-50">
               <tr>
-                <td colSpan={5} className="px-3 py-2 text-xs font-semibold text-gray-600">
+                <td colSpan={7} className="px-3 py-2 text-xs font-semibold text-gray-600">
                   Total: {filtered.length} positions
                 </td>
                 <td className="px-3 py-2 text-right text-xs font-semibold text-gray-600">

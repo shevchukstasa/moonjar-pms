@@ -224,7 +224,12 @@ async def get_glazing_schedule(
         OrderPosition.status.in_(SECTION_STATUSES["glazing"])
     )
     query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
-    positions = query.order_by(OrderPosition.priority_order, OrderPosition.created_at).all()
+    positions = query.order_by(
+        OrderPosition.priority_order,
+        OrderPosition.position_number,
+        OrderPosition.split_index,
+        OrderPosition.created_at,
+    ).all()
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
 
@@ -238,7 +243,12 @@ async def get_firing_schedule(
         OrderPosition.status.in_(SECTION_STATUSES["firing"])
     )
     query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
-    positions = query.order_by(OrderPosition.priority_order, OrderPosition.created_at).all()
+    positions = query.order_by(
+        OrderPosition.priority_order,
+        OrderPosition.position_number,
+        OrderPosition.split_index,
+        OrderPosition.created_at,
+    ).all()
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
 
@@ -252,7 +262,12 @@ async def get_sorting_schedule(
         OrderPosition.status.in_(SECTION_STATUSES["sorting"])
     )
     query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
-    positions = query.order_by(OrderPosition.priority_order, OrderPosition.created_at).all()
+    positions = query.order_by(
+        OrderPosition.priority_order,
+        OrderPosition.position_number,
+        OrderPosition.split_index,
+        OrderPosition.created_at,
+    ).all()
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
 
@@ -267,7 +282,12 @@ async def get_qc_schedule(
         OrderPosition.status.in_(SECTION_STATUSES["qc"])
     )
     query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
-    positions = query.order_by(OrderPosition.priority_order, OrderPosition.created_at).all()
+    positions = query.order_by(
+        OrderPosition.priority_order,
+        OrderPosition.position_number,
+        OrderPosition.split_index,
+        OrderPosition.created_at,
+    ).all()
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
 

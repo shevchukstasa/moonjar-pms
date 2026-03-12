@@ -91,7 +91,9 @@ const BUFFER_HEALTH_COLORS: Record<string, string> = {
 
 export default function ManagerDashboard() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const activeFactoryId = useUiStore((s) => s.activeFactoryId);
+  const currentUser = useCurrentUser();
 
   // --- Top-level tab ---
   const [activeTab, setActiveTab] = useState<DashboardTab>('orders');
@@ -103,6 +105,44 @@ export default function ManagerDashboard() {
   const [statusFilter, setStatusFilter] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const debouncedSearch = useDebounce(search, 400);
+
+  // --- Order delete permissions ---
+  const [canDeleteOrders, setCanDeleteOrders] = useState(false);
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeFactoryId) {
+      apiClient.get('/cleanup/permissions', { params: { factory_id: activeFactoryId } })
+        .then((r) => setCanDeleteOrders(r.data.pm_can_delete_orders))
+        .catch(() => setCanDeleteOrders(false));
+    } else {
+      const userFactories = currentUser?.factories ?? [];
+      if (userFactories.length === 0) { setCanDeleteOrders(false); return; }
+      Promise.all(
+        userFactories.map((f) =>
+          apiClient.get('/cleanup/permissions', { params: { factory_id: f.id } })
+            .then((r) => ({ allowed: r.data.pm_can_delete_orders as boolean }))
+            .catch(() => ({ allowed: false }))
+        )
+      ).then((results) => setCanDeleteOrders(results.some((r) => r.allowed)));
+    }
+  }, [activeFactoryId, currentUser]);
+
+  const handleDeleteOrder = useCallback(async (orderId: string, orderFactoryId?: string) => {
+    const fid = activeFactoryId || orderFactoryId;
+    if (!fid) { alert('Select a specific factory to delete orders.'); return; }
+    if (!window.confirm('Delete this order and ALL its positions and tasks? This cannot be undone.')) return;
+    setDeletingOrderId(orderId);
+    try {
+      await apiClient.delete(`/cleanup/orders/${orderId}`, { params: { factory_id: fid } });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Delete failed';
+      alert(msg);
+    } finally {
+      setDeletingOrderId(null);
+    }
+  }, [activeFactoryId, queryClient]);
 
   const ordersParams = useMemo<OrderListParams>(() => {
     const p: OrderListParams = { page, per_page: 20, tab: orderTab };
@@ -247,6 +287,24 @@ export default function ManagerDashboard() {
         </span>
       ),
     },
+    // Delete column — only shown when PM cleanup for orders is enabled
+    ...(canDeleteOrders ? [{
+      key: '_delete',
+      header: '',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      render: (item: any) => (
+        <button
+          onClick={(e) => { e.stopPropagation(); handleDeleteOrder(item.id, item.factory_id); }}
+          disabled={deletingOrderId === item.id}
+          className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+          title="Delete order"
+        >
+          {deletingOrderId === item.id
+            ? <span className="text-xs">...</span>
+            : <Trash2 className="h-4 w-4" />}
+        </button>
+      ),
+    }] : []),
   ];
 
   return (

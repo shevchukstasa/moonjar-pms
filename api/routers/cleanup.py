@@ -115,6 +115,7 @@ async def get_cleanup_permissions(
         "factory_id": str(factory_id),
         "pm_can_delete_tasks": bool(settings.get("pm_can_delete_tasks", False)),
         "pm_can_delete_positions": bool(settings.get("pm_can_delete_positions", False)),
+        "pm_can_delete_orders": bool(settings.get("pm_can_delete_orders", False)),
     }
 
 
@@ -122,6 +123,7 @@ class CleanupPermissionsUpdate(BaseModel):
     factory_id: UUID
     pm_can_delete_tasks: bool | None = None
     pm_can_delete_positions: bool | None = None
+    pm_can_delete_orders: bool | None = None
 
 
 @router.patch("/permissions")
@@ -146,6 +148,10 @@ async def update_cleanup_permissions(
         settings["pm_can_delete_positions"] = body.pm_can_delete_positions
         changed.append(f"pm_can_delete_positions={body.pm_can_delete_positions}")
 
+    if body.pm_can_delete_orders is not None:
+        settings["pm_can_delete_orders"] = body.pm_can_delete_orders
+        changed.append(f"pm_can_delete_orders={body.pm_can_delete_orders}")
+
     factory.settings = settings
     db.commit()
 
@@ -160,6 +166,7 @@ async def update_cleanup_permissions(
         "factory_id": str(body.factory_id),
         "pm_can_delete_tasks": bool(settings.get("pm_can_delete_tasks", False)),
         "pm_can_delete_positions": bool(settings.get("pm_can_delete_positions", False)),
+        "pm_can_delete_orders": bool(settings.get("pm_can_delete_orders", False)),
     }
 
 
@@ -247,21 +254,24 @@ async def delete_position(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# §4  Delete order (admin/ceo/owner only — no factory toggle needed)
+# §4  Delete order (admin/ceo/owner always; PM with toggle)
 # ══════════════════════════════════════════════════════════════════════════════
 
 @router.delete("/orders/{order_id}")
 async def delete_order(
     order_id: UUID,
+    factory_id: UUID = Query(...),
     db: Session = Depends(get_db),
-    current_user=Depends(_require_admin_roles),
+    current_user=Depends(_require_management_roles),
 ):
     """
     Hard-delete an order + all positions, split children, tasks, and order items.
-    Admin/CEO/Owner only.
+    PM requires pm_can_delete_orders toggle. Admin/CEO/Owner can always delete.
     DB CASCADE handles: positions, items, status_logs.
     Manual pre-delete: tasks linked to order or positions (no CASCADE in DB).
     """
+    _check_pm_permission(db, factory_id, "pm_can_delete_orders", current_user)
+
     order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
     if not order:
         raise HTTPException(404, "Order not found")

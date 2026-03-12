@@ -23,6 +23,7 @@ import { useState, useEffect } from 'react';
 function CleanupPermissionsCard({ factoryId }: { factoryId: string | null }) {
   const [canDeleteTasks, setCanDeleteTasks] = useState(false);
   const [canDeletePositions, setCanDeletePositions] = useState(false);
+  const [canDeleteOrders, setCanDeleteOrders] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -31,11 +32,12 @@ function CleanupPermissionsCard({ factoryId }: { factoryId: string | null }) {
       .then((r) => {
         setCanDeleteTasks(r.data.pm_can_delete_tasks);
         setCanDeletePositions(r.data.pm_can_delete_positions);
+        setCanDeleteOrders(r.data.pm_can_delete_orders);
       })
       .catch(() => {});
   }, [factoryId]);
 
-  const toggle = async (field: 'pm_can_delete_tasks' | 'pm_can_delete_positions', value: boolean) => {
+  const toggle = async (field: 'pm_can_delete_tasks' | 'pm_can_delete_positions' | 'pm_can_delete_orders', value: boolean) => {
     if (!factoryId) return;
     setSaving(true);
     try {
@@ -45,6 +47,7 @@ function CleanupPermissionsCard({ factoryId }: { factoryId: string | null }) {
       });
       setCanDeleteTasks(r.data.pm_can_delete_tasks);
       setCanDeletePositions(r.data.pm_can_delete_positions);
+      setCanDeleteOrders(r.data.pm_can_delete_orders);
     } finally {
       setSaving(false);
     }
@@ -79,6 +82,16 @@ function CleanupPermissionsCard({ factoryId }: { factoryId: string | null }) {
             className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
           />
           <span className="text-sm text-gray-700">PM can delete positions</span>
+        </label>
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={canDeleteOrders}
+            disabled={saving}
+            onChange={(e) => toggle('pm_can_delete_orders', e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+          />
+          <span className="text-sm text-gray-700">PM can delete orders</span>
         </label>
       </div>
     </Card>

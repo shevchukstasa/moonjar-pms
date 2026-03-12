@@ -22,6 +22,18 @@ from api.models import (
     ProductionOrderItem,
     OrderPosition,
     Task,
+    # ── FK-blocking models (no CASCADE on order/position refs) ──
+    MaterialTransaction,
+    QualityCheck,
+    DefectRecord,
+    GrindingStock,
+    RepairQueue,
+    SurplusDisposition,
+    CastersBox,
+    OrderPackingPhoto,
+    WorkerMedia,
+    OrderFinancial,
+    QmBlock,
 )
 from api.enums import UserRole
 
@@ -97,6 +109,68 @@ def _delete_position_tree(db: Session, position: OrderPosition) -> tuple[int, in
     positions_deleted += 1
 
     return positions_deleted, tasks_deleted
+
+
+# ── Tables with FK refs to order_positions (no CASCADE) ──
+_POSITION_FK_MODELS = [
+    (MaterialTransaction, MaterialTransaction.related_position_id),
+    (QualityCheck,        QualityCheck.position_id),
+    (DefectRecord,        DefectRecord.position_id),
+    (GrindingStock,       GrindingStock.source_position_id),
+    (RepairQueue,         RepairQueue.source_position_id),
+    (SurplusDisposition,  SurplusDisposition.position_id),
+    (OrderPackingPhoto,   OrderPackingPhoto.position_id),
+    (WorkerMedia,         WorkerMedia.related_position_id),
+    (QmBlock,             QmBlock.position_id),
+]
+
+# ── Tables with FK refs to production_orders (no CASCADE) ──
+_ORDER_FK_MODELS = [
+    (MaterialTransaction, MaterialTransaction.related_order_id),
+    (GrindingStock,       GrindingStock.source_order_id),
+    (RepairQueue,         RepairQueue.source_order_id),
+    (SurplusDisposition,  SurplusDisposition.order_id),
+    (CastersBox,          CastersBox.source_order_id),
+    (OrderPackingPhoto,   OrderPackingPhoto.order_id),
+    (WorkerMedia,         WorkerMedia.related_order_id),
+    (OrderFinancial,      OrderFinancial.order_id),
+]
+
+
+def _purge_position_refs(db: Session, position_ids: list[UUID]) -> int:
+    """Hard-delete all FK references to given positions from non-CASCADE tables."""
+    total = 0
+    if not position_ids:
+        return total
+    for Model, fk_col in _POSITION_FK_MODELS:
+        total += db.query(Model).filter(fk_col.in_(position_ids)).delete(
+            synchronize_session="fetch"
+        )
+    return total
+
+
+def _purge_order_refs(db: Session, order_id: UUID, position_ids: list[UUID]) -> dict:
+    """
+    Hard-delete all FK references to this order and its positions
+    from tables that lack CASCADE. Returns summary for logging.
+    """
+    counts: dict[str, int] = {}
+
+    # Position-linked refs
+    if position_ids:
+        n = _purge_position_refs(db, position_ids)
+        if n:
+            counts["position_refs"] = n
+
+    # Order-linked refs
+    for Model, fk_col in _ORDER_FK_MODELS:
+        n = db.query(Model).filter(fk_col == order_id).delete(
+            synchronize_session="fetch"
+        )
+        if n:
+            counts[Model.__tablename__] = n
+
+    return counts
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -232,13 +306,24 @@ async def delete_position(
         if parent:
             position = parent
 
+    # Gather all position IDs in the tree (root + split children)
+    child_ids = [
+        c.id for c in db.query(OrderPosition)
+        .filter(OrderPosition.parent_position_id == position.id).all()
+    ]
+    all_pos_ids = [position.id] + child_ids
+
+    # Purge FK refs from non-CASCADE tables before deleting positions
+    refs_purged = _purge_position_refs(db, all_pos_ids)
+
     logger.warning(
-        "CLEANUP DELETE position | id=%s order=%s color=%s size=%s qty=%s | by %s",
+        "CLEANUP DELETE position | id=%s order=%s color=%s size=%s qty=%s refs_purged=%d | by %s",
         position.id,
         position.order_id,
         position.color,
         position.size,
         position.quantity,
+        refs_purged,
         current_user.email,
     )
 
@@ -276,7 +361,7 @@ async def delete_order(
     if not order:
         raise HTTPException(404, "Order not found")
 
-    # Gather all position IDs (to delete linked tasks before CASCADE removes positions)
+    # Gather all position IDs (to purge FK refs before CASCADE removes positions)
     position_ids = [
         row[0]
         for row in db.query(OrderPosition.id)
@@ -284,37 +369,34 @@ async def delete_order(
         .all()
     ]
 
-    # Delete tasks linked to any position of this order
+    # ── Purge all FK references from non-CASCADE tables ──
+    ref_counts = _purge_order_refs(db, order_id, position_ids)
+
+    # ── Delete tasks (also no CASCADE) ──
     tasks_deleted = 0
     if position_ids:
-        pos_tasks = (
+        tasks_deleted += (
             db.query(Task)
             .filter(Task.related_position_id.in_(position_ids))
-            .all()
+            .delete(synchronize_session="fetch")
         )
-        for t in pos_tasks:
-            db.delete(t)
-        tasks_deleted += len(pos_tasks)
-
-    # Delete tasks linked directly to the order
-    order_tasks = (
-        db.query(Task).filter(Task.related_order_id == order_id).all()
+    tasks_deleted += (
+        db.query(Task)
+        .filter(Task.related_order_id == order_id)
+        .delete(synchronize_session="fetch")
     )
-    for t in order_tasks:
-        if t not in db.deleted:  # avoid double-delete if already queued
-            db.delete(t)
-    tasks_deleted += len(order_tasks)
 
     pos_count = len(position_ids)
 
     logger.warning(
         "CLEANUP DELETE order | id=%s number=%s client=%s "
-        "positions=%d tasks=%d | by %s",
+        "positions=%d tasks=%d refs=%s | by %s",
         order_id,
         order.order_number,
         order.client,
         pos_count,
         tasks_deleted,
+        ref_counts,
         current_user.email,
     )
 

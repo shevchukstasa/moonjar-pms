@@ -5,7 +5,7 @@ Data extracted from the Google Spreadsheet "Расчет рецептов" → "
 Stores:
   - Material records for each glaze ingredient (per factory, idempotent)
   - Recipe records for each glaze color
-  - RecipeMaterial records linking recipes to ingredients (ratio as quantity_per_unit)
+  - RecipeMaterial records linking recipes to ingredients
 
 Usage:
     DATABASE_URL=<url> python scripts/seed_glaze_recipes.py
@@ -13,11 +13,10 @@ Usage:
 
 Notes:
   - Idempotent: safe to run multiple times; existing records are skipped.
-  - quantity_per_unit stores the ingredient's fraction of the total dry batch (e.g. 0.2 for 20%).
-  - unit = "fraction"  →  grams_needed = fraction × desired_batch_grams
-  - recipe.description contains batch metadata as JSON:
-      reference_batch_g, water_fraction, water_ml_per_2boards,
-      coverage_note, special_kiln (Lagoon Spark only).
+  - quantity_per_unit stores grams per 100 g of frit base (e.g. 20 = 20g).
+    Frits in the data sum to 1.0 (100g base); additives are added on top.
+  - unit = "g_per_100g"
+  - recipe.description contains batch metadata as JSON.
 """
 
 import sys
@@ -588,13 +587,15 @@ def seed():
                     skipped_rm += 1
                     continue
 
+                # Convert fraction → grams per 100g of frit base
+                grams_per_100g = round(fraction * 100, 4)
                 grams_in_ref = round(fraction * recipe_data["reference_batch_g"], 4)
                 rm = RecipeMaterial(
                     id=uuid.uuid4(),
                     recipe_id=recipe.id,
                     material_id=mat.id,
-                    quantity_per_unit=fraction,
-                    unit="fraction",
+                    quantity_per_unit=grams_per_100g,
+                    unit="g_per_100g",
                     notes=(
                         f"{grams_in_ref}g per {recipe_data['reference_batch_g']}g "
                         f"reference batch"

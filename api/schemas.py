@@ -577,14 +577,11 @@ class RecipeCreate(BaseModel):
     name: str
     collection: Optional[str] = None
     color: Optional[str] = None
-    size: Optional[str] = None
     application_type: Optional[str] = None
-    place_of_application: Optional[str] = None
-    finishing_type: Optional[str] = None
-    thickness_mm: Optional[float] = None
     description: Optional[str] = None
     recipe_type: str = 'product'
     color_type: Optional[str] = None
+    specific_gravity: Optional[float] = None
     glaze_settings: Optional[dict] = None
     is_active: Optional[bool] = None
 
@@ -593,14 +590,11 @@ class RecipeUpdate(BaseModel):
     name: Optional[str] = None
     collection: Optional[str] = None
     color: Optional[str] = None
-    size: Optional[str] = None
     application_type: Optional[str] = None
-    place_of_application: Optional[str] = None
-    finishing_type: Optional[str] = None
-    thickness_mm: Optional[float] = None
     description: Optional[str] = None
     recipe_type: Optional[str] = None
     color_type: Optional[str] = None
+    specific_gravity: Optional[float] = None
     glaze_settings: Optional[dict] = None
     is_active: Optional[bool] = None
 
@@ -610,14 +604,11 @@ class RecipeResponse(BaseModel):
     name: str
     collection: Optional[str] = None
     color: Optional[str] = None
-    size: Optional[str] = None
     application_type: Optional[str] = None
-    place_of_application: Optional[str] = None
-    finishing_type: Optional[str] = None
-    thickness_mm: float
     description: Optional[str] = None
     recipe_type: str
     color_type: Optional[str] = None
+    specific_gravity: Optional[float] = None
     glaze_settings: dict
     is_active: bool
     created_at: datetime
@@ -692,10 +683,25 @@ class RecipeMaterialUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class RecipeMaterialBulkItem(BaseModel):
+    """Single ingredient in a bulk upsert — grams per 100 g dry mix."""
+    material_id: UUID
+    quantity_per_unit: float      # grams
+    unit: str = 'g_per_100g'
+    notes: Optional[str] = None
+
+
+class RecipeMaterialsBulkUpdate(BaseModel):
+    """Replace all ingredients of a recipe in one call."""
+    materials: list[RecipeMaterialBulkItem]
+
+
 class RecipeMaterialResponse(BaseModel):
     id: UUID
     recipe_id: UUID
     material_id: UUID
+    material_name: Optional[str] = None
+    material_type: Optional[str] = None
     quantity_per_unit: float
     unit: str
     notes: Optional[str] = None

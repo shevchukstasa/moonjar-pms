@@ -1,5 +1,41 @@
 import apiClient from './client';
 
+export interface RecipeItem {
+  id: string;
+  name: string;
+  collection: string | null;
+  color: string | null;
+  application_type: string | null;
+  description: string | null;
+  recipe_type: string;
+  color_type: string | null;
+  specific_gravity: number | null;
+  glaze_settings: Record<string, unknown>;
+  is_active: boolean;
+  ingredients_count?: number;
+  materials?: RecipeMaterialItem[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RecipeMaterialItem {
+  id: string;
+  recipe_id: string;
+  material_id: string;
+  material_name: string | null;
+  material_type: string | null;
+  quantity_per_unit: number;
+  unit: string;
+  notes: string | null;
+}
+
+export interface RecipeMaterialBulkItem {
+  material_id: string;
+  quantity_per_unit: number;
+  unit?: string;
+  notes?: string;
+}
+
 export const recipesApi = {
   list: (params?: Record<string, unknown>) =>
     apiClient.get('/recipes', { params }).then((r) => r.data),
@@ -11,4 +47,9 @@ export const recipesApi = {
     apiClient.patch(`/recipes/${id}`, data).then((r) => r.data),
   remove: (id: string) =>
     apiClient.delete(`/recipes/${id}`).then((r) => r.data),
+  // Materials (ingredients)
+  listMaterials: (recipeId: string) =>
+    apiClient.get(`/recipes/${recipeId}/materials`).then((r) => r.data),
+  bulkUpdateMaterials: (recipeId: string, materials: RecipeMaterialBulkItem[]) =>
+    apiClient.put(`/recipes/${recipeId}/materials`, { materials }).then((r) => r.data),
 };

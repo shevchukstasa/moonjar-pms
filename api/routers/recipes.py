@@ -1,4 +1,4 @@
-"""CRUD router for recipes — includes firing stages sub-endpoints."""
+"""CRUD router for recipes — includes firing stages + materials sub-endpoints."""
 
 from uuid import UUID
 from typing import List
@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
-from api.models import Recipe, RecipeFiringStage
+from api.models import Recipe, RecipeFiringStage, RecipeMaterial, Material
 from api.schemas import (
     RecipeCreate,
     RecipeUpdate,
@@ -16,10 +16,33 @@ from api.schemas import (
     RecipeFiringStageCreate,
     RecipeFiringStageResponse,
     RecipeFiringStagesBulkUpdate,
+    RecipeMaterialBulkItem,
+    RecipeMaterialsBulkUpdate,
+    RecipeMaterialResponse,
 )
 
 router = APIRouter()
 
+
+# ── helpers ───────────────────────────────────────────────────────────────
+
+def _serialize_recipe_material(rm) -> dict:
+    """Serialize a RecipeMaterial row + joined Material fields."""
+    return {
+        "id": str(rm.id),
+        "recipe_id": str(rm.recipe_id),
+        "material_id": str(rm.material_id),
+        "material_name": rm.material.name if rm.material else None,
+        "material_type": rm.material.material_type if rm.material else None,
+        "quantity_per_unit": float(rm.quantity_per_unit),
+        "unit": rm.unit,
+        "notes": rm.notes,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Recipe CRUD
+# ══════════════════════════════════════════════════════════════════════════
 
 @router.get("", response_model=dict)
 async def list_recipes(
@@ -31,15 +54,27 @@ async def list_recipes(
     query = db.query(Recipe)
     total = query.count()
     items = query.offset((page - 1) * per_page).limit(per_page).all()
+
+    results = []
+    for item in items:
+        d = RecipeResponse.model_validate(item).model_dump(mode="json")
+        # Count ingredients for the list view
+        d["ingredients_count"] = (
+            db.query(RecipeMaterial)
+            .filter(RecipeMaterial.recipe_id == item.id)
+            .count()
+        )
+        results.append(d)
+
     return {
-        "items": [RecipeResponse.model_validate(item).model_dump(mode="json") for item in items],
+        "items": results,
         "total": total,
         "page": page,
         "per_page": per_page,
     }
 
 
-@router.get("/{item_id}", response_model=RecipeResponse)
+@router.get("/{item_id}")
 async def get_recipes_item(
     item_id: UUID,
     db: Session = Depends(get_db),
@@ -48,7 +83,17 @@ async def get_recipes_item(
     item = db.query(Recipe).filter(Recipe.id == item_id).first()
     if not item:
         raise HTTPException(404, "Recipe not found")
-    return item
+
+    d = RecipeResponse.model_validate(item).model_dump(mode="json")
+
+    # Include materials (ingredients)
+    mats = (
+        db.query(RecipeMaterial)
+        .filter(RecipeMaterial.recipe_id == item_id)
+        .all()
+    )
+    d["materials"] = [_serialize_recipe_material(rm) for rm in mats]
+    return d
 
 
 @router.post("", response_model=RecipeResponse, status_code=201)
@@ -94,8 +139,66 @@ async def delete_recipes_item(
     db.commit()
 
 
-# --- Recipe Firing Stages sub-endpoints ---
+# ══════════════════════════════════════════════════════════════════════════
+# Recipe Materials (ingredients) — bulk upsert
+# ══════════════════════════════════════════════════════════════════════════
 
+@router.get("/{recipe_id}/materials", response_model=List[dict])
+async def list_recipe_materials(
+    recipe_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Get all ingredients for a recipe, with material name/type."""
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(404, "Recipe not found")
+    mats = (
+        db.query(RecipeMaterial)
+        .filter(RecipeMaterial.recipe_id == recipe_id)
+        .all()
+    )
+    return [_serialize_recipe_material(rm) for rm in mats]
+
+
+@router.put("/{recipe_id}/materials", response_model=List[dict])
+async def bulk_update_recipe_materials(
+    recipe_id: UUID,
+    data: RecipeMaterialsBulkUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Replace all ingredients of a recipe (bulk upsert)."""
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if not recipe:
+        raise HTTPException(404, "Recipe not found")
+
+    # Delete existing
+    db.query(RecipeMaterial).filter(RecipeMaterial.recipe_id == recipe_id).delete()
+
+    # Create new
+    new_items = []
+    for mat_data in data.materials:
+        rm = RecipeMaterial(
+            recipe_id=recipe_id,
+            material_id=mat_data.material_id,
+            quantity_per_unit=mat_data.quantity_per_unit,
+            unit=mat_data.unit,
+            notes=mat_data.notes,
+        )
+        db.add(rm)
+        new_items.append(rm)
+
+    db.commit()
+    for rm in new_items:
+        db.refresh(rm)
+
+    return [_serialize_recipe_material(rm) for rm in new_items]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Recipe Firing Stages sub-endpoints
+# ══════════════════════════════════════════════════════════════════════════
 
 @router.get("/{recipe_id}/firing-stages", response_model=List[RecipeFiringStageResponse])
 async def list_recipe_firing_stages(

@@ -305,30 +305,29 @@ class Recipe(Base):
     name = Column(sa.String(300), nullable=False)
     collection = Column(sa.String(100))
     color = Column(sa.String(100))
-    size = Column(sa.String(50))
     application_type = Column(sa.String(100))
-    place_of_application = Column(sa.String(50))
-    finishing_type = Column(sa.String(100))
-    thickness_mm = Column(sa.Numeric(5, 1), nullable=False, default=11.0)
     description = Column(sa.Text)
     recipe_type = Column(sa.String(20), nullable=False, default='product')
     # values: 'product', 'glaze', 'engobe'
     color_type = Column(sa.String(20))
     # values: 'base', 'custom', None
+    specific_gravity = Column(sa.Numeric(5, 3))
+    # SG (удельный вес) — for converting dry grams → ml of liquid glaze
     glaze_settings = Column(JSONB, nullable=False, default=dict)
     # Stores per-recipe glaze config:
     # {
-    #   "grams_to_ml_use_default": true,  // if false, use grams_to_ml_ratio
-    #   "grams_to_ml_ratio": 1.0,         // ml per gram (null = use default)
-    #   "consumption_use_default": true,   // if false, use consumption_ml_per_sqm
-    #   "consumption_ml_per_sqm": 1022.7, // ml per sqm (null = use default 450/0.44=1022.7)
+    #   "grams_to_ml_use_default": true,
+    #   "grams_to_ml_ratio": 1.0,
+    #   "consumption_use_default": true,
+    #   "consumption_ml_per_sqm": 1022.7,
     # }
     is_active = Column(sa.Boolean, nullable=False, default=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     __table_args__ = (
-        UniqueConstraint('collection', 'color', 'size', 'application_type', 'place_of_application', 'finishing_type', 'thickness_mm'),
+        UniqueConstraint('collection', 'color', 'application_type',
+                         name='uq_recipes_collection_color_apptype'),
     )
 
 

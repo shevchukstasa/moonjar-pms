@@ -10,8 +10,8 @@ Update: recipe_materials.unit from 'fraction' → 'g_per_100g'
 from alembic import op
 import sqlalchemy as sa
 
-revision = "007"
-down_revision = "006"
+revision = "007_recipe_redesign"
+down_revision = "006_split_material_stock"
 branch_labels = None
 depends_on = None
 

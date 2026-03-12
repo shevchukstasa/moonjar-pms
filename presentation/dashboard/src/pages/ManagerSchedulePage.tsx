@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Trash2 } from 'lucide-react';
 import { useUiStore } from '@/stores/uiStore';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGlazingSchedule, useFiringSchedule, useSortingSchedule, useQcSchedule, useKilnSchedule } from '@/hooks/useSchedule';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -25,8 +26,11 @@ export default function ManagerSchedulePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const activeFactoryId = useUiStore((s) => s.activeFactoryId);
+  const currentUser = useCurrentUser();
   const [tab, setTab] = useState('glazing');
   const [canDeletePositions, setCanDeletePositions] = useState(false);
+  // Map factory_id → whether cleanup is allowed (used when "All Factories" selected)
+  const [deleteFactoryMap, setDeleteFactoryMap] = useState<Record<string, boolean>>({});
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const { data: glazingData, isLoading: glazingLoading, isError: glazingError } = useGlazingSchedule(activeFactoryId);
@@ -36,21 +40,59 @@ export default function ManagerSchedulePage() {
   const { data: kilnData, isLoading: kilnLoading, isError: kilnError } = useKilnSchedule(activeFactoryId);
   const hasError = glazingError || firingError || sortingError || qcError || kilnError;
 
-  // Fetch PM cleanup permissions for this factory
+  // Fetch PM cleanup permissions — works for a single factory or "All Factories"
   useEffect(() => {
-    if (!activeFactoryId) return;
-    apiClient.get('/cleanup/permissions', { params: { factory_id: activeFactoryId } })
-      .then((r) => setCanDeletePositions(r.data.pm_can_delete_positions))
-      .catch(() => setCanDeletePositions(false));
-  }, [activeFactoryId]);
+    if (activeFactoryId) {
+      // Single factory selected
+      apiClient.get('/cleanup/permissions', { params: { factory_id: activeFactoryId } })
+        .then((r) => {
+          const allowed = r.data.pm_can_delete_positions;
+          setCanDeletePositions(allowed);
+          setDeleteFactoryMap({ [activeFactoryId]: allowed });
+        })
+        .catch(() => {
+          setCanDeletePositions(false);
+          setDeleteFactoryMap({});
+        });
+    } else {
+      // "All Factories" — fetch permissions for every factory the user belongs to
+      const userFactories = currentUser?.factories ?? [];
+      if (userFactories.length === 0) {
+        setCanDeletePositions(false);
+        setDeleteFactoryMap({});
+        return;
+      }
+      Promise.all(
+        userFactories.map((f) =>
+          apiClient.get('/cleanup/permissions', { params: { factory_id: f.id } })
+            .then((r) => ({ id: f.id, allowed: r.data.pm_can_delete_positions as boolean }))
+            .catch(() => ({ id: f.id, allowed: false }))
+        )
+      ).then((results) => {
+        const map: Record<string, boolean> = {};
+        let anyAllowed = false;
+        for (const r of results) {
+          map[r.id] = r.allowed;
+          if (r.allowed) anyAllowed = true;
+        }
+        setCanDeletePositions(anyAllowed);
+        setDeleteFactoryMap(map);
+      });
+    }
+  }, [activeFactoryId, currentUser]);
 
-  const handleDeletePosition = useCallback(async (positionId: string) => {
-    if (!activeFactoryId) return;
+  const handleDeletePosition = useCallback(async (positionId: string, positionFactoryId?: string) => {
+    // Determine which factory_id to use for the delete call
+    const factoryId = activeFactoryId || positionFactoryId;
+    if (!factoryId) {
+      alert('Cannot determine factory for this position. Select a specific factory.');
+      return;
+    }
     if (!window.confirm('Delete this position and all its linked tasks? This cannot be undone.')) return;
     setDeletingId(positionId);
     try {
       await apiClient.delete(`/cleanup/positions/${positionId}`, {
-        params: { factory_id: activeFactoryId },
+        params: { factory_id: factoryId },
       });
       // Refresh all schedule tabs
       queryClient.invalidateQueries({ queryKey: ['schedule'] });
@@ -122,18 +164,25 @@ export default function ManagerSchedulePage() {
     ...(canDeletePositions ? [{
       key: '_delete',
       header: '',
-      render: (item: { id: string }) => (
-        <button
-          onClick={(e) => { e.stopPropagation(); handleDeletePosition(item.id); }}
-          disabled={deletingId === item.id}
-          className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
-          title="Delete position"
-        >
-          {deletingId === item.id
-            ? <span className="text-xs">...</span>
-            : <Trash2 className="h-4 w-4" />}
-        </button>
-      ),
+      render: (item: { id: string; factory_id?: string }) => {
+        // When "All Factories" mode, check per-factory permission
+        const itemFactoryId = item.factory_id;
+        if (!activeFactoryId && itemFactoryId && !deleteFactoryMap[itemFactoryId]) {
+          return null; // This factory doesn't allow cleanup
+        }
+        return (
+          <button
+            onClick={(e) => { e.stopPropagation(); handleDeletePosition(item.id, itemFactoryId); }}
+            disabled={deletingId === item.id}
+            className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+            title="Delete position"
+          >
+            {deletingId === item.id
+              ? <span className="text-xs">...</span>
+              : <Trash2 className="h-4 w-4" />}
+          </button>
+        );
+      },
     }] : []),
   ];
 

@@ -96,6 +96,7 @@ def _serialize_position_brief(p) -> dict:
     return {
         "id": str(p.id),
         "order_id": str(p.order_id),
+        "factory_id": str(p.factory_id) if p.factory_id else None,
         "order_number": p.order.order_number if p.order else "",
         "client": p.order.client if p.order else None,
         "final_deadline": str(p.order.final_deadline) if p.order and p.order.final_deadline else None,

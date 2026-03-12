@@ -13,6 +13,7 @@ import { useQualityStats, useInspections } from '@/hooks/useQuality';
 import { useProblemCards } from '@/hooks/useProblemCards';
 import { useBufferHealth, useDashboardSummary } from '@/hooks/useAnalytics';
 import { useUiStore } from '@/stores/uiStore';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useDebounce } from '@/hooks/useDebounce';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -556,24 +557,49 @@ function OrdersTabContent({
 function TasksTabContent({ factoryId }: { factoryId: string | null }) {
   const [taskFilter, setTaskFilter] = useState<string>('');
   const [canDeleteTasks, setCanDeleteTasks] = useState(false);
+  const [deleteFactoryMap, setDeleteFactoryMap] = useState<Record<string, boolean>>({});
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const currentUser = useCurrentUser();
 
+  // Fetch PM cleanup permissions — single factory or all user factories
   useEffect(() => {
-    if (!factoryId) return;
-    apiClient.get('/cleanup/permissions', { params: { factory_id: factoryId } })
-      .then((r) => setCanDeleteTasks(r.data.pm_can_delete_tasks))
-      .catch(() => setCanDeleteTasks(false));
-  }, [factoryId]);
+    if (factoryId) {
+      apiClient.get('/cleanup/permissions', { params: { factory_id: factoryId } })
+        .then((r) => {
+          const allowed = r.data.pm_can_delete_tasks;
+          setCanDeleteTasks(allowed);
+          setDeleteFactoryMap({ [factoryId]: allowed });
+        })
+        .catch(() => { setCanDeleteTasks(false); setDeleteFactoryMap({}); });
+    } else {
+      const userFactories = currentUser?.factories ?? [];
+      if (userFactories.length === 0) { setCanDeleteTasks(false); setDeleteFactoryMap({}); return; }
+      Promise.all(
+        userFactories.map((f) =>
+          apiClient.get('/cleanup/permissions', { params: { factory_id: f.id } })
+            .then((r) => ({ id: f.id, allowed: r.data.pm_can_delete_tasks as boolean }))
+            .catch(() => ({ id: f.id, allowed: false }))
+        )
+      ).then((results) => {
+        const map: Record<string, boolean> = {};
+        let anyAllowed = false;
+        for (const r of results) { map[r.id] = r.allowed; if (r.allowed) anyAllowed = true; }
+        setCanDeleteTasks(anyAllowed);
+        setDeleteFactoryMap(map);
+      });
+    }
+  }, [factoryId, currentUser]);
 
-  const handleDeleteTask = useCallback(async (taskId: string) => {
-    if (!factoryId) return;
+  const handleDeleteTask = useCallback(async (taskId: string, taskFactoryId?: string) => {
+    const fid = factoryId || taskFactoryId;
+    if (!fid) { alert('Cannot determine factory for this task. Select a specific factory.'); return; }
     if (!window.confirm('Delete this task permanently? This cannot be undone.')) return;
     setDeletingTaskId(taskId);
     try {
       await apiClient.delete(`/cleanup/tasks/${taskId}`, {
-        params: { factory_id: factoryId },
+        params: { factory_id: fid },
       });
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
     } catch (e: unknown) {
@@ -662,9 +688,12 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
       key: '_delete',
       header: '',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      render: (item: any) => (
+      render: (item: any) => {
+        // When "All Factories" mode, check per-factory permission
+        if (!factoryId && item.factory_id && !deleteFactoryMap[item.factory_id]) return null;
+        return (
         <button
-          onClick={(e) => { e.stopPropagation(); handleDeleteTask(item.id); }}
+          onClick={(e) => { e.stopPropagation(); handleDeleteTask(item.id, item.factory_id); }}
           disabled={deletingTaskId === item.id}
           className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
           title="Delete task"
@@ -673,7 +702,8 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
             ? <span className="text-xs">...</span>
             : <Trash2 className="h-4 w-4" />}
         </button>
-      ),
+        );
+      },
     }] : []),
   ];
 

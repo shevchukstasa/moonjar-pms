@@ -393,18 +393,29 @@ def _ensure_schema():
 
     _run_section("kilns", _seed_kilns)
 
-    # --- Section 7b: Deactivate duplicate kilns (old names without factory prefix) ---
-    def _cleanup_duplicate_kilns(conn):
-        # Migration 003 created kilns named "Large Kiln", "Small Kiln", "Raku Kiln"
-        # _ensure_schema created "Bali Large Kiln", "Java Large Kiln" etc.
-        # Deactivate old duplicates (can't DELETE due to FK constraints)
+    # --- Section 7b: RESTORE kilns accidentally deactivated by a prior deploy ---
+    def _restore_deactivated_kilns(conn):
+        """
+        A prior version of _ensure_schema ran _cleanup_duplicate_kilns which
+        deactivated kilns named "Large Kiln", "Small Kiln", "Raku Kiln".
+        Those are the user-configured kilns from migration 003.
+        Re-activate them so the user's setup is preserved.
+        """
+        restored = []
         for old_name in ["Large Kiln", "Small Kiln", "Raku Kiln"]:
-            conn.execute(text(
-                "UPDATE resources SET is_active = FALSE "
-                "WHERE name = :name AND resource_type = 'kiln' AND is_active = TRUE"
+            result = conn.execute(text(
+                "UPDATE resources SET is_active = TRUE, status = CASE "
+                "  WHEN status = 'inactive' THEN 'idle' ELSE status END "
+                "WHERE name = :name AND resource_type = 'kiln' AND is_active = FALSE"
             ), {"name": old_name})
+            if result.rowcount > 0:
+                restored.append(old_name)
+        if restored:
+            logger.info(f"_restore_deactivated_kilns: re-activated {restored}")
+        else:
+            logger.debug("_restore_deactivated_kilns: nothing to restore")
 
-    _run_section("cleanup_kilns", _cleanup_duplicate_kilns)
+    _run_section("restore_kilns", _restore_deactivated_kilns)
 
     # --- Section 8b: Seed New Collection glaze recipes ---
     def _seed_glaze_recipes(conn):

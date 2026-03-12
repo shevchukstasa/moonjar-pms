@@ -1,13 +1,25 @@
 import { useEffect } from 'react';
 import { useUiStore } from '@/stores/uiStore';
 import { useFactories } from '@/hooks/useFactories';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 export function FactorySelector() {
   const { activeFactoryId, setActiveFactory } = useUiStore();
   const { data } = useFactories();
-  const factories = data?.items || [];
+  const user = useCurrentUser();
+  const allFactories = data?.items || [];
 
-  // Auto-select when there is exactly one factory and nothing is selected yet
+  // For non-admin roles that have factory assignments, show only their factories.
+  // Admin/owner/ceo with no factory list → show all factories.
+  const userFactoryIds = user?.factories?.map((f) => f.id) ?? [];
+  const factories =
+    userFactoryIds.length > 0
+      ? allFactories.filter((f) => userFactoryIds.includes(f.id))
+      : allFactories;
+
+  // Auto-select when the user has exactly one accessible factory and nothing is selected yet.
+  // This ensures PMs assigned to a single factory always have a factory context,
+  // which is required for cleanup-permission buttons to appear.
   useEffect(() => {
     if (!activeFactoryId && factories.length === 1) {
       setActiveFactory(factories[0].id);

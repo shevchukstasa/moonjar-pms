@@ -219,16 +219,15 @@ async def delete_position(
     if not position:
         raise HTTPException(404, "Position not found")
 
-    # Don't allow deleting a split child directly — delete the parent
+    # If this is a split child, auto-escalate to the parent
     if position.parent_position_id is not None:
-        raise HTTPException(
-            400,
-            "This is a split sub-position. Delete the parent position instead.",
-        )
+        parent = db.query(OrderPosition).filter(OrderPosition.id == position.parent_position_id).first()
+        if parent:
+            position = parent
 
     logger.warning(
         "CLEANUP DELETE position | id=%s order=%s color=%s size=%s qty=%s | by %s",
-        position_id,
+        position.id,
         position.order_id,
         position.color,
         position.size,

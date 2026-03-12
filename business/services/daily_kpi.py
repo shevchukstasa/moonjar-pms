@@ -17,7 +17,7 @@ from sqlalchemy import func as sa_func, case, and_, or_
 from api.models import (
     ProductionOrder, OrderPosition, Resource, Batch,
     DefectRecord, TpsShiftMetric, FinancialEntry, OrderFinancial,
-    Factory, Material, BottleneckConfig, BufferStatus,
+    Factory, Material, MaterialStock, BottleneckConfig, BufferStatus,
 )
 from api.enums import (
     OrderStatus, PositionStatus, ResourceType, BatchStatus,
@@ -354,24 +354,26 @@ def calculate_material_metrics(
     factory_id: Optional[UUID] = None,
 ) -> dict:
     """Material deficit items — materials below min_balance."""
-    q = db.query(Material).filter(
-        Material.balance < Material.min_balance,
+    q = db.query(Material, MaterialStock).join(
+        MaterialStock, Material.id == MaterialStock.material_id
+    ).filter(
+        MaterialStock.balance < MaterialStock.min_balance,
     )
     if factory_id:
-        q = q.filter(Material.factory_id == factory_id)
+        q = q.filter(MaterialStock.factory_id == factory_id)
 
     deficit_items = [
         {
-            "material_id": str(m.id),
-            "name": m.name,
-            "balance": float(m.balance or 0),
-            "min_balance": float(m.min_balance or 0),
-            "deficit": round(float(m.min_balance or 0) - float(m.balance or 0), 3),
-            "unit": m.unit,
-            "material_type": m.material_type,
-            "factory_id": str(m.factory_id),
+            "material_id": str(mat.id),
+            "name": mat.name,
+            "balance": float(stock.balance or 0),
+            "min_balance": float(stock.min_balance or 0),
+            "deficit": round(float(stock.min_balance or 0) - float(stock.balance or 0), 3),
+            "unit": mat.unit,
+            "material_type": mat.material_type,
+            "factory_id": str(stock.factory_id),
         }
-        for m in q.all()
+        for mat, stock in q.all()
     ]
 
     return {

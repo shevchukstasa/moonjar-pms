@@ -12,8 +12,9 @@ export interface MaterialListParams {
 
 export interface MaterialItem {
   id: string;
+  stock_id: string | null;
   name: string;
-  factory_id: string;
+  factory_id: string | null;
   balance: number;
   min_balance: number;
   min_balance_recommended: number | null;
@@ -34,6 +35,7 @@ export interface MaterialItem {
 export interface TransactionItem {
   id: string;
   material_id: string;
+  factory_id: string | null;
   type: string;
   quantity: number;
   related_order_id: string | null;
@@ -47,6 +49,7 @@ export interface TransactionItem {
 
 export interface TransactionInput {
   material_id: string;
+  factory_id: string;
   type: 'receive' | 'manual_write_off';
   quantity: number;
   reason?: string;

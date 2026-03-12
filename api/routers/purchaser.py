@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.models import (
-    MaterialPurchaseRequest, Supplier, Material, MaterialTransaction, User,
+    MaterialPurchaseRequest, Supplier, Material, MaterialStock, MaterialTransaction, User,
 )
 from api.enums import PurchaseStatus
 from api.schemas import MaterialPurchaseRequestCreate, MaterialPurchaseRequestUpdate
@@ -265,18 +265,22 @@ async def change_request_status(
         if data.actual_delivery_date:
             pr.actual_delivery_date = date.fromisoformat(data.actual_delivery_date)
 
-        # Auto-receive: update material balances
+        # Auto-receive: update material stock balances
         if pr.materials_json and isinstance(pr.materials_json, list):
             for item in pr.materials_json:
                 mat_id = item.get("material_id")
                 qty = item.get("quantity", 0)
                 if mat_id and qty > 0:
-                    mat = db.query(Material).filter(Material.id == mat_id).first()
-                    if mat:
-                        mat.balance += Decimal(str(qty))
-                        mat.updated_at = datetime.now(timezone.utc)
+                    stock = db.query(MaterialStock).filter(
+                        MaterialStock.material_id == mat_id,
+                        MaterialStock.factory_id == pr.factory_id,
+                    ).first()
+                    if stock:
+                        stock.balance += Decimal(str(qty))
+                        stock.updated_at = datetime.now(timezone.utc)
                         t = MaterialTransaction(
-                            material_id=mat.id,
+                            material_id=mat_id,
+                            factory_id=pr.factory_id,
                             type="receive",
                             quantity=Decimal(str(qty)),
                             notes=f"Auto-received from PO {str(pr.id)[:8]}",

@@ -1,4 +1,8 @@
-"""Materials router — inventory, transactions, low-stock, purchase requests."""
+"""Materials router — inventory, transactions, low-stock, purchase requests.
+
+Material = shared catalog (name, type, unit, supplier).
+MaterialStock = per-factory stock (balance, min_balance, consumption).
+"""
 
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -12,7 +16,8 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.models import (
-    Material, MaterialTransaction, MaterialPurchaseRequest, Supplier, User,
+    Material, MaterialStock, MaterialTransaction,
+    MaterialPurchaseRequest, Supplier, User,
 )
 from api.enums import PurchaseStatus
 
@@ -25,33 +30,35 @@ def _ev(val):
     return val.value if hasattr(val, "value") else str(val) if val else None
 
 
-def _serialize_material(m, db) -> dict:
+def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session) -> dict:
+    """Serialize catalog Material + optional per-factory MaterialStock into flat dict."""
     supplier_name = None
-    if m.supplier_id:
-        sup = db.query(Supplier).filter(Supplier.id == m.supplier_id).first()
+    if mat.supplier_id:
+        sup = db.query(Supplier).filter(Supplier.id == mat.supplier_id).first()
         supplier_name = sup.name if sup else None
 
-    balance = float(m.balance or 0)
-    min_bal = float(m.min_balance or 0)
+    balance = float(stock.balance or 0) if stock else 0
+    min_bal = float(stock.min_balance or 0) if stock else 0
 
     return {
-        "id": str(m.id),
-        "name": m.name,
-        "factory_id": str(m.factory_id),
+        "id": str(mat.id),
+        "stock_id": str(stock.id) if stock else None,
+        "name": mat.name,
+        "factory_id": str(stock.factory_id) if stock else None,
         "balance": balance,
         "min_balance": min_bal,
-        "min_balance_recommended": float(m.min_balance_recommended) if m.min_balance_recommended else None,
-        "min_balance_auto": m.min_balance_auto,
-        "avg_daily_consumption": float(m.avg_daily_consumption) if m.avg_daily_consumption else 0,
-        "avg_monthly_consumption": float(m.avg_monthly_consumption) if m.avg_monthly_consumption else 0,
-        "unit": m.unit,
-        "material_type": _ev(m.material_type),
-        "warehouse_section": m.warehouse_section,
-        "supplier_id": str(m.supplier_id) if m.supplier_id else None,
+        "min_balance_recommended": float(stock.min_balance_recommended) if stock and stock.min_balance_recommended else None,
+        "min_balance_auto": stock.min_balance_auto if stock else True,
+        "avg_daily_consumption": float(stock.avg_daily_consumption) if stock and stock.avg_daily_consumption else 0,
+        "avg_monthly_consumption": float(stock.avg_monthly_consumption) if stock and stock.avg_monthly_consumption else 0,
+        "unit": mat.unit,
+        "material_type": _ev(mat.material_type),
+        "warehouse_section": stock.warehouse_section if stock else None,
+        "supplier_id": str(mat.supplier_id) if mat.supplier_id else None,
         "supplier_name": supplier_name,
         "is_low_stock": balance < min_bal if min_bal > 0 else False,
-        "created_at": m.created_at.isoformat() if m.created_at else None,
-        "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+        "created_at": mat.created_at.isoformat() if mat.created_at else None,
+        "updated_at": (stock.updated_at if stock else mat.updated_at).isoformat() if (stock or mat) else None,
     }
 
 
@@ -64,6 +71,7 @@ def _serialize_transaction(t, db) -> dict:
     return {
         "id": str(t.id),
         "material_id": str(t.material_id),
+        "factory_id": str(t.factory_id) if t.factory_id else None,
         "type": _ev(t.type),
         "quantity": float(t.quantity),
         "related_order_id": str(t.related_order_id) if t.related_order_id else None,
@@ -101,6 +109,7 @@ class MaterialUpdateInput(BaseModel):
 
 class TransactionInput(BaseModel):
     material_id: UUID
+    factory_id: UUID
     type: str  # "receive" | "manual_write_off"
     quantity: float
     reason: Optional[str] = None
@@ -128,23 +137,28 @@ async def list_materials(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    query = db.query(Material)
-    query = apply_factory_filter(query, current_user, factory_id, Material)
+    query = db.query(Material, MaterialStock).outerjoin(
+        MaterialStock, Material.id == MaterialStock.material_id
+    )
+    query = apply_factory_filter(query, current_user, factory_id, MaterialStock)
 
     if material_type:
         query = query.filter(Material.material_type == material_type)
     if warehouse_section:
-        query = query.filter(Material.warehouse_section == warehouse_section)
+        query = query.filter(MaterialStock.warehouse_section == warehouse_section)
     if search:
         query = query.filter(Material.name.ilike(f"%{search}%"))
     if low_stock:
-        query = query.filter(Material.balance < Material.min_balance, Material.min_balance > 0)
+        query = query.filter(
+            MaterialStock.balance < MaterialStock.min_balance,
+            MaterialStock.min_balance > 0,
+        )
 
     total = query.count()
     items = query.order_by(Material.name).offset((page - 1) * per_page).limit(per_page).all()
 
     return {
-        "items": [_serialize_material(m, db) for m in items],
+        "items": [_serialize_material(mat, stock, db) for mat, stock in items],
         "total": total,
         "page": page,
         "per_page": per_page,
@@ -158,20 +172,22 @@ async def get_low_stock(
     current_user=Depends(get_current_user),
 ):
     """Low stock alerts — accessible to warehouse + purchaser."""
-    query = db.query(Material).filter(
-        Material.balance < Material.min_balance,
-        Material.min_balance > 0,
+    query = db.query(Material, MaterialStock).join(
+        MaterialStock, Material.id == MaterialStock.material_id
+    ).filter(
+        MaterialStock.balance < MaterialStock.min_balance,
+        MaterialStock.min_balance > 0,
     )
-    query = apply_factory_filter(query, current_user, factory_id, Material)
+    query = apply_factory_filter(query, current_user, factory_id, MaterialStock)
 
     items = query.order_by(
-        (Material.min_balance - Material.balance).desc()
+        (MaterialStock.min_balance - MaterialStock.balance).desc()
     ).all()
 
     result = []
-    for m in items:
-        s = _serialize_material(m, db)
-        s["deficit"] = float(m.min_balance - m.balance)
+    for mat, stock in items:
+        s = _serialize_material(mat, stock, db)
+        s["deficit"] = float(stock.min_balance - stock.balance)
         result.append(s)
 
     return {"items": result, "total": len(result)}
@@ -183,21 +199,20 @@ async def get_effective_balance(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Effective balance = current balance minus reserved for active orders.
-    Shows how much material is truly available for new orders.
-    """
+    """Effective balance = current balance minus reserved for active orders."""
     from api.models import RecipeMaterial, OrderPosition, ProductionOrderItem, Recipe
     from api.enums import PositionStatus
 
-    query = db.query(Material)
+    query = db.query(Material, MaterialStock).join(
+        MaterialStock, Material.id == MaterialStock.material_id
+    )
     if factory_id:
-        query = query.filter(Material.factory_id == factory_id)
+        query = query.filter(MaterialStock.factory_id == factory_id)
     else:
-        query = apply_factory_filter(query, Material, current_user, db)
+        query = apply_factory_filter(query, current_user, None, MaterialStock)
 
-    materials = query.all()
+    rows = query.all()
 
-    # Active position statuses that consume materials
     active_statuses = [
         PositionStatus.PLANNED.value,
         PositionStatus.SENT_TO_GLAZING.value,
@@ -209,24 +224,20 @@ async def get_effective_balance(
     ]
 
     result = []
-    for m in materials:
-        balance = float(m.balance or 0)
+    for mat, stock in rows:
+        balance = float(stock.balance or 0)
 
-        # Calculate reserved: sum of (recipe_material.quantity * position.quantity)
-        # for all active positions that use a recipe consuming this material
         reserved = 0.0
         try:
-            # Find recipes that use this material
             recipe_mats = db.query(RecipeMaterial).filter(
-                RecipeMaterial.material_id == m.id,
+                RecipeMaterial.material_id == mat.id,
             ).all()
 
             for rm in recipe_mats:
-                # Find active positions using this recipe
                 active_positions = db.query(OrderPosition).join(
                     ProductionOrderItem, OrderPosition.order_item_id == ProductionOrderItem.id
                 ).filter(
-                    OrderPosition.factory_id == m.factory_id,
+                    OrderPosition.factory_id == stock.factory_id,
                     OrderPosition.status.in_(active_statuses),
                     ProductionOrderItem.recipe_id == rm.recipe_id,
                 ).all()
@@ -236,17 +247,18 @@ async def get_effective_balance(
                     recipe_qty = float(rm.quantity_per_unit or 0)
                     reserved += qty * recipe_qty
         except Exception:
-            pass  # If recipe linkage doesn't exist, reserved stays 0
+            pass
 
         effective = balance - reserved
-        min_bal = float(m.min_balance or 0)
+        min_bal = float(stock.min_balance or 0)
 
         result.append({
-            "id": str(m.id),
-            "name": m.name,
-            "factory_id": str(m.factory_id),
-            "unit": m.unit,
-            "material_type": _ev(m.material_type),
+            "id": str(mat.id),
+            "stock_id": str(stock.id),
+            "name": mat.name,
+            "factory_id": str(stock.factory_id),
+            "unit": mat.unit,
+            "material_type": _ev(mat.material_type),
             "balance": balance,
             "reserved": round(reserved, 3),
             "effective_balance": round(effective, 3),
@@ -260,13 +272,27 @@ async def get_effective_balance(
 @router.get("/{material_id}")
 async def get_material(
     material_id: UUID,
+    factory_id: UUID | None = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    m = db.query(Material).filter(Material.id == material_id).first()
-    if not m:
+    mat = db.query(Material).filter(Material.id == material_id).first()
+    if not mat:
         raise HTTPException(404, "Material not found")
-    return _serialize_material(m, db)
+
+    stock = None
+    if factory_id:
+        stock = db.query(MaterialStock).filter(
+            MaterialStock.material_id == material_id,
+            MaterialStock.factory_id == factory_id,
+        ).first()
+    else:
+        # Return first available stock
+        stock = db.query(MaterialStock).filter(
+            MaterialStock.material_id == material_id,
+        ).first()
+
+    return _serialize_material(mat, stock, db)
 
 
 @router.post("", status_code=201)
@@ -275,68 +301,114 @@ async def create_material(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    existing = db.query(Material).filter(
-        Material.name == data.name, Material.factory_id == data.factory_id
+    # Get or create catalog material
+    mat = db.query(Material).filter(Material.name == data.name).first()
+    if not mat:
+        mat = Material(
+            name=data.name,
+            material_type=data.material_type,
+            unit=data.unit,
+            supplier_id=data.supplier_id,
+        )
+        db.add(mat)
+        db.flush()
+
+    # Check if stock already exists for this factory
+    existing_stock = db.query(MaterialStock).filter(
+        MaterialStock.material_id == mat.id,
+        MaterialStock.factory_id == data.factory_id,
     ).first()
-    if existing:
+    if existing_stock:
         raise HTTPException(409, f"Material '{data.name}' already exists in this factory")
 
-    m = Material(
-        name=data.name,
+    stock = MaterialStock(
+        material_id=mat.id,
         factory_id=data.factory_id,
-        material_type=data.material_type,
-        unit=data.unit,
         balance=Decimal(str(data.balance)),
         min_balance=Decimal(str(data.min_balance)),
         min_balance_auto=data.min_balance_auto,
-        supplier_id=data.supplier_id,
         warehouse_section=data.warehouse_section or "raw_materials",
     )
-    db.add(m)
+    db.add(stock)
     db.commit()
-    db.refresh(m)
-    return _serialize_material(m, db)
+    db.refresh(mat)
+    db.refresh(stock)
+    return _serialize_material(mat, stock, db)
 
 
 @router.patch("/{material_id}")
 async def update_material(
     material_id: UUID,
     data: MaterialUpdateInput,
+    factory_id: UUID | None = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    m = db.query(Material).filter(Material.id == material_id).first()
-    if not m:
+    mat = db.query(Material).filter(Material.id == material_id).first()
+    if not mat:
         raise HTTPException(404, "Material not found")
 
     updates = data.model_dump(exclude_unset=True)
-    for k, v in updates.items():
-        if k == "min_balance" and v is not None:
-            setattr(m, k, Decimal(str(v)))
-        else:
-            setattr(m, k, v)
 
-    m.updated_at = datetime.now(timezone.utc)
+    # Catalog-level fields
+    catalog_fields = {'name', 'unit', 'supplier_id'}
+    # Stock-level fields
+    stock_fields = {'min_balance', 'min_balance_auto', 'warehouse_section'}
+
+    for k, v in updates.items():
+        if k in catalog_fields:
+            setattr(mat, k, v)
+
+    mat.updated_at = datetime.now(timezone.utc)
+
+    # Update stock if factory_id provided and stock fields present
+    stock = None
+    stock_updates = {k: v for k, v in updates.items() if k in stock_fields}
+    if stock_updates:
+        if factory_id:
+            stock = db.query(MaterialStock).filter(
+                MaterialStock.material_id == material_id,
+                MaterialStock.factory_id == factory_id,
+            ).first()
+        else:
+            stock = db.query(MaterialStock).filter(
+                MaterialStock.material_id == material_id,
+            ).first()
+
+        if stock:
+            for k, v in stock_updates.items():
+                if k == "min_balance" and v is not None:
+                    setattr(stock, k, Decimal(str(v)))
+                else:
+                    setattr(stock, k, v)
+            stock.updated_at = datetime.now(timezone.utc)
+
     db.commit()
-    db.refresh(m)
-    return _serialize_material(m, db)
+    db.refresh(mat)
+    if stock:
+        db.refresh(stock)
+    return _serialize_material(mat, stock, db)
 
 
 @router.get("/{material_id}/transactions")
 async def list_material_transactions(
     material_id: UUID,
+    factory_id: UUID | None = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    m = db.query(Material).filter(Material.id == material_id).first()
-    if not m:
+    mat = db.query(Material).filter(Material.id == material_id).first()
+    if not mat:
         raise HTTPException(404, "Material not found")
 
     query = db.query(MaterialTransaction).filter(
         MaterialTransaction.material_id == material_id
     )
+    if factory_id:
+        query = query.filter(MaterialTransaction.factory_id == factory_id)
+
     total = query.count()
     items = query.order_by(
         MaterialTransaction.created_at.desc()
@@ -366,23 +438,31 @@ async def create_transaction(
     if data.type == "manual_write_off" and not data.reason:
         raise HTTPException(400, "Reason is required for write-off")
 
-    m = db.query(Material).filter(Material.id == data.material_id).first()
-    if not m:
+    mat = db.query(Material).filter(Material.id == data.material_id).first()
+    if not mat:
         raise HTTPException(404, "Material not found")
+
+    stock = db.query(MaterialStock).filter(
+        MaterialStock.material_id == data.material_id,
+        MaterialStock.factory_id == data.factory_id,
+    ).first()
+    if not stock:
+        raise HTTPException(404, "Material stock not found for this factory")
 
     qty = Decimal(str(data.quantity))
 
     if data.type == "manual_write_off":
-        if m.balance < qty:
-            raise HTTPException(400, f"Insufficient balance: {float(m.balance)} < {data.quantity}")
-        m.balance -= qty
+        if stock.balance < qty:
+            raise HTTPException(400, f"Insufficient balance: {float(stock.balance)} < {data.quantity}")
+        stock.balance -= qty
     else:
-        m.balance += qty
+        stock.balance += qty
 
-    m.updated_at = datetime.now(timezone.utc)
+    stock.updated_at = datetime.now(timezone.utc)
 
     t = MaterialTransaction(
         material_id=data.material_id,
+        factory_id=data.factory_id,
         type=data.type,
         quantity=qty,
         reason=data.reason,

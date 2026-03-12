@@ -237,8 +237,10 @@ function TransactionsTab({
     if (!selectedMaterialId || qty <= 0) return;
     setError('');
     try {
+      const selectedMat = materials.find((m) => m.id === selectedMaterialId);
       await createTransaction.mutateAsync({
         material_id: selectedMaterialId,
+        factory_id: selectedMat?.factory_id ?? '',
         type: formMode === 'receive' ? 'receive' : 'manual_write_off',
         quantity: qty,
         reason: formMode === 'write-off' ? reason : undefined,

@@ -36,7 +36,7 @@ except ImportError:
     pass
 
 from api.database import SessionLocal
-from api.models import Factory, Material, Recipe, RecipeMaterial
+from api.models import Factory, Material, MaterialStock, Recipe, RecipeMaterial
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 log = logging.getLogger("seed_glaze")
@@ -454,29 +454,42 @@ ALL_INGREDIENTS = sorted({
 })
 
 
-def get_or_create_material(db, name: str, factory_id) -> "Material":
-    """Get existing material by name+factory or create it."""
-    mat = (
-        db.query(Material)
-        .filter(Material.name == name, Material.factory_id == factory_id)
-        .first()
-    )
+def get_or_create_material(db, name: str) -> "Material":
+    """Get existing catalog material by name or create it."""
+    mat = db.query(Material).filter(Material.name == name).first()
     if mat:
         return mat
     mat = Material(
         id=uuid.uuid4(),
         name=name,
-        factory_id=factory_id,
-        balance=0,
-        min_balance=0,
         unit="kg",
         material_type="glaze_ingredient",
-        warehouse_section="raw_materials",
     )
     db.add(mat)
     db.flush()
-    log.info("  Created material: %s (factory %s)", name, factory_id)
+    log.info("  Created material: %s", name)
     return mat
+
+
+def ensure_stock(db, material_id, factory_id) -> "MaterialStock":
+    """Ensure MaterialStock exists for material+factory."""
+    stock = db.query(MaterialStock).filter(
+        MaterialStock.material_id == material_id,
+        MaterialStock.factory_id == factory_id,
+    ).first()
+    if stock:
+        return stock
+    stock = MaterialStock(
+        id=uuid.uuid4(),
+        material_id=material_id,
+        factory_id=factory_id,
+        balance=0,
+        min_balance=0,
+        warehouse_section="raw_materials",
+    )
+    db.add(stock)
+    db.flush()
+    return stock
 
 
 def get_or_create_recipe(db, name: str, data: dict) -> "Recipe":
@@ -519,20 +532,22 @@ def seed():
         log.info("Found %d factories: %s", len(factories),
                  ", ".join(f.name for f in factories))
 
-        # ── 1. Ensure all glaze ingredient Materials exist per factory ──────
-        log.info("\n── Creating glaze ingredient materials ──")
-        # materials[factory_id][ingredient_name] = Material
-        materials: dict[str, dict[str, Material]] = {}
+        # ── 1. Ensure all glaze ingredient Materials exist (shared catalog) ──
+        log.info("\n── Creating glaze ingredient materials (catalog) ──")
+        materials_catalog: dict[str, Material] = {}
+        for ing_name in ALL_INGREDIENTS:
+            mat = get_or_create_material(db, ing_name)
+            materials_catalog[ing_name] = mat
+
+        # ── 2. Ensure MaterialStock exists per factory ───────────────────────
+        log.info("\n── Creating material stock per factory ──")
         for factory in factories:
-            fid = str(factory.id)
-            materials[fid] = {}
-            for ing_name in ALL_INGREDIENTS:
-                mat = get_or_create_material(db, ing_name, factory.id)
-                materials[fid][ing_name] = mat
+            for ing_name, mat in materials_catalog.items():
+                ensure_stock(db, mat.id, factory.id)
 
         db.flush()
 
-        # ── 2. Create Recipe + RecipeMaterial records ────────────────────────
+        # ── 3. Create Recipe + RecipeMaterial records (shared, not per-factory)
         log.info("\n── Creating recipes ──")
         created_recipes = 0
         skipped_recipes = 0
@@ -546,47 +561,47 @@ def seed():
             else:
                 skipped_recipes += 1
 
-            # Add Water as a special ingredient (its fraction stored in recipe metadata)
-            # but also as a RecipeMaterial so material consumption can be tracked
+            # All ingredients + Water
             all_ings = list(recipe_data["ingredients"])
-            # Append water
             all_ings.append(("Water", recipe_data["water_fraction"]))
 
-            for factory in factories:
-                fid = str(factory.id)
-                for ing_name, fraction in all_ings:
-                    # Ensure water material exists for this factory
-                    if ing_name not in materials[fid]:
-                        mat = get_or_create_material(db, ing_name, factory.id)
-                        materials[fid][ing_name] = mat
-                    mat = materials[fid][ing_name]
+            for ing_name, fraction in all_ings:
+                # Ensure catalog material exists
+                if ing_name not in materials_catalog:
+                    mat = get_or_create_material(db, ing_name)
+                    materials_catalog[ing_name] = mat
+                    # Also create stock per factory
+                    for factory in factories:
+                        ensure_stock(db, mat.id, factory.id)
+                mat = materials_catalog[ing_name]
 
-                    existing_rm = (
-                        db.query(RecipeMaterial)
-                        .filter(
-                            RecipeMaterial.recipe_id == recipe.id,
-                            RecipeMaterial.material_id == mat.id,
-                        )
-                        .first()
+                # One RecipeMaterial per (recipe, material) — shared
+                existing_rm = (
+                    db.query(RecipeMaterial)
+                    .filter(
+                        RecipeMaterial.recipe_id == recipe.id,
+                        RecipeMaterial.material_id == mat.id,
                     )
-                    if existing_rm:
-                        skipped_rm += 1
-                        continue
+                    .first()
+                )
+                if existing_rm:
+                    skipped_rm += 1
+                    continue
 
-                    grams_in_ref = round(fraction * recipe_data["reference_batch_g"], 4)
-                    rm = RecipeMaterial(
-                        id=uuid.uuid4(),
-                        recipe_id=recipe.id,
-                        material_id=mat.id,
-                        quantity_per_unit=fraction,
-                        unit="fraction",
-                        notes=(
-                            f"{grams_in_ref}g per {recipe_data['reference_batch_g']}g "
-                            f"reference batch | factory: {factory.name}"
-                        ),
-                    )
-                    db.add(rm)
-                    created_rm += 1
+                grams_in_ref = round(fraction * recipe_data["reference_batch_g"], 4)
+                rm = RecipeMaterial(
+                    id=uuid.uuid4(),
+                    recipe_id=recipe.id,
+                    material_id=mat.id,
+                    quantity_per_unit=fraction,
+                    unit="fraction",
+                    notes=(
+                        f"{grams_in_ref}g per {recipe_data['reference_batch_g']}g "
+                        f"reference batch"
+                    ),
+                )
+                db.add(rm)
+                created_rm += 1
 
         db.commit()
 

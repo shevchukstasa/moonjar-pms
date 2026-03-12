@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func as sa_func
 
 from api.models import (
-    ProductionOrder, ProductionOrderItem, OrderPosition, Material,
+    ProductionOrder, ProductionOrderItem, OrderPosition, Material, MaterialStock,
     MaterialPurchaseRequest, Task, Resource, Batch, ScheduleSlot,
     TpsShiftMetric, Size,
 )
@@ -59,8 +59,13 @@ def calculate_position_availability(db: Session, position: OrderPosition) -> dat
             if not material:
                 continue
 
+            stock = db.query(MaterialStock).filter(
+                MaterialStock.material_id == rm.material_id,
+                MaterialStock.factory_id == position.factory_id,
+            ).first()
+
             needed_qty = float(rm.quantity_per_unit) * position.quantity
-            if float(material.balance) >= needed_qty:
+            if stock and float(stock.balance) >= needed_qty:
                 factors.append(today)
             else:
                 # Check for pending purchase request

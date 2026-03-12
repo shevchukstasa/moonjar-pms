@@ -106,31 +106,29 @@ async def daily_material_balance():
     logger.info("Running material balance recalculation")
     db = _get_db_session()
     try:
-        from api.models import Material, MaterialTransaction
+        from api.models import MaterialStock, MaterialTransaction
         from sqlalchemy import func as sa_func
         from datetime import date, timedelta
 
         cutoff = date.today() - timedelta(days=30)
-        materials = db.query(Material).filter(Material.min_balance_auto.is_(True)).all()
+        stocks = db.query(MaterialStock).filter(MaterialStock.min_balance_auto.is_(True)).all()
 
-        for mat in materials:
-            # Calculate avg daily consumption over last 30 days
+        for stock in stocks:
             total_consumed = db.query(
                 sa_func.sum(MaterialTransaction.quantity)
             ).filter(
-                MaterialTransaction.material_id == mat.id,
+                MaterialTransaction.material_id == stock.material_id,
+                MaterialTransaction.factory_id == stock.factory_id,
                 MaterialTransaction.type == 'consume',
                 MaterialTransaction.created_at >= cutoff,
             ).scalar()
 
             avg_daily = float(total_consumed or 0) / 30.0
-            mat.avg_daily_consumption = abs(avg_daily)
-
-            # Recommended min balance = 7 days of consumption
-            mat.min_balance_recommended = abs(avg_daily * 7)
+            stock.avg_daily_consumption = abs(avg_daily)
+            stock.min_balance_recommended = abs(avg_daily * 7)
 
         db.commit()
-        logger.info("Material balance updated for %d materials", len(materials))
+        logger.info("Material balance updated for %d stocks", len(stocks))
     except Exception as e:
         logger.error("Material balance job failed: %s", e)
         db.rollback()
@@ -143,35 +141,36 @@ async def daily_low_stock_alerts():
     logger.info("Running low stock alert generation")
     db = _get_db_session()
     try:
-        from api.models import Material, Notification, User, UserFactory
+        from api.models import Material, MaterialStock, Notification, User, UserFactory
         from api.enums import NotificationType, UserRole
 
-        low_stock = db.query(Material).filter(
-            Material.balance < Material.min_balance,
+        low_stock = db.query(MaterialStock, Material).join(
+            Material, MaterialStock.material_id == Material.id
+        ).filter(
+            MaterialStock.balance < MaterialStock.min_balance,
         ).all()
 
-        for mat in low_stock:
-            # Notify purchaser for this factory
+        for stock, mat in low_stock:
             uf = db.query(UserFactory).join(User).filter(
-                UserFactory.factory_id == mat.factory_id,
+                UserFactory.factory_id == stock.factory_id,
                 User.role.in_([UserRole.PURCHASER.value, UserRole.PRODUCTION_MANAGER.value]),
                 User.is_active.is_(True),
             ).first()
             if uf:
                 notif = Notification(
                     user_id=uf.user_id,
-                    factory_id=mat.factory_id,
+                    factory_id=stock.factory_id,
                     type=NotificationType.STOCK_SHORTAGE,
                     title=f"Low stock: {mat.name}",
                     message=(
-                        f"Balance: {mat.balance} {mat.unit}, "
-                        f"Min: {mat.min_balance} {mat.unit}"
+                        f"Balance: {stock.balance} {mat.unit}, "
+                        f"Min: {stock.min_balance} {mat.unit}"
                     ),
                 )
                 db.add(notif)
 
         db.commit()
-        logger.info("Low stock alerts: %d materials flagged", len(low_stock))
+        logger.info("Low stock alerts: %d stocks flagged", len(low_stock))
     except Exception as e:
         logger.error("Low stock alerts failed: %s", e)
         db.rollback()
@@ -270,21 +269,19 @@ async def weekly_min_balance_recalc():
     logger.info("Running weekly min_balance recalculation")
     db = _get_db_session()
     try:
-        from api.models import Material
-        from datetime import timedelta
+        from api.models import MaterialStock
 
-        materials = db.query(Material).filter(
-            Material.min_balance_auto.is_(True),
+        stocks = db.query(MaterialStock).filter(
+            MaterialStock.min_balance_auto.is_(True),
         ).all()
 
-        for mat in materials:
-            if mat.avg_daily_consumption and float(mat.avg_daily_consumption) > 0:
-                # Set min_balance to 7 days of avg consumption
-                new_min = float(mat.avg_daily_consumption) * 7
-                mat.min_balance = round(new_min, 3)
+        for stock in stocks:
+            if stock.avg_daily_consumption and float(stock.avg_daily_consumption) > 0:
+                new_min = float(stock.avg_daily_consumption) * 7
+                stock.min_balance = round(new_min, 3)
 
         db.commit()
-        logger.info("Weekly min_balance recalc: %d materials", len(materials))
+        logger.info("Weekly min_balance recalc: %d stocks", len(stocks))
     except Exception as e:
         logger.error("Weekly min_balance recalc failed: %s", e)
         db.rollback()

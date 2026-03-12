@@ -124,7 +124,7 @@ export default function ManagerMaterialsPage() {
   const openEdit = useCallback((item: MaterialItem) => {
     setForm({
       name: item.name,
-      factory_id: item.factory_id,
+      factory_id: item.factory_id ?? '',
       material_type: item.material_type as MaterialTypeValue,
       unit: item.unit,
       balance: String(item.balance),
@@ -191,6 +191,7 @@ export default function ManagerMaterialsPage() {
     try {
       await createTransaction.mutateAsync({
         material_id: txDialog.item.id,
+        factory_id: txDialog.item.factory_id ?? '',
         type: txForm.type,
         quantity: qty,
         notes: txForm.notes || undefined,

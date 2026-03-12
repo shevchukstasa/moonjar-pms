@@ -333,30 +333,44 @@ class Recipe(Base):
 
 
 class Material(Base):
+    """Shared material catalog — name, type, unit, supplier (no factory scope)."""
     __tablename__ = 'materials'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(sa.String(300), nullable=False)
+    name = Column(sa.String(300), unique=True, nullable=False)
+    unit = Column(sa.String(20), nullable=False, default='pcs')
+    material_type = Column(sa.String(50), nullable=False)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey('suppliers.id'))
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    supplier = relationship('Supplier', foreign_keys=[supplier_id])
+    stocks = relationship('MaterialStock', back_populates='material', cascade='all, delete-orphan')
+
+
+class MaterialStock(Base):
+    """Per-factory material stock — balance, thresholds, consumption metrics."""
+    __tablename__ = 'material_stock'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    material_id = Column(UUID(as_uuid=True), ForeignKey('materials.id', ondelete='CASCADE'), nullable=False)
     factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
     balance = Column(sa.Numeric(12, 3), nullable=False, default=0)
     min_balance = Column(sa.Numeric(12, 3), nullable=False, default=0)
     min_balance_recommended = Column(sa.Numeric(12, 3))
     min_balance_auto = Column(sa.Boolean, nullable=False, default=True)
     avg_daily_consumption = Column(sa.Numeric(12, 3), default=0)
-    unit = Column(sa.String(20), nullable=False, default='pcs')
-    material_type = Column(sa.String(50), nullable=False)
     avg_monthly_consumption = Column(sa.Numeric(12, 3), default=0)
     warehouse_section = Column(sa.String(50), default='raw_materials')
-    supplier_id = Column(UUID(as_uuid=True), ForeignKey('suppliers.id'))
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     __table_args__ = (
-        UniqueConstraint('name', 'factory_id'),
+        UniqueConstraint('material_id', 'factory_id'),
     )
 
+    material = relationship('Material', foreign_keys=[material_id], back_populates='stocks')
     factory = relationship('Factory', foreign_keys=[factory_id])
-    supplier = relationship('Supplier', foreign_keys=[supplier_id])
 
 
 class RecipeMaterial(Base):
@@ -557,6 +571,7 @@ class MaterialTransaction(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     material_id = Column(UUID(as_uuid=True), ForeignKey('materials.id'), nullable=False)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'))
     type = Column(PgEnum(TransactionType), nullable=False)
     quantity = Column(sa.Numeric(12, 3), nullable=False)
     related_order_id = Column(UUID(as_uuid=True), ForeignKey('production_orders.id'))
@@ -567,6 +582,7 @@ class MaterialTransaction(Base):
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     material = relationship('Material', foreign_keys=[material_id])
+    factory = relationship('Factory', foreign_keys=[factory_id])
     related_order = relationship('ProductionOrder', foreign_keys=[related_order_id])
     related_position = relationship('OrderPosition', foreign_keys=[related_position_id])
     created_by_rel = relationship('User', foreign_keys=[created_by])

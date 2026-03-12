@@ -11,7 +11,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from api.models import (
-    StageReconciliationLog, Notification, User, Material,
+    StageReconciliationLog, Notification, User, Material, MaterialStock,
     MaterialTransaction,
 )
 from api.enums import (
@@ -130,11 +130,18 @@ def inventory_reconciliation(
             logger.warning("Material %s not found during reconciliation", material_id)
             continue
 
-        system_qty = float(material.balance or 0)
+        stock = db.query(MaterialStock).filter(
+            MaterialStock.material_id == material_id,
+            MaterialStock.factory_id == factory_id,
+        ).first()
+        if not stock:
+            logger.warning("MaterialStock not found for %s in factory %s", material_id, factory_id)
+            continue
+
+        system_qty = float(stock.balance or 0)
         difference = actual_qty - system_qty
 
         if abs(difference) < 0.001:
-            # No discrepancy
             details.append({
                 "material_id": str(material_id),
                 "material_name": material.name,
@@ -148,15 +155,16 @@ def inventory_reconciliation(
         # Create adjustment transaction
         txn = MaterialTransaction(
             material_id=material.id,
+            factory_id=factory_id,
             type=TransactionType.MANUAL_WRITE_OFF,
             quantity=difference,
             notes=f"Inventory reconciliation: section {section_id}",
         )
         db.add(txn)
 
-        # Update material balance
-        material.balance = actual_qty
-        material.updated_at = datetime.utcnow()
+        # Update stock balance
+        stock.balance = actual_qty
+        stock.updated_at = datetime.utcnow()
 
         adjustments_count += 1
         if difference > 0:

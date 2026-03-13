@@ -6,6 +6,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGlazingSchedule, useFiringSchedule, useSortingSchedule, useQcSchedule, useKilnSchedule } from '@/hooks/useSchedule';
 import { Badge } from '@/components/ui/Badge';
+import { StatusDropdown } from '@/components/tablo/StatusDropdown';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Tabs } from '@/components/ui/Tabs';
@@ -152,7 +153,9 @@ export default function ManagerSchedulePage() {
     {
       key: 'status',
       header: 'Status',
-      render: (item) => <Badge status={item.status} />,
+      render: (item) => (
+        <StatusDropdown positionId={item.id} currentStatus={item.status} section={tab} />
+      ),
     },
     { key: 'product_type', header: 'Type' },
     {

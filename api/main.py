@@ -3,11 +3,9 @@ Moonjar PMS — FastAPI application entry point.
 """
 
 import os
-from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from contextlib import asynccontextmanager
 import logging
@@ -767,20 +765,3 @@ def setup_routers():
     app.include_router(cleanup.router, prefix="/api/cleanup", tags=["cleanup"])
 
 setup_routers()
-
-# ── SPA static files ──────────────────────────────────────────
-# Serve the React frontend from the Vite build output.
-# Must come AFTER API routers so /api/* routes take precedence.
-_DIST = Path(__file__).resolve().parent.parent / "presentation" / "dashboard" / "dist"
-if _DIST.is_dir():
-    # Serve JS/CSS/assets at /assets/*
-    app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="static-assets")
-
-    # SPA catch-all: any non-API route → index.html
-    @app.get("/{full_path:path}")
-    async def _spa_catchall(full_path: str):
-        # If a real file exists in dist, serve it (e.g. favicon.ico, robots.txt)
-        maybe = _DIST / full_path
-        if full_path and maybe.is_file():
-            return FileResponse(maybe)
-        return FileResponse(_DIST / "index.html")

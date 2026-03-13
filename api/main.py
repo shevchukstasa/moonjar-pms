@@ -405,7 +405,7 @@ def _ensure_schema():
         for old_name in ["Large Kiln", "Small Kiln", "Raku Kiln"]:
             result = conn.execute(text(
                 "UPDATE resources SET is_active = TRUE, status = CASE "
-                "  WHEN status = 'inactive' THEN 'idle' ELSE status END "
+                "  WHEN status = 'inactive' THEN 'active' ELSE status END "
                 "WHERE name = :name AND resource_type = 'kiln' AND is_active = FALSE"
             ), {"name": old_name})
             if result.rowcount > 0:
@@ -576,39 +576,46 @@ def _ensure_schema():
                 })
                 created_recipes += 1
 
-            # 2. Create materials per factory + link to recipe
-            for factory_id in factory_ids.values():
-                for ing_name, fraction in r["ingredients"]:
-                    # Ensure material exists for this factory
-                    mat_row = conn.execute(text(
-                        "SELECT id FROM materials WHERE name = :n AND factory_id = :fid"
-                    ), {"n": ing_name, "fid": factory_id}).fetchone()
-                    if mat_row:
-                        mat_id = str(mat_row[0])
-                    else:
-                        mat_id = str(__import__('uuid').uuid4())
-                        conn.execute(text(
-                            "INSERT INTO materials (id, name, factory_id, balance, min_balance, unit, "
-                            "material_type, warehouse_section, created_at, updated_at) "
-                            "VALUES (:id, :name, :fid, 0, 0, 'kg', 'glaze_ingredient', 'raw_materials', NOW(), NOW())"
-                        ), {"id": mat_id, "name": ing_name, "fid": factory_id})
-                        created_materials += 1
-
-                    # Link recipe ↔ material
-                    grams_in_ref = round(fraction * r["reference_batch_g"], 4)
+            # 2. Create materials (global catalog) + link to recipe
+            for ing_name, fraction in r["ingredients"]:
+                # Ensure material exists in global catalog (no factory_id since migration 006)
+                mat_row = conn.execute(text(
+                    "SELECT id FROM materials WHERE name = :n"
+                ), {"n": ing_name}).fetchone()
+                if mat_row:
+                    mat_id = str(mat_row[0])
+                else:
+                    mat_id = str(__import__('uuid').uuid4())
                     conn.execute(text(
-                        "INSERT INTO recipe_materials (id, recipe_id, material_id, quantity_per_unit, unit, notes) "
-                        "SELECT :id, :rid, :mid, :qty, 'fraction', :notes "
-                        "WHERE NOT EXISTS ("
-                        "  SELECT 1 FROM recipe_materials WHERE recipe_id = :rid AND material_id = :mid"
-                        ")"
-                    ), {
-                        "id": str(__import__('uuid').uuid4()),
-                        "rid": recipe_id, "mid": mat_id,
-                        "qty": fraction,
-                        "notes": f"{grams_in_ref}g per {r['reference_batch_g']}g ref batch",
-                    })
-                    created_rm += 1  # approximate — includes both new and existing
+                        "INSERT INTO materials (id, name, unit, material_type, created_at, updated_at) "
+                        "VALUES (:id, :name, 'kg', 'glaze_ingredient', NOW(), NOW())"
+                    ), {"id": mat_id, "name": ing_name})
+                    created_materials += 1
+
+                    # Create stock entries for each factory
+                    for factory_id in factory_ids.values():
+                        conn.execute(text(
+                            "INSERT INTO material_stock (id, material_id, factory_id, balance, min_balance, "
+                            "warehouse_section, created_at, updated_at) "
+                            "VALUES (:id, :mid, :fid, 0, 0, 'raw_materials', NOW(), NOW()) "
+                            "ON CONFLICT DO NOTHING"
+                        ), {"id": str(__import__('uuid').uuid4()), "mid": mat_id, "fid": factory_id})
+
+                # Link recipe ↔ material
+                grams_in_ref = round(fraction * r["reference_batch_g"], 4)
+                conn.execute(text(
+                    "INSERT INTO recipe_materials (id, recipe_id, material_id, quantity_per_unit, unit, notes) "
+                    "SELECT :id, :rid, :mid, :qty, 'g_per_100g', :notes "
+                    "WHERE NOT EXISTS ("
+                    "  SELECT 1 FROM recipe_materials WHERE recipe_id = :rid AND material_id = :mid"
+                    ")"
+                ), {
+                    "id": str(__import__('uuid').uuid4()),
+                    "rid": recipe_id, "mid": mat_id,
+                    "qty": round(fraction * 100, 4),
+                    "notes": f"{grams_in_ref}g per {r['reference_batch_g']}g ref batch",
+                })
+                created_rm += 1  # approximate — includes both new and existing
 
         logger.info(
             "_ensure_schema [glaze_recipes]: recipes+=%d materials+=%d recipe_materials~%d",

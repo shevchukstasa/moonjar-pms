@@ -1064,41 +1064,27 @@ def _estimate_completion(db: Session, order: ProductionOrder) -> Optional[str]:
 
 async def notify_sales_status_change_stub(order, position, old_status: str, new_status: str):
     """
-    Stub: send intermediate status callbacks to Sales.
-    When disabled (stub active), skips callback.
-    When enabled, sends real callback.
+    Send intermediate status callbacks to Sales.
+    When stub is active (True), skips callback.
+    When stub is off (False), sends real callback with retry.
     """
     if _stubs_state["intermediate_callbacks"]:
         return  # Stub: skip intermediate callbacks
 
-    # Real callback logic
-    try:
-        from api.config import get_settings
-        settings = get_settings()
-        if not settings.SALES_APP_URL or not settings.PRODUCTION_WEBHOOK_ENABLED:
-            return
-        if not order.external_id:
-            return
+    if not order.external_id:
+        return
 
-        import httpx
-        payload = {
-            "event": "status_change",
-            "external_id": order.external_id,
-            "order_number": order.order_number,
-            "position_id": str(position.id),
-            "old_status": old_status,
-            "new_status": new_status,
-            "order_status": _ev(order.status),
-        }
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                f"{settings.SALES_APP_URL}/api/webhooks/production-status",
-                json=payload,
-                headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
-                timeout=10,
-            )
-    except Exception as e:
-        logger.warning(f"Sales status callback failed: {e}")
+    from business.services.webhook_sender import send_webhook
+    payload = {
+        "event": "status_change",
+        "external_id": order.external_id,
+        "order_number": order.order_number,
+        "position_id": str(position.id),
+        "old_status": old_status,
+        "new_status": new_status,
+        "order_status": _ev(order.status),
+    }
+    await send_webhook(payload, event_type="status_change", external_id=order.external_id)
 
 
 @router.get("/stubs")

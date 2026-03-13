@@ -538,29 +538,22 @@ async def mark_order_shipped(
     order.updated_at = datetime.now(timezone.utc)
     db.commit()
 
-    # Notify Sales app if order has external_id (async, fire-and-forget)
+    # Notify Sales app if order has external_id (with retry)
     if order.external_id:
-        try:
-            from api.config import get_settings
-            settings = get_settings()
-            if settings.SALES_APP_URL and settings.PRODUCTION_WEBHOOK_ENABLED:
-                import httpx
-                payload = {
-                    "event": "order_shipped",
-                    "external_id": order.external_id,
-                    "order_number": order.order_number,
-                    "shipped_at": order.shipped_at.isoformat(),
-                    "status": "shipped",
-                }
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"{settings.SALES_APP_URL}/api/webhooks/production-status",
-                        json=payload,
-                        headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
-                        timeout=10,
-                    )
-        except Exception:
-            pass  # Log error; webhook retry can be added later
+        from business.services.webhook_sender import send_webhook
+        await send_webhook(
+            {
+                "event": "order_shipped",
+                "external_id": order.external_id,
+                "order_number": order.order_number,
+                "client": order.client,
+                "shipped_at": order.shipped_at.isoformat(),
+                "positions_shipped": len(positions),
+                "status": "shipped",
+            },
+            event_type="order_shipped",
+            external_id=order.external_id,
+        )
 
     return {
         "status": "shipped",
@@ -605,30 +598,21 @@ async def accept_cancellation(
     tasks_cancelled = _cancel_order_tasks(db, order_id)
     db.commit()
 
-    # Async: notify Sales App of cancellation (fire-and-forget)
+    # Notify Sales App of cancellation (with retry)
     if order.external_id:
-        try:
-            from api.config import get_settings
-            settings = get_settings()
-            if settings.SALES_APP_URL and settings.PRODUCTION_WEBHOOK_ENABLED:
-                import httpx
-                payload = {
-                    "event": "cancellation_accepted",
-                    "external_id": order.external_id,
-                    "order_number": order.order_number,
-                    "status": "cancelled",
-                    "decided_by": current_user.name,
-                    "decided_at": order.cancellation_decided_at.isoformat(),
-                }
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"{settings.SALES_APP_URL}/api/webhooks/production-status",
-                        json=payload,
-                        headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
-                        timeout=10,
-                    )
-        except Exception:
-            pass
+        from business.services.webhook_sender import send_webhook
+        await send_webhook(
+            {
+                "event": "cancellation_accepted",
+                "external_id": order.external_id,
+                "order_number": order.order_number,
+                "status": "cancelled",
+                "decided_by": current_user.name,
+                "decided_at": order.cancellation_decided_at.isoformat(),
+            },
+            event_type="cancellation_accepted",
+            external_id=order.external_id,
+        )
 
     return {
         "status": "accepted",
@@ -658,30 +642,21 @@ async def reject_cancellation(
     order.updated_at = datetime.now(timezone.utc)
     db.commit()
 
-    # Notify Sales App of rejection (fire-and-forget)
+    # Notify Sales App of rejection (with retry)
     if order.external_id:
-        try:
-            from api.config import get_settings
-            settings = get_settings()
-            if settings.SALES_APP_URL and settings.PRODUCTION_WEBHOOK_ENABLED:
-                import httpx
-                payload = {
-                    "event": "cancellation_rejected",
-                    "external_id": order.external_id,
-                    "order_number": order.order_number,
-                    "status": _ev(order.status),  # status unchanged
-                    "decided_by": current_user.name,
-                    "decided_at": order.cancellation_decided_at.isoformat(),
-                }
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"{settings.SALES_APP_URL}/api/webhooks/production-status",
-                        json=payload,
-                        headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
-                        timeout=10,
-                    )
-        except Exception:
-            pass
+        from business.services.webhook_sender import send_webhook
+        await send_webhook(
+            {
+                "event": "cancellation_rejected",
+                "external_id": order.external_id,
+                "order_number": order.order_number,
+                "status": _ev(order.status),
+                "decided_by": current_user.name,
+                "decided_at": order.cancellation_decided_at.isoformat(),
+            },
+            event_type="cancellation_rejected",
+            external_id=order.external_id,
+        )
 
     return {
         "status": "rejected",
@@ -733,27 +708,18 @@ async def approve_change_request(
 
     # Notify Sales App (fire-and-forget)
     if order.external_id:
-        try:
-            from api.config import get_settings
-            settings = get_settings()
-            if settings.SALES_APP_URL and settings.PRODUCTION_WEBHOOK_ENABLED:
-                import httpx
-                notify_payload = {
-                    "event": "change_request_approved",
-                    "external_id": order.external_id,
-                    "order_number": order.order_number,
-                    "decided_by": current_user.name,
-                    "decided_at": order.change_req_decided_at.isoformat(),
-                }
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"{settings.SALES_APP_URL}/api/webhooks/production-status",
-                        json=notify_payload,
-                        headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
-                        timeout=10,
-                    )
-        except Exception:
-            pass
+        from business.services.webhook_sender import send_webhook
+        await send_webhook(
+            {
+                "event": "change_request_approved",
+                "external_id": order.external_id,
+                "order_number": order.order_number,
+                "decided_by": current_user.name,
+                "decided_at": order.change_req_decided_at.isoformat(),
+            },
+            event_type="change_request_approved",
+            external_id=order.external_id,
+        )
 
     return {
         "status": "approved",
@@ -783,30 +749,21 @@ async def reject_change_request(
     order.updated_at = datetime.now(timezone.utc)
     db.commit()
 
-    # Notify Sales App (fire-and-forget)
+    # Notify Sales App (with retry)
     if order.external_id:
-        try:
-            from api.config import get_settings
-            settings = get_settings()
-            if settings.SALES_APP_URL and settings.PRODUCTION_WEBHOOK_ENABLED:
-                import httpx
-                notify_payload = {
-                    "event": "change_request_rejected",
-                    "external_id": order.external_id,
-                    "order_number": order.order_number,
-                    "status": _ev(order.status),
-                    "decided_by": current_user.name,
-                    "decided_at": order.change_req_decided_at.isoformat(),
-                }
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"{settings.SALES_APP_URL}/api/webhooks/production-status",
-                        json=notify_payload,
-                        headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
-                        timeout=10,
-                    )
-        except Exception:
-            pass
+        from business.services.webhook_sender import send_webhook
+        await send_webhook(
+            {
+                "event": "change_request_rejected",
+                "external_id": order.external_id,
+                "order_number": order.order_number,
+                "status": _ev(order.status),
+                "decided_by": current_user.name,
+                "decided_at": order.change_req_decided_at.isoformat(),
+            },
+            event_type="change_request_rejected",
+            external_id=order.external_id,
+        )
 
     return {
         "status": "rejected",

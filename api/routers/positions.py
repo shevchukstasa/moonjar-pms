@@ -106,30 +106,22 @@ def _recalculate_order_status(db: Session, order_id) -> tuple:
     return None, None, None
 
 
-async def _notify_sales_order_event(order, event_type: str):
-    """Send order status event to Sales app (fire-and-forget)."""
-    try:
-        from api.config import get_settings
-        settings = get_settings()
-        if not settings.SALES_APP_URL or not settings.PRODUCTION_WEBHOOK_ENABLED:
-            return
-        import httpx
-        payload = {
-            "event": event_type,
-            "external_id": order.external_id,
-            "order_number": order.order_number,
-            "status": _ev(order.status),
-            "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
-        }
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                f"{settings.SALES_APP_URL}/api/webhooks/production-status",
-                json=payload,
-                headers={"Authorization": f"Bearer {settings.PRODUCTION_WEBHOOK_BEARER_TOKEN}"},
-                timeout=10,
-            )
-    except Exception:
-        pass  # Fire-and-forget; webhook retry can be added later
+async def _notify_sales_order_event(order, event_type: str, extra: dict | None = None):
+    """Send order status event to Sales app with retry."""
+    if not order.external_id:
+        return
+    from business.services.webhook_sender import send_webhook
+    payload = {
+        "event": event_type,
+        "external_id": order.external_id,
+        "order_number": order.order_number,
+        "status": _ev(order.status),
+        "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
+        "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+    }
+    if extra:
+        payload.update(extra)
+    await send_webhook(payload, event_type=event_type, external_id=order.external_id)
 
 
 # Section → status mapping
@@ -364,7 +356,16 @@ async def change_position_status(
         and order
         and order.external_id
     ):
-        await _notify_sales_order_event(order, "order_ready")
+        # Count total positions for the enriched payload
+        total_pos = db.query(OrderPosition).filter(
+            OrderPosition.order_id == order.id,
+            OrderPosition.split_category.is_(None),
+        ).count()
+        await _notify_sales_order_event(order, "order_ready", extra={
+            "client": order.client,
+            "positions_total": total_pos,
+            "factory_name": order.factory.name if order.factory else None,
+        })
 
     # Send intermediate status callback to Sales (stub-aware)
     try:

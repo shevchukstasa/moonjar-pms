@@ -77,6 +77,15 @@ export function useStockAvailability(positionId?: string) {
   });
 }
 
+export function useAllowedTransitions(positionId?: string) {
+  return useQuery<{ current_status: string; allowed: string[] }>({
+    queryKey: ['positions', positionId, 'allowed-transitions'],
+    queryFn: () => positionsApi.allowedTransitions(positionId!),
+    enabled: !!positionId,
+    staleTime: 0,          // always fresh when dropdown opens
+  });
+}
+
 export function useResolveColorMismatch() {
   const qc = useQueryClient();
   return useMutation({

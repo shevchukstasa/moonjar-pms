@@ -43,4 +43,6 @@ export const positionsApi = {
     apiClient.get(`/positions/${id}/stock-availability`).then((r) => r.data),
   resolveColorMismatch: (id: string, data: ColorMismatchResolveRequest) =>
     apiClient.post(`/positions/${id}/resolve-color-mismatch`, data).then((r) => r.data),
+  allowedTransitions: (id: string) =>
+    apiClient.get(`/positions/${id}/allowed-transitions`).then((r) => r.data as { current_status: string; allowed: string[] }),
 };

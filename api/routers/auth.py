@@ -160,14 +160,19 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
 @router.get("/me")
 async def get_me(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     from api.models import UserFactory, Factory
-    # Fetch user's assigned factories
-    user_factories = (
-        db.query(Factory.id, Factory.name)
-        .join(UserFactory, UserFactory.factory_id == Factory.id)
-        .filter(UserFactory.user_id == current_user.id)
-        .all()
-    )
-    factories = [{"id": str(f.id), "name": f.name} for f in user_factories]
+    role = _role_str(current_user.role)
+    # Owner/administrator see ALL factories automatically (no manual assignment needed)
+    if role in ("owner", "administrator"):
+        all_factories = db.query(Factory.id, Factory.name).filter(Factory.is_active.is_(True)).all()
+        factories = [{"id": str(f.id), "name": f.name} for f in all_factories]
+    else:
+        user_factories = (
+            db.query(Factory.id, Factory.name)
+            .join(UserFactory, UserFactory.factory_id == Factory.id)
+            .filter(UserFactory.user_id == current_user.id)
+            .all()
+        )
+        factories = [{"id": str(f.id), "name": f.name} for f in user_factories]
     return {
         "id": str(current_user.id),
         "email": current_user.email,

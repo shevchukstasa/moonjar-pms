@@ -280,6 +280,35 @@ async def update_kiln_status(
                 "Failed to reschedule after kiln %s status change: %s", kiln_id, e,
             )
 
+        # ── Real-time alert: kiln breakdown ──────────────────────
+        try:
+            from business.services.notifications import notify_pm
+            factory_id = kiln.factory_id
+            if factory_id:
+                alert_title = f"🔥 KILN BREAKDOWN: {kiln.name}"
+                alert_msg = (
+                    f"Kiln {kiln.name} → status: {status}\n"
+                    f"Status sebelumnya: {old_status}\n"
+                    f"Posisi terdampak: {count if 'count' in dir() else '?'} — dijadwalkan ulang"
+                )
+                notify_pm(db, factory_id, "kiln_breakdown", alert_title, alert_msg,
+                          related_entity_type="resource",
+                          related_entity_id=kiln_id)
+                # Also send to masters chat
+                from api.models import Factory
+                factory = db.query(Factory).get(factory_id)
+                if factory and factory.masters_group_chat_id:
+                    from business.services.notifications import send_telegram_message
+                    send_telegram_message(
+                        str(factory.masters_group_chat_id),
+                        f"🔥 *PERINGATAN KILN*\n{alert_msg}"
+                    )
+        except Exception as e:
+            import logging
+            logging.getLogger("moonjar.kilns").warning(
+                "Failed to send kiln breakdown alert: %s", e
+            )
+
     return _serialize_kiln(kiln, db)
 
 

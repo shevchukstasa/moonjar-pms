@@ -237,9 +237,132 @@ def transition_position_status(
                 position_id, _e,
             )
 
+    # ── Real-time alerts for critical events ─────────────────────
+    # These trigger immediately via Telegram (not waiting for 21:00 daily batch)
+    _send_realtime_alerts(db, position, old_status, new_ps, notes)
+
     db.commit()
     db.refresh(position)
     return position
+
+
+def _send_realtime_alerts(
+    db: Session,
+    position: OrderPosition,
+    old_status: str,
+    new_status: PositionStatus,
+    notes: Optional[str] = None,
+) -> None:
+    """
+    Send instant Telegram alerts for critical production events.
+    Best-effort: never fails the transition.
+    """
+    import logging
+    _logger = logging.getLogger("moonjar.realtime_alerts")
+
+    try:
+        from business.services.notifications import notify_pm, create_notification
+        from api.models import ProductionOrder, Factory
+        from api.enums import NotificationType, RelatedEntityType
+
+        order = db.query(ProductionOrder).get(position.order_id) if position.order_id else None
+        order_num = order.order_number if order else "?"
+        pos_label = f"#{position.position_number}" + (f".{position.split_index}" if position.split_index else "")
+        factory_id = position.factory_id
+
+        if not factory_id:
+            return
+
+        # 1. QM Block — quality issue detected
+        if new_status == PositionStatus.BLOCKED_BY_QM:
+            title = f"⛔ QM BLOCK: Order {order_num} {pos_label}"
+            msg = (
+                f"Posisi {pos_label} diblokir oleh QM.\n"
+                f"Pesanan: {order_num}\n"
+                f"Warna: {position.color or '-'}\n"
+                f"Status sebelumnya: {old_status}"
+            )
+            if notes:
+                msg += f"\nCatatan: {notes}"
+            notify_pm(db, factory_id, "qm_block", title, msg,
+                      related_entity_type="order_position",
+                      related_entity_id=position.id)
+            # Also send to factory's masters chat
+            _send_to_factory_chat(db, factory_id, f"⛔ *QM BLOCK*\n{msg}")
+            _logger.info("REALTIME_ALERT | qm_block | order=%s pos=%s", order_num, pos_label)
+
+        # 2. Refire needed — significant delay
+        elif new_status == PositionStatus.REFIRE:
+            title = f"🔄 REFIRE: Order {order_num} {pos_label}"
+            msg = (
+                f"Posisi {pos_label} memerlukan pembakaran ulang.\n"
+                f"Pesanan: {order_num}\n"
+                f"Putaran ke: {position.firing_round + 1}"
+            )
+            notify_pm(db, factory_id, "refire_needed", title, msg,
+                      related_entity_type="order_position",
+                      related_entity_id=position.id)
+            _logger.info("REALTIME_ALERT | refire | order=%s pos=%s", order_num, pos_label)
+
+        # 3. Material shortage — position blocked
+        elif new_status == PositionStatus.INSUFFICIENT_MATERIALS:
+            title = f"📦 MATERIAL SHORTAGE: Order {order_num} {pos_label}"
+            msg = (
+                f"Posisi {pos_label} kekurangan material.\n"
+                f"Pesanan: {order_num}\n"
+                f"Warna: {position.color or '-'}"
+            )
+            notify_pm(db, factory_id, "material_shortage", title, msg,
+                      related_entity_type="order_position",
+                      related_entity_id=position.id)
+            _logger.info("REALTIME_ALERT | material_shortage | order=%s pos=%s", order_num, pos_label)
+
+        # 4. Awaiting reglaze — defect repair loop
+        elif new_status == PositionStatus.AWAITING_REGLAZE:
+            title = f"🔧 REGLAZE: Order {order_num} {pos_label}"
+            msg = (
+                f"Posisi {pos_label} perlu glasir ulang setelah perbaikan.\n"
+                f"Pesanan: {order_num}"
+            )
+            notify_pm(db, factory_id, "reglaze_needed", title, msg,
+                      related_entity_type="order_position",
+                      related_entity_id=position.id)
+            _logger.info("REALTIME_ALERT | reglaze | order=%s pos=%s", order_num, pos_label)
+
+        # 5. Position ready for shipment — notify warehouse
+        elif new_status == PositionStatus.READY_FOR_SHIPMENT:
+            from api.enums import UserRole
+            from business.services.notifications import notify_role
+            title = f"📦 READY: Order {order_num} {pos_label}"
+            msg = (
+                f"Posisi {pos_label} siap dikirim.\n"
+                f"Pesanan: {order_num}\n"
+                f"Jumlah: {position.quantity} pcs"
+            )
+            notify_role(db, factory_id, UserRole.WAREHOUSE, "ready_for_shipment",
+                        title, msg,
+                        related_entity_type="order_position",
+                        related_entity_id=position.id)
+            _logger.info("REALTIME_ALERT | ready_for_shipment | order=%s pos=%s", order_num, pos_label)
+
+    except Exception as e:
+        import logging
+        logging.getLogger("moonjar.realtime_alerts").warning(
+            "Failed to send realtime alert for position %s: %s", position.id, e
+        )
+
+
+def _send_to_factory_chat(db: Session, factory_id: UUID, text: str) -> None:
+    """Send message to factory's masters group chat (best-effort)."""
+    try:
+        from api.models import Factory
+        from business.services.notifications import send_telegram_message
+
+        factory = db.query(Factory).get(factory_id)
+        if factory and factory.masters_group_chat_id:
+            send_telegram_message(str(factory.masters_group_chat_id), text)
+    except Exception:
+        pass
 
 
 # ────────────────────────────────────────────────────────────────

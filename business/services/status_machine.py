@@ -201,6 +201,30 @@ def transition_position_status(
     if new_ps == PositionStatus.FIRED:
         route_after_firing(db, position)
 
+    # ── Reschedule on status change ──────────────────────────────
+    # When a position transitions to a status that indicates delay
+    # or requires re-routing, recalculate its production schedule.
+    _DELAY_STATUSES = {
+        PositionStatus.INSUFFICIENT_MATERIALS,
+        PositionStatus.AWAITING_RECIPE,
+        PositionStatus.AWAITING_STENCIL_SILKSCREEN,
+        PositionStatus.AWAITING_COLOR_MATCHING,
+        PositionStatus.SENT_TO_GLAZING,        # re-entering glazing pipeline
+        PositionStatus.REFIRE,                  # needs another firing
+        PositionStatus.AWAITING_REGLAZE,        # repair → reglaze
+        PositionStatus.BLOCKED_BY_QM,           # quality hold
+    }
+    if new_ps in _DELAY_STATUSES:
+        try:
+            from business.services.production_scheduler import reschedule_position
+            reschedule_position(db, position)
+        except Exception as _e:
+            import logging
+            logging.getLogger("moonjar.status_machine").warning(
+                "Failed to reschedule position %s after status change: %s",
+                position_id, _e,
+            )
+
     db.commit()
     db.refresh(position)
     return position

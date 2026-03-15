@@ -512,6 +512,13 @@ class OrderPosition(Base):
     is_merged = Column(sa.Boolean, nullable=False, default=False)
     priority_order = Column(sa.Integer, default=0)
     firing_round = Column(sa.Integer, nullable=False, default=1)
+    # ── Upfront schedule (TOC/DBR backward scheduling) ──────────────────
+    planned_glazing_date = Column(sa.Date)          # when glazing should start
+    planned_kiln_date = Column(sa.Date)             # when kiln firing should happen
+    planned_sorting_date = Column(sa.Date)          # when sorting should happen
+    planned_completion_date = Column(sa.Date)       # when position should be complete
+    estimated_kiln_id = Column(UUID(as_uuid=True), ForeignKey('resources.id'))
+    schedule_version = Column(sa.Integer, nullable=False, default=1)
     # Human-readable position numbering within the order:
     #   position_number — sequential integer for root positions (1, 2, 3, …)
     #   split_index     — NULL for roots; 1, 2, 3 for split sub-positions
@@ -527,6 +534,7 @@ class OrderPosition(Base):
     factory = relationship('Factory', foreign_keys=[factory_id])
     batch = relationship('Batch', foreign_keys=[batch_id])
     resource = relationship('Resource', foreign_keys=[resource_id])
+    estimated_kiln = relationship('Resource', foreign_keys=[estimated_kiln_id])
     recipe = relationship('Recipe', foreign_keys=[recipe_id])
 
 
@@ -1565,4 +1573,55 @@ class BackupLog(Base):
     s3_key = Column(sa.String(500))
     error_message = Column(sa.Text)
     backup_type = Column(sa.String(20), nullable=False, default=BackupType.SCHEDULED.value)
+
+
+# ─── Firing Temperature Groups ──────────────────────────────
+
+class FiringTemperatureGroup(Base):
+    """Named temperature group for batch formation (replaces ±50°C auto-grouping).
+    PM can create additional groups beyond the 2 defaults.
+    """
+    __tablename__ = 'firing_temperature_groups'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(sa.String(100), nullable=False)           # e.g. "Low Temperature", "High Temperature"
+    min_temperature = Column(sa.Integer, nullable=False)     # e.g. 800
+    max_temperature = Column(sa.Integer, nullable=False)     # e.g. 1050
+    description = Column(sa.Text)
+    is_active = Column(sa.Boolean, nullable=False, default=True)
+    display_order = Column(sa.Integer, nullable=False, default=0)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    recipes = relationship(
+        'FiringTemperatureGroupRecipe',
+        back_populates='temperature_group',
+        cascade='all, delete-orphan',
+    )
+
+
+class FiringTemperatureGroupRecipe(Base):
+    """Join table linking temperature groups to recipes."""
+    __tablename__ = 'firing_temperature_group_recipes'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temperature_group_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('firing_temperature_groups.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    recipe_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('recipes.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    is_default = Column(sa.Boolean, nullable=False, default=False)  # default recipe for this group
+
+    __table_args__ = (
+        UniqueConstraint('temperature_group_id', 'recipe_id',
+                         name='uq_temp_group_recipe'),
+    )
+
+    temperature_group = relationship('FiringTemperatureGroup', back_populates='recipes')
+    recipe = relationship('Recipe', foreign_keys=[recipe_id])
 

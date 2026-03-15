@@ -1,0 +1,534 @@
+"""
+Production Scheduler — upfront TOC/DBR backward scheduling.
+Business Logic: §5, §17, §20
+
+When an order comes in, the entire production path is planned immediately
+using backward scheduling from the deadline:
+
+  TOC/DBR model:
+    Drum   = kiln (the constraint)
+    Buffer = 1-day time buffers before and after the kiln
+    Rope   = pull work to arrive at the kiln on time
+
+Dates are calculated per-position (not per-order) because each position
+may go to a different kiln with different availability.
+
+Auto-reschedules on:
+  - Status changes (delays)
+  - Kiln breakdowns (MAINTENANCE_EMERGENCY)
+  - Manual reorder by PM
+  - Material blocking/unblocking
+"""
+from uuid import UUID
+from datetime import date, timedelta
+from typing import Optional
+import logging
+
+from sqlalchemy.orm import Session
+from sqlalchemy import func as sa_func
+
+from api.models import (
+    OrderPosition,
+    ProductionOrder,
+    Resource,
+    ScheduleSlot,
+    Batch,
+)
+from api.enums import (
+    PositionStatus,
+    ResourceType,
+    ResourceStatus,
+    BatchStatus,
+    ScheduleSlotStatus,
+)
+
+logger = logging.getLogger("moonjar.production_scheduler")
+
+
+# ────────────────────────────────────────────────────────────────
+# Standard durations (days) — will be configurable per factory later
+# ────────────────────────────────────────────────────────────────
+
+GLAZING_DURATION_DAYS = 1        # glazing work
+PRE_KILN_CHECK_DAYS = 1         # engobe check + pre-kiln QC (rounded up from 0.5)
+FIRING_DURATION_DAYS = 1        # kiln firing (depends on profile, but 1 day typical)
+COOLING_DAYS = 1                # kiln cooldown
+SORTING_DAYS = 1                # sorting + packing
+QC_DAYS = 1                     # quality check (rounded up from 0.5)
+BUFFER_DAYS = 1                 # TOC buffer — safety margin around the constraint
+
+
+def _skip_weekends(target: date) -> date:
+    """If target falls on Sunday, move to Monday."""
+    # In Bali/Java production, Saturday is a workday; Sunday is off.
+    if target.weekday() == 6:  # Sunday
+        return target + timedelta(days=1)
+    return target
+
+
+# ────────────────────────────────────────────────────────────────
+# Find best kiln for a position
+# ────────────────────────────────────────────────────────────────
+
+def find_best_kiln(
+    db: Session,
+    position: OrderPosition,
+    target_date: date,
+) -> Optional[UUID]:
+    """
+    Find the kiln with the fewest scheduled slots around the target date.
+
+    Selection criteria:
+    1. Only active kilns at the same factory
+    2. Exclude kilns under emergency maintenance
+    3. Prefer kiln with the fewest planned/in-progress batches in the
+       7-day window around the target date (least congested)
+    4. If no batches exist for any kiln, pick the first available
+    """
+    kilns = db.query(Resource).filter(
+        Resource.factory_id == position.factory_id,
+        Resource.resource_type == ResourceType.KILN.value,
+        Resource.is_active.is_(True),
+        Resource.status != ResourceStatus.MAINTENANCE_EMERGENCY.value,
+    ).all()
+
+    if not kilns:
+        return None
+
+    window_start = target_date - timedelta(days=3)
+    window_end = target_date + timedelta(days=3)
+
+    best_kiln_id = None
+    min_load = float("inf")
+
+    for kiln in kilns:
+        # Count batches in the window for this kiln
+        batch_count = db.query(sa_func.count(Batch.id)).filter(
+            Batch.resource_id == kiln.id,
+            Batch.batch_date >= window_start,
+            Batch.batch_date <= window_end,
+            Batch.status.in_([BatchStatus.PLANNED.value, BatchStatus.IN_PROGRESS.value]),
+        ).scalar() or 0
+
+        # Also count schedule slots
+        slot_count = db.query(sa_func.count(ScheduleSlot.id)).filter(
+            ScheduleSlot.resource_id == kiln.id,
+            sa_func.date(ScheduleSlot.start_at) >= window_start,
+            sa_func.date(ScheduleSlot.start_at) <= window_end,
+            ScheduleSlot.status == ScheduleSlotStatus.PLANNED.value,
+        ).scalar() or 0
+
+        total_load = batch_count + slot_count
+        if total_load < min_load:
+            min_load = total_load
+            best_kiln_id = kiln.id
+
+    return best_kiln_id
+
+
+# ────────────────────────────────────────────────────────────────
+# §1  Schedule a single position (backward from deadline)
+# ────────────────────────────────────────────────────────────────
+
+def schedule_position(
+    db: Session,
+    position: OrderPosition,
+    deadline: date,
+) -> None:
+    """
+    Calculate planned dates for a position using backward scheduling
+    from the order deadline.
+
+    TOC/DBR:
+      Drum   = kiln firing date (the constraint)
+      Buffer = 1 day before kiln (pre-kiln buffer) and after kiln (post-kiln buffer)
+      Rope   = work is pulled so glazing finishes just in time for kiln
+
+    Timeline (backward from deadline):
+      deadline
+        - QC_DAYS                         → planned_completion_date
+        - SORTING_DAYS                    → planned_sorting_date
+        - BUFFER_DAYS (post-kiln)         → post-kiln buffer
+        - COOLING_DAYS                    → cooling
+        - FIRING_DURATION_DAYS            → planned_kiln_date (drum)
+        - BUFFER_DAYS (pre-kiln)          → pre-kiln buffer
+        - PRE_KILN_CHECK_DAYS             → pre-kiln QC
+        - GLAZING_DURATION_DAYS           → planned_glazing_date (rope start)
+    """
+    # Backward schedule calculation
+    planned_completion = _skip_weekends(deadline)
+
+    planned_sorting = _skip_weekends(
+        planned_completion - timedelta(days=SORTING_DAYS + QC_DAYS)
+    )
+
+    planned_kiln = _skip_weekends(
+        planned_sorting - timedelta(
+            days=FIRING_DURATION_DAYS + COOLING_DAYS + BUFFER_DAYS
+        )
+    )
+
+    planned_glazing = _skip_weekends(
+        planned_kiln - timedelta(
+            days=GLAZING_DURATION_DAYS + PRE_KILN_CHECK_DAYS + BUFFER_DAYS
+        )
+    )
+
+    # Guard: planned_glazing must be >= today. If the deadline is too tight,
+    # the dates will be in the past — we clamp to today and let the PM see
+    # the warning (position starts late → schedule_version tracks this).
+    today = date.today()
+    if planned_glazing < today:
+        # Tight deadline — shift everything forward from today
+        planned_glazing = today
+        planned_kiln = _skip_weekends(
+            today + timedelta(
+                days=GLAZING_DURATION_DAYS + PRE_KILN_CHECK_DAYS + BUFFER_DAYS
+            )
+        )
+        planned_sorting = _skip_weekends(
+            planned_kiln + timedelta(
+                days=FIRING_DURATION_DAYS + COOLING_DAYS + BUFFER_DAYS
+            )
+        )
+        planned_completion = _skip_weekends(
+            planned_sorting + timedelta(days=SORTING_DAYS + QC_DAYS)
+        )
+        logger.warning(
+            "TIGHT_DEADLINE | position=%s deadline=%s | "
+            "glazing shifted to today, completion pushed to %s",
+            position.id, deadline, planned_completion,
+        )
+
+    # Assign dates
+    position.planned_glazing_date = planned_glazing
+    position.planned_kiln_date = planned_kiln
+    position.planned_sorting_date = planned_sorting
+    position.planned_completion_date = planned_completion
+
+    # Find best kiln
+    position.estimated_kiln_id = find_best_kiln(db, position, planned_kiln)
+
+    # Increment schedule version
+    position.schedule_version = (position.schedule_version or 0) + 1
+
+    logger.info(
+        "SCHEDULED | position=%s v%d | glazing=%s kiln=%s sorting=%s "
+        "completion=%s kiln_id=%s",
+        position.id, position.schedule_version,
+        planned_glazing, planned_kiln, planned_sorting, planned_completion,
+        position.estimated_kiln_id,
+    )
+
+
+# ────────────────────────────────────────────────────────────────
+# §2  Schedule all positions in an order
+# ────────────────────────────────────────────────────────────────
+
+def schedule_order(db: Session, order: ProductionOrder) -> int:
+    """
+    Schedule all positions in an order using backward scheduling.
+
+    Uses the order's final_deadline. If not set, falls back to
+    desired_delivery_date, then today + 30 days.
+
+    Returns the number of positions scheduled.
+    """
+    deadline = (
+        order.final_deadline
+        or order.desired_delivery_date
+        or (date.today() + timedelta(days=30))
+    )
+
+    positions = db.query(OrderPosition).filter(
+        OrderPosition.order_id == order.id,
+        OrderPosition.status != PositionStatus.CANCELLED.value,
+    ).all()
+
+    count = 0
+    for position in positions:
+        try:
+            schedule_position(db, position, deadline)
+            count += 1
+        except Exception as e:
+            logger.error(
+                "Failed to schedule position %s: %s", position.id, e,
+            )
+
+    logger.info(
+        "ORDER_SCHEDULED | order=%s | %d/%d positions scheduled, deadline=%s",
+        order.order_number, count, len(positions), deadline,
+    )
+
+    # Also update the schedule_deadline on the order itself
+    # (uses existing service for the aggregate estimate)
+    try:
+        from business.services.schedule_estimation import calculate_schedule_deadline
+        calculate_schedule_deadline(db, order)
+    except Exception as e:
+        logger.warning("Failed to update schedule_deadline: %s", e)
+
+    return count
+
+
+# ────────────────────────────────────────────────────────────────
+# §3  Reschedule on changes
+# ────────────────────────────────────────────────────────────────
+
+def reschedule_position(db: Session, position: OrderPosition) -> None:
+    """
+    Recalculate schedule for a single position.
+
+    Called when:
+    - Position is delayed (status change)
+    - Material becomes available / gets blocked
+    - Manual reorder
+    """
+    order = db.query(ProductionOrder).get(position.order_id)
+    if not order:
+        return
+
+    deadline = (
+        order.final_deadline
+        or order.desired_delivery_date
+        or (date.today() + timedelta(days=30))
+    )
+
+    schedule_position(db, position, deadline)
+
+    logger.info(
+        "RESCHEDULED | position=%s v%d",
+        position.id, position.schedule_version,
+    )
+
+
+def reschedule_affected_by_kiln(db: Session, kiln_id: UUID) -> int:
+    """
+    When a kiln breaks down (MAINTENANCE_EMERGENCY) or changes status,
+    recalculate all positions estimated to use that kiln.
+
+    Finds all non-terminal positions with estimated_kiln_id == kiln_id
+    and reassigns them to the next best kiln.
+
+    Returns the number of positions rescheduled.
+    """
+    terminal_statuses = {
+        PositionStatus.SHIPPED.value,
+        PositionStatus.CANCELLED.value,
+        PositionStatus.READY_FOR_SHIPMENT.value,
+    }
+
+    affected_positions = db.query(OrderPosition).filter(
+        OrderPosition.estimated_kiln_id == kiln_id,
+        OrderPosition.status.notin_(list(terminal_statuses)),
+    ).all()
+
+    count = 0
+    for position in affected_positions:
+        try:
+            reschedule_position(db, position)
+            count += 1
+        except Exception as e:
+            logger.error(
+                "Failed to reschedule position %s after kiln change: %s",
+                position.id, e,
+            )
+
+    if count > 0:
+        # Notify PM about the mass reschedule
+        try:
+            from business.services.notifications import notify_pm
+            factory_id = affected_positions[0].factory_id if affected_positions else None
+            if factory_id:
+                notify_pm(
+                    db=db,
+                    factory_id=factory_id,
+                    type="schedule_change",
+                    title=f"Kiln schedule updated: {count} positions rescheduled",
+                    message=(
+                        f"Kiln {kiln_id} status changed. "
+                        f"{count} positions have been reassigned to other kilns."
+                    ),
+                    related_entity_type="resource",
+                    related_entity_id=kiln_id,
+                )
+        except Exception as e:
+            logger.warning("Failed to notify PM about kiln reschedule: %s", e)
+
+    logger.info(
+        "KILN_RESCHEDULE | kiln=%s | %d positions rescheduled", kiln_id, count,
+    )
+    return count
+
+
+def reschedule_order(db: Session, order_id: UUID) -> int:
+    """
+    Reschedule all positions in an order.
+
+    Called when:
+    - Order deadline changes
+    - PM triggers manual reschedule
+    """
+    order = db.query(ProductionOrder).get(order_id)
+    if not order:
+        return 0
+
+    return schedule_order(db, order)
+
+
+def reschedule_factory(db: Session, factory_id: UUID) -> int:
+    """
+    Reschedule all active positions in a factory.
+
+    Called when a major change affects the whole factory
+    (e.g., new kiln added, factory-wide schedule reset).
+    """
+    from api.enums import OrderStatus
+
+    active_orders = db.query(ProductionOrder).filter(
+        ProductionOrder.factory_id == factory_id,
+        ProductionOrder.status.in_([
+            OrderStatus.NEW.value,
+            OrderStatus.IN_PRODUCTION.value,
+            OrderStatus.PARTIALLY_READY.value,
+        ]),
+    ).all()
+
+    total = 0
+    for order in active_orders:
+        try:
+            count = schedule_order(db, order)
+            total += count
+        except Exception as e:
+            logger.error(
+                "Failed to reschedule order %s: %s", order.order_number, e,
+            )
+
+    db.commit()
+    logger.info(
+        "FACTORY_RESCHEDULE | factory=%s | %d positions across %d orders",
+        factory_id, total, len(active_orders),
+    )
+    return total
+
+
+# ────────────────────────────────────────────────────────────────
+# §4  Schedule summary helpers (for API responses)
+# ────────────────────────────────────────────────────────────────
+
+def get_position_schedule(position: OrderPosition) -> dict:
+    """Serialize schedule fields for a single position."""
+    return {
+        "planned_glazing_date": str(position.planned_glazing_date) if position.planned_glazing_date else None,
+        "planned_kiln_date": str(position.planned_kiln_date) if position.planned_kiln_date else None,
+        "planned_sorting_date": str(position.planned_sorting_date) if position.planned_sorting_date else None,
+        "planned_completion_date": str(position.planned_completion_date) if position.planned_completion_date else None,
+        "estimated_kiln_id": str(position.estimated_kiln_id) if position.estimated_kiln_id else None,
+        "estimated_kiln_name": (
+            position.estimated_kiln.name
+            if position.estimated_kiln_id and hasattr(position, 'estimated_kiln') and position.estimated_kiln
+            else None
+        ),
+        "schedule_version": position.schedule_version or 1,
+        "is_on_track": _is_on_track(position),
+    }
+
+
+def _is_on_track(position: OrderPosition) -> bool:
+    """
+    Check if a position is on track based on its current status
+    and planned dates.
+
+    Returns True if:
+    - Position has no schedule (not yet scheduled)
+    - Position is ahead of or on its planned date for current stage
+    - Position is in a terminal state
+    """
+    today = date.today()
+    status_val = position.status.value if hasattr(position.status, 'value') else str(position.status)
+
+    # Terminal states — always "on track"
+    if status_val in ('shipped', 'cancelled', 'ready_for_shipment'):
+        return True
+
+    # No schedule — unknown
+    if not position.planned_glazing_date:
+        return True
+
+    # Pre-glazing statuses: check against glazing date
+    pre_glazing = {
+        'planned', 'insufficient_materials', 'awaiting_recipe',
+        'awaiting_stencil_silkscreen', 'awaiting_color_matching',
+    }
+    if status_val in pre_glazing:
+        return today <= position.planned_glazing_date
+
+    # Glazing statuses: check against kiln date
+    glazing = {'engobe_applied', 'engobe_check', 'glazed', 'pre_kiln_check', 'sent_to_glazing'}
+    if status_val in glazing:
+        return today <= (position.planned_kiln_date or position.planned_glazing_date)
+
+    # Firing statuses: check against sorting date
+    firing = {'loaded_in_kiln', 'fired', 'refire', 'awaiting_reglaze'}
+    if status_val in firing:
+        return today <= (position.planned_sorting_date or position.planned_kiln_date or date.max)
+
+    # Sorting / QC statuses: check against completion date
+    return today <= (position.planned_completion_date or date.max)
+
+
+def get_order_schedule_summary(db: Session, order: ProductionOrder) -> dict:
+    """
+    Build a complete schedule summary for an order — used by the Sales
+    visibility endpoint.
+    """
+    positions = db.query(OrderPosition).filter(
+        OrderPosition.order_id == order.id,
+        OrderPosition.status != PositionStatus.CANCELLED.value,
+    ).order_by(
+        OrderPosition.position_number,
+        OrderPosition.split_index,
+    ).all()
+
+    position_schedules = []
+    all_on_track = True
+
+    for p in positions:
+        sched = get_position_schedule(p)
+        status_val = p.status.value if hasattr(p.status, 'value') else str(p.status)
+
+        pos_data = {
+            "id": str(p.id),
+            "position_number": p.position_number,
+            "split_index": p.split_index,
+            "position_label": f"#{p.position_number}" + (f".{p.split_index}" if p.split_index else ""),
+            "status": status_val,
+            "color": p.color,
+            "size": p.size,
+            "collection": p.collection,
+            "quantity": p.quantity,
+            "product_type": p.product_type.value if hasattr(p.product_type, 'value') else str(p.product_type) if p.product_type else None,
+            **sched,
+        }
+        position_schedules.append(pos_data)
+
+        if not sched["is_on_track"]:
+            all_on_track = False
+
+    # Earliest glazing and latest completion across all positions
+    glazing_dates = [p.planned_glazing_date for p in positions if p.planned_glazing_date]
+    completion_dates = [p.planned_completion_date for p in positions if p.planned_completion_date]
+
+    return {
+        "order_id": str(order.id),
+        "order_number": order.order_number,
+        "client": order.client,
+        "final_deadline": str(order.final_deadline) if order.final_deadline else None,
+        "schedule_deadline": str(order.schedule_deadline) if order.schedule_deadline else None,
+        "earliest_glazing_start": str(min(glazing_dates)) if glazing_dates else None,
+        "latest_completion": str(max(completion_dates)) if completion_dates else None,
+        "all_on_track": all_on_track,
+        "positions_count": len(positions),
+        "positions_scheduled": sum(1 for p in positions if p.planned_glazing_date),
+        "positions": position_schedules,
+    }

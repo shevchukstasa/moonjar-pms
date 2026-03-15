@@ -327,6 +327,30 @@ def _ensure_schema():
                 backup_type VARCHAR(20) NOT NULL DEFAULT 'scheduled'
             )
         """))
+        # Firing temperature groups — named groups replacing ±50°C auto-grouping
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS firing_temperature_groups (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(100) NOT NULL,
+                min_temperature INTEGER NOT NULL,
+                max_temperature INTEGER NOT NULL,
+                description TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                display_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        # Join table: temperature group ↔ recipe
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS firing_temperature_group_recipes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                temperature_group_id UUID NOT NULL REFERENCES firing_temperature_groups(id) ON DELETE CASCADE,
+                recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+                is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                UNIQUE(temperature_group_id, recipe_id)
+            )
+        """))
 
     _run_section("tables", _create_tables)
 
@@ -420,6 +444,25 @@ def _ensure_schema():
             ), {"shape": shape, "ptype": ptype, "coeff": coeff, "desc": desc})
 
     _run_section("shape_coefficients", _seed_shape_coefficients)
+
+    # --- Section 6c: Firing temperature groups ---
+    def _seed_temperature_groups(conn):
+        """Seed 2 default firing temperature groups: Low and High."""
+        groups = [
+            ("Low Temperature", 800, 1050, "Glazes and bodies fired at lower temperatures", 0),
+            ("High Temperature", 1050, 1300, "Stoneware and high-fire glazes", 1),
+        ]
+        for name, min_t, max_t, desc, order in groups:
+            conn.execute(text(
+                "INSERT INTO firing_temperature_groups "
+                "(id, name, min_temperature, max_temperature, description, display_order) "
+                "SELECT gen_random_uuid(), :name, :min_t, :max_t, :desc, :ord "
+                "WHERE NOT EXISTS ("
+                "  SELECT 1 FROM firing_temperature_groups WHERE name = :name"
+                ")"
+            ), {"name": name, "min_t": min_t, "max_t": max_t, "desc": desc, "ord": order})
+
+    _run_section("temperature_groups", _seed_temperature_groups)
 
     # --- Section 7: Kilns (resources) — 3 per factory (one-time only) ---
     def _seed_kilns(conn):

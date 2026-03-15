@@ -31,6 +31,7 @@ from api.enums import (
     TaskStatus,
     ProductType,
     ShapeType,
+    UserRole,
     is_stock_collection,
 )
 
@@ -214,7 +215,16 @@ def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
         if position:
             positions.append(position)
 
-    # 7. Update order status
+    # 7. Upfront scheduling (TOC/DBR backward scheduling)
+    #    Calculate planned dates for every position immediately so Sales
+    #    can see a real-time production plan.
+    try:
+        from business.services.production_scheduler import schedule_order
+        schedule_order(db, order)
+    except Exception as e:
+        logger.warning("Failed to schedule order %s: %s", order.order_number, e)
+
+    # 8. Update order status
     if any(
         p.status == PositionStatus.INSUFFICIENT_MATERIALS
         or p.status == PositionStatus.AWAITING_RECIPE
@@ -228,7 +238,7 @@ def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
 
     db.commit()
 
-    # 8. Notify PM (best-effort)
+    # 9. Notify PM (best-effort)
     try:
         from business.services.notifications import notify_pm
         notify_pm(
@@ -489,20 +499,69 @@ def process_order_item(
     from business.services.material_reservation import (
         reserve_materials_for_position,
         create_auto_purchase_request,
+        check_material_availability_smart,
     )
     result = reserve_materials_for_position(db, position, recipe, order.factory_id)
     if result.shortages:
-        # Only override status to insufficient_materials if position is still
-        # in PLANNED state. If it's already blocked (awaiting_stencil_silkscreen,
-        # awaiting_color_matching), keep the blocking status — material shortage
-        # is recorded via transactions and purchase request regardless.
-        if position.status == PositionStatus.PLANNED:
+        # Smart blocking: check if materials are already ordered and will
+        # arrive in time. Only block with INSUFFICIENT_MATERIALS if material
+        # is truly unavailable (not ordered, or ordered but arriving too late).
+        #
+        # Planned glazing date approximation: use order.desired_delivery_date
+        # minus a processing buffer (glazing happens before delivery).
+        # If no date available, smart check defaults to "don't block if ordered".
+        _glazing_date = None
+        if order.desired_delivery_date:
+            # Glazing must happen before delivery; approximate glazing date
+            # as desired_delivery minus 7 days (firing + sorting + packing).
+            _glazing_date = order.desired_delivery_date - timedelta(days=7)
+        elif order.final_deadline:
+            _glazing_date = order.final_deadline - timedelta(days=7)
+
+        should_block = False
+        truly_missing = []  # shortages that are NOT covered by pending orders
+
+        for shortage in result.shortages:
+            smart_result = check_material_availability_smart(
+                db=db,
+                material_id=shortage.material_id,
+                factory_id=order.factory_id,
+                required_qty=shortage.required,
+                effective_available=shortage.available,
+                planned_glazing_date=_glazing_date,
+                buffer_days=3,
+            )
+            if not smart_result.available:
+                should_block = True
+                truly_missing.append(shortage)
+                logger.warning(
+                    "MATERIAL_SHORTAGE | order=%s position=%s | %s: %s "
+                    "(deficit=%.3f, ordered=%.3f)",
+                    order.order_number, position.id,
+                    shortage.material_name, smart_result.reason,
+                    float(shortage.deficit), float(smart_result.ordered_qty),
+                )
+            else:
+                logger.info(
+                    "MATERIAL_COVERED | order=%s position=%s | %s: %s "
+                    "(deficit=%.3f, ordered=%.3f — will arrive in time)",
+                    order.order_number, position.id,
+                    shortage.material_name, smart_result.reason,
+                    float(shortage.deficit), float(smart_result.ordered_qty),
+                )
+
+        # Only override status to INSUFFICIENT_MATERIALS if position is still
+        # in PLANNED state AND at least one material is truly missing.
+        # If it's already blocked (awaiting_stencil_silkscreen,
+        # awaiting_color_matching), keep the blocking status.
+        if should_block and position.status == PositionStatus.PLANNED:
             position.status = PositionStatus.INSUFFICIENT_MATERIALS
-        create_auto_purchase_request(db, order.factory_id, result.shortages, order)
-        logger.warning(
-            "MATERIAL_SHORTAGE | order=%s position=%s | %d materials insufficient",
-            order.order_number, position.id, len(result.shortages),
-        )
+
+        # Always create auto purchase requests for shortages that don't have
+        # pending orders yet (truly_missing). If all shortages are covered,
+        # skip auto-purchase creation.
+        if truly_missing:
+            create_auto_purchase_request(db, order.factory_id, truly_missing, order)
 
     return position
 
@@ -535,6 +594,7 @@ def check_blocking_tasks(
             factory_id=order.factory_id,
             type=TaskType.STENCIL_ORDER,
             status=TaskStatus.PENDING,
+            assigned_role=UserRole.PRODUCTION_MANAGER,
             related_order_id=order.id,
             related_position_id=position.id,
             blocking=True,
@@ -550,6 +610,7 @@ def check_blocking_tasks(
             factory_id=order.factory_id,
             type=TaskType.SILK_SCREEN_ORDER,
             status=TaskStatus.PENDING,
+            assigned_role=UserRole.PRODUCTION_MANAGER,
             related_order_id=order.id,
             related_position_id=position.id,
             blocking=True,
@@ -565,6 +626,7 @@ def check_blocking_tasks(
             factory_id=order.factory_id,
             type=TaskType.COLOR_MATCHING,
             status=TaskStatus.PENDING,
+            assigned_role=UserRole.PRODUCTION_MANAGER,
             related_order_id=order.id,
             related_position_id=position.id,
             blocking=True,

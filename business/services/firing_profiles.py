@@ -11,6 +11,8 @@ from sqlalchemy import and_, or_
 
 from api.models import (
     FiringProfile,
+    FiringTemperatureGroup,
+    FiringTemperatureGroupRecipe,
     RecipeFiringStage,
     OrderPosition,
     RecipeKilnConfig,
@@ -141,16 +143,51 @@ def get_firing_profile_for_stage(
     )
 
 
+def get_temperature_group(
+    db: Session,
+    target_temperature: int,
+) -> Optional[FiringTemperatureGroup]:
+    """
+    Find which named temperature group a firing temperature falls into.
+    Returns the first active group whose [min, max] range contains the temperature.
+    """
+    return (
+        db.query(FiringTemperatureGroup)
+        .filter(
+            FiringTemperatureGroup.min_temperature <= target_temperature,
+            FiringTemperatureGroup.max_temperature >= target_temperature,
+            FiringTemperatureGroup.is_active.is_(True),
+        )
+        .order_by(FiringTemperatureGroup.display_order)
+        .first()
+    )
+
+
+def get_temperature_group_recipes(
+    db: Session,
+    group_id: UUID,
+) -> list[FiringTemperatureGroupRecipe]:
+    """Get all recipes linked to a temperature group."""
+    return (
+        db.query(FiringTemperatureGroupRecipe)
+        .filter(FiringTemperatureGroupRecipe.temperature_group_id == group_id)
+        .all()
+    )
+
+
 def group_positions_by_temperature(
     db: Session,
     positions: list[OrderPosition],
     max_temp_delta: int = 50,
-) -> list[list[OrderPosition]]:
+) -> dict[Optional[UUID], list[OrderPosition]]:
     """
-    Group positions into temperature-compatible buckets for batch formation.
+    Group positions into named temperature groups for batch formation.
 
-    Each bucket contains positions whose firing temperatures are within
-    max_temp_delta of each other.
+    Uses named FiringTemperatureGroup records instead of ±50°C auto-grouping.
+    Falls back to delta-based bucketing only for temperatures that don't match
+    any named group.
+
+    Returns dict: {group_id → [positions]} where group_id=None for ungrouped.
     """
     # Get temperature for each position from recipe_kiln_config
     pos_with_temp: list[tuple[OrderPosition, int]] = []
@@ -165,31 +202,35 @@ def group_positions_by_temperature(
         temp = config.firing_temperature if config and config.firing_temperature else 1100  # default
         pos_with_temp.append((pos, temp))
 
-    # Sort by temperature
-    pos_with_temp.sort(key=lambda x: x[1])
-
-    # Group into buckets
-    buckets: list[list[OrderPosition]] = []
-    current_bucket: list[OrderPosition] = []
-    bucket_min_temp: int = 0
-    bucket_max_temp: int = 0
+    # Group by named temperature group
+    grouped: dict[Optional[UUID], list[OrderPosition]] = {}
+    ungrouped: list[tuple[OrderPosition, int]] = []
 
     for pos, temp in pos_with_temp:
-        if not current_bucket:
-            current_bucket.append(pos)
-            bucket_min_temp = temp
-            bucket_max_temp = temp
-        elif temp - bucket_min_temp <= max_temp_delta:
-            current_bucket.append(pos)
-            bucket_max_temp = max(bucket_max_temp, temp)
+        group = get_temperature_group(db, temp)
+        if group:
+            grouped.setdefault(group.id, []).append(pos)
         else:
-            # Start new bucket
-            buckets.append(current_bucket)
-            current_bucket = [pos]
-            bucket_min_temp = temp
-            bucket_max_temp = temp
+            ungrouped.append((pos, temp))
 
-    if current_bucket:
-        buckets.append(current_bucket)
+    # Fallback: delta-based bucketing for positions without a named group
+    if ungrouped:
+        ungrouped.sort(key=lambda x: x[1])
+        current_bucket: list[OrderPosition] = []
+        bucket_min_temp: int = 0
 
-    return buckets
+        for pos, temp in ungrouped:
+            if not current_bucket:
+                current_bucket.append(pos)
+                bucket_min_temp = temp
+            elif temp - bucket_min_temp <= max_temp_delta:
+                current_bucket.append(pos)
+            else:
+                grouped[None] = grouped.get(None, []) + current_bucket
+                current_bucket = [pos]
+                bucket_min_temp = temp
+
+        if current_bucket:
+            grouped[None] = grouped.get(None, []) + current_bucket
+
+    return grouped

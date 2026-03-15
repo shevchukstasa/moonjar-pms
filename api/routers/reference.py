@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from decimal import Decimal
@@ -10,7 +10,10 @@ from decimal import Decimal
 from api.database import get_db
 from api.auth import get_current_user
 from api.roles import require_management
-from api.models import Material, OrderPosition, Recipe, ShapeConsumptionCoefficient
+from api.models import (
+    Material, OrderPosition, Recipe, ShapeConsumptionCoefficient,
+    FiringTemperatureGroup, FiringTemperatureGroupRecipe,
+)
 from api.enums import (
     ProductType,
     ShapeType,
@@ -289,3 +292,206 @@ async def list_bowl_shapes(
 ):
     """Return all bowl shape types (for sink configuration)."""
     return _enum_to_list(BowlShape)
+
+
+# ─── Firing Temperature Groups CRUD ────────────────────────
+
+class TemperatureGroupCreate(BaseModel):
+    name: str = Field(..., max_length=100, description="Group name, e.g. 'Low Temperature'")
+    min_temperature: int = Field(..., ge=0, le=2000, description="Min temperature in °C")
+    max_temperature: int = Field(..., ge=0, le=2000, description="Max temperature in °C")
+    description: Optional[str] = None
+    display_order: int = Field(default=0, description="Sort order in UI")
+
+
+class TemperatureGroupUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    min_temperature: Optional[int] = Field(None, ge=0, le=2000)
+    max_temperature: Optional[int] = Field(None, ge=0, le=2000)
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+    display_order: Optional[int] = None
+
+
+class TemperatureGroupRecipeAttach(BaseModel):
+    recipe_id: str = Field(..., description="UUID of the recipe to attach")
+    is_default: bool = Field(default=False, description="Mark as default recipe for this group")
+
+
+def _serialize_temperature_group(group: FiringTemperatureGroup) -> dict:
+    """Serialize a temperature group with its linked recipes."""
+    return {
+        "id": str(group.id),
+        "name": group.name,
+        "min_temperature": group.min_temperature,
+        "max_temperature": group.max_temperature,
+        "description": group.description,
+        "is_active": group.is_active,
+        "display_order": group.display_order,
+        "created_at": group.created_at.isoformat() if group.created_at else None,
+        "updated_at": group.updated_at.isoformat() if group.updated_at else None,
+        "recipes": [
+            {
+                "id": str(link.id),
+                "recipe_id": str(link.recipe_id),
+                "recipe_name": link.recipe.name if link.recipe else None,
+                "recipe_collection": link.recipe.collection if link.recipe else None,
+                "is_default": link.is_default,
+            }
+            for link in (group.recipes or [])
+        ],
+    }
+
+
+@router.get("/temperature-groups")
+async def list_temperature_groups(
+    include_inactive: bool = Query(False, description="Include deactivated groups"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List all firing temperature groups with their attached recipes."""
+    query = db.query(FiringTemperatureGroup)
+    if not include_inactive:
+        query = query.filter(FiringTemperatureGroup.is_active.is_(True))
+    groups = query.order_by(FiringTemperatureGroup.display_order, FiringTemperatureGroup.name).all()
+    return [_serialize_temperature_group(g) for g in groups]
+
+
+@router.post("/temperature-groups", status_code=201)
+async def create_temperature_group(
+    body: TemperatureGroupCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Create a new firing temperature group. PM/Admin only."""
+    import uuid
+
+    if body.min_temperature >= body.max_temperature:
+        raise HTTPException(400, "min_temperature must be less than max_temperature")
+
+    group = FiringTemperatureGroup(
+        id=uuid.uuid4(),
+        name=body.name,
+        min_temperature=body.min_temperature,
+        max_temperature=body.max_temperature,
+        description=body.description,
+        display_order=body.display_order,
+    )
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+    return _serialize_temperature_group(group)
+
+
+@router.put("/temperature-groups/{group_id}")
+async def update_temperature_group(
+    group_id: str,
+    body: TemperatureGroupUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Update a firing temperature group. PM/Admin only."""
+    import uuid as uuid_mod
+
+    group = db.query(FiringTemperatureGroup).filter(
+        FiringTemperatureGroup.id == uuid_mod.UUID(group_id)
+    ).first()
+    if not group:
+        raise HTTPException(404, "Temperature group not found")
+
+    if body.name is not None:
+        group.name = body.name
+    if body.min_temperature is not None:
+        group.min_temperature = body.min_temperature
+    if body.max_temperature is not None:
+        group.max_temperature = body.max_temperature
+    if body.description is not None:
+        group.description = body.description
+    if body.is_active is not None:
+        group.is_active = body.is_active
+    if body.display_order is not None:
+        group.display_order = body.display_order
+
+    # Validate range after updates
+    if group.min_temperature >= group.max_temperature:
+        raise HTTPException(400, "min_temperature must be less than max_temperature")
+
+    group.updated_at = func.now()
+    db.commit()
+    db.refresh(group)
+    return _serialize_temperature_group(group)
+
+
+@router.post("/temperature-groups/{group_id}/recipes", status_code=201)
+async def attach_recipe_to_temperature_group(
+    group_id: str,
+    body: TemperatureGroupRecipeAttach,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Attach a recipe to a temperature group. PM/Admin only."""
+    import uuid as uuid_mod
+
+    group = db.query(FiringTemperatureGroup).filter(
+        FiringTemperatureGroup.id == uuid_mod.UUID(group_id)
+    ).first()
+    if not group:
+        raise HTTPException(404, "Temperature group not found")
+
+    recipe = db.query(Recipe).filter(Recipe.id == uuid_mod.UUID(body.recipe_id)).first()
+    if not recipe:
+        raise HTTPException(404, "Recipe not found")
+
+    # Check for duplicate
+    existing = db.query(FiringTemperatureGroupRecipe).filter(
+        FiringTemperatureGroupRecipe.temperature_group_id == group.id,
+        FiringTemperatureGroupRecipe.recipe_id == recipe.id,
+    ).first()
+    if existing:
+        raise HTTPException(409, "Recipe is already attached to this temperature group")
+
+    # If marking as default, clear other defaults in this group
+    if body.is_default:
+        db.query(FiringTemperatureGroupRecipe).filter(
+            FiringTemperatureGroupRecipe.temperature_group_id == group.id,
+            FiringTemperatureGroupRecipe.is_default.is_(True),
+        ).update({"is_default": False})
+
+    link = FiringTemperatureGroupRecipe(
+        id=uuid_mod.uuid4(),
+        temperature_group_id=group.id,
+        recipe_id=recipe.id,
+        is_default=body.is_default,
+    )
+    db.add(link)
+    db.commit()
+    db.refresh(link)
+    return {
+        "id": str(link.id),
+        "temperature_group_id": str(link.temperature_group_id),
+        "recipe_id": str(link.recipe_id),
+        "recipe_name": recipe.name,
+        "is_default": link.is_default,
+    }
+
+
+@router.delete("/temperature-groups/{group_id}/recipes/{recipe_id}")
+async def detach_recipe_from_temperature_group(
+    group_id: str,
+    recipe_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Detach a recipe from a temperature group. PM/Admin only."""
+    import uuid as uuid_mod
+
+    link = db.query(FiringTemperatureGroupRecipe).filter(
+        FiringTemperatureGroupRecipe.temperature_group_id == uuid_mod.UUID(group_id),
+        FiringTemperatureGroupRecipe.recipe_id == uuid_mod.UUID(recipe_id),
+    ).first()
+    if not link:
+        raise HTTPException(404, "Recipe is not attached to this temperature group")
+
+    db.delete(link)
+    db.commit()
+    return {"detail": "Recipe detached from temperature group"}

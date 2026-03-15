@@ -226,11 +226,28 @@ async def update_kiln_status(
     if not kiln:
         raise HTTPException(404, "Kiln not found")
 
+    old_status = _ev(kiln.status)
     kiln.status = status
     kiln.is_active = status == "active"
     kiln.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(kiln)
+
+    # ── Reschedule positions when kiln status changes ──────────
+    # If kiln goes to maintenance_emergency or inactive, all positions
+    # estimated to use this kiln need to be reassigned.
+    if status in ("maintenance_emergency", "inactive") and old_status == "active":
+        try:
+            from business.services.production_scheduler import reschedule_affected_by_kiln
+            count = reschedule_affected_by_kiln(db, kiln_id)
+            if count > 0:
+                db.commit()
+        except Exception as e:
+            import logging
+            logging.getLogger("moonjar.kilns").warning(
+                "Failed to reschedule after kiln %s status change: %s", kiln_id, e,
+            )
+
     return _serialize_kiln(kiln, db)
 
 

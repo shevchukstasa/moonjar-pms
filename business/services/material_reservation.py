@@ -7,8 +7,10 @@ Handles:
 - Force-reservation (PM override for insufficient materials)
 - Unreserving materials when positions are cancelled
 - Auto-creation of purchase requests for shortages
+- Smart material availability check (ordered material awareness)
 """
 from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID
 from typing import Optional
@@ -104,6 +106,159 @@ def _calculate_required(rm, position) -> Decimal:
 
     # Default: per_piece
     return qty * Decimal(str(position.quantity))
+
+
+# ────────────────────────────────────────────────────────────────
+# §4.0  Smart material availability check
+# ────────────────────────────────────────────────────────────────
+
+@dataclass
+class SmartAvailabilityResult:
+    """Outcome of smart availability check for a single material."""
+    available: bool
+    reason: str       # "in_stock", "ordered_arriving_in_time", "not_ordered", "ordered_late"
+    deficit: Decimal
+    ordered_qty: Decimal  # total qty across pending purchase requests
+
+
+def check_material_availability_smart(
+    db: Session,
+    material_id: UUID,
+    factory_id: UUID,
+    required_qty: Decimal,
+    effective_available: Decimal,
+    planned_glazing_date: Optional[date] = None,
+    buffer_days: int = 3,
+) -> SmartAvailabilityResult:
+    """Check if material will be available when needed.
+
+    Smart blocking rule: do NOT block if material is already ordered
+    AND expected to arrive before (planned_glazing_date - buffer_days).
+
+    Returns SmartAvailabilityResult:
+    - (True,  "in_stock")                — enough in stock now
+    - (True,  "ordered_arriving_in_time") — ordered, will arrive before deadline
+    - (False, "not_ordered")             — not enough and not ordered
+    - (False, "ordered_late")            — ordered but won't arrive in time
+    """
+    from api.models import MaterialPurchaseRequest
+    from api.enums import PurchaseStatus
+
+    deficit = required_qty - max(effective_available, Decimal("0"))
+
+    # 1. Enough in stock right now — no need to check orders
+    if effective_available >= required_qty:
+        return SmartAvailabilityResult(
+            available=True,
+            reason="in_stock",
+            deficit=Decimal("0"),
+            ordered_qty=Decimal("0"),
+        )
+
+    # 2. Not enough in stock — check pending purchase requests
+    #    PurchaseStatus has: PENDING, APPROVED, SENT, PARTIALLY_RECEIVED, RECEIVED
+    #    Only RECEIVED is terminal (material already counted in stock.balance).
+    #    We consider PENDING, APPROVED, SENT, PARTIALLY_RECEIVED as "in-flight".
+    active_statuses = [
+        PurchaseStatus.PENDING,
+        PurchaseStatus.APPROVED,
+        PurchaseStatus.SENT,
+        PurchaseStatus.PARTIALLY_RECEIVED,
+    ]
+
+    pending_requests = (
+        db.query(MaterialPurchaseRequest)
+        .filter(
+            MaterialPurchaseRequest.factory_id == factory_id,
+            MaterialPurchaseRequest.status.in_(active_statuses),
+        )
+        .all()
+    )
+
+    # Filter to requests that contain our material_id in materials_json
+    # materials_json is a list of dicts: [{"material_id": "...", "quantity": ...}, ...]
+    material_id_str = str(material_id)
+    relevant_requests = []
+    total_ordered_qty = Decimal("0")
+
+    for pr in pending_requests:
+        if not pr.materials_json or not isinstance(pr.materials_json, list):
+            continue
+        for mat_entry in pr.materials_json:
+            if mat_entry.get("material_id") == material_id_str:
+                qty = Decimal(str(mat_entry.get("quantity", 0)))
+                total_ordered_qty += qty
+                relevant_requests.append(pr)
+                break  # one match per PR is enough
+
+    if not relevant_requests:
+        return SmartAvailabilityResult(
+            available=False,
+            reason="not_ordered",
+            deficit=deficit,
+            ordered_qty=Decimal("0"),
+        )
+
+    # 3. Material is ordered — check if it arrives in time
+    if planned_glazing_date:
+        deadline = planned_glazing_date - timedelta(days=buffer_days)
+
+        # Check if ANY request with expected_delivery_date arrives by deadline.
+        # Requests without expected_delivery_date are treated optimistically
+        # (purchaser hasn't set date yet — don't block, they're working on it).
+        has_timely_delivery = False
+        timely_ordered_qty = Decimal("0")
+
+        for pr in relevant_requests:
+            if pr.expected_delivery_date is None:
+                # No date set yet — treat as "will arrive in time"
+                # (purchaser is still negotiating; don't penalize)
+                has_timely_delivery = True
+                for mat_entry in pr.materials_json:
+                    if mat_entry.get("material_id") == material_id_str:
+                        timely_ordered_qty += Decimal(str(mat_entry.get("quantity", 0)))
+                        break
+            elif pr.expected_delivery_date <= deadline:
+                has_timely_delivery = True
+                for mat_entry in pr.materials_json:
+                    if mat_entry.get("material_id") == material_id_str:
+                        timely_ordered_qty += Decimal(str(mat_entry.get("quantity", 0)))
+                        break
+
+        if has_timely_delivery:
+            timely_projected = max(effective_available, Decimal("0")) + timely_ordered_qty
+            if timely_projected >= required_qty:
+                return SmartAvailabilityResult(
+                    available=True,
+                    reason="ordered_arriving_in_time",
+                    deficit=deficit,
+                    ordered_qty=total_ordered_qty,
+                )
+            # Enough arriving in time but qty not sufficient
+            # — still ordered_late because timely portion doesn't cover need
+            return SmartAvailabilityResult(
+                available=False,
+                reason="ordered_late",
+                deficit=deficit,
+                ordered_qty=total_ordered_qty,
+            )
+
+        # All orders have dates past the deadline
+        return SmartAvailabilityResult(
+            available=False,
+            reason="ordered_late",
+            deficit=deficit,
+            ordered_qty=total_ordered_qty,
+        )
+
+    # 4. No planned glazing date — can't evaluate timing.
+    #    Material is ordered → don't block (benefit of the doubt).
+    return SmartAvailabilityResult(
+        available=True,
+        reason="ordered_arriving_in_time",
+        deficit=deficit,
+        ordered_qty=total_ordered_qty,
+    )
 
 
 # ────────────────────────────────────────────────────────────────

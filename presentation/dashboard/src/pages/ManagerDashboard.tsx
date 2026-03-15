@@ -38,6 +38,7 @@ import { ChangeRequestsPanel } from '@/components/dashboard/ChangeRequestsPanel'
 import { NotificationsBell } from '@/components/dashboard/NotificationsBell';
 import { ColorMismatchDecisionDialog } from '@/components/positions/ColorMismatchDecisionDialog';
 import { BlockingTasksTab } from '@/components/dashboard/BlockingTasksTab';
+import { ConsumptionAdjustmentsPanel } from '@/components/materials/ConsumptionAdjustmentsPanel';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -976,6 +977,11 @@ function MaterialsTabContent({ factoryId }: { factoryId: string | null }) {
           <DataTable columns={lowStockColumns} data={lowStockItems} />
         )}
       </div>
+
+      {/* Consumption adjustments section */}
+      <Card className="p-4">
+        <ConsumptionAdjustmentsPanel factoryId={factoryId} />
+      </Card>
 
       {/* Purchase requests section */}
       <div>

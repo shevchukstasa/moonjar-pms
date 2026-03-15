@@ -1,15 +1,19 @@
 """Reference data router — enums + dynamic lookup values for frontend dropdowns."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from decimal import Decimal
 
 from api.database import get_db
-from api.auth import get_current_user
-from api.models import Material, OrderPosition, Recipe
+from api.auth import get_current_user, require_management
+from api.models import Material, OrderPosition, Recipe, ShapeConsumptionCoefficient
 from api.enums import (
     ProductType,
     ShapeType,
+    BowlShape,
     MaterialType,
     SplitCategory,
     DefectOutcome,
@@ -185,4 +189,102 @@ async def list_all_reference_data(
     all_cols = sorted({r[0] for r in recipe_cols} | {r[0] for r in pos_cols})
     result["collections"] = [{"value": c, "label": c} for c in all_cols]
 
+    # Shape consumption coefficients
+    coeff_rows = db.query(ShapeConsumptionCoefficient).order_by(
+        ShapeConsumptionCoefficient.shape, ShapeConsumptionCoefficient.product_type
+    ).all()
+    result["shape_coefficients"] = [
+        {
+            "id": str(c.id), "shape": c.shape, "product_type": c.product_type,
+            "coefficient": float(c.coefficient), "description": c.description,
+        }
+        for c in coeff_rows
+    ]
+    result["bowl_shapes"] = _enum_to_list(BowlShape)
+
     return result
+
+
+# ─── Shape Consumption Coefficients CRUD ──────────────────
+
+class ShapeCoefficientUpdate(BaseModel):
+    coefficient: float = Field(..., gt=0, le=10.0, description="Area conversion coefficient")
+    description: Optional[str] = None
+
+
+@router.get("/shape-coefficients")
+async def list_shape_coefficients(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List all shape consumption coefficients."""
+    rows = db.query(ShapeConsumptionCoefficient).order_by(
+        ShapeConsumptionCoefficient.shape,
+        ShapeConsumptionCoefficient.product_type,
+    ).all()
+    return [
+        {
+            "id": str(c.id),
+            "shape": c.shape,
+            "product_type": c.product_type,
+            "coefficient": float(c.coefficient),
+            "description": c.description,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        }
+        for c in rows
+    ]
+
+
+@router.put("/shape-coefficients/{shape}/{product_type}")
+async def update_shape_coefficient(
+    shape: str,
+    product_type: str,
+    body: ShapeCoefficientUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Update (or create) shape consumption coefficient. PM/Admin only."""
+    from sqlalchemy import func as sa_func
+
+    coeff = db.query(ShapeConsumptionCoefficient).filter(
+        ShapeConsumptionCoefficient.shape == shape,
+        ShapeConsumptionCoefficient.product_type == product_type,
+    ).first()
+
+    if coeff:
+        coeff.coefficient = Decimal(str(body.coefficient))
+        if body.description is not None:
+            coeff.description = body.description
+        coeff.updated_by = current_user.id
+        coeff.updated_at = sa_func.now()
+    else:
+        import uuid
+        coeff = ShapeConsumptionCoefficient(
+            id=uuid.uuid4(),
+            shape=shape,
+            product_type=product_type,
+            coefficient=Decimal(str(body.coefficient)),
+            description=body.description,
+            updated_by=current_user.id,
+        )
+        db.add(coeff)
+
+    db.commit()
+    db.refresh(coeff)
+    return {
+        "id": str(coeff.id),
+        "shape": coeff.shape,
+        "product_type": coeff.product_type,
+        "coefficient": float(coeff.coefficient),
+        "description": coeff.description,
+        "updated_at": coeff.updated_at.isoformat() if coeff.updated_at else None,
+    }
+
+
+@router.get("/bowl-shapes")
+async def list_bowl_shapes(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return all bowl shape types (for sink configuration)."""
+    return _enum_to_list(BowlShape)

@@ -1,11 +1,11 @@
 import { useState, useMemo } from 'react';
-import { useForm, useFieldArray } from 'react-hook-form';
+import { useForm, useFieldArray, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Dialog } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { orderCreateSchema, type OrderCreateFormData } from '@/types/forms';
+import { orderCreateSchema, type OrderCreateFormData, SHAPE_OPTIONS, BOWL_SHAPE_OPTIONS } from '@/types/forms';
 import { useCreateOrder } from '@/hooks/useOrders';
 import { useFactories } from '@/hooks/useFactories';
 
@@ -49,11 +49,12 @@ export function OrderCreateDialog({ open, onClose }: Props) {
       final_deadline: '',
       notes: '',
       mandatory_qc: false,
-      items: [{ color: '', size: '', application: '', finishing: '', collection: '', quantity_pcs: 1, product_type: 'tile' }],
+      items: [{ color: '', size: '', application: '', finishing: '', collection: '', quantity_pcs: 1, product_type: 'tile', shape: 'rectangle', length_cm: null, width_cm: null, depth_cm: null, bowl_shape: '' }],
     },
   });
 
   const { fields, append, remove } = useFieldArray({ control, name: 'items' });
+  const watchedItems = useWatch({ control, name: 'items' });
 
   const onSubmit = async (data: OrderCreateFormData) => {
     setSubmitError('');
@@ -114,7 +115,7 @@ export function OrderCreateDialog({ open, onClose }: Props) {
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() => append({ color: '', size: '', application: '', finishing: '', collection: '', quantity_pcs: 1, product_type: 'tile' })}
+              onClick={() => append({ color: '', size: '', application: '', finishing: '', collection: '', quantity_pcs: 1, product_type: 'tile', shape: 'rectangle', length_cm: null, width_cm: null, depth_cm: null, bowl_shape: '' })}
             >
               + Add Item
             </Button>
@@ -139,7 +140,21 @@ export function OrderCreateDialog({ open, onClose }: Props) {
                   <Input label="Finishing" {...register(`items.${idx}.finishing`)} placeholder="Matte" />
                   <Input label="Collection" {...register(`items.${idx}.collection`)} placeholder="e.g. Stock" />
                   <Select label="Product Type" {...register(`items.${idx}.product_type`)} options={PRODUCT_TYPES} />
+                  <Select label="Shape" {...register(`items.${idx}.shape`)} options={SHAPE_OPTIONS.map(s => ({ value: s.value, label: s.label }))} />
                 </div>
+                {/* Dimension fields — shown for non-standard shapes */}
+                {watchedItems?.[idx]?.shape && !['rectangle', 'square'].includes(watchedItems[idx].shape || '') && (
+                  <div className="mt-2 grid grid-cols-4 gap-3 border-t border-gray-200 pt-2">
+                    <Input label="Length (cm)" type="number" step="0.01" {...register(`items.${idx}.length_cm`)} placeholder="30" />
+                    <Input label="Width (cm)" type="number" step="0.01" {...register(`items.${idx}.width_cm`)} placeholder="30" />
+                    {watchedItems[idx].product_type === 'sink' && (
+                      <>
+                        <Input label="Depth (cm)" type="number" step="0.01" {...register(`items.${idx}.depth_cm`)} placeholder="15" />
+                        <Select label="Bowl Shape" {...register(`items.${idx}.bowl_shape`)} options={BOWL_SHAPE_OPTIONS.map(s => ({ value: s.value, label: s.label }))} />
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>

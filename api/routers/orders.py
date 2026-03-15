@@ -38,6 +38,12 @@ class OrderItemInput(BaseModel):
     application_type: Optional[str] = None
     place_of_application: Optional[str] = None
     product_type: str = "tile"
+    # Shape & dimension data for surface area calculation
+    shape: Optional[str] = None        # rectangle, square, round, triangle, octagon, freeform
+    length_cm: Optional[float] = None  # Length in cm
+    width_cm: Optional[float] = None   # Width in cm
+    depth_cm: Optional[float] = None   # Depth in cm (sinks only)
+    bowl_shape: Optional[str] = None   # Bowl shape: parallelepiped, half_oval, other (sinks only)
 
 
 class OrderCreateInput(BaseModel):
@@ -472,6 +478,10 @@ async def create_order(
             application_type=item_data.application_type,
             place_of_application=item_data.place_of_application,
             product_type=item_data.product_type,
+            # Shape & dimension data for glaze surface area
+            shape=item_data.shape, length_cm=item_data.length_cm,
+            width_cm=item_data.width_cm, depth_cm=item_data.depth_cm,
+            bowl_shape=item_data.bowl_shape,
         )
         db.add(item)
         db.flush()

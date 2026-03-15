@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { materialsApi, type MaterialListParams, type MaterialItem, type TransactionItem, type TransactionInput } from '@/api/materials';
+import { materialsApi, type MaterialListParams, type MaterialItem, type TransactionItem, type TransactionInput, type ConsumptionAdjustmentItem } from '@/api/materials';
 
-export type { MaterialItem, TransactionItem };
+export type { MaterialItem, TransactionItem, ConsumptionAdjustmentItem };
 
 export function useMaterials(params?: MaterialListParams) {
   return useQuery<{ items: MaterialItem[]; total: number }>({
@@ -73,6 +73,42 @@ export function useCreatePurchaseRequest() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['materials'] });
       qc.invalidateQueries({ queryKey: ['purchase-requests'] });
+    },
+  });
+}
+
+// ── Consumption Adjustments ──────────────────────────────────────
+
+export function useConsumptionAdjustments(params?: {
+  factory_id?: string;
+  status?: string;
+  page?: number;
+  per_page?: number;
+}) {
+  return useQuery<{ items: ConsumptionAdjustmentItem[]; total: number }>({
+    queryKey: ['consumption-adjustments', params],
+    queryFn: () => materialsApi.listConsumptionAdjustments(params),
+  });
+}
+
+export function useApproveAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, notes }: { id: string; notes?: string }) =>
+      materialsApi.approveAdjustment(id, notes ? { notes } : undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['consumption-adjustments'] });
+    },
+  });
+}
+
+export function useRejectAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, notes }: { id: string; notes?: string }) =>
+      materialsApi.rejectAdjustment(id, notes ? { notes } : undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['consumption-adjustments'] });
     },
   });
 }

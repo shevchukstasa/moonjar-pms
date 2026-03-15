@@ -918,6 +918,12 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
             application_type=item_data.get("application_type"),
             place_of_application=item_data.get("place_of_application"),
             product_type=item_data.get("product_type", "tile"),
+            # Shape & dimension data from Sales app (for glaze surface area calculation)
+            shape=item_data.get("shape"),
+            length_cm=item_data.get("length_cm"),
+            width_cm=item_data.get("width_cm"),
+            depth_cm=item_data.get("depth_cm"),
+            bowl_shape=item_data.get("bowl_shape"),
         )
         db.add(item)
         db.flush()

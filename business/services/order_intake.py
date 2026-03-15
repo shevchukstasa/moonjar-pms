@@ -413,6 +413,10 @@ def process_order_item(
     ).scalar()
     _next_pn = (_max_pn or 0) + 1
 
+    # Resolve shape from item data (Sales app sends shape/dimensions)
+    _item_shape = getattr(item, "shape", None)
+    _shape_val = ShapeType(_item_shape) if _item_shape and _item_shape in [s.value for s in ShapeType] else ShapeType.RECTANGLE
+
     # Create position
     position = OrderPosition(
         order_id=order.id,
@@ -430,6 +434,11 @@ def process_order_item(
         application_type=item.application_type,
         place_of_application=item.place_of_application,
         product_type=item.product_type or ProductType.TILE,
+        shape=_shape_val,
+        length_cm=getattr(item, "length_cm", None),
+        width_cm=getattr(item, "width_cm", None),
+        depth_cm=getattr(item, "depth_cm", None),
+        bowl_shape=getattr(item, "bowl_shape", None),
         thickness_mm=item.thickness or Decimal("11.0"),
         recipe_id=recipe.id if recipe else None,
         mandatory_qc=order.mandatory_qc,
@@ -438,6 +447,12 @@ def process_order_item(
     )
     db.add(position)
     db.flush()
+
+    # Calculate glazeable surface area (shape-aware)
+    from business.services.surface_area import calculate_glazeable_sqm_for_position
+    _glazeable = calculate_glazeable_sqm_for_position(db, position)
+    if _glazeable is not None:
+        position.glazeable_sqm = _glazeable
 
     # Calculate defect margin
     from math import ceil

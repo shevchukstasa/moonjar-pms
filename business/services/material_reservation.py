@@ -44,6 +44,69 @@ class ReservationResult:
 
 
 # ────────────────────────────────────────────────────────────────
+# Helper: Calculate required material quantity per position
+# ────────────────────────────────────────────────────────────────
+
+def _get_area_for_position(position) -> Decimal:
+    """Get the glazeable surface area (total for all pieces in the position).
+
+    Priority:
+    1. glazeable_sqm × quantity (shape-aware area per piece)
+    2. quantity_sqm (bounding-box total — legacy fallback)
+    3. quantity (treat as per-piece)
+    """
+    if position.glazeable_sqm and position.glazeable_sqm > 0:
+        return Decimal(str(position.glazeable_sqm)) * Decimal(str(position.quantity))
+    if position.quantity_sqm and position.quantity_sqm > 0:
+        return Decimal(str(position.quantity_sqm))
+    return Decimal(str(position.quantity))
+
+
+def _calculate_required(rm, position) -> Decimal:
+    """Calculate required material quantity based on recipe-material unit.
+
+    Units:
+    - per_sqm:    qty_per_unit × total_glazeable_area (m²)
+    - g_per_100g: qty_per_unit is grams per 100g of dry glaze batch.
+                  Approximate via area: treat as per_sqm with a base
+                  consumption factor (glaze_settings.consumption_ml_per_sqm).
+                  Fallback: use area × qty_per_unit as a rough approximation.
+    - per_piece:  qty_per_unit × quantity (default)
+    """
+    qty = Decimal(str(rm.quantity_per_unit))
+
+    if rm.unit == "per_sqm":
+        area = _get_area_for_position(position)
+        return qty * area
+
+    if rm.unit == "g_per_100g":
+        # g_per_100g: qty_per_unit is grams per 100g reference batch.
+        # To estimate total material, we need total glaze weight.
+        # Approximation: total_area_sqm × default consumption (500 ml/sqm ≈ 500 g/sqm)
+        # Then scale: (qty_per_100g / 100) × total_glaze_grams
+        # With default ~500 g/sqm: total_glaze = area × 500
+        # required = (qty_per_100g / 100) × total_glaze
+        area = _get_area_for_position(position)
+        # Use recipe glaze_settings consumption_ml_per_sqm if available
+        consumption_per_sqm = Decimal("500")  # default: 500 g/sqm
+        try:
+            recipe = getattr(rm, '_sa_instance_state', None)
+            # Try to get from recipe glaze_settings
+            if hasattr(rm, 'recipe') and rm.recipe and hasattr(rm.recipe, 'glaze_settings'):
+                gs = rm.recipe.glaze_settings or {}
+                if gs.get("consumption_ml_per_sqm"):
+                    consumption_per_sqm = Decimal(str(gs["consumption_ml_per_sqm"]))
+        except Exception:
+            pass  # Use default
+
+        total_glaze_grams = area * consumption_per_sqm
+        return (qty / Decimal("100")) * total_glaze_grams
+
+    # Default: per_piece
+    return qty * Decimal(str(position.quantity))
+
+
+# ────────────────────────────────────────────────────────────────
 # §4.1  Reserve materials for a single position
 # ────────────────────────────────────────────────────────────────
 
@@ -90,10 +153,7 @@ def reserve_materials_for_position(
             continue
 
         # --- Calculate required quantity ---
-        if rm.unit == "per_sqm" and position.quantity_sqm:
-            required = Decimal(str(rm.quantity_per_unit)) * Decimal(str(position.quantity_sqm))
-        else:
-            required = Decimal(str(rm.quantity_per_unit)) * Decimal(str(position.quantity))
+        required = _calculate_required(rm, position)
 
         # --- Current stock balance ---
         stock = (
@@ -214,10 +274,7 @@ def force_reserve_materials(
             continue
 
         # Calculate required quantity
-        if rm.unit == "per_sqm" and position.quantity_sqm:
-            required = Decimal(str(rm.quantity_per_unit)) * Decimal(str(position.quantity_sqm))
-        else:
-            required = Decimal(str(rm.quantity_per_unit)) * Decimal(str(position.quantity))
+        required = _calculate_required(rm, position)
 
         # Create reserve transaction regardless of balance
         txn = MaterialTransaction(

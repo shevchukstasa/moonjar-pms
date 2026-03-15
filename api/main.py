@@ -113,6 +113,17 @@ def _ensure_schema():
             ("recipes", "recipe_type VARCHAR(20) NOT NULL DEFAULT 'product'"),
             ("recipes", "color_type VARCHAR(20)"),
             ("recipes", "glaze_settings JSONB NOT NULL DEFAULT '{}'"),
+            # Shape dimensions for glazeable surface area calculation
+            ("order_positions", "length_cm NUMERIC(7,2)"),
+            ("order_positions", "width_cm NUMERIC(7,2)"),
+            ("order_positions", "depth_cm NUMERIC(7,2)"),
+            ("order_positions", "bowl_shape VARCHAR(20)"),
+            ("order_positions", "glazeable_sqm NUMERIC(10,4)"),
+            ("production_order_items", "shape VARCHAR(20)"),
+            ("production_order_items", "length_cm NUMERIC(7,2)"),
+            ("production_order_items", "width_cm NUMERIC(7,2)"),
+            ("production_order_items", "depth_cm NUMERIC(7,2)"),
+            ("production_order_items", "bowl_shape VARCHAR(20)"),
         ]
         for table, col_def in add_cols:
             try:
@@ -135,6 +146,8 @@ def _ensure_schema():
         ("notification_type", "change_request"),   # pre-add for future use
         # New split category for tiles that need re-firing without re-glazing
         ("split_category", "refire"),
+        # Octagon shape for glaze surface area calculation
+        ("shape_type", "octagon"),
     ]
     try:
         raw_conn = engine.raw_connection()
@@ -255,6 +268,39 @@ def _ensure_schema():
                 UNIQUE(factory_id, shift_number)
             )
         """))
+        # Shape consumption coefficients — maps (shape, product_type) → coefficient
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS shape_consumption_coefficients (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                shape VARCHAR(20) NOT NULL,
+                product_type VARCHAR(20) NOT NULL DEFAULT 'tile',
+                coefficient NUMERIC(5,3) NOT NULL DEFAULT 1.0,
+                description TEXT,
+                updated_by UUID REFERENCES users(id),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(shape, product_type)
+            )
+        """))
+        # Consumption adjustments — actual vs expected material usage
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS consumption_adjustments (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                factory_id UUID NOT NULL REFERENCES factories(id),
+                position_id UUID NOT NULL REFERENCES order_positions(id),
+                material_id UUID NOT NULL REFERENCES materials(id),
+                expected_qty NUMERIC(12,4) NOT NULL,
+                actual_qty NUMERIC(12,4) NOT NULL,
+                variance_pct NUMERIC(7,2),
+                shape VARCHAR(20),
+                product_type VARCHAR(20),
+                suggested_coefficient NUMERIC(5,3),
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                approved_by UUID REFERENCES users(id),
+                approved_at TIMESTAMPTZ,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
         # Ensure quality_assignment_config exists
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS quality_assignment_config (
@@ -327,6 +373,40 @@ def _ensure_schema():
                 ), {"fid": fid, "stage": stage})
 
     _run_section("qc_config", _seed_qc_config)
+
+    # --- Section 6b: Shape consumption coefficients ---
+    def _seed_shape_coefficients(conn):
+        """Seed default shape-to-area conversion coefficients.
+        coefficient = actual_area / bounding_box_area
+        E.g. circle inscribed in square: π/4 ≈ 0.785
+        """
+        coefficients = [
+            # Tiles
+            ("rectangle", "tile", 1.0, "Rectangle: full bounding box"),
+            ("square", "tile", 1.0, "Square: full bounding box"),
+            ("round", "tile", 0.785, "Circle: π/4 of bounding box"),
+            ("triangle", "tile", 0.5, "Triangle: half of bounding box"),
+            ("octagon", "tile", 0.828, "Regular octagon: 2(1+√2)s²/bbox"),
+            ("freeform", "tile", 0.85, "Freeform: estimated 85% of bbox"),
+            # Countertops (same as tiles for flat surfaces)
+            ("rectangle", "countertop", 1.0, "Rectangle countertop"),
+            ("round", "countertop", 0.785, "Round countertop"),
+            ("freeform", "countertop", 0.85, "Freeform countertop"),
+            # Sinks (include interior bowl — coefficient > 1.0)
+            ("rectangle", "sink", 1.5, "Rectangular sink: flat + bowl interior"),
+            ("round", "sink", 1.3, "Round sink: flat + bowl interior"),
+            ("freeform", "sink", 1.4, "Freeform sink: estimated with bowl"),
+            # 3D products
+            ("freeform", "3d", 0.9, "3D product: estimated surface"),
+        ]
+        for shape, ptype, coeff, desc in coefficients:
+            conn.execute(text(
+                "INSERT INTO shape_consumption_coefficients (id, shape, product_type, coefficient, description) "
+                "VALUES (gen_random_uuid(), :shape, :ptype, :coeff, :desc) "
+                "ON CONFLICT (shape, product_type) DO NOTHING"
+            ), {"shape": shape, "ptype": ptype, "coeff": coeff, "desc": desc})
+
+    _run_section("shape_coefficients", _seed_shape_coefficients)
 
     # --- Section 7: Kilns (resources) — 3 per factory (one-time only) ---
     def _seed_kilns(conn):

@@ -56,6 +56,28 @@ export interface TransactionInput {
   notes?: string;
 }
 
+export interface ConsumptionAdjustmentItem {
+  id: string;
+  factory_id: string;
+  position_id: string;
+  position_number: number | null;
+  order_number: string | null;
+  material_id: string;
+  material_name: string | null;
+  expected_qty: number;
+  actual_qty: number;
+  variance_pct: number | null;
+  shape: string | null;
+  product_type: string | null;
+  suggested_coefficient: number | null;
+  status: 'pending' | 'approved' | 'rejected';
+  approved_by: string | null;
+  approved_by_name: string | null;
+  approved_at: string | null;
+  notes: string | null;
+  created_at: string | null;
+}
+
 export const materialsApi = {
   list: (params?: MaterialListParams) =>
     apiClient.get('/materials', { params }).then((r) => r.data),
@@ -73,4 +95,11 @@ export const materialsApi = {
     apiClient.get('/materials/low-stock', { params }).then((r) => r.data),
   createPurchaseRequest: (data: Record<string, unknown>) =>
     apiClient.post('/materials/purchase-requests', data).then((r) => r.data),
+  // Consumption adjustments
+  listConsumptionAdjustments: (params?: { factory_id?: string; status?: string; page?: number; per_page?: number }) =>
+    apiClient.get('/materials/consumption-adjustments', { params }).then((r) => r.data),
+  approveAdjustment: (id: string, data?: { notes?: string }) =>
+    apiClient.post(`/materials/consumption-adjustments/${id}/approve`, data || {}).then((r) => r.data),
+  rejectAdjustment: (id: string, data?: { notes?: string }) =>
+    apiClient.post(`/materials/consumption-adjustments/${id}/reject`, data || {}).then((r) => r.data),
 };

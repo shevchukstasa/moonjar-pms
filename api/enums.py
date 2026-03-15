@@ -178,6 +178,12 @@ class ShapeType(str, Enum):
     ROUND = 'round'
     FREEFORM = 'freeform'
     TRIANGLE = 'triangle'
+    OCTAGON = 'octagon'
+
+class BowlShape(str, Enum):
+    PARALLELEPIPED = 'parallelepiped'   # Rectangular bowl
+    HALF_OVAL = 'half_oval'             # Half-oval (ellipsoidal) bowl
+    OTHER = 'other'                     # Arbitrary bowl shape
 
 class SplitCategory(str, Enum):
     REPAIR = 'repair'                   # Needs re-glazing → SENT_TO_GLAZING

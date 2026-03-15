@@ -1,7 +1,9 @@
-"""Materials router — inventory, transactions, low-stock, purchase requests.
+"""Materials router — inventory, transactions, low-stock, purchase requests,
+consumption adjustments.
 
 Material = shared catalog (name, type, unit, supplier).
 MaterialStock = per-factory stock (balance, min_balance, consumption).
+ConsumptionAdjustment = actual vs expected material usage (PM review).
 """
 
 from datetime import datetime, timezone
@@ -10,14 +12,16 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.auth import get_current_user, apply_factory_filter
+from api.auth import get_current_user, apply_factory_filter, require_management
 from api.models import (
     Material, MaterialStock, MaterialTransaction,
     MaterialPurchaseRequest, Supplier, User,
+    ConsumptionAdjustment, ShapeConsumptionCoefficient,
+    OrderPosition,
 )
 from api.enums import PurchaseStatus
 
@@ -509,3 +513,148 @@ async def create_purchase_request(
         "notes": pr.notes,
         "created_at": pr.created_at.isoformat() if pr.created_at else None,
     }
+
+
+# ── Consumption Adjustments ─────────────────────────────────────────────
+
+def _serialize_adjustment(adj: ConsumptionAdjustment, db: Session) -> dict:
+    """Serialize a ConsumptionAdjustment for API response."""
+    mat = db.query(Material).filter(Material.id == adj.material_id).first()
+    pos = db.query(OrderPosition).filter(OrderPosition.id == adj.position_id).first()
+
+    approver_name = None
+    if adj.approved_by:
+        user = db.query(User).filter(User.id == adj.approved_by).first()
+        approver_name = user.name if user else None
+
+    return {
+        "id": str(adj.id),
+        "factory_id": str(adj.factory_id),
+        "position_id": str(adj.position_id),
+        "position_number": pos.position_number if pos else None,
+        "order_number": pos.order.order_number if pos and pos.order else None,
+        "material_id": str(adj.material_id),
+        "material_name": mat.name if mat else None,
+        "expected_qty": float(adj.expected_qty),
+        "actual_qty": float(adj.actual_qty),
+        "variance_pct": float(adj.variance_pct) if adj.variance_pct else None,
+        "shape": adj.shape,
+        "product_type": adj.product_type,
+        "suggested_coefficient": float(adj.suggested_coefficient) if adj.suggested_coefficient else None,
+        "status": adj.status,
+        "approved_by": str(adj.approved_by) if adj.approved_by else None,
+        "approved_by_name": approver_name,
+        "approved_at": adj.approved_at.isoformat() if adj.approved_at else None,
+        "notes": adj.notes,
+        "created_at": adj.created_at.isoformat() if adj.created_at else None,
+    }
+
+
+class AdjustmentDecisionInput(BaseModel):
+    notes: Optional[str] = None
+
+
+@router.get("/consumption-adjustments")
+async def list_consumption_adjustments(
+    factory_id: UUID | None = None,
+    status: str | None = Query(None, description="Filter by status: pending, approved, rejected"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List consumption adjustments — pending corrections for PM review."""
+    query = db.query(ConsumptionAdjustment)
+
+    if factory_id:
+        query = query.filter(ConsumptionAdjustment.factory_id == factory_id)
+    if status:
+        query = query.filter(ConsumptionAdjustment.status == status)
+
+    total = query.count()
+    items = query.order_by(
+        ConsumptionAdjustment.created_at.desc()
+    ).offset((page - 1) * per_page).limit(per_page).all()
+
+    return {
+        "items": [_serialize_adjustment(a, db) for a in items],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
+
+
+@router.post("/consumption-adjustments/{adj_id}/approve")
+async def approve_consumption_adjustment(
+    adj_id: UUID,
+    body: AdjustmentDecisionInput = AdjustmentDecisionInput(),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Approve a consumption adjustment — updates shape coefficient.
+
+    When approved, if the adjustment has a suggested_coefficient,
+    the shape_consumption_coefficients table is updated for future calculations.
+    """
+    adj = db.query(ConsumptionAdjustment).filter(ConsumptionAdjustment.id == adj_id).first()
+    if not adj:
+        raise HTTPException(404, "Adjustment not found")
+    if adj.status != "pending":
+        raise HTTPException(400, f"Adjustment is already {adj.status}")
+
+    adj.status = "approved"
+    adj.approved_by = current_user.id
+    adj.approved_at = datetime.now(timezone.utc)
+    if body.notes:
+        adj.notes = body.notes
+
+    # Update shape coefficient if suggested
+    if adj.suggested_coefficient and adj.shape and adj.product_type:
+        coeff = db.query(ShapeConsumptionCoefficient).filter(
+            ShapeConsumptionCoefficient.shape == adj.shape,
+            ShapeConsumptionCoefficient.product_type == adj.product_type,
+        ).first()
+
+        if coeff:
+            coeff.coefficient = adj.suggested_coefficient
+            coeff.updated_by = current_user.id
+            coeff.updated_at = datetime.now(timezone.utc)
+        else:
+            # Create new coefficient entry
+            coeff = ShapeConsumptionCoefficient(
+                shape=adj.shape,
+                product_type=adj.product_type,
+                coefficient=adj.suggested_coefficient,
+                description=f"Auto-created from consumption adjustment #{str(adj.id)[:8]}",
+                updated_by=current_user.id,
+            )
+            db.add(coeff)
+
+    db.commit()
+    db.refresh(adj)
+    return _serialize_adjustment(adj, db)
+
+
+@router.post("/consumption-adjustments/{adj_id}/reject")
+async def reject_consumption_adjustment(
+    adj_id: UUID,
+    body: AdjustmentDecisionInput = AdjustmentDecisionInput(),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Reject a consumption adjustment — no coefficient change."""
+    adj = db.query(ConsumptionAdjustment).filter(ConsumptionAdjustment.id == adj_id).first()
+    if not adj:
+        raise HTTPException(404, "Adjustment not found")
+    if adj.status != "pending":
+        raise HTTPException(400, f"Adjustment is already {adj.status}")
+
+    adj.status = "rejected"
+    adj.approved_by = current_user.id
+    adj.approved_at = datetime.now(timezone.utc)
+    if body.notes:
+        adj.notes = body.notes
+
+    db.commit()
+    db.refresh(adj)
+    return _serialize_adjustment(adj, db)

@@ -3,6 +3,22 @@ import { z } from 'zod';
 export const loginSchema = z.object({ email: z.string().email(), password: z.string().min(6) });
 export type LoginFormData = z.infer<typeof loginSchema>;
 
+export const SHAPE_OPTIONS = [
+  { value: 'rectangle', label: 'Rectangle' },
+  { value: 'square', label: 'Square' },
+  { value: 'round', label: 'Round' },
+  { value: 'triangle', label: 'Triangle' },
+  { value: 'octagon', label: 'Octagon' },
+  { value: 'freeform', label: 'Freeform' },
+] as const;
+
+export const BOWL_SHAPE_OPTIONS = [
+  { value: '', label: 'N/A' },
+  { value: 'parallelepiped', label: 'Parallelepiped' },
+  { value: 'half_oval', label: 'Half Oval' },
+  { value: 'other', label: 'Other' },
+] as const;
+
 export const orderItemSchema = z.object({
   color: z.string().min(1, 'Color is required'),
   size: z.string().min(1, 'Size is required'),
@@ -12,6 +28,12 @@ export const orderItemSchema = z.object({
   thickness_mm: z.coerce.number().positive().optional(),
   quantity_pcs: z.coerce.number().int().positive('Quantity must be > 0'),
   product_type: z.string().optional().default('tile'),
+  // Shape & dimensions for glaze surface area
+  shape: z.string().optional().default('rectangle'),
+  length_cm: z.coerce.number().positive().optional().nullable(),
+  width_cm: z.coerce.number().positive().optional().nullable(),
+  depth_cm: z.coerce.number().positive().optional().nullable(),
+  bowl_shape: z.string().optional().default(''),
 });
 export type OrderItemFormData = z.infer<typeof orderItemSchema>;
 

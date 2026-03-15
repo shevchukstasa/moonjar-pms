@@ -249,6 +249,12 @@ class ProductionOrderItem(Base):
     application_type = Column(sa.String(100))
     place_of_application = Column(sa.String(50))
     product_type = Column(PgEnum(ProductType), nullable=False, default=ProductType.TILE)
+    # Shape & dimension data (from Sales app or manual form)
+    shape = Column(sa.String(20))        # rectangle, round, triangle, octagon, freeform
+    length_cm = Column(sa.Numeric(7, 2))
+    width_cm = Column(sa.Numeric(7, 2))
+    depth_cm = Column(sa.Numeric(7, 2))  # sinks only
+    bowl_shape = Column(sa.String(20))   # sinks only: parallelepiped, half_oval, other
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     order = relationship('ProductionOrder', foreign_keys=[order_id])
@@ -493,6 +499,12 @@ class OrderPosition(Base):
     place_of_application = Column(sa.String(50))
     product_type = Column(PgEnum(ProductType), nullable=False, default=ProductType.TILE)
     shape = Column(PgEnum(ShapeType), default=ShapeType.RECTANGLE)
+    # Shape dimensions for surface area calculation
+    length_cm = Column(sa.Numeric(7, 2))             # Length in cm (from Sales/kiln calculator)
+    width_cm = Column(sa.Numeric(7, 2))              # Width in cm
+    depth_cm = Column(sa.Numeric(7, 2))              # Depth in cm (sinks only)
+    bowl_shape = Column(sa.String(20))               # Bowl shape: parallelepiped/half_oval/other (sinks)
+    glazeable_sqm = Column(sa.Numeric(10, 4))        # Glazeable surface area per piece (m²)
     thickness_mm = Column(sa.Numeric(5, 1), nullable=False, default=11.0)
     recipe_id = Column(UUID(as_uuid=True), ForeignKey('recipes.id'))
     mandatory_qc = Column(sa.Boolean, nullable=False, default=False)
@@ -1485,4 +1497,56 @@ class RecipeFiringStage(Base):
 
     recipe = relationship('Recipe', foreign_keys=[recipe_id])
     firing_profile = relationship('FiringProfile', foreign_keys=[firing_profile_id])
+
+
+# ─── Shape Consumption Coefficients ─────────────────────────
+
+class ShapeConsumptionCoefficient(Base):
+    """Coefficient for converting bounding-box area to actual glazeable surface
+    per shape × product_type combination.
+    E.g. round/tile = 0.785 (π/4), triangle/tile = 0.5, rectangle/sink = 1.5 (includes bowl).
+    """
+    __tablename__ = 'shape_consumption_coefficients'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shape = Column(sa.String(20), nullable=False)
+    product_type = Column(sa.String(20), nullable=False, default='tile')
+    coefficient = Column(sa.Numeric(5, 3), nullable=False, default=1.0)
+    description = Column(sa.Text)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('shape', 'product_type', name='uq_shape_coeff_shape_ptype'),
+    )
+
+
+# ─── Consumption Adjustment (actual vs expected) ────────────
+
+class ConsumptionAdjustment(Base):
+    """Records variance between expected and actual material consumption.
+    Created when glazing master reports actual usage differs from calculated.
+    PM reviews and approves/rejects — approved adjustments update the coefficient.
+    """
+    __tablename__ = 'consumption_adjustments'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id'), nullable=False)
+    material_id = Column(UUID(as_uuid=True), ForeignKey('materials.id'), nullable=False)
+    expected_qty = Column(sa.Numeric(12, 4), nullable=False)
+    actual_qty = Column(sa.Numeric(12, 4), nullable=False)
+    variance_pct = Column(sa.Numeric(7, 2))  # (actual - expected) / expected × 100
+    shape = Column(sa.String(20))
+    product_type = Column(sa.String(20))
+    suggested_coefficient = Column(sa.Numeric(5, 3))
+    status = Column(sa.String(20), nullable=False, default='pending')  # pending | approved | rejected
+    approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    approved_at = Column(sa.DateTime(timezone=True))
+    notes = Column(sa.Text)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    position = relationship('OrderPosition', foreign_keys=[position_id])
+    material = relationship('Material', foreign_keys=[material_id])
+    factory = relationship('Factory', foreign_keys=[factory_id])
 

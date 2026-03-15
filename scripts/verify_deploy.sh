@@ -73,36 +73,12 @@ echo "▸ Новые/изменённые эндпоинты"
 check_endpoint "${API_URL}/materials/consumption-adjustments" "401" "Consumption Adjustments"
 check_endpoint "${API_URL}/reference/shape-coefficients"      "401" "Shape Coefficients"
 
-# 4. Backup health
+# 4. Backup & Security эндпоинты (401 = существует и защищён)
 echo ""
-echo "▸ Backup система"
-backup_health=$(curl -s "${API_URL}/health/backup" 2>/dev/null)
-if echo "$backup_health" | grep -q '"pg_dump_available":true'; then
-  green "  ✅ pg_dump: доступен"
-  PASS=$((PASS + 1))
-else
-  red "  ❌ pg_dump: НЕ НАЙДЕН (nixpacks.toml не применился?)"
-  FAIL=$((FAIL + 1))
-fi
-if echo "$backup_health" | grep -q '"s3_configured":true'; then
-  green "  ✅ S3 bucket: настроен"
-  PASS=$((PASS + 1))
-else
-  yellow "  ⚠️  S3 bucket: НЕ настроен (бэкапы не будут сохраняться на Railway!)"
-  WARN=$((WARN + 1))
-fi
-backup_status=$(echo "$backup_health" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null || echo "unknown")
-if [ "$backup_status" = "ok" ]; then
-  green "  ✅ Последний бэкап: OK"
-  PASS=$((PASS + 1))
-elif [ "$backup_status" = "pending" ]; then
-  yellow "  ⚠️  Бэкап ещё не запускался (ожидание 22:00 UTC)"
-  WARN=$((WARN + 1))
-elif [ "$backup_status" = "error" ]; then
-  backup_error=$(echo "$backup_health" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error',''))" 2>/dev/null || echo "")
-  red "  ❌ Последний бэкап: ОШИБКА — ${backup_error}"
-  FAIL=$((FAIL + 1))
-fi
+echo "▸ Безопасность и бэкапы"
+check_endpoint "${API_URL}/health/backup"     "401" "Backup Health (защищён)"
+check_endpoint "${API_URL}/security/sessions" "401" "Security Sessions"
+check_endpoint "${API_URL}/security/audit-log" "401" "Audit Log"
 
 # 5. OpenAPI docs (на корне, без /api)
 echo ""

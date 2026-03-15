@@ -230,6 +230,7 @@ def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
         or p.status == PositionStatus.AWAITING_RECIPE
         or p.status == PositionStatus.AWAITING_STENCIL_SILKSCREEN
         or p.status == PositionStatus.AWAITING_COLOR_MATCHING
+        or p.status == PositionStatus.AWAITING_SIZE_CONFIRMATION
         for p in positions
     ):
         order.status = OrderStatus.NEW
@@ -492,6 +493,45 @@ def process_order_item(
 
     # Check blocking tasks (stencil, silkscreen, color matching)
     check_blocking_tasks(db, order, position, item)
+
+    # Size resolution — match position dimensions against sizes reference table.
+    # Must happen BEFORE material reservation because we need to know which stone
+    # to reserve. If size can't be determined, block the position.
+    from business.services.size_resolution import (
+        resolve_size_for_position,
+        create_size_resolution_task,
+    )
+    from business.services.notifications import notify_pm
+
+    size_result = resolve_size_for_position(db, position)
+    if size_result.resolved:
+        position.size_id = size_result.size_id
+    else:
+        # Only block if position is still in PLANNED state
+        # (it might already be blocked by stencil/silkscreen/color matching)
+        if position.status == PositionStatus.PLANNED:
+            position.status = PositionStatus.AWAITING_SIZE_CONFIRMATION
+
+        create_size_resolution_task(
+            db=db,
+            position=position,
+            order_id=order.id,
+            factory_id=order.factory_id,
+            reason=size_result.reason,
+            candidates=size_result.candidates,
+        )
+        notify_pm(
+            db=db,
+            factory_id=order.factory_id,
+            type="task_assigned",
+            title=f"Size resolution needed: {position.size}",
+            message=f"Order {order.order_number}, position {position.size} — "
+                    f"cannot auto-determine stone size ({size_result.reason})",
+            related_entity_type="position",
+            related_entity_id=position.id,
+        )
+        # Don't proceed to material reservation if size is unresolved
+        return position
 
     # Material reservation check
     # Recipe is guaranteed to exist here (no-recipe returns above).

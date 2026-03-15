@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from api.database import get_db
 from api.auth import get_current_user
@@ -55,6 +56,41 @@ def _serialize_size(s: Size) -> dict:
 
 
 # ── CRUD ──────────────────────────────────────────────────
+
+
+@router.get("/search")
+async def search_sizes(
+    q: str | None = Query(None, description="Search by name"),
+    width_mm: int | None = Query(None),
+    height_mm: int | None = Query(None),
+    shape: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Search sizes by dimensions, name, or shape. Used by size resolution UI."""
+    query = db.query(Size)
+
+    if width_mm is not None and height_mm is not None:
+        # Match both orientations
+        query = query.filter(
+            or_(
+                (Size.width_mm == width_mm) & (Size.height_mm == height_mm),
+                (Size.width_mm == height_mm) & (Size.height_mm == width_mm),
+            )
+        )
+    elif width_mm is not None:
+        query = query.filter(or_(Size.width_mm == width_mm, Size.height_mm == width_mm))
+    elif height_mm is not None:
+        query = query.filter(or_(Size.width_mm == height_mm, Size.height_mm == height_mm))
+
+    if shape:
+        query = query.filter(Size.shape == shape)
+
+    if q:
+        query = query.filter(Size.name.ilike(f"%{q}%"))
+
+    items = query.order_by(Size.name).limit(50).all()
+    return [_serialize_size(s) for s in items]
 
 
 @router.get("")

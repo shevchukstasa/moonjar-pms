@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { tasksApi, type TaskListParams, type TaskItem, type ShortageResolutionInput } from '@/api/tasks';
+import { tasksApi, type TaskListParams, type TaskItem, type ShortageResolutionInput, type SizeResolutionInput } from '@/api/tasks';
 
 export function useTasks(params?: TaskListParams) {
   return useQuery<{ items: TaskItem[]; total: number }>({
@@ -47,6 +47,20 @@ export function useShortageResolution() {
       qc.invalidateQueries({ queryKey: ['tasks'] });
       qc.invalidateQueries({ queryKey: ['positions'] });
       qc.invalidateQueries({ queryKey: ['orders'] });
+    },
+  });
+}
+
+export function useSizeResolution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: SizeResolutionInput }) =>
+      tasksApi.resolveSize(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['sizes'] });
     },
   });
 }

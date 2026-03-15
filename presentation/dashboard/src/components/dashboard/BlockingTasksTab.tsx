@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useBlockingSummary } from '@/hooks/usePositions';
 import { Card } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
@@ -17,6 +18,7 @@ const STATUS_LABELS: Record<string, string> = {
   awaiting_recipe: 'Awaiting Recipe',
   awaiting_stencil_silkscreen: 'Stencil / Silkscreen',
   awaiting_color_matching: 'Color Matching',
+  awaiting_size_confirmation: 'Awaiting Size',
   blocked_by_qm: 'QM Block',
 };
 
@@ -25,6 +27,7 @@ const STATUS_BADGE_COLORS: Record<string, string> = {
   awaiting_recipe: 'bg-purple-100 text-purple-800 border-purple-200',
   awaiting_stencil_silkscreen: 'bg-amber-100 text-amber-800 border-amber-200',
   awaiting_color_matching: 'bg-orange-100 text-orange-800 border-orange-200',
+  awaiting_size_confirmation: 'bg-cyan-100 text-cyan-800 border-cyan-200',
   blocked_by_qm: 'bg-pink-100 text-pink-800 border-pink-200',
 };
 
@@ -33,6 +36,7 @@ const KPI_ICONS: Record<string, string> = {
   awaiting_recipe: '📋',
   awaiting_stencil_silkscreen: '🖼',
   awaiting_color_matching: '🎨',
+  awaiting_size_confirmation: '📏',
   blocked_by_qm: '🔍',
 };
 
@@ -46,6 +50,7 @@ function timeSince(dateStr: string | null): string {
 }
 
 export function BlockingTasksTab({ factoryId }: BlockingTasksTabProps) {
+  const navigate = useNavigate();
   const { data, isLoading, error } = useBlockingSummary(factoryId);
   const [unblockTarget, setUnblockTarget] = useState<BlockedPositionInfo | null>(null);
   const [materialsTarget, setMaterialsTarget] = useState<string | null>(null);
@@ -174,6 +179,18 @@ export function BlockingTasksTab({ factoryId }: BlockingTasksTabProps) {
                         onClick={() => setMaterialsTarget(p.id)}
                       >
                         Materials
+                      </Button>
+                    )}
+                    {p.status === 'awaiting_size_confirmation' && p.related_tasks.length > 0 && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          const sizeTask = p.related_tasks.find((t) => t.type === 'size_resolution');
+                          if (sizeTask) navigate(`/manager/size-resolution/${sizeTask.task_id}`);
+                        }}
+                      >
+                        Resolve Size
                       </Button>
                     )}
                     <Button

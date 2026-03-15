@@ -133,6 +133,7 @@ BLOCKING_STATUSES = {
     PositionStatus.AWAITING_RECIPE,
     PositionStatus.AWAITING_STENCIL_SILKSCREEN,
     PositionStatus.AWAITING_COLOR_MATCHING,
+    PositionStatus.AWAITING_SIZE_CONFIRMATION,
     PositionStatus.BLOCKED_BY_QM,
 }
 

@@ -1332,6 +1332,34 @@ def _ensure_schema():
 
     _run_section("create_color_collections_table", _create_color_collections_table)
 
+    # --- Section 18: Size resolution — add size_id FK + enum values ---
+    def _size_resolution_migration(conn):
+        """Add size_id FK to order_positions, new enum values for size resolution."""
+        # Add enum values
+        conn.execute(text("""
+            DO $$ BEGIN
+                ALTER TYPE positionstatus ADD VALUE IF NOT EXISTS 'awaiting_size_confirmation';
+            EXCEPTION WHEN duplicate_object THEN NULL;
+            END $$;
+        """))
+        conn.execute(text("""
+            DO $$ BEGIN
+                ALTER TYPE tasktype ADD VALUE IF NOT EXISTS 'size_resolution';
+            EXCEPTION WHEN duplicate_object THEN NULL;
+            END $$;
+        """))
+        # Add size_id column
+        conn.execute(text("""
+            ALTER TABLE order_positions
+            ADD COLUMN IF NOT EXISTS size_id UUID REFERENCES sizes(id);
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_order_positions_size_id
+            ON order_positions(size_id);
+        """))
+
+    _run_section("size_resolution_migration", _size_resolution_migration)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""

@@ -25,6 +25,7 @@ class PositionStatus(str, Enum):
     AWAITING_RECIPE = 'awaiting_recipe'
     AWAITING_STENCIL_SILKSCREEN = 'awaiting_stencil_silkscreen'
     AWAITING_COLOR_MATCHING = 'awaiting_color_matching'
+    AWAITING_SIZE_CONFIRMATION = 'awaiting_size_confirmation'
     ENGOBE_APPLIED = 'engobe_applied'
     ENGOBE_CHECK = 'engobe_check'
     GLAZED = 'glazed'
@@ -72,6 +73,7 @@ class TaskType(str, Enum):
     RECONCILIATION_ALERT = 'reconciliation_alert'
     STOCK_SHORTAGE = 'stock_shortage'
     STOCK_TRANSFER = 'stock_transfer'
+    SIZE_RESOLUTION = 'size_resolution'
 
 class TaskStatus(str, Enum):
     PENDING = 'pending'

@@ -36,6 +36,16 @@ export interface ShortageResolutionInput {
   notes?: string;
 }
 
+export interface SizeResolutionInput {
+  size_id?: string;
+  create_new_size?: boolean;
+  new_size_name?: string;
+  new_size_width_mm?: number;
+  new_size_height_mm?: number;
+  new_size_thickness_mm?: number;
+  new_size_shape?: string;
+}
+
 export const tasksApi = {
   list: (params?: TaskListParams) =>
     apiClient.get('/tasks', { params }).then((r) => r.data),
@@ -45,4 +55,6 @@ export const tasksApi = {
     apiClient.post(`/tasks/${id}/complete`).then((r) => r.data),
   resolveShortage: (id: string, data: ShortageResolutionInput) =>
     apiClient.post(`/tasks/${id}/resolve-shortage`, data).then((r) => r.data),
+  resolveSize: (id: string, data: SizeResolutionInput) =>
+    apiClient.post(`/tasks/${id}/resolve-size`, data).then((r) => r.data),
 };

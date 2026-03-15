@@ -586,6 +586,7 @@ class OrderPosition(Base):
     glazeable_sqm = Column(sa.Numeric(10, 4))        # Glazeable surface area per piece (m²)
     thickness_mm = Column(sa.Numeric(5, 1), nullable=False, default=11.0)
     recipe_id = Column(UUID(as_uuid=True), ForeignKey('recipes.id'))
+    size_id = Column(UUID(as_uuid=True), ForeignKey('sizes.id'), nullable=True)
     mandatory_qc = Column(sa.Boolean, nullable=False, default=False)
     split_category = Column(PgEnum(SplitCategory))
     is_merged = Column(sa.Boolean, nullable=False, default=False)
@@ -615,6 +616,7 @@ class OrderPosition(Base):
     resource = relationship('Resource', foreign_keys=[resource_id])
     estimated_kiln = relationship('Resource', foreign_keys=[estimated_kiln_id])
     recipe = relationship('Recipe', foreign_keys=[recipe_id])
+    size_ref = relationship('Size', foreign_keys=[size_id])
 
 
 class Task(Base):

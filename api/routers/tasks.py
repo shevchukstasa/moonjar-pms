@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
-from api.models import Task, User, ProductionOrder, OrderPosition, ProductionOrderItem, Factory
+from api.models import Task, User, ProductionOrder, OrderPosition, ProductionOrderItem, Factory, Size
 from api.enums import TaskStatus, TaskType, PositionStatus, UserRole
 
 router = APIRouter()
@@ -319,3 +319,141 @@ async def resolve_shortage(
 
     else:
         raise HTTPException(400, f"Invalid decision: {data.decision}. Must be 'manufacture' or 'decline'")
+
+
+# ── Size Resolution ──────────────────────────────────────────────
+
+class SizeResolutionInput(BaseModel):
+    size_id: str | None = None            # existing size to assign
+    create_new_size: bool = False          # create a new size entry
+    new_size_name: str | None = None
+    new_size_width_mm: int | None = None
+    new_size_height_mm: int | None = None
+    new_size_thickness_mm: int | None = None
+    new_size_shape: str = "rectangle"
+
+
+VALID_SIZE_SHAPES = {"rectangle", "square", "round", "freeform", "triangle", "octagon"}
+
+
+@router.post("/{task_id}/resolve-size")
+async def resolve_size(
+    task_id: UUID,
+    data: SizeResolutionInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Admin/PM resolves a size ambiguity: pick existing size or create new."""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(404, "Task not found")
+
+    if _ev(task.type) != "size_resolution":
+        raise HTTPException(400, "Task is not a size_resolution task")
+
+    if _ev(task.status) == "done":
+        raise HTTPException(400, "Task is already resolved")
+
+    now = datetime.now(timezone.utc)
+    meta = task.metadata_json or {}
+
+    position = db.query(OrderPosition).filter(
+        OrderPosition.id == task.related_position_id
+    ).first()
+    if not position:
+        raise HTTPException(400, "Related position not found")
+
+    chosen_size_id: UUID | None = None
+
+    if data.create_new_size:
+        # Validate required fields
+        if not data.new_size_name:
+            raise HTTPException(400, "new_size_name is required when creating a new size")
+        if not data.new_size_width_mm or not data.new_size_height_mm:
+            raise HTTPException(400, "new_size_width_mm and new_size_height_mm are required")
+        if data.new_size_shape and data.new_size_shape not in VALID_SIZE_SHAPES:
+            raise HTTPException(400, f"Invalid shape: {data.new_size_shape}")
+
+        # Check uniqueness
+        existing = db.query(Size).filter(Size.name == data.new_size_name).first()
+        if existing:
+            raise HTTPException(409, f"Size '{data.new_size_name}' already exists. Use its ID instead.")
+
+        new_size = Size(
+            name=data.new_size_name,
+            width_mm=data.new_size_width_mm,
+            height_mm=data.new_size_height_mm,
+            thickness_mm=data.new_size_thickness_mm,
+            shape=data.new_size_shape or "rectangle",
+            is_custom=True,
+        )
+        db.add(new_size)
+        db.flush()
+        chosen_size_id = new_size.id
+
+    elif data.size_id:
+        size = db.query(Size).filter(Size.id == UUID(data.size_id)).first()
+        if not size:
+            raise HTTPException(404, f"Size '{data.size_id}' not found")
+        chosen_size_id = size.id
+
+    else:
+        raise HTTPException(400, "Either size_id or create_new_size=true is required")
+
+    # Assign size to position
+    position.size_id = chosen_size_id
+    position.updated_at = now
+
+    # Transition position back to PLANNED if it was awaiting size
+    if _ev(position.status) == "awaiting_size_confirmation":
+        position.status = PositionStatus.PLANNED
+
+    # Close task
+    task.status = TaskStatus.DONE
+    task.completed_at = now
+    task.updated_at = now
+    task.metadata_json = {
+        **meta,
+        "resolution": "new_size_created" if data.create_new_size else "existing_size_selected",
+        "chosen_size_id": str(chosen_size_id),
+        "resolved_by": str(current_user.id),
+        "resolved_at": now.isoformat(),
+    }
+
+    db.flush()
+
+    # Trigger material reservation for the unblocked position
+    # (only if position is now PLANNED and has a recipe)
+    reservation_result = None
+    if _ev(position.status) == "planned" and position.recipe_id:
+        try:
+            from api.models import Recipe
+            recipe = db.query(Recipe).filter(Recipe.id == position.recipe_id).first()
+            if recipe:
+                from business.services.material_reservation import (
+                    reserve_materials_for_position,
+                )
+                result = reserve_materials_for_position(db, position, recipe, position.factory_id)
+                if result.shortages:
+                    position.status = PositionStatus.INSUFFICIENT_MATERIALS
+                    reservation_result = {
+                        "status": "insufficient_materials",
+                        "shortages": len(result.shortages),
+                    }
+                else:
+                    reservation_result = {"status": "reserved"}
+        except Exception as e:
+            import logging
+            logging.getLogger("moonjar.tasks").warning(
+                "Material reservation after size resolution failed: %s", e
+            )
+
+    db.commit()
+
+    return {
+        "task_status": "done",
+        "chosen_size_id": str(chosen_size_id),
+        "position_status": _ev(position.status),
+        "created_new_size": data.create_new_size,
+        "reservation": reservation_result,
+    }

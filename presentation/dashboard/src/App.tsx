@@ -13,6 +13,7 @@ import ManagerSchedulePage from '@/pages/ManagerSchedulePage';
 import ManagerKilnsPage from '@/pages/ManagerKilnsPage';
 import ManagerMaterialsPage from '@/pages/ManagerMaterialsPage';
 import ShortageDecisionPage from '@/pages/ShortageDecisionPage';
+import SizeResolutionPage from '@/pages/SizeResolutionPage';
 import TabloDashboard from '@/pages/TabloDashboard';
 import QualityManagerDashboard from '@/pages/QualityManagerDashboard';
 import WarehouseDashboard from '@/pages/WarehouseDashboard';
@@ -105,6 +106,7 @@ export default function App() {
           <Route path="/admin/warehouses" element={<AdminWarehousesPage />} />
           <Route path="/admin/packaging" element={<AdminPackagingPage />} />
           <Route path="/admin/sizes" element={<AdminSizesPage />} />
+          <Route path="/admin/size-resolution/:taskId" element={<SizeResolutionPage />} />
         </Route>
         <Route element={<RequireRole roles={['owner', 'administrator', 'ceo']} />}>
           <Route path="/users" element={<UsersPage />} />
@@ -116,6 +118,7 @@ export default function App() {
           <Route path="/manager/kilns" element={<ManagerKilnsPage />} />
           <Route path="/manager/materials" element={<ManagerMaterialsPage />} />
           <Route path="/manager/shortage/:taskId" element={<ShortageDecisionPage />} />
+          <Route path="/manager/size-resolution/:taskId" element={<SizeResolutionPage />} />
         </Route>
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/tablo" element={<TabloDashboard />} />

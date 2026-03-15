@@ -7,23 +7,6 @@ import { Badge } from '@/components/ui/Badge';
 import apiClient from '@/api/client';
 import { Thermometer, Plus, Pencil, Trash2, X, Save } from 'lucide-react';
 
-const THERMOCOUPLE_OPTIONS = [
-  { value: '', label: '-- Select --' },
-  { value: 'chinese', label: 'Chinese' },
-  { value: 'indonesia_manufacture', label: 'Indonesia Manufacture' },
-] as const;
-
-const CONTROL_CABLE_OPTIONS = [
-  { value: '', label: '-- Select --' },
-  { value: 'indonesia_manufacture', label: 'Indonesia Manufacture' },
-] as const;
-
-const CONTROL_DEVICE_OPTIONS = [
-  { value: '', label: '-- Select --' },
-  { value: 'oven', label: 'OVEN' },
-  { value: 'moonjar', label: 'Moonjar' },
-] as const;
-
 interface RecipeLink {
   id: string;
   recipe_id: string;
@@ -38,9 +21,6 @@ interface TemperatureGroup {
   min_temperature: number;
   max_temperature: number;
   description: string | null;
-  thermocouple: string | null;
-  control_cable: string | null;
-  control_device: string | null;
   is_active: boolean;
   display_order: number;
   recipes: RecipeLink[];
@@ -53,9 +33,6 @@ interface FormData {
   min_temperature: number;
   max_temperature: number;
   description: string;
-  thermocouple: string;
-  control_cable: string;
-  control_device: string;
   display_order: number;
 }
 
@@ -64,16 +41,8 @@ const emptyForm: FormData = {
   min_temperature: 800,
   max_temperature: 1050,
   description: '',
-  thermocouple: '',
-  control_cable: '',
-  control_device: '',
   display_order: 0,
 };
-
-function labelFor(value: string | null, options: readonly { value: string; label: string }[]): string {
-  if (!value) return '-';
-  return options.find((o) => o.value === value)?.label || value;
-}
 
 export default function AdminTemperatureGroupsPage() {
   const qc = useQueryClient();
@@ -121,9 +90,6 @@ export default function AdminTemperatureGroupsPage() {
       min_temperature: group.min_temperature,
       max_temperature: group.max_temperature,
       description: group.description || '',
-      thermocouple: group.thermocouple || '',
-      control_cable: group.control_cable || '',
-      control_device: group.control_device || '',
       display_order: group.display_order,
     });
     setEditing(group.id);
@@ -158,7 +124,7 @@ export default function AdminTemperatureGroupsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Temperature Groups</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Manage firing temperature groups and equipment specifications
+            Manage firing temperature groups and linked recipes
           </p>
         </div>
         <Button size="sm" onClick={startNew} disabled={editing === 'new'}>
@@ -240,7 +206,7 @@ export default function AdminTemperatureGroupsPage() {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <span className="text-gray-500 text-xs block">Temperature Range</span>
                       <span className="font-medium text-gray-900">
@@ -248,21 +214,9 @@ export default function AdminTemperatureGroupsPage() {
                       </span>
                     </div>
                     <div>
-                      <span className="text-gray-500 text-xs block">Thermocouple</span>
+                      <span className="text-gray-500 text-xs block">Display Order</span>
                       <span className="font-medium text-gray-900">
-                        {labelFor(group.thermocouple, THERMOCOUPLE_OPTIONS)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500 text-xs block">Control Cable</span>
-                      <span className="font-medium text-gray-900">
-                        {labelFor(group.control_cable, CONTROL_CABLE_OPTIONS)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500 text-xs block">Control Device</span>
-                      <span className="font-medium text-gray-900">
-                        {labelFor(group.control_device, CONTROL_DEVICE_OPTIONS)}
+                        {group.display_order}
                       </span>
                     </div>
                   </div>
@@ -365,45 +319,6 @@ function GroupForm({
             onChange={(e) => setForm({ ...form, max_temperature: parseInt(e.target.value) || 0 })}
             className="w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
           />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Thermocouple</label>
-          <select
-            value={form.thermocouple}
-            onChange={(e) => setForm({ ...form, thermocouple: e.target.value })}
-            className="w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
-          >
-            {THERMOCOUPLE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Control Cable</label>
-          <select
-            value={form.control_cable}
-            onChange={(e) => setForm({ ...form, control_cable: e.target.value })}
-            className="w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
-          >
-            {CONTROL_CABLE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Control Device</label>
-          <select
-            value={form.control_device}
-            onChange={(e) => setForm({ ...form, control_device: e.target.value })}
-            className="w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
-          >
-            {CONTROL_DEVICE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
         </div>
       </div>
 

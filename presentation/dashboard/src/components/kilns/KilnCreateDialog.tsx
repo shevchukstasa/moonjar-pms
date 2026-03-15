@@ -8,6 +8,21 @@ import { Select } from '@/components/ui/Select';
 import { kilnCreateSchema, type KilnCreateFormData, KILN_TYPE_OPTIONS } from '@/types/forms';
 import { useCreateKiln } from '@/hooks/useKilns';
 
+const THERMOCOUPLE_OPTIONS = [
+  { value: '', label: '-- Not set --' },
+  { value: 'chinese', label: 'Chinese' },
+  { value: 'indonesia_manufacture', label: 'Indonesia Manufacture' },
+];
+const CONTROL_CABLE_OPTIONS = [
+  { value: '', label: '-- Not set --' },
+  { value: 'indonesia_manufacture', label: 'Indonesia Manufacture' },
+];
+const CONTROL_DEVICE_OPTIONS = [
+  { value: '', label: '-- Not set --' },
+  { value: 'oven', label: 'OVEN' },
+  { value: 'moonjar', label: 'Moonjar' },
+];
+
 const DEFAULTS: Record<string, Partial<KilnCreateFormData>> = {
   big: {
     kiln_dimensions_cm: { width: 100, depth: 100, height: 100 },
@@ -142,6 +157,28 @@ export function KilnCreateDialog({ open, onClose, factoryId }: Props) {
               <input type="checkbox" {...register('kiln_multi_level')} className="rounded border-gray-300" />
               Multi-level support
             </label>
+
+            {/* Equipment */}
+            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+              <label className="mb-2 block text-sm font-medium text-gray-700">Equipment</label>
+              <div className="grid grid-cols-3 gap-3">
+                <Select
+                  label="Thermocouple"
+                  {...register('thermocouple')}
+                  options={THERMOCOUPLE_OPTIONS}
+                />
+                <Select
+                  label="Control Cable"
+                  {...register('control_cable')}
+                  options={CONTROL_CABLE_OPTIONS}
+                />
+                <Select
+                  label="Control Device"
+                  {...register('control_device')}
+                  options={CONTROL_DEVICE_OPTIONS}
+                />
+              </div>
+            </div>
           </>
         )}
 

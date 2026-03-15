@@ -427,6 +427,10 @@ class Resource(Base):
     kiln_multi_level = Column(sa.Boolean, default=False)
     kiln_coefficient = Column(sa.Numeric(4, 2))
     kiln_type = Column(sa.String(20))
+    # Equipment installed on this kiln
+    thermocouple = Column(sa.String(50))       # "chinese" | "indonesia_manufacture"
+    control_cable = Column(sa.String(50))      # "indonesia_manufacture"
+    control_device = Column(sa.String(50))     # "oven" | "moonjar"
     is_active = Column(sa.Boolean, nullable=False, default=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
@@ -1604,10 +1608,10 @@ class FiringTemperatureGroup(Base):
     min_temperature = Column(sa.Integer, nullable=False)     # e.g. 800
     max_temperature = Column(sa.Integer, nullable=False)     # e.g. 1050
     description = Column(sa.Text)
-    # Equipment specifications
+    # Equipment specifications (DEPRECATED — equipment now lives on Resource/Kiln)
     thermocouple = Column(sa.String(50))       # "chinese" | "indonesia_manufacture"
     control_cable = Column(sa.String(50))      # "indonesia_manufacture"
-    control_device = Column(sa.String(50))     # "oven" | "self_made"
+    control_device = Column(sa.String(50))     # "oven" | "moonjar"
     is_active = Column(sa.Boolean, nullable=False, default=True)
     display_order = Column(sa.Integer, nullable=False, default=0)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())

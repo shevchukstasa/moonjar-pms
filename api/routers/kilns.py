@@ -63,12 +63,20 @@ def _serialize_kiln(resource: Resource, db: Session) -> dict:
         "num_levels": resource.num_levels,
         "capacity_sqm": float(resource.capacity_sqm) if resource.capacity_sqm else None,
         "capacity_pcs": resource.capacity_pcs,
+        "thermocouple": resource.thermocouple,
+        "control_cable": resource.control_cable,
+        "control_device": resource.control_device,
         "is_active": resource.is_active,
         "loading_rules": rules.rules if rules else None,
         "loading_rules_id": str(rules.id) if rules else None,
         "created_at": resource.created_at.isoformat() if resource.created_at else None,
         "updated_at": resource.updated_at.isoformat() if resource.updated_at else None,
     }
+
+
+VALID_THERMOCOUPLES = ["chinese", "indonesia_manufacture"]
+VALID_CONTROL_CABLES = ["indonesia_manufacture"]
+VALID_CONTROL_DEVICES = ["oven", "moonjar"]
 
 
 class KilnCreateInput(BaseModel):
@@ -81,6 +89,9 @@ class KilnCreateInput(BaseModel):
     kiln_coefficient: float = 0.8
     capacity_sqm: Optional[float] = None
     capacity_pcs: Optional[int] = None
+    thermocouple: Optional[str] = None
+    control_cable: Optional[str] = None
+    control_device: Optional[str] = None
 
 
 class KilnUpdateInput(BaseModel):
@@ -92,6 +103,9 @@ class KilnUpdateInput(BaseModel):
     kiln_coefficient: Optional[float] = None
     capacity_sqm: Optional[float] = None
     capacity_pcs: Optional[int] = None
+    thermocouple: Optional[str] = None
+    control_cable: Optional[str] = None
+    control_device: Optional[str] = None
 
 
 # --- Endpoints ---
@@ -197,6 +211,9 @@ async def create_kiln(
         kiln_coefficient=data.kiln_coefficient,
         capacity_sqm=data.capacity_sqm,
         capacity_pcs=data.capacity_pcs,
+        thermocouple=data.thermocouple or None,
+        control_cable=data.control_cable or None,
+        control_device=data.control_device or None,
         status="active",
         is_active=True,
     )
@@ -237,6 +254,12 @@ async def update_kiln(
         kiln.capacity_sqm = data.capacity_sqm
     if data.capacity_pcs is not None:
         kiln.capacity_pcs = data.capacity_pcs
+    if data.thermocouple is not None:
+        kiln.thermocouple = data.thermocouple or None
+    if data.control_cable is not None:
+        kiln.control_cable = data.control_cable or None
+    if data.control_device is not None:
+        kiln.control_device = data.control_device or None
 
     kiln.updated_at = datetime.now(timezone.utc)
     db.commit()

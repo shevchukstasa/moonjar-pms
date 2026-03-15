@@ -15,6 +15,9 @@ export interface KilnItem {
   num_levels: number;
   capacity_sqm: number | null;
   capacity_pcs: number | null;
+  thermocouple: string | null;
+  control_cable: string | null;
+  control_device: string | null;
   is_active: boolean;
   loading_rules: Record<string, unknown> | null;
   loading_rules_id: string | null;

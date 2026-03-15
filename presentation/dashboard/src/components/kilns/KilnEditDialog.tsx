@@ -9,6 +9,21 @@ import { kilnEditSchema, type KilnEditFormData, KILN_STATUS_OPTIONS } from '@/ty
 import { useUpdateKiln, useUpdateKilnStatus, useDeleteKiln, type KilnItem } from '@/hooks/useKilns';
 import { useFactories } from '@/hooks/useFactories';
 
+const THERMOCOUPLE_OPTIONS = [
+  { value: '', label: '-- Not set --' },
+  { value: 'chinese', label: 'Chinese' },
+  { value: 'indonesia_manufacture', label: 'Indonesia Manufacture' },
+];
+const CONTROL_CABLE_OPTIONS = [
+  { value: '', label: '-- Not set --' },
+  { value: 'indonesia_manufacture', label: 'Indonesia Manufacture' },
+];
+const CONTROL_DEVICE_OPTIONS = [
+  { value: '', label: '-- Not set --' },
+  { value: 'oven', label: 'OVEN' },
+  { value: 'moonjar', label: 'Moonjar' },
+];
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -60,6 +75,9 @@ export function KilnEditDialog({ open, onClose, kiln }: Props) {
         },
         kiln_multi_level: kiln.kiln_multi_level,
         kiln_coefficient: kiln.kiln_coefficient ?? 0.8,
+        thermocouple: kiln.thermocouple ?? '',
+        control_cable: kiln.control_cable ?? '',
+        control_device: kiln.control_device ?? '',
       });
       setConfirmDelete(false);
     }
@@ -168,6 +186,28 @@ export function KilnEditDialog({ open, onClose, kiln }: Props) {
           <input type="checkbox" {...register('kiln_multi_level')} className="rounded border-gray-300" />
           Multi-level support
         </label>
+
+        {/* Equipment */}
+        <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+          <label className="mb-2 block text-sm font-medium text-gray-700">Equipment</label>
+          <div className="grid grid-cols-3 gap-3">
+            <Select
+              label="Thermocouple"
+              {...register('thermocouple')}
+              options={THERMOCOUPLE_OPTIONS}
+            />
+            <Select
+              label="Control Cable"
+              {...register('control_cable')}
+              options={CONTROL_CABLE_OPTIONS}
+            />
+            <Select
+              label="Control Device"
+              {...register('control_device')}
+              options={CONTROL_DEVICE_OPTIONS}
+            />
+          </div>
+        </div>
 
         {/* Calculated levels info */}
         {kiln.kiln_multi_level && kiln.kiln_working_area_cm && (

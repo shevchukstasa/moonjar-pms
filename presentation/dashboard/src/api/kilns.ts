@@ -17,6 +17,9 @@ export interface KilnCreateData {
   kiln_coefficient?: number;
   capacity_sqm?: number;
   capacity_pcs?: number;
+  thermocouple?: string | null;
+  control_cable?: string | null;
+  control_device?: string | null;
 }
 
 export interface KilnUpdateData {
@@ -26,6 +29,9 @@ export interface KilnUpdateData {
   kiln_working_area_cm?: { width: number; depth: number; height?: number | null };
   kiln_multi_level?: boolean;
   kiln_coefficient?: number;
+  thermocouple?: string | null;
+  control_cable?: string | null;
+  control_device?: string | null;
 }
 
 export const kilnsApi = {

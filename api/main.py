@@ -448,6 +448,23 @@ def _ensure_schema():
 
     _run_section("temp_group_columns", _add_temp_group_columns)
 
+    # --- Section 2d: Add equipment columns to resources (kilns) ---
+    def _add_kiln_equipment_columns(conn):
+        cols = [
+            ("resources", "thermocouple VARCHAR(50)"),
+            ("resources", "control_cable VARCHAR(50)"),
+            ("resources", "control_device VARCHAR(50)"),
+        ]
+        for table, col_def in cols:
+            try:
+                conn.execute(text(f"""
+                    ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col_def}
+                """))
+            except Exception as e:
+                logger.warning(f"_ensure_schema: skip {table}.{col_def.split()[0]}: {e}")
+
+    _run_section("kiln_equipment_columns", _add_kiln_equipment_columns)
+
     # --- Section 3: Get factory IDs (needed for all seed sections) ---
     factory_ids = {}  # {"Bali Factory": "uuid", ...}
     try:

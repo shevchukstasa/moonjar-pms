@@ -139,6 +139,9 @@ export const kilnCreateSchema = z.object({
   kiln_multi_level: z.boolean().default(false),
   // coefficient can be > 1 for some kilns (e.g. raku with attrition)
   kiln_coefficient: z.coerce.number().min(0).max(2).default(0.8),
+  thermocouple: z.string().optional().default(''),
+  control_cable: z.string().optional().default(''),
+  control_device: z.string().optional().default(''),
 });
 export type KilnCreateFormData = z.infer<typeof kilnCreateSchema>;
 
@@ -149,5 +152,8 @@ export const kilnEditSchema = z.object({
   kiln_working_area_cm: dimensionSchema,
   kiln_multi_level: z.boolean().default(false),
   kiln_coefficient: z.coerce.number().min(0).max(2).default(0.8),
+  thermocouple: z.string().optional().default(''),
+  control_cable: z.string().optional().default(''),
+  control_device: z.string().optional().default(''),
 });
 export type KilnEditFormData = z.infer<typeof kilnEditSchema>;

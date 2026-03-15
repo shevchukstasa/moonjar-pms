@@ -12,6 +12,13 @@ import { KilnConstantsTable } from '@/components/kilns/KilnConstantsTable';
 
 const KILN_TYPE_LABELS: Record<string, string> = { big: 'Large', small: 'Small', raku: 'Raku' };
 
+const EQUIPMENT_LABELS: Record<string, string> = {
+  chinese: 'Chinese',
+  indonesia_manufacture: 'Indonesia Mfg',
+  oven: 'OVEN',
+  moonjar: 'Moonjar',
+};
+
 function formatDims(d: { width: number; depth: number; height: number } | null) {
   if (!d) return '—';
   return `${d.width} × ${d.depth} × ${d.height} cm`;
@@ -183,6 +190,17 @@ function KilnCard({
           <span className="text-gray-400">Multi-level</span>
           <span>{kiln.kiln_multi_level ? 'Yes' : 'No'}</span>
         </div>
+        {(kiln.thermocouple || kiln.control_cable || kiln.control_device) && (
+          <div className="flex justify-between">
+            <span className="text-gray-400">Equipment</span>
+            <span className="text-right text-xs">
+              {[
+                kiln.thermocouple && `TC: ${EQUIPMENT_LABELS[kiln.thermocouple] || kiln.thermocouple}`,
+                kiln.control_device && EQUIPMENT_LABELS[kiln.control_device] || kiln.control_device,
+              ].filter(Boolean).join(' · ')}
+            </span>
+          </div>
+        )}
         {kiln.capacity_sqm != null && (
           <div className="flex justify-between">
             <span className="text-gray-400">Capacity</span>

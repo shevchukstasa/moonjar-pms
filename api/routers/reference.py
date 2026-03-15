@@ -303,7 +303,7 @@ class TemperatureGroupCreate(BaseModel):
     description: Optional[str] = None
     thermocouple: Optional[str] = Field(None, description="chinese | indonesia_manufacture")
     control_cable: Optional[str] = Field(None, description="indonesia_manufacture")
-    control_device: Optional[str] = Field(None, description="oven | self_made")
+    control_device: Optional[str] = Field(None, description="oven | moonjar")
     display_order: int = Field(default=0, description="Sort order in UI")
 
 

@@ -82,6 +82,12 @@ export default function AdminRecipesPage() {
     queryFn: () => materialsApi.list({ per_page: 200 }),
   });
 
+  // Color collections for glaze recipes
+  const { data: colorCollections } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ['ref-color-collections'],
+    queryFn: () => apiClient.get('/reference/color-collections').then((r) => r.data),
+  });
+
   // Temperature groups for recipe assignment
   interface TempGroupOption { id: string; name: string; min_temperature: number; max_temperature: number; thermocouple: string | null; control_device: string | null; }
   const { data: tempGroups } = useQuery<TempGroupOption[]>({
@@ -319,7 +325,19 @@ export default function AdminRecipesPage() {
         <div className="max-h-[75vh] space-y-5 overflow-y-auto pr-1">
           <div className="grid grid-cols-3 gap-4">
             <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-            <Input label="Color Collection" value={form.color_collection} onChange={(e) => setForm({ ...form, color_collection: e.target.value })} placeholder="e.g. Collection 2025/2026" />
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Color Collection</label>
+              <select
+                value={form.color_collection}
+                onChange={(e) => setForm({ ...form, color_collection: e.target.value })}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">— None —</option>
+                {(colorCollections ?? []).map((cc) => (
+                  <option key={cc.id} value={cc.name}>{cc.name}</option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Recipe Type</label>
               <select

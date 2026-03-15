@@ -1306,6 +1306,32 @@ def _ensure_schema():
 
     _run_section("recipe_is_default_engobes", _add_recipe_is_default_and_engobes)
 
+    # --- Section 17: Create color_collections table ---
+    def _create_color_collections_table(conn):
+        """Create separate color_collections table for glaze recipes."""
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS color_collections (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(100) NOT NULL UNIQUE,
+                description VARCHAR(255),
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """))
+        # Seed from existing distinct recipe.color_collection values
+        conn.execute(text("""
+            INSERT INTO color_collections (id, name)
+            SELECT gen_random_uuid(), rc.color_collection
+            FROM (
+                SELECT DISTINCT color_collection
+                FROM recipes
+                WHERE color_collection IS NOT NULL AND color_collection != ''
+            ) rc
+            ON CONFLICT (name) DO NOTHING;
+        """))
+
+    _run_section("create_color_collections_table", _create_color_collections_table)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""

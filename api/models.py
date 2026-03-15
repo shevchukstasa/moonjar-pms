@@ -133,10 +133,22 @@ class SupplierLeadTime(Base):
 
 
 class Collection(Base):
+    """Product collections (for finished tiles/products)."""
     __tablename__ = 'collections'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(sa.String(100), unique=True, nullable=False)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+
+class ColorCollection(Base):
+    """Color collections (for glaze recipes). Separate from product Collections."""
+    __tablename__ = 'color_collections'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(sa.String(100), unique=True, nullable=False)
+    description = Column(sa.String(255))
+    is_active = Column(sa.Boolean, nullable=False, server_default=sa.text("true"))
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 

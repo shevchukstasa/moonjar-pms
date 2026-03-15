@@ -23,6 +23,7 @@ import AdminPanelPage from '@/pages/AdminPanelPage';
 import AdminRecipesPage from '@/pages/AdminRecipesPage';
 import AdminSuppliersPage from '@/pages/AdminSuppliersPage';
 import AdminCollectionsPage from '@/pages/AdminCollectionsPage';
+import AdminColorCollectionsPage from '@/pages/AdminColorCollectionsPage';
 import AdminColorsPage from '@/pages/AdminColorsPage';
 import AdminAppTypesPage from '@/pages/AdminAppTypesPage';
 import AdminPoaPage from '@/pages/AdminPoaPage';
@@ -94,6 +95,7 @@ export default function App() {
           <Route path="/admin/recipes" element={<AdminRecipesPage />} />
           <Route path="/admin/suppliers" element={<AdminSuppliersPage />} />
           <Route path="/admin/collections" element={<AdminCollectionsPage />} />
+          <Route path="/admin/color-collections" element={<AdminColorCollectionsPage />} />
           <Route path="/admin/colors" element={<AdminColorsPage />} />
           <Route path="/admin/application-types" element={<AdminAppTypesPage />} />
           <Route path="/admin/places-of-application" element={<AdminPoaPage />} />

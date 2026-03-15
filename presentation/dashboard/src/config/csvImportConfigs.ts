@@ -17,6 +17,15 @@ export const CSV_CONFIGS: Record<string, CsvImportConfig> = {
     ],
   },
 
+  color_collections: {
+    entityName: 'color_collections',
+    entityLabel: 'Color Collections',
+    columns: [
+      { key: 'name', header: 'name', required: true, type: 'string', example: 'Season 2025/2026' },
+      { key: 'description', header: 'description', required: false, type: 'string', example: 'Spring-Summer palette' },
+    ],
+  },
+
   colors: {
     entityName: 'colors',
     entityLabel: 'Colors',

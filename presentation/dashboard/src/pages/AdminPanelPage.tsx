@@ -376,6 +376,9 @@ export default function AdminPanelPage() {
           <Button variant="secondary" onClick={() => navigate('/admin/collections')}>
             Collections &rarr;
           </Button>
+          <Button variant="secondary" onClick={() => navigate('/admin/color-collections')}>
+            Color Collections &rarr;
+          </Button>
           <Button variant="secondary" onClick={() => navigate('/admin/colors')}>
             Colors &rarr;
           </Button>

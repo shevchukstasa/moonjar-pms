@@ -13,7 +13,7 @@ from api.roles import require_management
 from api.models import (
     Material, OrderPosition, Recipe, ShapeConsumptionCoefficient,
     FiringTemperatureGroup, FiringTemperatureGroupRecipe,
-    Collection, Color, ApplicationType, PlacesOfApplication, FinishingType,
+    Collection, ColorCollection, Color, ApplicationType, PlacesOfApplication, FinishingType,
     Supplier, Size, WarehouseSection,
 )
 from api.enums import (
@@ -232,6 +232,13 @@ async def list_all_reference_data(
     pos_cols = db.query(OrderPosition.collection).filter(OrderPosition.collection.isnot(None)).distinct().all()
     all_cols = sorted({r[0] for r in recipe_cols} | {r[0] for r in pos_cols})
     result["collections"] = [{"value": c, "label": c} for c in all_cols]
+
+    # Color collections (for glaze recipes — separate from product collections)
+    cc_rows = db.query(ColorCollection).filter(ColorCollection.is_active.is_(True)).order_by(ColorCollection.name).all()
+    result["color_collections"] = [
+        {"id": str(cc.id), "value": cc.name, "label": cc.name}
+        for cc in cc_rows
+    ]
 
     # Shape consumption coefficients
     coeff_rows = db.query(ShapeConsumptionCoefficient).order_by(
@@ -605,6 +612,73 @@ async def delete_collection(item_id: str, db: Session = Depends(get_db), current
     return {"detail": "Deleted"}
 
 
+# ─── Color Collections CRUD (for glaze recipes) ─────────────────────────
+
+class ColorCollectionCreate(BaseModel):
+    name: str = Field(..., max_length=100)
+    description: Optional[str] = Field(None, max_length=255)
+
+class ColorCollectionUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@router.get("/color-collections")
+async def list_color_collections(
+    include_inactive: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return all color collections (for glaze recipes)."""
+    query = db.query(ColorCollection)
+    if not include_inactive:
+        query = query.filter(ColorCollection.is_active.is_(True))
+    rows = query.order_by(ColorCollection.name).all()
+    return [
+        {"id": str(r.id), "name": r.name, "description": r.description, "is_active": r.is_active, "created_at": r.created_at.isoformat() if r.created_at else None}
+        for r in rows
+    ]
+
+
+@router.post("/color-collections", status_code=201)
+async def create_color_collection(body: ColorCollectionCreate, db: Session = Depends(get_db), current_user=Depends(require_management)):
+    existing = db.query(ColorCollection).filter(ColorCollection.name == body.name).first()
+    if existing:
+        raise HTTPException(409, f"Color collection '{body.name}' already exists")
+    item = ColorCollection(id=uuid_mod.uuid4(), name=body.name, description=body.description)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {"id": str(item.id), "name": item.name, "description": item.description, "is_active": item.is_active, "created_at": item.created_at.isoformat() if item.created_at else None}
+
+
+@router.put("/color-collections/{item_id}")
+async def update_color_collection(item_id: str, body: ColorCollectionUpdate, db: Session = Depends(get_db), current_user=Depends(require_management)):
+    item = db.query(ColorCollection).filter(ColorCollection.id == uuid_mod.UUID(item_id)).first()
+    if not item:
+        raise HTTPException(404, "Color collection not found")
+    if body.name is not None:
+        item.name = body.name
+    if body.description is not None:
+        item.description = body.description
+    if body.is_active is not None:
+        item.is_active = body.is_active
+    db.commit()
+    db.refresh(item)
+    return {"id": str(item.id), "name": item.name, "description": item.description, "is_active": item.is_active, "created_at": item.created_at.isoformat() if item.created_at else None}
+
+
+@router.delete("/color-collections/{item_id}")
+async def delete_color_collection(item_id: str, db: Session = Depends(get_db), current_user=Depends(require_management)):
+    item = db.query(ColorCollection).filter(ColorCollection.id == uuid_mod.UUID(item_id)).first()
+    if not item:
+        raise HTTPException(404, "Color collection not found")
+    db.delete(item)
+    db.commit()
+    return {"detail": "Deleted"}
+
+
 # ─── Colors CRUD ─────────────────────────────────────────────────────────
 
 class ColorCreate(BaseModel):
@@ -837,6 +911,7 @@ class BulkImportRequest(BaseModel):
 # Config map: entity key → { model, unique fields, allowed fields, type coercions }
 _BULK_ENTITY_CONFIG: dict = {
     "collections":           {"model": Collection,        "unique": ["name"],  "fields": {"name": str}},
+    "color_collections":     {"model": ColorCollection,   "unique": ["name"],  "fields": {"name": str, "description": str}},
     "colors":                {"model": Color,             "unique": ["name"],  "fields": {"name": str, "code": str, "is_basic": bool}},
     "application_types":     {"model": ApplicationType,   "unique": ["name"],  "fields": {"name": str}},
     "places_of_application": {"model": PlacesOfApplication, "unique": ["code"], "fields": {"code": str, "name": str}},

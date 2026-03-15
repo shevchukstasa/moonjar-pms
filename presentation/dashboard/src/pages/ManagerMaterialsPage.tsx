@@ -21,6 +21,7 @@ const UNIT_OPTIONS = [
   { value: 'kg',  label: 'kg' },
   { value: 'g',   label: 'g' },
   { value: 'l',   label: 'L' },
+  { value: 'ml',  label: 'ml' },
   { value: 'pcs', label: 'pcs' },
   { value: 'm',   label: 'm' },
   { value: 'm2',  label: 'm\u00B2' },

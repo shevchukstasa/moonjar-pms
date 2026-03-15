@@ -9,6 +9,7 @@ interface User {
   role: string;
   language?: string;
   is_active?: boolean;
+  telegram_user_id?: number | null;
   factories?: FactoryBrief[];
 }
 

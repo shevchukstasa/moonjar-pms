@@ -368,6 +368,30 @@ def _ensure_schema():
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
+        # Position photos — received via Telegram bot
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS position_photos (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                position_id UUID REFERENCES order_positions(id),
+                factory_id UUID NOT NULL REFERENCES factories(id),
+                telegram_file_id VARCHAR(200) NOT NULL,
+                telegram_chat_id BIGINT,
+                uploaded_by_telegram_id BIGINT,
+                uploaded_by_user_id UUID REFERENCES users(id),
+                photo_type VARCHAR(30),
+                caption TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        # System settings (key-value for Telegram owner chat, etc.)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                key VARCHAR(100) NOT NULL UNIQUE,
+                value TEXT,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
 
     _run_section("tables", _create_tables)
 
@@ -862,6 +886,20 @@ async def lifespan(app: FastAPI):
     # Start background scheduler
     from api.scheduler import setup_scheduler
     sched = setup_scheduler()
+
+    # Auto-register Telegram webhook on startup
+    if settings.TELEGRAM_BOT_TOKEN and settings.api_base_url:
+        webhook_url = f"{settings.api_base_url}/api/telegram/webhook"
+        try:
+            from business.services.telegram_bot import set_webhook
+            set_webhook(webhook_url)
+        except Exception as e:
+            logger.warning(f"Telegram webhook setup failed: {e}")
+    elif settings.TELEGRAM_BOT_TOKEN:
+        logger.info(
+            "Telegram bot token configured but no API_BASE_URL / RAILWAY_PUBLIC_DOMAIN set — "
+            "webhook not registered automatically. Set API_BASE_URL to enable."
+        )
 
     yield
 

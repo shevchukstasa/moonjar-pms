@@ -66,6 +66,66 @@ async def get_bot_status(current_user=Depends(require_admin)):
         return {"connected": False, "error": "Failed to check bot status"}
 
 
+class OwnerChatRequest(BaseModel):
+    chat_id: str
+
+    @field_validator('chat_id')
+    @classmethod
+    def validate_chat_id(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError('chat_id is required')
+        if not v.lstrip('-').isdigit():
+            raise ValueError('chat_id must be numeric (e.g. -1001234567890)')
+        return v
+
+
+@router.get("/owner-chat")
+async def get_owner_chat(
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Get the current owner/admin Telegram chat ID."""
+    from api.models import SystemSetting
+    setting = db.query(SystemSetting).filter(
+        SystemSetting.key == "telegram_owner_chat_id"
+    ).first()
+    db_value = setting.value if setting else None
+
+    # Fallback to env var
+    env_value = get_settings().TELEGRAM_OWNER_CHAT_ID or None
+
+    return {
+        "chat_id": db_value or env_value,
+        "source": "database" if db_value else ("environment" if env_value else "not_set"),
+    }
+
+
+@router.put("/owner-chat")
+async def set_owner_chat(
+    data: OwnerChatRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Set the owner/admin Telegram chat ID (stored in database)."""
+    from api.models import SystemSetting
+
+    setting = db.query(SystemSetting).filter(
+        SystemSetting.key == "telegram_owner_chat_id"
+    ).first()
+
+    if setting:
+        setting.value = data.chat_id
+    else:
+        setting = SystemSetting(key="telegram_owner_chat_id", value=data.chat_id)
+        db.add(setting)
+
+    db.commit()
+    logger.info(f"Owner chat ID set to {data.chat_id} by {current_user.email}")
+
+    return {"success": True, "chat_id": data.chat_id}
+
+
 class TestChatRequest(BaseModel):
     chat_id: str
 
@@ -126,23 +186,90 @@ async def test_chat(
 
 
 # ────────────────────────────────────────────────────────────────
-# Webhook & subscriptions (to be implemented)
+# Webhook (NO auth — Telegram sends updates directly)
 # ────────────────────────────────────────────────────────────────
 
 @router.post("/webhook")
 async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
-    # TODO: Process Telegram bot updates — see API_CONTRACTS §18
-    raise HTTPException(501, "Not implemented")
+    """
+    Telegram webhook endpoint.
+    Receives Update JSON from Telegram, dispatches to bot handler.
+    Must always return 200 OK (Telegram retries on non-200).
+    No authentication — Telegram sends raw POST requests.
+    """
+    from fastapi.responses import JSONResponse
+
+    try:
+        body = await request.json()
+    except Exception:
+        logger.warning("Telegram webhook: invalid JSON body")
+        return JSONResponse({"ok": True})
+
+    # Dispatch to bot handler (fire-and-forget style, but we await to catch errors)
+    try:
+        from business.services.telegram_bot import handle_update
+        await handle_update(db, body)
+    except Exception as e:
+        # Never crash — Telegram will retry endlessly on non-200
+        logger.error(f"Telegram webhook handler error: {e}", exc_info=True)
+
+    return JSONResponse({"ok": True})
+
+
+# ────────────────────────────────────────────────────────────────
+# Subscribe / Unsubscribe (authenticated PMS endpoints)
+# ────────────────────────────────────────────────────────────────
+
+class SubscribeRequest(BaseModel):
+    telegram_user_id: int
+
+    @field_validator('telegram_user_id')
+    @classmethod
+    def validate_telegram_user_id(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError('telegram_user_id must be a positive integer')
+        return v
 
 
 @router.post("/subscribe")
 async def telegram_subscribe(
-    request: Request,
+    data: SubscribeRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    # TODO: Subscribe user to Telegram notifications — see API_CONTRACTS §18
-    raise HTTPException(501, "Not implemented")
+    """
+    Link a Telegram user ID to the authenticated PMS user.
+    Called from the PMS frontend settings page.
+    """
+    from api.models import User
+
+    # Check if this telegram_user_id is already linked to another user
+    existing = (
+        db.query(User)
+        .filter(
+            User.telegram_user_id == data.telegram_user_id,
+            User.id != current_user.id,
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            409,
+            "This Telegram account is already linked to another PMS user.",
+        )
+
+    current_user.telegram_user_id = data.telegram_user_id
+    db.commit()
+
+    logger.info(
+        f"User {current_user.email} subscribed Telegram ID {data.telegram_user_id}"
+    )
+
+    return {
+        "success": True,
+        "telegram_user_id": data.telegram_user_id,
+        "message": "Telegram account linked successfully.",
+    }
 
 
 @router.delete("/unsubscribe")
@@ -150,5 +277,23 @@ async def telegram_unsubscribe(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    # TODO: Unsubscribe from Telegram — see API_CONTRACTS §18
-    raise HTTPException(501, "Not implemented")
+    """
+    Unlink Telegram from the authenticated PMS user.
+    Clears telegram_user_id.
+    """
+    old_id = current_user.telegram_user_id
+    if not old_id:
+        return {
+            "success": True,
+            "message": "No Telegram account was linked.",
+        }
+
+    current_user.telegram_user_id = None
+    db.commit()
+
+    logger.info(f"User {current_user.email} unsubscribed Telegram ID {old_id}")
+
+    return {
+        "success": True,
+        "message": "Telegram account unlinked successfully.",
+    }

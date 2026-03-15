@@ -37,7 +37,7 @@ from api.enums import (
     TaskType,
     TaskStatus,
 )
-from business.services.notifications import send_telegram_message
+from business.services.notifications import send_telegram_message, send_telegram_message_with_buttons
 
 logger = logging.getLogger("moonjar.daily_distribution")
 
@@ -118,15 +118,37 @@ def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
     # --- Persist to daily_task_distributions ---
     _save_distribution_record(db, factory_id, tomorrow, distribution)
 
-    # --- Send Telegram message ---
+    # --- Send Telegram message with inline buttons ---
     language = factory.telegram_language or "id"
     if factory.masters_group_chat_id:
         message = format_daily_message(distribution, language)
+        chat_id = str(factory.masters_group_chat_id)
+        date_str = tomorrow.isoformat()
+        fid = str(factory_id)
+
+        # Compact callback_data (must be <= 64 bytes):
+        #   d:a:{factory_id}:{date}  — acknowledge
+        #   d:p:{factory_id}:{date}  — report problem
+        #   d:d:{factory_id}:{date}  — show detail
+        # Use short UUID (first 8 chars) to save bytes
+        fid_short = fid[:8]
+        inline_keyboard = [
+            [{"text": "\u2705 Terima tugas", "callback_data": f"d:a:{fid_short}:{date_str}"}],
+            [{"text": "\u26a0\ufe0f Laporkan masalah", "callback_data": f"d:p:{fid_short}:{date_str}"}],
+            [{"text": "\U0001f4cb Detail tugas", "callback_data": f"d:d:{fid_short}:{date_str}"}],
+        ]
+
         try:
-            send_telegram_message(str(factory.masters_group_chat_id), message)
+            result = send_telegram_message_with_buttons(chat_id, message, inline_keyboard)
+            telegram_message_id = None
+            if result:
+                telegram_message_id = result.get("message_id")
+            # Store message_id on the distribution record
+            if telegram_message_id:
+                _update_distribution_message_id(db, factory_id, tomorrow, telegram_message_id)
             logger.info(
-                "Daily distribution sent to factory %s (chat %s)",
-                factory.name, factory.masters_group_chat_id,
+                "Daily distribution sent to factory %s (chat %s, msg_id=%s)",
+                factory.name, factory.masters_group_chat_id, telegram_message_id,
             )
         except Exception as e:
             logger.error(
@@ -645,6 +667,26 @@ def _save_distribution_record(
     except Exception as e:
         logger.error("Failed to save distribution record: %s", e)
         db.rollback()
+
+
+def _update_distribution_message_id(
+    db: Session,
+    factory_id: UUID,
+    distribution_date: date,
+    message_id: int,
+) -> None:
+    """Store the Telegram message_id on the distribution record for future edits."""
+    record = db.query(DailyTaskDistribution).filter(
+        DailyTaskDistribution.factory_id == factory_id,
+        DailyTaskDistribution.distribution_date == distribution_date,
+    ).first()
+    if record:
+        record.message_id = message_id
+        try:
+            db.commit()
+        except Exception as e:
+            logger.error("Failed to update distribution message_id: %s", e)
+            db.rollback()
 
 
 # ────────────────────────────────────────────────────────────────

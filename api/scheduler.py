@@ -584,11 +584,29 @@ def _finish_backup_log(
         db.close()
 
 
+def _get_owner_chat_id() -> str:
+    """Get owner chat ID — database first, then env var fallback."""
+    import os
+    try:
+        from api.database import SessionLocal
+        from api.models import SystemSetting
+        db = SessionLocal()
+        try:
+            s = db.query(SystemSetting).filter(SystemSetting.key == "telegram_owner_chat_id").first()
+            if s and s.value:
+                return s.value
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return os.getenv("TELEGRAM_OWNER_CHAT_ID", "")
+
+
 def _send_backup_telegram_alert(message: str):
     """Send backup failure alert to Telegram owner chat (fire-and-forget)."""
     import os
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.getenv("TELEGRAM_OWNER_CHAT_ID", "")
+    chat_id = _get_owner_chat_id()
     if not token or not chat_id:
         return
     try:

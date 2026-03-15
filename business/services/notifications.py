@@ -207,10 +207,13 @@ def _maybe_push_telegram(
         send_telegram_message(str(user.telegram_user_id), text)
 
 
-def send_telegram_message(chat_id: str, text: str) -> None:
+def send_telegram_message(chat_id: str, text: str) -> dict | None:
     """
     Send message via Telegram Bot API.
     Uses TELEGRAM_BOT_TOKEN from config (cached via lru_cache).
+
+    Returns the Telegram API response dict on success (contains message_id),
+    or None on failure.
     """
     import httpx
     from api.config import get_settings
@@ -218,7 +221,7 @@ def send_telegram_message(chat_id: str, text: str) -> None:
     token = get_settings().TELEGRAM_BOT_TOKEN
     if not token:
         logger.debug("TELEGRAM_BOT_TOKEN not set, skipping Telegram message")
-        return
+        return None
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
@@ -233,5 +236,130 @@ def send_telegram_message(chat_id: str, text: str) -> None:
         )
         if resp.status_code != 200:
             logger.warning(f"Telegram API returned {resp.status_code}: {resp.text[:200]}")
+            return None
+        data = resp.json()
+        if data.get("ok"):
+            return data.get("result")
+        return None
     except Exception as e:
         logger.warning(f"Telegram send failed: {e}")
+        return None
+
+
+def send_telegram_message_with_buttons(
+    chat_id: str,
+    text: str,
+    inline_keyboard: list[list[dict]],
+) -> dict | None:
+    """Send Telegram message with inline keyboard buttons.
+
+    Args:
+        chat_id: Telegram chat ID (group or private).
+        text: Message text (Markdown formatted).
+        inline_keyboard: Button rows, each row is a list of button dicts.
+            Format: [[{"text": "Label", "callback_data": "action:data"}]]
+
+    Returns:
+        Telegram API response dict (contains message_id) on success, or None on failure.
+    """
+    import httpx
+    from api.config import get_settings
+
+    token = get_settings().TELEGRAM_BOT_TOKEN
+    if not token:
+        logger.debug("TELEGRAM_BOT_TOKEN not set, skipping Telegram message")
+        return None
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        resp = httpx.post(
+            url,
+            json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "Markdown",
+                "reply_markup": {"inline_keyboard": inline_keyboard},
+            },
+            timeout=10.0,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"Telegram API returned {resp.status_code}: {resp.text[:200]}")
+            return None
+        data = resp.json()
+        if data.get("ok"):
+            return data.get("result")
+        return None
+    except Exception as e:
+        logger.warning(f"Telegram send with buttons failed: {e}")
+        return None
+
+
+def answer_callback_query(callback_query_id: str, text: str, show_alert: bool = False) -> bool:
+    """Answer a Telegram callback query (button press acknowledgment).
+
+    Args:
+        callback_query_id: The callback_query.id from the update.
+        text: Short text to show to the user (toast or alert).
+        show_alert: If True, show as a modal alert instead of a toast.
+
+    Returns:
+        True on success, False on failure.
+    """
+    import httpx
+    from api.config import get_settings
+
+    token = get_settings().TELEGRAM_BOT_TOKEN
+    if not token:
+        return False
+
+    url = f"https://api.telegram.org/bot{token}/answerCallbackQuery"
+    try:
+        resp = httpx.post(
+            url,
+            json={
+                "callback_query_id": callback_query_id,
+                "text": text,
+                "show_alert": show_alert,
+            },
+            timeout=10.0,
+        )
+        return resp.status_code == 200
+    except Exception as e:
+        logger.warning(f"answerCallbackQuery failed: {e}")
+        return False
+
+
+def edit_telegram_message_buttons(
+    chat_id: str,
+    message_id: int,
+    inline_keyboard: list[list[dict]] | None = None,
+) -> bool:
+    """Edit inline keyboard on an existing message (e.g., to disable buttons after press).
+
+    Pass inline_keyboard=None or empty list to remove all buttons.
+
+    Returns True on success.
+    """
+    import httpx
+    from api.config import get_settings
+
+    token = get_settings().TELEGRAM_BOT_TOKEN
+    if not token:
+        return False
+
+    url = f"https://api.telegram.org/bot{token}/editMessageReplyMarkup"
+    reply_markup = {"inline_keyboard": inline_keyboard or []}
+    try:
+        resp = httpx.post(
+            url,
+            json={
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "reply_markup": reply_markup,
+            },
+            timeout=10.0,
+        )
+        return resp.status_code == 200
+    except Exception as e:
+        logger.warning(f"editMessageReplyMarkup failed: {e}")
+        return False

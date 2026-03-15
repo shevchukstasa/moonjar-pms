@@ -27,6 +27,7 @@ import AdminColorsPage from '@/pages/AdminColorsPage';
 import AdminAppTypesPage from '@/pages/AdminAppTypesPage';
 import AdminPoaPage from '@/pages/AdminPoaPage';
 import AdminFinishingPage from '@/pages/AdminFinishingPage';
+import SettingsPage from '@/pages/SettingsPage';
 import AppLayout from '@/components/layout/AppLayout';
 import { Spinner } from '@/components/ui/Spinner';
 
@@ -104,6 +105,7 @@ export default function App() {
           <Route path="/manager/materials" element={<ManagerMaterialsPage />} />
           <Route path="/manager/shortage/:taskId" element={<ShortageDecisionPage />} />
         </Route>
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="/tablo" element={<TabloDashboard />} />
         <Route element={<RequireRole roles={['quality_manager', 'owner', 'administrator']} />}>
           <Route path="/quality" element={<QualityManagerDashboard />} />

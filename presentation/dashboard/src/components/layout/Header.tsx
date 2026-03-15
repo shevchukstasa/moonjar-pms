@@ -21,7 +21,7 @@ export function Header() {
       <div />
       <div className="flex items-center gap-4">
         <button className="relative rounded-full p-2 text-gray-400 hover:bg-gray-100" aria-label="Notifications"><Bell size={20} /></button>
-        {user && <DropdownMenu trigger={<Avatar name={user.name} className="cursor-pointer" />} items={[{ label: user.name, onClick: () => {} }, { label: 'Logout', onClick: handleLogout }]} />}
+        {user && <DropdownMenu trigger={<Avatar name={user.name} className="cursor-pointer" />} items={[{ label: user.name, onClick: () => {} }, { label: 'Settings', onClick: () => navigate('/settings') }, { label: 'Logout', onClick: handleLogout }]} />}
       </div>
     </header>
   );

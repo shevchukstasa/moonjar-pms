@@ -287,8 +287,12 @@ def _send_realtime_alerts(
             notify_pm(db, factory_id, "qm_block", title, msg,
                       related_entity_type="order_position",
                       related_entity_id=position.id)
-            # Also send to factory's masters chat
-            _send_to_factory_chat(db, factory_id, f"⛔ *QM BLOCK*\n{msg}")
+            # Also send to factory's masters chat with action button
+            pid_short = str(position.id)[:8]
+            qm_buttons = [
+                [{"text": "\U0001f50d Lihat detail", "callback_data": f"a:v:{pid_short}"}],
+            ]
+            _send_to_factory_chat(db, factory_id, f"⛔ *QM BLOCK*\n{msg}", inline_keyboard=qm_buttons)
             _logger.info("REALTIME_ALERT | qm_block | order=%s pos=%s", order_num, pos_label)
 
         # 2. Refire needed — significant delay
@@ -352,15 +356,28 @@ def _send_realtime_alerts(
         )
 
 
-def _send_to_factory_chat(db: Session, factory_id: UUID, text: str) -> None:
-    """Send message to factory's masters group chat (best-effort)."""
+def _send_to_factory_chat(
+    db: Session,
+    factory_id: UUID,
+    text: str,
+    inline_keyboard: list[list[dict]] | None = None,
+) -> None:
+    """Send message to factory's masters group chat (best-effort).
+
+    If inline_keyboard is provided, sends with inline buttons.
+    """
     try:
         from api.models import Factory
-        from business.services.notifications import send_telegram_message
 
         factory = db.query(Factory).get(factory_id)
         if factory and factory.masters_group_chat_id:
-            send_telegram_message(str(factory.masters_group_chat_id), text)
+            chat_id = str(factory.masters_group_chat_id)
+            if inline_keyboard:
+                from business.services.notifications import send_telegram_message_with_buttons
+                send_telegram_message_with_buttons(chat_id, text, inline_keyboard)
+            else:
+                from business.services.notifications import send_telegram_message
+                send_telegram_message(chat_id, text)
     except Exception:
         pass
 

@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFactories, type Factory } from '@/hooks/useFactories';
 import { useUsers } from '@/hooks/useUsers';
-import { useBotStatus } from '@/hooks/useTelegramBot';
+import { useBotStatus, useTestChat } from '@/hooks/useTelegramBot';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DataTable } from '@/components/ui/Table';
@@ -18,12 +19,45 @@ import apiClient from '@/api/client';
 
 export default function AdminPanelPage() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data: factoriesData, isLoading: factoriesLoading, isError: factoriesError } = useFactories();
   const { data: usersData, isLoading: usersLoading, isError: usersError } = useUsers({ per_page: 1 });
   const { data: botStatus, isLoading: botLoading, isError: botError } = useBotStatus();
+  const testChat = useTestChat();
   const [factoryDialogOpen, setFactoryDialogOpen] = useState(false);
   const [editFactory, setEditFactory] = useState<Factory | null>(null);
   const [securityTab, setSecurityTab] = useState('audit');
+
+  // Owner chat ID management
+  const { data: ownerChatData } = useQuery<{ chat_id: string | null; source: string }>({
+    queryKey: ['telegram', 'owner-chat'],
+    queryFn: () => apiClient.get('/telegram/owner-chat').then((r) => r.data),
+  });
+  const [ownerChatInput, setOwnerChatInput] = useState('');
+  const [ownerChatMsg, setOwnerChatMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    if (ownerChatData?.chat_id) setOwnerChatInput(ownerChatData.chat_id);
+  }, [ownerChatData]);
+
+  const saveOwnerChat = useMutation({
+    mutationFn: (chatId: string) => apiClient.put('/telegram/owner-chat', { chat_id: chatId }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['telegram'] });
+      setOwnerChatMsg({ ok: true, text: 'Saved!' });
+    },
+    onError: () => setOwnerChatMsg({ ok: false, text: 'Failed to save' }),
+  });
+
+  const testOwnerChat = async () => {
+    if (!ownerChatInput.trim()) return;
+    setOwnerChatMsg(null);
+    try {
+      const res = await testChat.mutateAsync(ownerChatInput.trim());
+      setOwnerChatMsg(res.success
+        ? { ok: true, text: `Connected: ${res.chat_title || 'OK'}` }
+        : { ok: false, text: res.error || 'Test failed' });
+    } catch { setOwnerChatMsg({ ok: false, text: 'Test failed' }); }
+  };
 
   const factories = factoriesData?.items || [];
   const totalUsers = usersData?.total ?? 0;
@@ -170,14 +204,30 @@ export default function AdminPanelPage() {
                 {botStatus.bot_name && (
                   <p className="text-xs text-gray-500">{botStatus.bot_name}</p>
                 )}
-                <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                  <span>Owner chat:</span>
-                  {botStatus.owner_chat_configured ? (
-                    <span className="text-green-600">configured ✓</span>
-                  ) : (
-                    <span className="text-amber-600">not set</span>
-                  )}
+                {/* Owner Chat ID — editable */}
+                <div className="mt-2 flex items-center gap-2">
+                  <label className="text-xs text-gray-500 whitespace-nowrap">Owner chat:</label>
+                  <input
+                    type="text"
+                    value={ownerChatInput}
+                    onChange={(e) => { setOwnerChatInput(e.target.value); setOwnerChatMsg(null); }}
+                    placeholder="-1001234567890"
+                    className="w-44 rounded border border-gray-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none"
+                  />
+                  <Button
+                    type="button" variant="secondary" size="sm"
+                    disabled={!ownerChatInput.trim() || testChat.isPending}
+                    onClick={testOwnerChat}
+                  >Test</Button>
+                  <Button
+                    type="button" size="sm"
+                    disabled={!ownerChatInput.trim() || saveOwnerChat.isPending}
+                    onClick={() => saveOwnerChat.mutate(ownerChatInput.trim())}
+                  >Save</Button>
                 </div>
+                {ownerChatMsg && (
+                  <p className={`mt-1 text-xs ${ownerChatMsg.ok ? 'text-green-600' : 'text-red-500'}`}>{ownerChatMsg.text}</p>
+                )}
               </div>
             ) : (
               <div className="mt-2 space-y-1">

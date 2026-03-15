@@ -294,14 +294,19 @@ async def update_kiln_status(
                 notify_pm(db, factory_id, "kiln_breakdown", alert_title, alert_msg,
                           related_entity_type="resource",
                           related_entity_id=kiln_id)
-                # Also send to masters chat
+                # Also send to masters chat with reschedule button
                 from api.models import Factory
                 factory = db.query(Factory).get(factory_id)
                 if factory and factory.masters_group_chat_id:
-                    from business.services.notifications import send_telegram_message
-                    send_telegram_message(
+                    kid_short = str(kiln_id)[:8]
+                    kiln_buttons = [
+                        [{"text": "\U0001f4c5 Jadwal ulang", "callback_data": f"a:r:{kid_short}"}],
+                    ]
+                    from business.services.notifications import send_telegram_message_with_buttons
+                    send_telegram_message_with_buttons(
                         str(factory.masters_group_chat_id),
-                        f"🔥 *PERINGATAN KILN*\n{alert_msg}"
+                        f"🔥 *PERINGATAN KILN*\n{alert_msg}",
+                        kiln_buttons,
                     )
         except Exception as e:
             import logging

@@ -55,6 +55,21 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_OWNER_CHAT_ID: str = ""
 
+    # Public API URL (for Telegram webhook registration, etc.)
+    # Auto-detected from RAILWAY_PUBLIC_DOMAIN if not set explicitly.
+    API_BASE_URL: str = ""
+
+    @property
+    def api_base_url(self) -> str:
+        """Resolve API base URL from explicit config or Railway domain."""
+        if self.API_BASE_URL:
+            return self.API_BASE_URL.rstrip("/")
+        # Railway auto-provides this env var
+        railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+        if railway_domain:
+            return f"https://{railway_domain}"
+        return ""
+
     # Sales integration
     SALES_APP_URL: str = ""
     SALES_APP_API_KEY: str = ""

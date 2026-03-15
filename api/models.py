@@ -1659,3 +1659,34 @@ class KilnMaintenanceType(Base):
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
+
+# ─── Telegram Position Photos ────────────────────────────────
+
+class PositionPhoto(Base):
+    """Photos received via Telegram bot for production documentation."""
+    __tablename__ = 'position_photos'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id'), nullable=True)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    telegram_file_id = Column(sa.String(200), nullable=False)
+    telegram_chat_id = Column(sa.BigInteger)
+    uploaded_by_telegram_id = Column(sa.BigInteger)
+    uploaded_by_user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    photo_type = Column(sa.String(30))  # glazing, firing, defect, packing, other
+    caption = Column(sa.Text)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    position = relationship('OrderPosition', foreign_keys=[position_id])
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    uploaded_by = relationship('User', foreign_keys=[uploaded_by_user_id])
+
+
+class SystemSetting(Base):
+    """Key-value store for system-wide settings (e.g. Telegram owner chat ID)."""
+    __tablename__ = 'system_settings'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    key = Column(sa.String(100), nullable=False, unique=True)
+    value = Column(sa.Text)
+    updated_at = Column(sa.DateTime(timezone=True), server_default=sa.func.now())

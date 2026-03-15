@@ -14,7 +14,6 @@ import { FactoryDialog } from '@/components/admin/FactoryDialog';
 import { AuditLogViewer } from '@/components/admin/AuditLogViewer';
 import { ActiveSessionsViewer } from '@/components/admin/ActiveSessionsViewer';
 import { StubsToggle } from '@/components/admin/StubsToggle';
-import { MaterialDeduplication } from '@/components/admin/MaterialDeduplication';
 import { Trash2 } from 'lucide-react';
 import apiClient from '@/api/client';
 
@@ -392,11 +391,11 @@ export default function AdminPanelPage() {
           <Button variant="secondary" onClick={() => navigate('/admin/temperature-groups')}>
             Temperature Groups &rarr;
           </Button>
+          <Button variant="secondary" onClick={() => navigate('/admin/materials')}>
+            Materials &rarr;
+          </Button>
         </div>
       </Card>
-
-      {/* Material Deduplication */}
-      <MaterialDeduplication />
 
       {/* PM Cleanup Permissions */}
       <AdminCleanupCard factories={factories} />

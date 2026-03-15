@@ -4,8 +4,8 @@ import { useUiStore } from '@/stores/uiStore';
 import { cn } from '@/lib/cn';
 
 const navByRole: Record<string, { to: string; label: string }[]> = {
-  owner: [{ to: '/owner', label: 'Dashboard' }, { to: '/users', label: 'Users' }, { to: '/admin', label: 'Admin' }],
-  administrator: [{ to: '/admin', label: 'Admin Panel' }, { to: '/users', label: 'Users' }],
+  owner: [{ to: '/owner', label: 'Dashboard' }, { to: '/admin/materials', label: 'Materials' }, { to: '/users', label: 'Users' }, { to: '/admin', label: 'Admin' }],
+  administrator: [{ to: '/admin', label: 'Admin Panel' }, { to: '/admin/materials', label: 'Materials' }, { to: '/users', label: 'Users' }],
   ceo: [{ to: '/ceo', label: 'Dashboard' }, { to: '/tablo', label: 'Tablo' }, { to: '/users', label: 'Users' }],
   production_manager: [{ to: '/manager', label: 'Dashboard' }, { to: '/manager/schedule', label: 'Schedule' }, { to: '/manager/kilns', label: 'Kilns' }, { to: '/tablo', label: 'Tablo' }],
   quality_manager: [{ to: '/quality', label: 'Quality' }],

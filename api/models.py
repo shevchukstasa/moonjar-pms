@@ -98,6 +98,22 @@ class Supplier(Base):
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 
+class SupplierSubgroup(Base):
+    """Many-to-many: supplier ↔ material subgroups."""
+    __tablename__ = 'supplier_subgroups'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey('suppliers.id', ondelete='CASCADE'), nullable=False)
+    subgroup_id = Column(UUID(as_uuid=True), ForeignKey('material_subgroups.id', ondelete='CASCADE'), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('supplier_id', 'subgroup_id'),
+    )
+
+    supplier = relationship('Supplier', foreign_keys=[supplier_id])
+    subgroup = relationship('MaterialSubgroup', foreign_keys=[subgroup_id])
+
+
 class SupplierLeadTime(Base):
     __tablename__ = 'supplier_lead_times'
 

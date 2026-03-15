@@ -1090,6 +1090,19 @@ def _ensure_schema():
 
     _run_section("add_material_code", _add_material_code)
 
+    # --- Section 12: Create supplier_subgroups junction table ---
+    def _create_supplier_subgroups(conn):
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS supplier_subgroups (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                supplier_id UUID NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+                subgroup_id UUID NOT NULL REFERENCES material_subgroups(id) ON DELETE CASCADE,
+                UNIQUE (supplier_id, subgroup_id)
+            )
+        """))
+
+    _run_section("create_supplier_subgroups", _create_supplier_subgroups)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""

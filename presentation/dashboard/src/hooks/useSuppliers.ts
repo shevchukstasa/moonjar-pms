@@ -13,6 +13,8 @@ export interface SupplierItem {
   rating: number | null;
   notes: string | null;
   is_active: boolean;
+  subgroup_ids: string[];
+  subgroup_names: string[];
   created_at: string;
 }
 

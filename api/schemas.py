@@ -154,6 +154,7 @@ class SupplierCreate(BaseModel):
     rating: Optional[float] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+    subgroup_ids: Optional[list[UUID]] = None
 
 
 class SupplierUpdate(BaseModel):
@@ -167,6 +168,7 @@ class SupplierUpdate(BaseModel):
     rating: Optional[float] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+    subgroup_ids: Optional[list[UUID]] = None
 
 
 class SupplierResponse(BaseModel):
@@ -181,6 +183,8 @@ class SupplierResponse(BaseModel):
     rating: Optional[float] = None
     notes: Optional[str] = None
     is_active: bool
+    subgroup_ids: Optional[list[str]] = None
+    subgroup_names: Optional[list[str]] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

@@ -8,7 +8,8 @@ from sqlalchemy import func
 from decimal import Decimal
 
 from api.database import get_db
-from api.auth import get_current_user, require_management
+from api.auth import get_current_user
+from api.roles import require_management
 from api.models import Material, OrderPosition, Recipe, ShapeConsumptionCoefficient
 from api.enums import (
     ProductType,

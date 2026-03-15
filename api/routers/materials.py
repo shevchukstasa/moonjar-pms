@@ -16,7 +16,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.auth import get_current_user, apply_factory_filter, require_management
+from api.auth import get_current_user, apply_factory_filter
+from api.roles import require_management
 from api.models import (
     Material, MaterialStock, MaterialTransaction,
     MaterialPurchaseRequest, Supplier, User,

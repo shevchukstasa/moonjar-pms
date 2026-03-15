@@ -48,6 +48,41 @@ export interface ChangeRequestItem {
   change_summary: Record<string, unknown>;
 }
 
+// --- PDF Upload types ---
+export interface PdfParsedItem {
+  color: string;
+  size: string;
+  quantity_pcs: number;
+  quantity_sqm: number | null;
+  application: string | null;
+  finishing: string | null;
+  collection: string | null;
+  product_type: string;
+  application_type: string | null;
+  place_of_application: string | null;
+  thickness: number;
+}
+
+export interface PdfParsedOrder {
+  order_number: string;
+  client: string;
+  client_location: string | null;
+  sales_manager_name: string | null;
+  factory_id: string;
+  document_date: string | null;
+  final_deadline: string | null;
+  desired_delivery_date: string | null;
+  mandatory_qc: boolean;
+  notes: string | null;
+  items: PdfParsedItem[];
+}
+
+export interface PdfParseResult {
+  parsed_order: PdfParsedOrder;
+  confidence: number;
+  warnings: string[];
+}
+
 export const ordersApi = {
   list: (params?: OrderListParams) =>
     apiClient.get('/orders', { params }).then((r) => r.data),
@@ -75,4 +110,12 @@ export const ordersApi = {
     apiClient.post(`/orders/${id}/approve-change`).then((r) => r.data),
   rejectChange: (id: string) =>
     apiClient.post(`/orders/${id}/reject-change`).then((r) => r.data),
+  // PDF upload
+  uploadPdf: (file: File, factoryId: string): Promise<PdfParseResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return apiClient.post(`/orders/upload-pdf?factory_id=${factoryId}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then((r) => r.data);
+  },
 };

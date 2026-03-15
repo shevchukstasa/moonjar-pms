@@ -27,6 +27,7 @@ import { DataTable } from '@/components/ui/Table';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { FactorySelector } from '@/components/layout/FactorySelector';
 import { OrderCreateDialog } from '@/components/orders/OrderCreateDialog';
+import { PdfUploadDialog } from '@/components/orders/PdfUploadDialog';
 import { tpsApi } from '@/api/tps';
 import { tocApi } from '@/api/toc';
 import { defectsApi } from '@/api/defects';
@@ -105,6 +106,7 @@ export default function ManagerDashboard() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [pdfUploadOpen, setPdfUploadOpen] = useState(false);
   const debouncedSearch = useDebounce(search, 400);
 
   // --- Order delete permissions ---
@@ -457,6 +459,9 @@ export default function ManagerDashboard() {
           setStatusFilter={setStatusFilter}
           createOpen={createOpen}
           setCreateOpen={setCreateOpen}
+          pdfUploadOpen={pdfUploadOpen}
+          setPdfUploadOpen={setPdfUploadOpen}
+          activeFactoryId={activeFactoryId}
           ordersLoading={ordersLoading}
           orders={orders}
           totalPages={totalPages}
@@ -517,6 +522,9 @@ function OrdersTabContent({
   setStatusFilter,
   createOpen,
   setCreateOpen,
+  pdfUploadOpen,
+  setPdfUploadOpen,
+  activeFactoryId,
   ordersLoading,
   orders,
   totalPages,
@@ -534,6 +542,9 @@ function OrdersTabContent({
   setStatusFilter: (v: string) => void;
   createOpen: boolean;
   setCreateOpen: (v: boolean) => void;
+  pdfUploadOpen: boolean;
+  setPdfUploadOpen: (v: boolean) => void;
+  activeFactoryId: string | null;
   ordersLoading: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   orders: any[];
@@ -575,6 +586,9 @@ function OrdersTabContent({
         </select>
         <div className="flex-1" />
         <Button onClick={() => setCreateOpen(true)}>+ Create Order</Button>
+        <Button variant="secondary" onClick={() => setPdfUploadOpen(true)}>
+          Upload PDF
+        </Button>
         <Button variant="secondary" onClick={() => navigate('/tablo')}>
           Tablo
         </Button>
@@ -630,6 +644,11 @@ function OrdersTabContent({
       )}
 
       <OrderCreateDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      <PdfUploadDialog
+        open={pdfUploadOpen}
+        onClose={() => setPdfUploadOpen(false)}
+        defaultFactoryId={activeFactoryId ?? undefined}
+      />
     </div>
   );
 }

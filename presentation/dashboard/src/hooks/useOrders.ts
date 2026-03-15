@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ordersApi, type OrderListParams } from '@/api/orders';
+import { ordersApi, type OrderListParams, type PdfParseResult } from '@/api/orders';
 
 export function useOrders(params?: OrderListParams) {
   return useQuery({
@@ -118,5 +118,13 @@ export function useShipOrder() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
     },
+  });
+}
+
+// --- PDF Upload ---
+
+export function useUploadPdf() {
+  return useMutation<PdfParseResult, Error, { file: File; factoryId: string }>({
+    mutationFn: ({ file, factoryId }) => ordersApi.uploadPdf(file, factoryId),
   });
 }

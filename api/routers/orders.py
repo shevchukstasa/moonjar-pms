@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 from uuid import UUID
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
@@ -52,6 +52,7 @@ class OrderCreateInput(BaseModel):
     mandatory_qc: bool = False
     notes: Optional[str] = None
     items: list[OrderItemInput] = []
+    source: Optional[str] = None  # 'pdf_upload' when confirmed from PDF parse
 
 
 class OrderUpdateInput(BaseModel):
@@ -380,6 +381,40 @@ async def list_change_requests_v2(
     return {"items": results, "total": len(results)}
 
 
+# --- PDF Upload (parse + create) ---
+# MUST be before /{order_id} to avoid route shadowing.
+
+@router.post("/upload-pdf")
+async def upload_pdf(
+    file: UploadFile = File(...),
+    factory_id: str = Query(..., description="Factory UUID — PDF orders still need a factory"),
+    current_user=Depends(require_management),
+):
+    """Upload a PDF order document for parsing.
+
+    Returns parsed data (preview) with confidence score and warnings.
+    PM reviews the parsed data, edits if needed, then confirms via POST /orders.
+    """
+    from business.services.pdf_parser_service import parse_order_pdf, validate_pdf_file
+
+    # Read file
+    file_bytes = await file.read()
+
+    # Validate
+    errors = validate_pdf_file(file_bytes, file.filename or "unknown.pdf")
+    if errors:
+        raise HTTPException(400, detail="; ".join(errors))
+
+    # Parse
+    result = parse_order_pdf(file_bytes)
+
+    # Inject factory_id so frontend can pre-fill
+    parsed = result.to_dict()
+    parsed["parsed_order"]["factory_id"] = factory_id
+
+    return parsed
+
+
 @router.get("/{order_id}")
 async def get_order(
     order_id: UUID,
@@ -419,7 +454,7 @@ async def create_order(
         mandatory_qc=data.mandatory_qc,
         notes=data.notes,
         status=OrderStatus.NEW,
-        source=OrderSource.MANUAL,
+        source=OrderSource.PDF_UPLOAD if data.source == "pdf_upload" else OrderSource.MANUAL,
     )
     db.add(order)
     db.flush()

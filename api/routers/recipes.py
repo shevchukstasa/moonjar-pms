@@ -8,7 +8,10 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
-from api.models import Recipe, RecipeFiringStage, RecipeMaterial, Material
+from api.models import (
+    Recipe, RecipeFiringStage, RecipeMaterial, Material,
+    FiringTemperatureGroup, FiringTemperatureGroupRecipe,
+)
 from api.schemas import (
     RecipeCreate,
     RecipeUpdate,
@@ -40,6 +43,30 @@ def _serialize_recipe_material(rm) -> dict:
     }
 
 
+def _get_temperature_groups_for_recipe(db: Session, recipe_id: UUID) -> list[dict]:
+    """Get temperature groups linked to a recipe."""
+    links = (
+        db.query(FiringTemperatureGroupRecipe)
+        .filter(FiringTemperatureGroupRecipe.recipe_id == recipe_id)
+        .all()
+    )
+    result = []
+    for link in links:
+        group = db.query(FiringTemperatureGroup).filter(
+            FiringTemperatureGroup.id == link.temperature_group_id
+        ).first()
+        if group:
+            result.append({
+                "id": str(group.id),
+                "name": group.name,
+                "min_temperature": group.min_temperature,
+                "max_temperature": group.max_temperature,
+                "description": group.description,
+                "is_default": link.is_default,
+            })
+    return result
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Recipe CRUD
 # ══════════════════════════════════════════════════════════════════════════
@@ -64,6 +91,8 @@ async def list_recipes(
             .filter(RecipeMaterial.recipe_id == item.id)
             .count()
         )
+        # Temperature groups for this recipe
+        d["temperature_groups"] = _get_temperature_groups_for_recipe(db, item.id)
         results.append(d)
 
     return {
@@ -93,6 +122,9 @@ async def get_recipes_item(
         .all()
     )
     d["materials"] = [_serialize_recipe_material(rm) for rm in mats]
+
+    # Temperature groups for this recipe
+    d["temperature_groups"] = _get_temperature_groups_for_recipe(db, item_id)
     return d
 
 

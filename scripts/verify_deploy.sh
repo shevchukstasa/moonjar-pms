@@ -72,6 +72,7 @@ echo ""
 echo "▸ Новые/изменённые эндпоинты"
 check_endpoint "${API_URL}/materials/consumption-adjustments" "401" "Consumption Adjustments"
 check_endpoint "${API_URL}/reference/shape-coefficients"      "401" "Shape Coefficients"
+check_endpoint "${API_URL}/reference/temperature-groups"      "401" "Temperature Groups"
 
 # 4. Backup & Security эндпоинты (401 = существует и защищён)
 echo ""

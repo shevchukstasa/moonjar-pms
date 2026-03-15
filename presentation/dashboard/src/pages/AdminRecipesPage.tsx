@@ -2,7 +2,8 @@ import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, FlaskConical } from 'lucide-react';
-import { recipesApi, type RecipeItem, type RecipeMaterialItem, type RecipeMaterialBulkItem } from '@/api/recipes';
+import { recipesApi, type RecipeItem, type RecipeMaterialItem, type RecipeMaterialBulkItem, type TemperatureGroupInfo } from '@/api/recipes';
+import { Thermometer } from 'lucide-react';
 import { materialsApi, type MaterialItem } from '@/api/materials';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -200,6 +201,21 @@ export default function AdminRecipesPage() {
       { key: 'collection', header: 'Collection', render: (r: RecipeItem) => r.collection || <span className="text-gray-400">&mdash;</span> },
       { key: 'color', header: 'Color', render: (r: RecipeItem) => r.color || <span className="text-gray-400">&mdash;</span> },
       { key: 'specific_gravity', header: 'SG', render: (r: RecipeItem) => r.specific_gravity != null ? r.specific_gravity : <span className="text-gray-400">&mdash;</span> },
+      { key: 'temperature_groups', header: 'Temp Group', render: (r: RecipeItem) => {
+        const groups = r.temperature_groups ?? [];
+        if (groups.length === 0) return <span className="text-gray-400">&mdash;</span>;
+        return (
+          <div className="flex flex-col gap-0.5">
+            {groups.map((g: TemperatureGroupInfo) => (
+              <span key={g.id} className="inline-flex items-center gap-1 text-xs" title={g.description ?? `${g.min_temperature}–${g.max_temperature}°C`}>
+                <Thermometer className="h-3 w-3 text-orange-500" />
+                <span className="font-medium">{g.name}</span>
+                <span className="text-gray-400">({g.min_temperature}–{g.max_temperature}°C)</span>
+              </span>
+            ))}
+          </div>
+        );
+      }},
       { key: 'ingredients_count', header: 'Ingredients', render: (r: RecipeItem) => (
         <span className="inline-flex items-center gap-1 text-sm"><FlaskConical className="h-3.5 w-3.5 text-gray-400" />{r.ingredients_count ?? 0}</span>
       )},
@@ -252,6 +268,30 @@ export default function AdminRecipesPage() {
               Active
             </label>
           </div>
+
+          {/* ── Temperature Groups ──────────────────────────────────────── */}
+          {editItem?.temperature_groups && editItem.temperature_groups.length > 0 && (
+            <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+              <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-orange-800">
+                <Thermometer className="h-4 w-4" /> Temperature Groups
+              </h3>
+              <div className="space-y-1.5">
+                {editItem.temperature_groups.map((g: TemperatureGroupInfo) => (
+                  <div key={g.id} className="flex items-center justify-between rounded-md bg-white px-3 py-2 text-sm shadow-sm">
+                    <div>
+                      <span className="font-medium text-gray-900">{g.name}</span>
+                      <span className="ml-2 text-gray-500">{g.min_temperature}–{g.max_temperature}°C</span>
+                    </div>
+                    {g.description && <span className="text-xs text-gray-400">{g.description}</span>}
+                    {g.is_default && <Badge status="active" label="Default" />}
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-orange-600">
+                Manage temperature group assignments in Reference → Temperature Groups
+              </p>
+            </div>
+          )}
 
           {/* ── Ingredients ────────────────────────────────────────────── */}
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">

@@ -1,5 +1,14 @@
 import apiClient from './client';
 
+export interface TemperatureGroupInfo {
+  id: string;
+  name: string;
+  min_temperature: number;
+  max_temperature: number;
+  description: string | null;
+  is_default: boolean;
+}
+
 export interface RecipeItem {
   id: string;
   name: string;
@@ -14,6 +23,7 @@ export interface RecipeItem {
   is_active: boolean;
   ingredients_count?: number;
   materials?: RecipeMaterialItem[];
+  temperature_groups?: TemperatureGroupInfo[];
   created_at: string;
   updated_at: string;
 }

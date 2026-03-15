@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Trash2 } from 'lucide-react';
 import apiClient from '@/api/client';
 import { useOrders, useCancellationRequests, useChangeRequests } from '@/hooks/useOrders';
-import { usePositions, type PositionItem } from '@/hooks/usePositions';
+import { usePositions, useBlockingSummary, type PositionItem } from '@/hooks/usePositions';
 import { useShortageTasksForManager, useTasks } from '@/hooks/useTasks';
 import { useLowStock } from '@/hooks/useMaterials';
 import { usePurchaseRequests } from '@/hooks/usePurchaseRequests';
@@ -36,12 +36,13 @@ import { CancellationRequestsPanel } from '@/components/dashboard/CancellationRe
 import { ChangeRequestsPanel } from '@/components/dashboard/ChangeRequestsPanel';
 import { NotificationsBell } from '@/components/dashboard/NotificationsBell';
 import { ColorMismatchDecisionDialog } from '@/components/positions/ColorMismatchDecisionDialog';
+import { BlockingTasksTab } from '@/components/dashboard/BlockingTasksTab';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-type DashboardTab = 'orders' | 'tasks' | 'materials' | 'defects' | 'tps' | 'toc' | 'kilns' | 'ai_chat' | 'cancellations' | 'change_requests' | 'mismatch';
+type DashboardTab = 'orders' | 'tasks' | 'materials' | 'defects' | 'tps' | 'toc' | 'kilns' | 'ai_chat' | 'blocking' | 'cancellations' | 'change_requests' | 'mismatch';
 
 const DASHBOARD_TABS_BASE: { id: DashboardTab; label: string }[] = [
   { id: 'orders', label: 'Orders' },
@@ -204,10 +205,18 @@ export default function ManagerDashboard() {
   const { data: mismatchData } = usePositions(mismatchParams);
   const pendingMismatches: number = mismatchData?.total ?? 0;
 
+  // --- Blocking summary (material shortages, awaiting recipe/stencil/QM) ---
+  const { data: blockingData } = useBlockingSummary(activeFactoryId ?? undefined);
+  const totalBlocked: number = blockingData?.total_blocked ?? 0;
+
   // Build tabs dynamically — show badge counts on action-required tabs
   const DASHBOARD_TABS = useMemo(
     () => [
       ...DASHBOARD_TABS_BASE,
+      {
+        id: 'blocking' as DashboardTab,
+        label: totalBlocked > 0 ? `🚫 Blocking (${totalBlocked})` : '🚫 Blocking',
+      },
       {
         id: 'mismatch' as DashboardTab,
         label: pendingMismatches > 0 ? `Color Mismatch (${pendingMismatches})` : 'Color Mismatch',
@@ -221,7 +230,7 @@ export default function ManagerDashboard() {
         label: pendingChangeRequests > 0 ? `Changes (${pendingChangeRequests})` : 'Changes',
       },
     ],
-    [pendingMismatches, pendingCancellations, pendingChangeRequests],
+    [totalBlocked, pendingMismatches, pendingCancellations, pendingChangeRequests],
   );
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -364,6 +373,22 @@ export default function ManagerDashboard() {
         </div>
       )}
 
+      {/* Blocking alert banner — shown when positions are blocked */}
+      {totalBlocked > 0 && activeTab !== 'blocking' && (
+        <div
+          className="cursor-pointer rounded-lg border border-red-300 bg-red-50 px-4 py-3 flex items-center justify-between gap-3 hover:bg-red-100 transition-colors"
+          onClick={() => setActiveTab('blocking')}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-red-600 text-lg">🚫</span>
+            <span className="text-sm font-medium text-red-800">
+              {totalBlocked} position{totalBlocked > 1 ? 's' : ''} blocked — requires attention
+            </span>
+          </div>
+          <span className="text-xs text-red-600 underline">View →</span>
+        </div>
+      )}
+
       {/* Color mismatch alert banner — shown when PM decisions are pending */}
       {pendingMismatches > 0 && activeTab !== 'mismatch' && (
         <div
@@ -447,6 +472,7 @@ export default function ManagerDashboard() {
       {activeTab === 'toc' && <TocTabContent factoryId={activeFactoryId} />}
       {activeTab === 'kilns' && <KilnsTabContent factoryId={activeFactoryId} navigate={navigate} />}
       {activeTab === 'ai_chat' && <AiChatTabContent factoryId={activeFactoryId} />}
+      {activeTab === 'blocking' && <BlockingTasksTab factoryId={activeFactoryId ?? undefined} />}
       {activeTab === 'mismatch' && (
         <ColorMismatchTabContent factoryId={activeFactoryId} />
       )}

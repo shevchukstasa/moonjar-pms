@@ -1,14 +1,16 @@
-"""Positions router — list, status transitions, sorting split, filtering by section."""
+"""Positions router — list, status transitions, sorting split, filtering by section,
+   blocking summary, material reservations, PM force-unblock."""
 
 import uuid as uuid_mod
 from datetime import datetime, timezone
+from decimal import Decimal
 from uuid import UUID
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
@@ -16,11 +18,12 @@ from api.roles import require_management, require_sorting
 from api.models import (
     OrderPosition, ProductionOrder, ProductionOrderItem, DefectRecord,
     GrindingStock, RepairQueue, FinishedGoodsStock, Task,
+    MaterialTransaction, MaterialStock, RecipeMaterial, Material, Recipe,
 )
 from api.enums import (
     PositionStatus, OrderStatus, SplitCategory, DefectStage, DefectOutcome,
     GrindingStatus, RepairStatus, TaskType, TaskStatus, UserRole,
-    is_stock_collection,
+    TransactionType, is_stock_collection,
 )
 
 # Import handle_surplus lazily to avoid circular imports
@@ -123,6 +126,15 @@ async def _notify_sales_order_event(order, event_type: str, extra: dict | None =
         payload.update(extra)
     await send_webhook(payload, event_type=event_type, external_id=order.external_id)
 
+
+# Blocking statuses that PM can force-unblock
+BLOCKING_STATUSES = {
+    PositionStatus.INSUFFICIENT_MATERIALS,
+    PositionStatus.AWAITING_RECIPE,
+    PositionStatus.AWAITING_STENCIL_SILKSCREEN,
+    PositionStatus.AWAITING_COLOR_MATCHING,
+    PositionStatus.BLOCKED_BY_QM,
+}
 
 # Section → status mapping
 SECTION_STATUSES = {
@@ -242,6 +254,134 @@ async def list_positions(
         "per_page": per_page,
     }
 
+
+# ================================================================
+# Blocking Summary — MUST be defined before /{position_id} routes
+# ================================================================
+
+@router.get("/blocking-summary")
+async def get_blocking_summary(
+    factory_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return a summary of all blocked positions with related tasks and shortages.
+
+    Used by the PM dashboard Blocking tab to show all positions needing attention.
+    """
+    query = db.query(OrderPosition).filter(
+        OrderPosition.status.in_(list(BLOCKING_STATUSES)),
+    )
+    query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
+
+    blocked_positions = query.order_by(OrderPosition.created_at).all()
+
+    # Count by type
+    by_type = {}
+    for status in BLOCKING_STATUSES:
+        key = _ev(status)
+        by_type[key] = sum(1 for p in blocked_positions if _ev(p.status) == key)
+
+    positions_data = []
+    for p in blocked_positions:
+        order = p.order
+
+        # Related blocking tasks
+        related_tasks = (
+            db.query(Task)
+            .filter(
+                Task.related_position_id == p.id,
+                Task.blocking.is_(True),
+                Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+            )
+            .all()
+        )
+        tasks_data = [
+            {
+                "task_id": str(t.id),
+                "type": _ev(t.type),
+                "status": _ev(t.status),
+                "description": t.description,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in related_tasks
+        ]
+
+        # Material shortages (for insufficient_materials positions)
+        material_shortages = []
+        if _ev(p.status) == "insufficient_materials" and p.recipe_id:
+            recipe = db.query(Recipe).filter(Recipe.id == p.recipe_id).first()
+            if recipe:
+                rms = db.query(RecipeMaterial).filter(RecipeMaterial.recipe_id == recipe.id).all()
+                for rm in rms:
+                    mat = db.query(Material).get(rm.material_id)
+                    if not mat:
+                        continue
+                    # Quick effective available calculation
+                    stk = (
+                        db.query(MaterialStock)
+                        .filter(
+                            MaterialStock.material_id == rm.material_id,
+                            MaterialStock.factory_id == p.factory_id,
+                        )
+                        .first()
+                    )
+                    bal = Decimal(str(stk.balance)) if stk else Decimal("0")
+                    t_res = Decimal(str(
+                        db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+                        .filter(
+                            MaterialTransaction.material_id == rm.material_id,
+                            MaterialTransaction.factory_id == p.factory_id,
+                            MaterialTransaction.type == TransactionType.RESERVE,
+                        ).scalar()
+                    ))
+                    t_unres = Decimal(str(
+                        db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+                        .filter(
+                            MaterialTransaction.material_id == rm.material_id,
+                            MaterialTransaction.factory_id == p.factory_id,
+                            MaterialTransaction.type == TransactionType.UNRESERVE,
+                        ).scalar()
+                    ))
+                    eff = bal - (t_res - t_unres)
+                    if rm.unit == "per_sqm" and p.quantity_sqm:
+                        req = Decimal(str(rm.quantity_per_unit)) * Decimal(str(p.quantity_sqm))
+                    else:
+                        req = Decimal(str(rm.quantity_per_unit)) * Decimal(str(p.quantity))
+                    deficit = max(Decimal("0"), req - max(eff, Decimal("0")))
+                    if deficit > 0:
+                        material_shortages.append({
+                            "name": mat.name,
+                            "deficit": float(deficit),
+                            "required": float(req),
+                            "available": float(eff),
+                        })
+
+        positions_data.append({
+            "id": str(p.id),
+            "order_number": order.order_number if order else "",
+            "position_label": position_label(p),
+            "color": p.color,
+            "size": p.size,
+            "collection": p.collection,
+            "quantity": p.quantity,
+            "status": _ev(p.status),
+            "blocking_reason": _ev(p.status),
+            "blocking_since": p.created_at.isoformat() if p.created_at else None,
+            "related_tasks": tasks_data,
+            "material_shortages": material_shortages,
+            "recipe_id": str(p.recipe_id) if p.recipe_id else None,
+            "factory_id": str(p.factory_id),
+        })
+
+    return {
+        "total_blocked": len(blocked_positions),
+        "by_type": by_type,
+        "positions": positions_data,
+    }
+
+
+# ================================================================
 
 @router.get("/{position_id}")
 async def get_position(
@@ -990,3 +1130,259 @@ async def get_stock_availability(
         "is_multi_factory": len(siblings) > 0,
         "sibling_count": len(siblings),
     }
+
+
+# ================================================================
+# STAGE 2 — PM Force Unblock
+# ================================================================
+
+class ForceUnblockInput(BaseModel):
+    notes: str  # PM must provide a reason
+
+
+@router.post("/{position_id}/force-unblock")
+async def force_unblock_position(
+    position_id: UUID,
+    data: ForceUnblockInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """PM force-unblock: override any blocking status, force-reserve if needed.
+
+    - insufficient_materials → force-reserve (may go negative), set PLANNED
+    - awaiting_recipe → set PLANNED (PM takes responsibility)
+    - awaiting_stencil_silkscreen / awaiting_color_matching → close blocking tasks, set PLANNED
+    - blocked_by_qm → close QM block tasks, set PLANNED
+    All actions are logged for audit.
+    """
+    import logging
+    logger = logging.getLogger("moonjar.force_unblock")
+
+    p = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not p:
+        raise HTTPException(404, "Position not found")
+
+    current_status = p.status
+    if current_status not in BLOCKING_STATUSES:
+        raise HTTPException(
+            400,
+            f"Position status '{_ev(current_status)}' is not a blocking status. "
+            f"Allowed: {[_ev(s) for s in BLOCKING_STATUSES]}",
+        )
+
+    if not data.notes or not data.notes.strip():
+        raise HTTPException(400, "Notes are required for force-unblock (audit trail)")
+
+    now = datetime.now(timezone.utc)
+    negative_balances = []
+
+    # --- Handle INSUFFICIENT_MATERIALS: force-reserve ---
+    if current_status == PositionStatus.INSUFFICIENT_MATERIALS:
+        recipe = db.query(Recipe).filter(Recipe.id == p.recipe_id).first() if p.recipe_id else None
+        if recipe:
+            from business.services.material_reservation import force_reserve_materials
+            negative_balances = force_reserve_materials(db, p, recipe, p.factory_id)
+        # Even without recipe (edge case), transition to planned
+
+    # --- Close related blocking tasks ---
+    blocking_tasks = (
+        db.query(Task)
+        .filter(
+            Task.related_position_id == position_id,
+            Task.blocking.is_(True),
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+        )
+        .all()
+    )
+    for task in blocking_tasks:
+        task.status = TaskStatus.DONE
+        task.completed_at = now
+        task.updated_at = now
+
+    # --- Transition to PLANNED ---
+    old_status_str = _ev(p.status)
+    p.status = PositionStatus.PLANNED
+    p.updated_at = now
+
+    # --- Audit metadata ---
+    audit_task = Task(
+        id=uuid_mod.uuid4(),
+        factory_id=p.factory_id,
+        type=TaskType.MANU_CONFIRMATION,  # Reuse for audit log of PM overrides
+        status=TaskStatus.DONE,
+        assigned_role=UserRole.PRODUCTION_MANAGER,
+        related_order_id=p.order_id,
+        related_position_id=p.id,
+        blocking=False,
+        description=f"PM Force-Unblock: {old_status_str} → planned",
+        priority=0,
+        completed_at=now,
+        created_at=now,
+        updated_at=now,
+        metadata_json={
+            "action": "force_unblock",
+            "previous_status": old_status_str,
+            "notes": data.notes.strip(),
+            "user_id": str(current_user.id),
+            "user_name": getattr(current_user, 'full_name', None) or str(current_user.id),
+            "blocking_tasks_closed": [str(t.id) for t in blocking_tasks],
+            "negative_balances": negative_balances,
+        },
+    )
+    db.add(audit_task)
+
+    # Recalculate order status
+    _recalculate_order_status(db, p.order_id)
+
+    db.commit()
+    db.refresh(p)
+
+    logger.warning(
+        "FORCE_UNBLOCK | user=%s | position=%s | %s → planned | tasks_closed=%d | negatives=%d | notes=%s",
+        current_user.id, p.id, old_status_str,
+        len(blocking_tasks), len(negative_balances), data.notes[:80],
+    )
+
+    return {
+        "position_id": str(p.id),
+        "previous_status": old_status_str,
+        "new_status": "planned",
+        "blocking_tasks_closed": len(blocking_tasks),
+        "negative_balances": negative_balances,
+        "audit_note": data.notes.strip(),
+    }
+
+
+# ================================================================
+# STAGE 3a — Material Reservations for a Position
+# ================================================================
+
+@router.get("/{position_id}/material-reservations")
+async def get_material_reservations(
+    position_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return material reservation details for a position.
+
+    Shows each recipe material with required / reserved / available / deficit.
+    """
+    p = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not p:
+        raise HTTPException(404, "Position not found")
+
+    recipe = db.query(Recipe).filter(Recipe.id == p.recipe_id).first() if p.recipe_id else None
+    if not recipe:
+        return {
+            "position_id": str(p.id),
+            "recipe_name": None,
+            "materials": [],
+            "has_recipe": False,
+        }
+
+    recipe_materials = (
+        db.query(RecipeMaterial)
+        .filter(RecipeMaterial.recipe_id == recipe.id)
+        .all()
+    )
+
+    materials_info = []
+    for rm in recipe_materials:
+        material = db.query(Material).get(rm.material_id)
+        if not material:
+            continue
+
+        # Calculate required
+        if rm.unit == "per_sqm" and p.quantity_sqm:
+            required = Decimal(str(rm.quantity_per_unit)) * Decimal(str(p.quantity_sqm))
+        else:
+            required = Decimal(str(rm.quantity_per_unit)) * Decimal(str(p.quantity))
+
+        # Current stock balance
+        stock = (
+            db.query(MaterialStock)
+            .filter(
+                MaterialStock.material_id == rm.material_id,
+                MaterialStock.factory_id == p.factory_id,
+            )
+            .first()
+        )
+        balance = Decimal(str(stock.balance)) if stock else Decimal("0")
+
+        # Net reserved for this position
+        pos_reserved = (
+            db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+            .filter(
+                MaterialTransaction.related_position_id == position_id,
+                MaterialTransaction.material_id == rm.material_id,
+                MaterialTransaction.type == TransactionType.RESERVE,
+            )
+            .scalar()
+        )
+        pos_unreserved = (
+            db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+            .filter(
+                MaterialTransaction.related_position_id == position_id,
+                MaterialTransaction.material_id == rm.material_id,
+                MaterialTransaction.type == TransactionType.UNRESERVE,
+            )
+            .scalar()
+        )
+        net_reserved_pos = Decimal(str(pos_reserved)) - Decimal(str(pos_unreserved))
+
+        # Total net reserved across ALL positions for this material+factory
+        total_reserved_all = (
+            db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+            .filter(
+                MaterialTransaction.material_id == rm.material_id,
+                MaterialTransaction.factory_id == p.factory_id,
+                MaterialTransaction.type == TransactionType.RESERVE,
+            )
+            .scalar()
+        )
+        total_unreserved_all = (
+            db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+            .filter(
+                MaterialTransaction.material_id == rm.material_id,
+                MaterialTransaction.factory_id == p.factory_id,
+                MaterialTransaction.type == TransactionType.UNRESERVE,
+            )
+            .scalar()
+        )
+        effective_available = balance - (Decimal(str(total_reserved_all)) - Decimal(str(total_unreserved_all)))
+
+        # Determine status
+        if net_reserved_pos >= required and net_reserved_pos > 0:
+            if effective_available < 0:
+                mat_status = "force_reserved"
+            else:
+                mat_status = "reserved"
+        elif net_reserved_pos > 0:
+            mat_status = "partially_reserved"
+        else:
+            if effective_available >= required:
+                mat_status = "available"
+            else:
+                mat_status = "insufficient"
+
+        deficit = max(Decimal("0"), required - max(effective_available, Decimal("0")))
+
+        materials_info.append({
+            "material_id": str(rm.material_id),
+            "name": material.name,
+            "type": material.material_type or "",
+            "required": float(required),
+            "reserved": float(net_reserved_pos),
+            "available": float(effective_available),
+            "deficit": float(deficit),
+            "status": mat_status,
+        })
+
+    return {
+        "position_id": str(p.id),
+        "recipe_name": recipe.name if recipe else None,
+        "materials": materials_info,
+        "has_recipe": True,
+    }
+
+

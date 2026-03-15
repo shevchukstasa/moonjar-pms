@@ -28,6 +28,56 @@ export interface SortingSplitRequest {
   notes?: string;
 }
 
+export interface BlockingSummaryResponse {
+  total_blocked: number;
+  by_type: Record<string, number>;
+  positions: BlockedPositionInfo[];
+}
+
+export interface BlockedPositionInfo {
+  id: string;
+  order_number: string;
+  position_label: string;
+  color: string;
+  size: string;
+  collection: string | null;
+  quantity: number;
+  status: string;
+  blocking_reason: string;
+  blocking_since: string | null;
+  related_tasks: { task_id: string; type: string; status: string; description: string; created_at: string | null }[];
+  material_shortages: { name: string; deficit: number; required: number; available: number }[];
+  recipe_id: string | null;
+  factory_id: string;
+}
+
+export interface MaterialReservationResponse {
+  position_id: string;
+  recipe_name: string | null;
+  materials: MaterialReservationItem[];
+  has_recipe: boolean;
+}
+
+export interface MaterialReservationItem {
+  material_id: string;
+  name: string;
+  type: string;
+  required: number;
+  reserved: number;
+  available: number;
+  deficit: number;
+  status: 'reserved' | 'force_reserved' | 'partially_reserved' | 'available' | 'insufficient';
+}
+
+export interface ForceUnblockResponse {
+  position_id: string;
+  previous_status: string;
+  new_status: string;
+  blocking_tasks_closed: number;
+  negative_balances: { material_id: string; material_name: string; balance: number; reserved: number; resulting_effective: number }[];
+  audit_note: string;
+}
+
 export const positionsApi = {
   list: (params?: PositionListParams) =>
     apiClient.get('/positions', { params }).then((r) => r.data),
@@ -45,4 +95,14 @@ export const positionsApi = {
     apiClient.post(`/positions/${id}/resolve-color-mismatch`, data).then((r) => r.data),
   allowedTransitions: (id: string) =>
     apiClient.get(`/positions/${id}/allowed-transitions`).then((r) => r.data as { current_status: string; allowed: string[] }),
+
+  // --- Blocking & Reservations ---
+  blockingSummary: (factoryId?: string) =>
+    apiClient.get<BlockingSummaryResponse>('/positions/blocking-summary', {
+      params: factoryId ? { factory_id: factoryId } : {},
+    }).then((r) => r.data),
+  materialReservations: (id: string) =>
+    apiClient.get<MaterialReservationResponse>(`/positions/${id}/material-reservations`).then((r) => r.data),
+  forceUnblock: (id: string, notes: string) =>
+    apiClient.post<ForceUnblockResponse>(`/positions/${id}/force-unblock`, { notes }).then((r) => r.data),
 };

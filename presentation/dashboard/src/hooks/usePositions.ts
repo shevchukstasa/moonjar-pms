@@ -1,5 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { positionsApi, type PositionListParams, type SortingSplitRequest, type ColorMismatchResolveRequest } from '@/api/positions';
+import {
+  positionsApi,
+  type PositionListParams,
+  type SortingSplitRequest,
+  type ColorMismatchResolveRequest,
+  type BlockingSummaryResponse,
+  type MaterialReservationResponse,
+} from '@/api/positions';
 
 export interface PositionItem {
   id: string;
@@ -96,6 +103,40 @@ export function useResolveColorMismatch() {
       qc.invalidateQueries({ queryKey: ['positions'] });
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['tasks'] });
+    },
+  });
+}
+
+
+// ─── Blocking & Material Reservations ─────────────────────────
+
+export function useBlockingSummary(factoryId?: string) {
+  return useQuery<BlockingSummaryResponse>({
+    queryKey: ['blocking-summary', factoryId],
+    queryFn: () => positionsApi.blockingSummary(factoryId),
+    refetchInterval: 30_000, // auto-refresh every 30s
+  });
+}
+
+export function useMaterialReservations(positionId?: string) {
+  return useQuery<MaterialReservationResponse>({
+    queryKey: ['material-reservations', positionId],
+    queryFn: () => positionsApi.materialReservations(positionId!),
+    enabled: !!positionId,
+  });
+}
+
+export function useForceUnblock() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, notes }: { id: string; notes: string }) =>
+      positionsApi.forceUnblock(id, notes),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['blocking-summary'] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['material-reservations'] });
     },
   });
 }

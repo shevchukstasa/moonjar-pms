@@ -19,6 +19,7 @@ export interface RecipeItem {
   specific_gravity: number | null;
   consumption_spray_ml_per_sqm: number | null;
   consumption_brush_ml_per_sqm: number | null;
+  is_default: boolean;
   glaze_settings: Record<string, unknown>;
   is_active: boolean;
   ingredients_count?: number;

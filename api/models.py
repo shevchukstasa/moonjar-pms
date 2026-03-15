@@ -340,6 +340,8 @@ class Recipe(Base):
     # Spray application consumption rate in ml per m²
     consumption_brush_ml_per_sqm = Column(sa.Numeric(8, 2))
     # Brush application consumption rate in ml per m²
+    is_default = Column(sa.Boolean, nullable=False, default=False)
+    # Default recipe flag — system auto-picks this recipe for given recipe_type (e.g. engobe)
     glaze_settings = Column(JSONB, nullable=False, default=dict)
     # Legacy per-recipe glaze config (consumption_ml_per_sqm migrated to dedicated columns)
     is_active = Column(sa.Boolean, nullable=False, default=True)

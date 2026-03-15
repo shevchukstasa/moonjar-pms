@@ -586,6 +586,7 @@ class RecipeCreate(BaseModel):
     specific_gravity: Optional[float] = None
     consumption_spray_ml_per_sqm: Optional[float] = None
     consumption_brush_ml_per_sqm: Optional[float] = None
+    is_default: Optional[bool] = None
     glaze_settings: Optional[dict] = None
     is_active: Optional[bool] = None
 
@@ -599,6 +600,7 @@ class RecipeUpdate(BaseModel):
     specific_gravity: Optional[float] = None
     consumption_spray_ml_per_sqm: Optional[float] = None
     consumption_brush_ml_per_sqm: Optional[float] = None
+    is_default: Optional[bool] = None
     glaze_settings: Optional[dict] = None
     is_active: Optional[bool] = None
 
@@ -613,6 +615,7 @@ class RecipeResponse(BaseModel):
     specific_gravity: Optional[float] = None
     consumption_spray_ml_per_sqm: Optional[float] = None
     consumption_brush_ml_per_sqm: Optional[float] = None
+    is_default: bool = False
     glaze_settings: dict
     is_active: bool
     created_at: datetime

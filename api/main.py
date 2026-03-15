@@ -1217,6 +1217,95 @@ def _ensure_schema():
 
     _run_section("restructure_recipe_columns", _restructure_recipe_columns)
 
+    # --- Section 16: Add is_default to recipes + seed engobe recipes ---
+    def _add_recipe_is_default_and_engobes(conn):
+        """Add is_default boolean to recipes; seed 4 engobe recipes with ingredients."""
+        # 1. Add column
+        conn.execute(text("""
+            ALTER TABLE recipes ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;
+        """))
+
+        # 2. Seed engobe recipes (idempotent via ON CONFLICT)
+        engobe_recipes = [
+            ("Angobe old", "engobe", True),
+            ("Kiln shelve slip", "engobe", False),
+            ("Angobe new/white glaze", "engobe", False),
+            ("Angobe no CMC", "engobe", False),
+        ]
+        for rname, rtype, is_def in engobe_recipes:
+            conn.execute(text("""
+                INSERT INTO recipes (id, name, recipe_type, is_default, is_active, glaze_settings, created_at, updated_at)
+                VALUES (gen_random_uuid(), :name, :rtype, :is_def, TRUE, '{}'::jsonb, NOW(), NOW())
+                ON CONFLICT (color_collection, name) DO NOTHING
+            """), {"name": rname, "rtype": rtype, "is_def": is_def})
+
+        # 3. Seed recipe ingredients (match materials by name, best-effort)
+        #    Format: (recipe_name, [(material_name, quantity_per_unit, unit), ...])
+        engobe_ingredients = {
+            "Angobe old": [
+                ("Fritt bottle", 65),
+                ("Kaolin", 12.5),
+                ("Kaolin calcinide", 12.5),
+                ("Zircosil", 10),
+                ("CMC", 0.3),
+                ("Water", 60),
+            ],
+            "Kiln shelve slip": [
+                ("Alumina", 50),
+                ("Kaolin", 25),
+                ("Kaolin calcinide", 25),
+                ("CMC", 0.2),
+                ("Water", 60),
+            ],
+            "Angobe new/white glaze": [
+                ("Fritt Tomat", 20),
+                ("Fritt Kasm", 80),
+                ("Zircosil", 15),
+                ("CMC", 0.3),
+                ("Water", 65),
+            ],
+            "Angobe no CMC": [
+                ("Fritt Tomat", 20),
+                ("Fritt Kasm", 80),
+                ("Zircosil", 15),
+                ("Bentonite", 0.5),
+                ("Water", 55),
+            ],
+        }
+
+        for recipe_name, mats in engobe_ingredients.items():
+            # Get recipe id
+            row = conn.execute(text(
+                "SELECT id FROM recipes WHERE name = :n AND recipe_type = 'engobe' LIMIT 1"
+            ), {"n": recipe_name}).fetchone()
+            if not row:
+                continue
+            recipe_id = row[0]
+
+            # Check if recipe already has materials
+            mat_count = conn.execute(text(
+                "SELECT COUNT(*) FROM recipe_materials WHERE recipe_id = :rid"
+            ), {"rid": recipe_id}).scalar() or 0
+            if mat_count > 0:
+                continue  # Already seeded
+
+            for mat_name, qty in mats:
+                # Find material by name (case-insensitive)
+                mat_row = conn.execute(text(
+                    "SELECT id FROM materials WHERE LOWER(name) = LOWER(:mn) LIMIT 1"
+                ), {"mn": mat_name}).fetchone()
+                if mat_row:
+                    notes = 'water' if mat_name.lower() == 'water' else None
+                    conn.execute(text("""
+                        INSERT INTO recipe_materials (id, recipe_id, material_id, quantity_per_unit, unit, notes)
+                        VALUES (gen_random_uuid(), :rid, :mid, :qty, 'g_per_100g', :notes)
+                        ON CONFLICT DO NOTHING
+                    """), {"rid": recipe_id, "mid": mat_row[0], "qty": qty, "notes": notes})
+
+        logger.info("_add_recipe_is_default_and_engobes: done")
+
+    _run_section("recipe_is_default_engobes", _add_recipe_is_default_and_engobes)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""

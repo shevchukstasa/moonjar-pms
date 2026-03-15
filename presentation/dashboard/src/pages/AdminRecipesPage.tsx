@@ -26,9 +26,11 @@ const INGREDIENT_GROUPS: { type: string; label: string; emoji: string }[] = [
 interface RecipeForm {
   name: string;
   color_collection: string;
+  recipe_type: string;
   specific_gravity: string;
   consumption_spray_ml_per_sqm: string;
   consumption_brush_ml_per_sqm: string;
+  is_default: boolean;
   is_active: boolean;
 }
 
@@ -37,12 +39,20 @@ interface IngredientRow {
   quantity: string;
 }
 
+const RECIPE_TYPE_OPTIONS = [
+  { value: 'product', label: 'Product' },
+  { value: 'glaze', label: 'Glaze' },
+  { value: 'engobe', label: 'Engobe' },
+];
+
 const emptyForm: RecipeForm = {
   name: '',
   color_collection: '',
+  recipe_type: 'product',
   specific_gravity: '',
   consumption_spray_ml_per_sqm: '',
   consumption_brush_ml_per_sqm: '',
+  is_default: false,
   is_active: true,
 };
 
@@ -149,9 +159,11 @@ export default function AdminRecipesPage() {
     setForm({
       name: item.name,
       color_collection: item.color_collection ?? '',
+      recipe_type: item.recipe_type || 'product',
       specific_gravity: item.specific_gravity != null ? String(item.specific_gravity) : '',
       consumption_spray_ml_per_sqm: item.consumption_spray_ml_per_sqm != null ? String(item.consumption_spray_ml_per_sqm) : '',
       consumption_brush_ml_per_sqm: item.consumption_brush_ml_per_sqm != null ? String(item.consumption_brush_ml_per_sqm) : '',
+      is_default: item.is_default ?? false,
       is_active: item.is_active,
     });
     // Set current temperature group
@@ -197,9 +209,11 @@ export default function AdminRecipesPage() {
     const payload: Record<string, unknown> = {
       name: form.name,
       color_collection: form.color_collection || null,
+      recipe_type: form.recipe_type || 'product',
       specific_gravity: form.specific_gravity ? parseFloat(form.specific_gravity) : null,
       consumption_spray_ml_per_sqm: form.consumption_spray_ml_per_sqm ? parseFloat(form.consumption_spray_ml_per_sqm) : null,
       consumption_brush_ml_per_sqm: form.consumption_brush_ml_per_sqm ? parseFloat(form.consumption_brush_ml_per_sqm) : null,
+      is_default: form.is_default,
       is_active: form.is_active,
     };
     if (editItem) {
@@ -236,6 +250,10 @@ export default function AdminRecipesPage() {
   const columns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = useMemo(
     () => [
       { key: 'name', header: 'Name' },
+      { key: 'recipe_type', header: 'Type', render: (r: RecipeItem) => {
+        const labels: Record<string, string> = { product: 'Product', glaze: 'Glaze', engobe: 'Engobe' };
+        return <span className="text-sm">{labels[r.recipe_type] || r.recipe_type}</span>;
+      }},
       { key: 'color_collection', header: 'Color Collection', render: (r: RecipeItem) => r.color_collection || <span className="text-gray-400">&mdash;</span> },
       { key: 'specific_gravity', header: 'SG', render: (r: RecipeItem) => r.specific_gravity != null ? r.specific_gravity : <span className="text-gray-400">&mdash;</span> },
       { key: 'consumption_spray', header: 'Spray ml/m²', render: (r: RecipeItem) => r.consumption_spray_ml_per_sqm != null ? <span className="font-mono text-sm">{r.consumption_spray_ml_per_sqm}</span> : <span className="text-gray-400">&mdash;</span> },
@@ -258,6 +276,7 @@ export default function AdminRecipesPage() {
       { key: 'ingredients_count', header: 'Ingredients', render: (r: RecipeItem) => (
         <span className="inline-flex items-center gap-1 text-sm"><FlaskConical className="h-3.5 w-3.5 text-gray-400" />{r.ingredients_count ?? 0}</span>
       )},
+      { key: 'is_default', header: 'Default', render: (r: RecipeItem) => r.is_default ? <Badge status="active" label="Default" /> : null },
       { key: 'is_active', header: 'Status', render: (r: RecipeItem) => <Badge status={r.is_active ? 'active' : 'inactive'} label={r.is_active ? 'Active' : 'Inactive'} /> },
       { key: 'actions', header: '', render: (r: RecipeItem) => (
         <div className="flex gap-1">
@@ -294,19 +313,38 @@ export default function AdminRecipesPage() {
       {/* ── Create / Edit Dialog ──────────────────────────────────────── */}
       <Dialog open={dialogOpen} onClose={closeDialog} title={editItem ? 'Edit Recipe' : 'Add Recipe'} className="w-full max-w-2xl">
         <div className="max-h-[75vh] space-y-5 overflow-y-auto pr-1">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             <Input label="Color Collection" value={form.color_collection} onChange={(e) => setForm({ ...form, color_collection: e.target.value })} placeholder="e.g. Collection 2025/2026" />
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Recipe Type</label>
+              <select
+                value={form.recipe_type}
+                onChange={(e) => setForm({ ...form, recipe_type: e.target.value })}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                {RECIPE_TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-4">
             <Input label="Specific Gravity (SG)" type="number" step="0.001" placeholder="e.g. 1.450" value={form.specific_gravity} onChange={(e) => setForm({ ...form, specific_gravity: e.target.value })} />
             <Input label={"Spray (ml/m²)"} type="number" step="0.01" placeholder="e.g. 850" value={form.consumption_spray_ml_per_sqm} onChange={(e) => setForm({ ...form, consumption_spray_ml_per_sqm: e.target.value })} />
             <Input label={"Brush (ml/m²)"} type="number" step="0.01" placeholder="e.g. 1200" value={form.consumption_brush_ml_per_sqm} onChange={(e) => setForm({ ...form, consumption_brush_ml_per_sqm: e.target.value })} />
           </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} className="rounded" />
-            Active
-          </label>
+          <div className="flex items-center gap-6">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} className="rounded" />
+              Active
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.is_default} onChange={(e) => setForm({ ...form, is_default: e.target.checked })} className="rounded" />
+              Default recipe
+              <span className="text-xs text-gray-400">(auto-picked when this type is used)</span>
+            </label>
+          </div>
 
           {/* ── Temperature Group Selector ──────────────────────────────── */}
           <div>

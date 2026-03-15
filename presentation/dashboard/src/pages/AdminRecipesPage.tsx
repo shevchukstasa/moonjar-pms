@@ -130,22 +130,36 @@ export default function AdminRecipesPage() {
     }
     if (mats.length > 0) {
       setSavingMaterials(true);
-      try { await recipesApi.bulkUpdateMaterials(recipeId, mats); } finally { setSavingMaterials(false); }
+      try {
+        await recipesApi.bulkUpdateMaterials(recipeId, mats);
+      } catch (e) {
+        console.error('Failed to save ingredients:', e);
+      } finally {
+        setSavingMaterials(false);
+      }
     }
   }, [ingredients, waterGrams, allMaterials]);
+
+  const extractError = (err: unknown): string => {
+    const resp = (err as { response?: { data?: { detail?: unknown } } })?.response?.data;
+    if (!resp) return String(err);
+    if (typeof resp.detail === 'string') return resp.detail;
+    if (Array.isArray(resp.detail)) return resp.detail.map((d: { msg?: string }) => d.msg || JSON.stringify(d)).join('; ');
+    return JSON.stringify(resp);
+  };
 
   const createMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => recipesApi.create(payload),
     onSuccess: async (newRecipe: RecipeItem) => {
       setMutationError('');
-      await saveIngredients(newRecipe.id);
-      await saveTempGroupAssignment(newRecipe.id, []);
+      // Save ingredients + temp group — errors should NOT block dialog close
+      try { await saveIngredients(newRecipe.id); } catch (e) { console.error('saveIngredients failed:', e); }
+      try { await saveTempGroupAssignment(newRecipe.id, []); } catch (e) { console.error('saveTempGroup failed:', e); }
       queryClient.invalidateQueries({ queryKey: ['admin-recipes'] });
       closeDialog();
     },
     onError: (err: unknown) => {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMutationError(msg || 'Failed to create recipe');
+      setMutationError(extractError(err));
     },
   });
 
@@ -155,15 +169,14 @@ export default function AdminRecipesPage() {
     onSuccess: async () => {
       setMutationError('');
       if (editItem) {
-        await saveIngredients(editItem.id);
-        await saveTempGroupAssignment(editItem.id, editItem.temperature_groups || []);
+        try { await saveIngredients(editItem.id); } catch (e) { console.error('saveIngredients failed:', e); }
+        try { await saveTempGroupAssignment(editItem.id, editItem.temperature_groups || []); } catch (e) { console.error('saveTempGroup failed:', e); }
       }
       queryClient.invalidateQueries({ queryKey: ['admin-recipes'] });
       closeDialog();
     },
     onError: (err: unknown) => {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMutationError(msg || 'Failed to update recipe');
+      setMutationError(extractError(err));
     },
   });
 
@@ -391,11 +404,6 @@ export default function AdminRecipesPage() {
               Cloning from existing recipe. Ingredients and firing stages will be copied.
             </div>
           )}
-          {mutationError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              {mutationError}
-            </div>
-          )}
           <div className="grid grid-cols-2 gap-4">
             <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             <Input label="Client Name" placeholder="e.g. PT Bali Stone" value={form.client_name} onChange={(e) => setForm({ ...form, client_name: e.target.value })} />
@@ -543,6 +551,11 @@ export default function AdminRecipesPage() {
             </div>
           </div>
 
+          {mutationError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+              Error: {mutationError}
+            </div>
+          )}
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={closeDialog}>Cancel</Button>
             <Button onClick={handleSubmit} disabled={!form.name || saving}>

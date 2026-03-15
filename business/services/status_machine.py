@@ -386,6 +386,19 @@ def _send_to_factory_chat(
 # Multi-firing routing (from §32b)
 # ────────────────────────────────────────────────────────────────
 
+def _try_reserve_packaging(db: Session, position: OrderPosition):
+    """Best-effort packaging reservation when entering sorting."""
+    try:
+        from business.services.packaging_consumption import reserve_packaging
+        if position.factory_id:
+            reserve_packaging(db, position.id, position.factory_id)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Failed to reserve packaging for position %s: %s", position.id, e
+        )
+
+
 def route_after_firing(db: Session, position: OrderPosition) -> str:
     """
     Called when a position transitions to FIRED status.
@@ -406,6 +419,7 @@ def route_after_firing(db: Session, position: OrderPosition) -> str:
     if not position.recipe_id:
         # No recipe → single firing, go to sorting
         position.status = PositionStatus.TRANSFERRED_TO_SORTING
+        _try_reserve_packaging(db, position)
         return PositionStatus.TRANSFERRED_TO_SORTING.value
 
     total_rounds = get_total_firing_rounds(db, position.recipe_id)
@@ -428,4 +442,5 @@ def route_after_firing(db: Session, position: OrderPosition) -> str:
     else:
         # Final firing done → sorting
         position.status = PositionStatus.TRANSFERRED_TO_SORTING
+        _try_reserve_packaging(db, position)
         return PositionStatus.TRANSFERRED_TO_SORTING.value

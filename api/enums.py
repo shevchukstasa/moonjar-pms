@@ -96,6 +96,7 @@ class TransactionType(str, Enum):
     ORDER = 'order'
     UNRESERVE = 'unreserve'
     MANUAL_WRITE_OFF = 'manual_write_off'
+    INVENTORY = 'inventory'
 
 class WriteOffReason(str, Enum):
     BREAKAGE = 'breakage'

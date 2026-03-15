@@ -57,7 +57,7 @@ export interface TransactionItem {
 export interface TransactionInput {
   material_id: string;
   factory_id: string;
-  type: 'receive' | 'manual_write_off';
+  type: 'receive' | 'manual_write_off' | 'inventory';
   quantity: number;
   reason?: string;
   notes?: string;

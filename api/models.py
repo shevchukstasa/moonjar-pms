@@ -1387,6 +1387,63 @@ class InventoryReconciliationItem(Base):
     material = relationship('Material', foreign_keys=[material_id])
 
 
+# ── Packaging ──────────────────────────────────────────────
+
+
+class PackagingBoxType(Base):
+    """Box type card — links a packaging material to size capacities."""
+    __tablename__ = 'packaging_box_types'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    material_id = Column(UUID(as_uuid=True), ForeignKey('materials.id', ondelete='CASCADE'), nullable=False)
+    name = Column(sa.String(200), nullable=False)
+    notes = Column(sa.Text)
+    is_active = Column(sa.Boolean, nullable=False, default=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    material = relationship('Material', foreign_keys=[material_id])
+    capacities = relationship('PackagingBoxCapacity', back_populates='box_type', cascade='all, delete-orphan')
+    spacer_rules = relationship('PackagingSpacerRule', back_populates='box_type', cascade='all, delete-orphan')
+
+
+class PackagingBoxCapacity(Base):
+    """How many tiles of a given size fit into a box type."""
+    __tablename__ = 'packaging_box_capacities'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    box_type_id = Column(UUID(as_uuid=True), ForeignKey('packaging_box_types.id', ondelete='CASCADE'), nullable=False)
+    size_id = Column(UUID(as_uuid=True), ForeignKey('sizes.id', ondelete='CASCADE'), nullable=False)
+    pieces_per_box = Column(sa.Integer)
+    sqm_per_box = Column(sa.Numeric(10, 4))
+
+    __table_args__ = (
+        UniqueConstraint('box_type_id', 'size_id'),
+    )
+
+    box_type = relationship('PackagingBoxType', foreign_keys=[box_type_id], back_populates='capacities')
+    size = relationship('Size', foreign_keys=[size_id])
+
+
+class PackagingSpacerRule(Base):
+    """How many spacers of a given material are needed per box for a tile size."""
+    __tablename__ = 'packaging_spacer_rules'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    box_type_id = Column(UUID(as_uuid=True), ForeignKey('packaging_box_types.id', ondelete='CASCADE'), nullable=False)
+    size_id = Column(UUID(as_uuid=True), ForeignKey('sizes.id', ondelete='CASCADE'), nullable=False)
+    spacer_material_id = Column(UUID(as_uuid=True), ForeignKey('materials.id', ondelete='CASCADE'), nullable=False)
+    qty_per_box = Column(sa.Integer, nullable=False, default=1)
+
+    __table_args__ = (
+        UniqueConstraint('box_type_id', 'size_id', 'spacer_material_id'),
+    )
+
+    box_type = relationship('PackagingBoxType', foreign_keys=[box_type_id], back_populates='spacer_rules')
+    size = relationship('Size', foreign_keys=[size_id])
+    spacer_material = relationship('Material', foreign_keys=[spacer_material_id])
+
+
 class QmBlock(Base):
     __tablename__ = 'qm_blocks'
 

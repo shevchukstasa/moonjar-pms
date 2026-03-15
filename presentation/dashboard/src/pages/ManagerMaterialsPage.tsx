@@ -65,7 +65,7 @@ const emptyForm: MaterialForm = {
 };
 
 interface TxForm {
-  type: 'receive' | 'manual_write_off';
+  type: 'receive' | 'manual_write_off' | 'inventory';
   quantity: string;
   notes: string;
 }
@@ -484,7 +484,7 @@ export default function ManagerMaterialsPage() {
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Operation</label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   onClick={() => setTxForm({ ...txForm, type: 'receive' })}
                   className={`rounded-lg border px-3 py-2 text-sm font-medium ${
@@ -493,7 +493,7 @@ export default function ManagerMaterialsPage() {
                       : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                   }`}
                 >
-                  ↑ Receive
+                  {'\u2191'} Receive
                 </button>
                 <button
                   onClick={() => setTxForm({ ...txForm, type: 'manual_write_off' })}
@@ -503,7 +503,17 @@ export default function ManagerMaterialsPage() {
                       : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                   }`}
                 >
-                  ↓ Write-off
+                  {'\u2193'} Write-off
+                </button>
+                <button
+                  onClick={() => setTxForm({ ...txForm, type: 'inventory' })}
+                  className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                    txForm.type === 'inventory'
+                      ? 'border-amber-500 bg-amber-50 text-amber-700'
+                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {'\u2261'} Inventory
                 </button>
               </div>
             </div>
@@ -525,9 +535,9 @@ export default function ManagerMaterialsPage() {
               <Button
                 onClick={handleTx}
                 disabled={txPending}
-                className={txForm.type === 'manual_write_off' ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500' : ''}
+                className={txForm.type === 'manual_write_off' ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500' : txForm.type === 'inventory' ? 'bg-amber-600 hover:bg-amber-700 focus:ring-amber-500' : ''}
               >
-                {txPending ? 'Saving\u2026' : txForm.type === 'receive' ? '↑ Receive' : '↓ Write-off'}
+                {txPending ? 'Saving\u2026' : txForm.type === 'receive' ? '\u2191 Receive' : txForm.type === 'inventory' ? '\u2261 Inventory' : '\u2193 Write-off'}
               </Button>
             </div>
           </div>

@@ -576,6 +576,17 @@ async def split_position(
     p.status = PositionStatus.PACKED
     p.updated_at = now
 
+    # Consume packaging materials (boxes + spacers)
+    try:
+        from business.services.packaging_consumption import consume_packaging
+        if p.factory_id:
+            consume_packaging(db, p.id, p.factory_id, user_id=current_user.id)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Failed to consume packaging for position %s: %s", p.id, e
+        )
+
     # 2. Refire sub-position — tile is already glazed, just needs another firing pass
     if data.refire_quantity > 0:
         refire_pos = OrderPosition(

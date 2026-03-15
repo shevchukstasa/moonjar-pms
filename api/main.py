@@ -65,6 +65,7 @@ from api.routers import firing_profiles
 from api.routers import batches
 from api.routers import cleanup
 from api.routers import material_groups
+from api.routers import packaging
 
 
 def _ensure_schema():
@@ -1103,6 +1104,53 @@ def _ensure_schema():
 
     _run_section("create_supplier_subgroups", _create_supplier_subgroups)
 
+    # --- Section 13: Packaging tables + inventory enum ---
+    def _create_packaging_tables(conn):
+        # Add INVENTORY value to transaction_type enum
+        conn.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'inventory'
+                    AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'transactiontype'))
+                THEN
+                    ALTER TYPE transactiontype ADD VALUE 'inventory';
+                END IF;
+            END$$;
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS packaging_box_types (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                material_id UUID NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+                name VARCHAR(200) NOT NULL,
+                notes TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS packaging_box_capacities (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                box_type_id UUID NOT NULL REFERENCES packaging_box_types(id) ON DELETE CASCADE,
+                size_id UUID NOT NULL REFERENCES sizes(id) ON DELETE CASCADE,
+                pieces_per_box INTEGER,
+                sqm_per_box NUMERIC(10, 4),
+                UNIQUE (box_type_id, size_id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS packaging_spacer_rules (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                box_type_id UUID NOT NULL REFERENCES packaging_box_types(id) ON DELETE CASCADE,
+                size_id UUID NOT NULL REFERENCES sizes(id) ON DELETE CASCADE,
+                spacer_material_id UUID NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+                qty_per_box INTEGER NOT NULL DEFAULT 1,
+                UNIQUE (box_type_id, size_id, spacer_material_id)
+            )
+        """))
+
+    _run_section("create_packaging_tables", _create_packaging_tables)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""
@@ -1258,5 +1306,6 @@ def setup_routers():
     app.include_router(batches.router, prefix="/api/batches", tags=["batches"])
     app.include_router(cleanup.router, prefix="/api/cleanup", tags=["cleanup"])
     app.include_router(material_groups.router, prefix="/api/material-groups", tags=["material-groups"])
+    app.include_router(packaging.router, prefix="/api/packaging", tags=["packaging"])
 
 setup_routers()

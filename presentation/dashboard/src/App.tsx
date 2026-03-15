@@ -30,6 +30,7 @@ import AdminFinishingPage from '@/pages/AdminFinishingPage';
 import AdminTemperatureGroupsPage from '@/pages/AdminTemperatureGroupsPage';
 import AdminMaterialsPage from '@/pages/AdminMaterialsPage';
 import AdminWarehousesPage from '@/pages/AdminWarehousesPage';
+import AdminPackagingPage from '@/pages/AdminPackagingPage';
 import SettingsPage from '@/pages/SettingsPage';
 import AppLayout from '@/components/layout/AppLayout';
 import { Spinner } from '@/components/ui/Spinner';
@@ -99,6 +100,7 @@ export default function App() {
           <Route path="/admin/temperature-groups" element={<AdminTemperatureGroupsPage />} />
           <Route path="/admin/materials" element={<AdminMaterialsPage />} />
           <Route path="/admin/warehouses" element={<AdminWarehousesPage />} />
+          <Route path="/admin/packaging" element={<AdminPackagingPage />} />
         </Route>
         <Route element={<RequireRole roles={['owner', 'administrator', 'ceo']} />}>
           <Route path="/users" element={<UsersPage />} />

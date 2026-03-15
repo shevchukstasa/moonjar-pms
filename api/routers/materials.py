@@ -154,9 +154,12 @@ def _serialize_material_aggregate(mat: Material, stocks: list[MaterialStock], db
 
 def _serialize_transaction(t, db) -> dict:
     creator_name = None
+    creator_role = None
     if t.created_by:
         user = db.query(User).filter(User.id == t.created_by).first()
-        creator_name = user.name if user else None
+        if user:
+            creator_name = user.name
+            creator_role = _ev(user.role) if user.role else None
 
     return {
         "id": str(t.id),
@@ -170,6 +173,7 @@ def _serialize_transaction(t, db) -> dict:
         "notes": t.notes,
         "created_by": str(t.created_by) if t.created_by else None,
         "created_by_name": creator_name,
+        "created_by_role": creator_role,
         "created_at": t.created_at.isoformat() if t.created_at else None,
     }
 
@@ -1220,11 +1224,11 @@ async def create_transaction(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Manual receive or write-off transaction."""
-    if data.type not in ("receive", "manual_write_off"):
-        raise HTTPException(400, "Manual transactions must be 'receive' or 'manual_write_off'")
+    """Manual receive, write-off, or inventory adjustment transaction."""
+    if data.type not in ("receive", "manual_write_off", "inventory"):
+        raise HTTPException(400, "Manual transactions must be 'receive', 'manual_write_off', or 'inventory'")
 
-    if data.quantity <= 0:
+    if data.type in ("receive", "manual_write_off") and data.quantity <= 0:
         raise HTTPException(400, "Quantity must be positive")
 
     if data.type == "manual_write_off" and not data.reason:
@@ -1247,7 +1251,11 @@ async def create_transaction(
         if stock.balance < qty:
             raise HTTPException(400, f"Insufficient balance: {float(stock.balance)} < {data.quantity}")
         stock.balance -= qty
+    elif data.type == "inventory":
+        # Inventory adjustment: qty is the difference (actual − system), can be negative
+        stock.balance += qty
     else:
+        # receive
         stock.balance += qty
 
     stock.updated_at = datetime.now(timezone.utc)

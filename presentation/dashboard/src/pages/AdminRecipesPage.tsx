@@ -70,6 +70,7 @@ export default function AdminRecipesPage() {
   const [form, setForm] = useState<RecipeForm>(emptyForm);
   const [ingredients, setIngredients] = useState<IngredientRow[]>([]);
   const [waterGrams, setWaterGrams] = useState('');
+  const [mutationError, setMutationError] = useState('');
   const [savingMaterials, setSavingMaterials] = useState(false);
   const [csvOpen, setCsvOpen] = useState(false);
   const [cloneFromId, setCloneFromId] = useState<string | null>(null);
@@ -136,9 +137,15 @@ export default function AdminRecipesPage() {
   const createMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => recipesApi.create(payload),
     onSuccess: async (newRecipe: RecipeItem) => {
+      setMutationError('');
       await saveIngredients(newRecipe.id);
+      await saveTempGroupAssignment(newRecipe.id, []);
       queryClient.invalidateQueries({ queryKey: ['admin-recipes'] });
       closeDialog();
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setMutationError(msg || 'Failed to create recipe');
     },
   });
 
@@ -146,9 +153,17 @@ export default function AdminRecipesPage() {
     mutationFn: ({ id, payload }: { id: string; payload: Record<string, unknown> }) =>
       recipesApi.update(id, payload),
     onSuccess: async () => {
-      if (editItem) await saveIngredients(editItem.id);
+      setMutationError('');
+      if (editItem) {
+        await saveIngredients(editItem.id);
+        await saveTempGroupAssignment(editItem.id, editItem.temperature_groups || []);
+      }
       queryClient.invalidateQueries({ queryKey: ['admin-recipes'] });
       closeDialog();
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setMutationError(msg || 'Failed to update recipe');
     },
   });
 
@@ -159,7 +174,7 @@ export default function AdminRecipesPage() {
 
   /* ── dialog helpers ────────────────────────────────────────────────── */
   const closeDialog = useCallback(() => {
-    setDialogOpen(false); setEditItem(null); setForm(emptyForm); setIngredients([]); setWaterGrams(''); setCloneFromId(null);
+    setDialogOpen(false); setEditItem(null); setForm(emptyForm); setIngredients([]); setWaterGrams(''); setCloneFromId(null); setMutationError('');
   }, []);
 
   const openCreate = useCallback(() => {
@@ -254,7 +269,8 @@ export default function AdminRecipesPage() {
     }
   }, [selectedTempGroupId]);
 
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = useCallback(() => {
+    setMutationError('');
     const payload: Record<string, unknown> = {
       name: form.name,
       color_collection: form.color_collection || null,
@@ -271,11 +287,10 @@ export default function AdminRecipesPage() {
     }
     if (editItem) {
       updateMutation.mutate({ id: editItem.id, payload });
-      await saveTempGroupAssignment(editItem.id, editItem.temperature_groups || []);
     } else {
       createMutation.mutate(payload);
     }
-  }, [form, editItem, cloneFromId, createMutation, updateMutation, saveTempGroupAssignment]);
+  }, [form, editItem, cloneFromId, createMutation, updateMutation]);
 
   const addIngredient = useCallback(() => {
     setIngredients((prev) => [...prev, { material_id: '', quantity: '' }]);
@@ -374,6 +389,11 @@ export default function AdminRecipesPage() {
           {cloneFromId && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
               Cloning from existing recipe. Ingredients and firing stages will be copied.
+            </div>
+          )}
+          {mutationError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {mutationError}
             </div>
           )}
           <div className="grid grid-cols-2 gap-4">

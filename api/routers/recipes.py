@@ -137,7 +137,7 @@ async def create_recipes_item(
 ):
     import uuid as uuid_mod
 
-    create_data = data.model_dump(exclude={'clone_from_id'})
+    create_data = data.model_dump(exclude={'clone_from_id'}, exclude_none=True)
     item = Recipe(**create_data)
     db.add(item)
     db.flush()

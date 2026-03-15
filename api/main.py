@@ -1077,13 +1077,13 @@ def _ensure_schema():
             )
             UPDATE materials
             SET material_code = 'M-' || LPAD(
-                (SELECT COALESCE(MAX(
+                ((SELECT COALESCE(MAX(
                     CASE WHEN m2.material_code ~ '^M-[0-9]+$'
                          THEN CAST(SUBSTRING(m2.material_code FROM 3) AS INTEGER)
                          ELSE 0
                     END
                 ), 0) FROM materials m2 WHERE m2.material_code IS NOT NULL)
-                + numbered.rn,
+                + numbered.rn)::TEXT,
                 4, '0')
             FROM numbered
             WHERE materials.id = numbered.id
@@ -1111,9 +1111,9 @@ def _ensure_schema():
             DO $$
             BEGIN
                 IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'inventory'
-                    AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'transactiontype'))
+                    AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'transaction_type'))
                 THEN
-                    ALTER TYPE transactiontype ADD VALUE 'inventory';
+                    ALTER TYPE transaction_type ADD VALUE 'inventory';
                 END IF;
             END$$;
         """))

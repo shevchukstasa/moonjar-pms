@@ -398,6 +398,11 @@ async def create_order(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
+    """Create an order manually (PM form or future PDF upload).
+
+    Uses the same intake pipeline as webhook orders:
+    recipe lookup → blocking tasks → material reservation → defect margin.
+    """
     if not data.items:
         raise HTTPException(400, "Order must have at least one item")
 
@@ -419,6 +424,9 @@ async def create_order(
     db.add(order)
     db.flush()
 
+    # Lazy import to avoid circular dependency
+    from business.services.order_intake import process_order_item
+
     for item_data in data.items:
         item = ProductionOrderItem(
             order_id=order.id,
@@ -433,38 +441,12 @@ async def create_order(
         db.add(item)
         db.flush()
 
-        # Compute next position_number for this order (sequential within order)
-        from sqlalchemy import func as _func
-        _max_pn = db.query(_func.max(OrderPosition.position_number)).filter(
-            OrderPosition.order_id == order.id,
-            OrderPosition.parent_position_id.is_(None),
-        ).scalar()
-        _next_pn = (_max_pn or 0) + 1
-
-        position = OrderPosition(
-            order_id=order.id, order_item_id=item.id,
-            factory_id=UUID(data.factory_id),
-            status=(
-                PositionStatus.TRANSFERRED_TO_SORTING
-                if is_stock_collection(item_data.collection)
-                else PositionStatus.PLANNED
-            ),
-            quantity=item_data.quantity_pcs,
-            color=item_data.color, size=item_data.size,
-            application=item_data.application, finishing=item_data.finishing,
-            collection=item_data.collection,
-            application_type=item_data.application_type,
-            place_of_application=item_data.place_of_application,
-            product_type=item_data.product_type,
-            thickness_mm=item_data.thickness,
-            mandatory_qc=data.mandatory_qc,
-            position_number=_next_pn,
-        )
-        db.add(position)
-        db.flush()
+        # Use the full intake pipeline: recipe lookup → blocking tasks →
+        # material reservation → defect margin (same as webhook orders)
+        position = process_order_item(db, order, item)
 
         # Stock positions: distribute across factories based on finished goods availability
-        if is_stock_collection(item_data.collection):
+        if position and is_stock_collection(item_data.collection):
             _distribute_stock_position(db, position, item_data.quantity_pcs)
 
     db.commit()

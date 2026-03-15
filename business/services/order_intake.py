@@ -267,30 +267,40 @@ def assign_factory(db: Session, client_location: str) -> Factory:
     # Get all active factories
     factories = db.query(Factory).filter(Factory.is_active.is_(True)).all()
     if not factories:
-        # Fallback: try any factory (even inactive)
-        factories = db.query(Factory).all()
-        if not factories:
-            raise ValueError("No factories configured in the system")
+        raise ValueError(
+            "No active factories available. Deactivate at least one factory or "
+            "activate an existing one before creating orders."
+        )
 
-    # Single factory → always use it, no matching needed
+    # Single active factory → always use it (handles disabled-factory fallback:
+    # if Bali is disabled → Java only; if Java disabled → Bali only)
     if len(factories) == 1:
         return factories[0]
 
-    # Multiple factories: try region-based matching
+    # Multiple active factories: try region-based matching
     location_lower = (client_location or "").lower()
 
-    bali_keywords = {"bali", "denpasar", "kuta", "ubud", "seminyak", "canggu"}
+    bali_keywords = {"bali", "denpasar", "kuta", "ubud", "seminyak", "canggu",
+                     "lombok", "nusa penida", "nusa lembongan"}
     java_keywords = {"java", "jakarta", "surabaya", "bandung", "semarang", "yogyakarta"}
 
     for keyword in bali_keywords:
         if keyword in location_lower:
-            factory = db.query(Factory).filter(Factory.name.ilike("%bali%")).first()
+            # Only match active factories
+            factory = db.query(Factory).filter(
+                Factory.name.ilike("%bali%"),
+                Factory.is_active.is_(True),
+            ).first()
             if factory:
                 return factory
 
     for keyword in java_keywords:
         if keyword in location_lower:
-            factory = db.query(Factory).filter(Factory.name.ilike("%java%")).first()
+            # Only match active factories
+            factory = db.query(Factory).filter(
+                Factory.name.ilike("%java%"),
+                Factory.is_active.is_(True),
+            ).first()
             if factory:
                 return factory
 
@@ -395,6 +405,14 @@ def process_order_item(
     # Lookup recipe by matching attributes
     recipe = _find_recipe(db, item)
 
+    # Auto-assign sequential position_number within this order
+    from sqlalchemy import func as _sqla_func
+    _max_pn = db.query(_sqla_func.max(OrderPosition.position_number)).filter(
+        OrderPosition.order_id == order.id,
+        OrderPosition.parent_position_id.is_(None),
+    ).scalar()
+    _next_pn = (_max_pn or 0) + 1
+
     # Create position
     position = OrderPosition(
         order_id=order.id,
@@ -416,6 +434,7 @@ def process_order_item(
         recipe_id=recipe.id if recipe else None,
         mandatory_qc=order.mandatory_qc,
         firing_round=1,
+        position_number=_next_pn,
     )
     db.add(position)
     db.flush()

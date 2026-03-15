@@ -46,6 +46,17 @@ def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session)
     balance = float(stock.balance or 0) if stock else 0
     min_bal = float(stock.min_balance or 0) if stock else 0
 
+    # Subgroup / group info
+    subgroup_id = None
+    subgroup_name = None
+    group_name = None
+    if mat.subgroup_id:
+        subgroup_id = str(mat.subgroup_id)
+        if hasattr(mat, 'subgroup') and mat.subgroup:
+            subgroup_name = mat.subgroup.name
+            if mat.subgroup.group:
+                group_name = mat.subgroup.group.name
+
     return {
         "id": str(mat.id),
         "stock_id": str(stock.id) if stock else None,
@@ -59,6 +70,9 @@ def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session)
         "avg_monthly_consumption": float(stock.avg_monthly_consumption) if stock and stock.avg_monthly_consumption else 0,
         "unit": mat.unit,
         "material_type": _ev(mat.material_type),
+        "subgroup_id": subgroup_id,
+        "subgroup_name": subgroup_name,
+        "group_name": group_name,
         "warehouse_section": stock.warehouse_section if stock else None,
         "supplier_id": str(mat.supplier_id) if mat.supplier_id else None,
         "supplier_name": supplier_name,
@@ -95,7 +109,8 @@ def _serialize_transaction(t, db) -> dict:
 class MaterialCreateInput(BaseModel):
     name: str
     factory_id: UUID
-    material_type: str
+    material_type: str = ""
+    subgroup_id: Optional[UUID] = None
     unit: str = "pcs"
     balance: float = 0
     min_balance: float = 0
@@ -137,12 +152,16 @@ async def list_materials(
     per_page: int = Query(50, ge=1, le=200),
     factory_id: UUID | None = None,
     material_type: str | None = None,
+    subgroup_id: UUID | None = None,
+    group_id: UUID | None = None,
     warehouse_section: str | None = None,
     low_stock: bool | None = None,
     search: str | None = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    from api.models import MaterialSubgroup
+
     query = db.query(Material, MaterialStock).outerjoin(
         MaterialStock, Material.id == MaterialStock.material_id
     )
@@ -150,6 +169,12 @@ async def list_materials(
 
     if material_type:
         query = query.filter(Material.material_type == material_type)
+    if subgroup_id:
+        query = query.filter(Material.subgroup_id == subgroup_id)
+    if group_id:
+        query = query.join(
+            MaterialSubgroup, Material.subgroup_id == MaterialSubgroup.id
+        ).filter(MaterialSubgroup.group_id == group_id)
     if warehouse_section:
         query = query.filter(MaterialStock.warehouse_section == warehouse_section)
     if search:
@@ -797,17 +822,33 @@ async def create_material(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    from api.models import MaterialSubgroup
+
+    # Resolve material_type from subgroup if provided
+    material_type = data.material_type
+    subgroup_id = data.subgroup_id
+    if subgroup_id:
+        sg = db.query(MaterialSubgroup).filter(MaterialSubgroup.id == subgroup_id).first()
+        if not sg:
+            raise HTTPException(404, "Material subgroup not found")
+        material_type = sg.code  # sync material_type from subgroup.code
+
     # Get or create catalog material
     mat = db.query(Material).filter(Material.name == data.name).first()
     if not mat:
         mat = Material(
             name=data.name,
-            material_type=data.material_type,
+            material_type=material_type,
             unit=data.unit,
             supplier_id=data.supplier_id,
+            subgroup_id=subgroup_id,
         )
         db.add(mat)
         db.flush()
+    elif subgroup_id and not mat.subgroup_id:
+        # Existing material without subgroup — assign it
+        mat.subgroup_id = subgroup_id
+        mat.material_type = material_type
 
     # Check if stock already exists for this factory
     existing_stock = db.query(MaterialStock).filter(

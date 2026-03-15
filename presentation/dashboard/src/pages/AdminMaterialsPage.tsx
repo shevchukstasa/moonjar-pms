@@ -1,6 +1,15 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMaterials, useCreateMaterial, useUpdateMaterial, useCreateTransaction, type MaterialItem } from '@/hooks/useMaterials';
+import {
+  useMaterialHierarchy,
+  useCreateMaterialGroup,
+  useUpdateMaterialGroup,
+  useCreateMaterialSubgroup,
+  useUpdateMaterialSubgroup,
+  type MaterialGroup,
+  type MaterialSubgroup,
+} from '@/hooks/useMaterialGroups';
 import { useFactories } from '@/hooks/useFactories';
 import { useSuppliers } from '@/hooks/useSuppliers';
 import { Card } from '@/components/ui/Card';
@@ -13,19 +22,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
 import { MaterialDeduplication } from '@/components/admin/MaterialDeduplication';
 
-// ── Material type definitions ─────────────────────────────────────────────
-const MATERIAL_TYPES = [
-  { value: 'stone',           label: 'Stone',                emoji: '🪨' },
-  { value: 'pigment',         label: 'Pigments',             emoji: '🎨' },
-  { value: 'frit',            label: 'Frits',                emoji: '⚗️' },
-  { value: 'oxide_carbonate', label: 'Oxides & Carbonates',  emoji: '🧪' },
-  { value: 'other_bulk',      label: 'Other Bulk',           emoji: '📦' },
-  { value: 'packaging',       label: 'Packaging',            emoji: '📦' },
-  { value: 'consumable',      label: 'Consumables',          emoji: '🔧' },
-  { value: 'other',           label: 'Other',                emoji: '📋' },
-] as const;
-
-type MaterialTypeValue = typeof MATERIAL_TYPES[number]['value'];
+// ── Constants ────────────────────────────────────────────────────────────
 
 const UNIT_OPTIONS = [
   { value: 'kg',  label: 'kg' },
@@ -33,22 +30,35 @@ const UNIT_OPTIONS = [
   { value: 'l',   label: 'L' },
   { value: 'pcs', label: 'pcs' },
   { value: 'm',   label: 'm' },
-  { value: 'm2',  label: 'm²' },
+  { value: 'm2',  label: 'm\u00B2' },
 ];
 
-function typeLabel(type: string): string {
-  return MATERIAL_TYPES.find((t) => t.value === type)?.label ?? type;
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+/** Build a flat list of subgroups from hierarchy for type tabs & dropdowns */
+function flatSubgroups(hierarchy: MaterialGroup[] | undefined) {
+  if (!hierarchy) return [];
+  const result: { value: string; label: string; subgroupId: string; icon: string }[] = [];
+  for (const g of hierarchy) {
+    for (const sg of g.subgroups) {
+      result.push({
+        value: sg.code,
+        label: sg.name,
+        subgroupId: sg.id,
+        icon: sg.icon || '',
+      });
+    }
+  }
+  return result;
 }
 
-function typeEmoji(type: string): string {
-  return MATERIAL_TYPES.find((t) => t.value === type)?.emoji ?? '📋';
-}
+// ── Form interfaces ─────────────────────────────────────────────────────
 
-// ── Form interfaces ──────────────────────────────────────────────────────
 interface MaterialForm {
   name: string;
   factory_id: string;
-  material_type: MaterialTypeValue | '';
+  subgroup_id: string;
+  material_type: string;
   unit: string;
   balance: string;
   min_balance: string;
@@ -59,6 +69,7 @@ interface MaterialForm {
 const emptyForm: MaterialForm = {
   name: '',
   factory_id: '',
+  subgroup_id: '',
   material_type: '',
   unit: 'kg',
   balance: '0',
@@ -73,7 +84,8 @@ interface TxForm {
   notes: string;
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────
+// ── Main page ───────────────────────────────────────────────────────────
+
 export default function AdminMaterialsPage() {
   const navigate = useNavigate();
   const [mainTab, setMainTab] = useState('materials');
@@ -85,16 +97,19 @@ export default function AdminMaterialsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Materials</h1>
           <p className="mt-0.5 text-sm text-gray-500">
-            Manage raw materials, packaging, consumables, and deduplication
+            Manage materials, groups, subgroups, and deduplication
           </p>
         </div>
-        <Button variant="secondary" onClick={() => navigate('/admin')}>← Admin Panel</Button>
+        <Button variant="secondary" onClick={() => navigate('/admin')}>
+          ← Admin Panel
+        </Button>
       </div>
 
       {/* Tabs */}
       <Tabs
         tabs={[
           { id: 'materials', label: 'All Materials' },
+          { id: 'groups', label: 'Groups & Subgroups' },
           { id: 'dedup', label: 'Deduplication & Merge' },
         ]}
         activeTab={mainTab}
@@ -102,18 +117,27 @@ export default function AdminMaterialsPage() {
       />
 
       {/* Tab content */}
-      {mainTab === 'materials' ? <MaterialsCrudTab /> : <MaterialDeduplication />}
+      {mainTab === 'materials' && <MaterialsCrudTab />}
+      {mainTab === 'groups' && <GroupsSubgroupsTab />}
+      {mainTab === 'dedup' && <MaterialDeduplication />}
     </div>
   );
 }
 
-// ── Materials CRUD Tab ────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// Tab 1: Materials CRUD (with dynamic subgroup tabs from hierarchy)
+// ═══════════════════════════════════════════════════════════════════════════
+
 function MaterialsCrudTab() {
+  // Hierarchy for dynamic tabs & form dropdown
+  const { data: hierarchy, isLoading: hierarchyLoading } = useMaterialHierarchy();
+  const subgroups = useMemo(() => flatSubgroups(hierarchy), [hierarchy]);
+
   // Filters
   const { data: factoriesData } = useFactories();
   const factories = factoriesData?.items ?? [];
-  const [factoryId, setFactoryId] = useState<string>('');
-  const [activeType, setActiveType] = useState<MaterialTypeValue | 'all'>('all');
+  const [factoryId, setFactoryId] = useState('');
+  const [activeType, setActiveType] = useState('all');
   const [search, setSearch] = useState('');
 
   // Data
@@ -125,7 +149,7 @@ function MaterialsCrudTab() {
   });
   const items = data?.items ?? [];
 
-  // Suppliers for form dropdown
+  // Suppliers
   const { data: suppliersData } = useSuppliers();
   const suppliers = suppliersData?.items ?? [];
 
@@ -135,35 +159,55 @@ function MaterialsCrudTab() {
   const createTransaction = useCreateTransaction();
 
   // Dialog state
-  const [editDialog, setEditDialog] = useState<{ open: boolean; item: MaterialItem | null }>({ open: false, item: null });
+  const [editDialog, setEditDialog] = useState<{ open: boolean; item: MaterialItem | null }>({
+    open: false,
+    item: null,
+  });
   const [form, setForm] = useState<MaterialForm>(emptyForm);
   const [formError, setFormError] = useState('');
 
-  const [txDialog, setTxDialog] = useState<{ open: boolean; item: MaterialItem | null }>({ open: false, item: null });
+  const [txDialog, setTxDialog] = useState<{ open: boolean; item: MaterialItem | null }>({
+    open: false,
+    item: null,
+  });
   const [txForm, setTxForm] = useState<TxForm>({ type: 'receive', quantity: '', notes: '' });
   const [txError, setTxError] = useState('');
 
-  // ── Edit/create dialog ─────────────────────────────────────────────────
-  const openCreate = useCallback((defaultType?: MaterialTypeValue) => {
-    setForm({ ...emptyForm, material_type: defaultType ?? '', factory_id: factoryId });
-    setFormError('');
-    setEditDialog({ open: true, item: null });
-  }, [factoryId]);
+  // ── Edit/create helpers ─────────────────────────────────────────────────
 
-  const openEdit = useCallback((item: MaterialItem) => {
-    setForm({
-      name: item.name,
-      factory_id: item.factory_id ?? '',
-      material_type: item.material_type as MaterialTypeValue,
-      unit: item.unit,
-      balance: String(item.balance),
-      min_balance: String(item.min_balance),
-      supplier_id: item.supplier_id ?? '',
-      warehouse_section: item.warehouse_section ?? 'raw_materials',
-    });
-    setFormError('');
-    setEditDialog({ open: true, item });
-  }, []);
+  const openCreate = useCallback(
+    (defaultType?: string) => {
+      const sg = subgroups.find((s) => s.value === defaultType);
+      setForm({
+        ...emptyForm,
+        material_type: defaultType ?? '',
+        subgroup_id: sg?.subgroupId ?? '',
+        factory_id: factoryId,
+      });
+      setFormError('');
+      setEditDialog({ open: true, item: null });
+    },
+    [factoryId, subgroups],
+  );
+
+  const openEdit = useCallback(
+    (item: MaterialItem) => {
+      setForm({
+        name: item.name,
+        factory_id: item.factory_id ?? '',
+        subgroup_id: item.subgroup_id ?? '',
+        material_type: item.material_type ?? '',
+        unit: item.unit,
+        balance: String(item.balance),
+        min_balance: String(item.min_balance),
+        supplier_id: item.supplier_id ?? '',
+        warehouse_section: item.warehouse_section ?? 'raw_materials',
+      });
+      setFormError('');
+      setEditDialog({ open: true, item });
+    },
+    [],
+  );
 
   const closeEdit = useCallback(() => {
     setEditDialog({ open: false, item: null });
@@ -171,15 +215,25 @@ function MaterialsCrudTab() {
   }, []);
 
   const handleSave = useCallback(async () => {
-    if (!form.name.trim()) { setFormError('Name is required'); return; }
-    if (!form.factory_id) { setFormError('Factory is required'); return; }
-    if (!form.material_type) { setFormError('Type is required'); return; }
+    if (!form.name.trim()) {
+      setFormError('Name is required');
+      return;
+    }
+    if (!form.factory_id) {
+      setFormError('Factory is required');
+      return;
+    }
+    if (!form.subgroup_id && !form.material_type) {
+      setFormError('Subgroup is required');
+      return;
+    }
     setFormError('');
 
     const payload: Record<string, unknown> = {
       name: form.name.trim(),
       factory_id: form.factory_id,
       material_type: form.material_type,
+      subgroup_id: form.subgroup_id || null,
       unit: form.unit,
       balance: parseFloat(form.balance) || 0,
       min_balance: parseFloat(form.min_balance) || 0,
@@ -195,12 +249,14 @@ function MaterialsCrudTab() {
       }
       closeEdit();
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data
+        ?.detail;
       setFormError(detail ?? 'Save failed');
     }
   }, [form, editDialog.item, createMaterial, updateMaterial, closeEdit]);
 
-  // ── Transaction dialog ─────────────────────────────────────────────────
+  // ── Transaction dialog ──────────────────────────────────────────────────
+
   const openTx = useCallback((item: MaterialItem) => {
     setTxForm({ type: 'receive', quantity: '', notes: '' });
     setTxError('');
@@ -215,7 +271,10 @@ function MaterialsCrudTab() {
   const handleTx = useCallback(async () => {
     if (!txDialog.item) return;
     const qty = parseFloat(txForm.quantity);
-    if (!qty || qty <= 0) { setTxError('Enter a valid quantity'); return; }
+    if (!qty || qty <= 0) {
+      setTxError('Enter a valid quantity');
+      return;
+    }
     setTxError('');
     try {
       await createTransaction.mutateAsync({
@@ -227,21 +286,24 @@ function MaterialsCrudTab() {
       });
       closeTx();
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data
+        ?.detail;
       setTxError(detail ?? 'Transaction failed');
     }
   }, [txDialog.item, txForm, createTransaction, closeTx]);
 
-  // ── Per-type counts for tab badges ─────────────────────────────────────
+  // ── Counts ──────────────────────────────────────────────────────────────
+
   const countsByType = useMemo(() => {
     const map: Record<string, number> = {};
-    items.forEach((m) => { map[m.material_type] = (map[m.material_type] ?? 0) + 1; });
+    items.forEach((m) => {
+      map[m.material_type] = (map[m.material_type] ?? 0) + 1;
+    });
     return map;
   }, [items]);
 
   const lowStockCount = useMemo(() => items.filter((m) => m.is_low_stock).length, [items]);
 
-  // ── Filtered display items ─────────────────────────────────────────────
   const displayItems = useMemo(() => {
     if (activeType === 'all') return items;
     return items.filter((m) => m.material_type === activeType);
@@ -250,12 +312,48 @@ function MaterialsCrudTab() {
   const saving = createMaterial.isPending || updateMaterial.isPending;
   const txPending = createTransaction.isPending;
 
-  // ── Options ────────────────────────────────────────────────────────────
+  // ── Dropdown options ────────────────────────────────────────────────────
+
   const factoryOptions = [
     { value: '', label: 'All factories' },
     ...factories.map((f) => ({ value: f.id, label: f.name })),
   ];
-  const typeOptions = MATERIAL_TYPES.map((t) => ({ value: t.value, label: `${t.emoji} ${t.label}` }));
+
+  // Build grouped subgroup options for the form (Group → Subgroups)
+  const subgroupOptions = useMemo(() => {
+    if (!hierarchy) return [];
+    const opts: { value: string; label: string }[] = [];
+    for (const g of hierarchy) {
+      for (const sg of g.subgroups) {
+        opts.push({
+          value: sg.id,
+          label: `${g.name} / ${sg.name}`,
+        });
+      }
+    }
+    return opts;
+  }, [hierarchy]);
+
+  // When user selects a subgroup in the form, also sync material_type
+  const handleSubgroupChange = useCallback(
+    (sgId: string) => {
+      const sg = subgroups.find((s) => s.subgroupId === sgId);
+      setForm((prev) => ({
+        ...prev,
+        subgroup_id: sgId,
+        material_type: sg?.value ?? prev.material_type,
+      }));
+    },
+    [subgroups],
+  );
+
+  if (hierarchyLoading) {
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner className="h-8 w-8" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -268,14 +366,16 @@ function MaterialsCrudTab() {
             onChange={(e) => setFactoryId(e.target.value)}
           />
         </div>
-        <div className="flex-1 min-w-48">
+        <div className="min-w-48 flex-1">
           <Input
-            placeholder="Search materials…"
+            placeholder="Search materials\u2026"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <Button onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}>
+        <Button
+          onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}
+        >
           + Add Material
         </Button>
       </div>
@@ -289,7 +389,7 @@ function MaterialsCrudTab() {
         </div>
       )}
 
-      {/* Type tabs */}
+      {/* Dynamic type tabs from hierarchy */}
       <div className="flex flex-wrap gap-1 rounded-lg bg-gray-100 p-1">
         <button
           onClick={() => setActiveType('all')}
@@ -301,24 +401,28 @@ function MaterialsCrudTab() {
         >
           All
           {items.length > 0 && (
-            <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">{items.length}</span>
+            <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">
+              {items.length}
+            </span>
           )}
         </button>
-        {MATERIAL_TYPES.map((t) => {
-          const count = countsByType[t.value] ?? 0;
+        {subgroups.map((sg) => {
+          const count = countsByType[sg.value] ?? 0;
           return (
             <button
-              key={t.value}
-              onClick={() => setActiveType(t.value)}
+              key={sg.value}
+              onClick={() => setActiveType(sg.value)}
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                activeType === t.value
+                activeType === sg.value
                   ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
-              {t.emoji} {t.label}
+              {sg.icon ? `${sg.icon} ` : ''}{sg.label}
               {count > 0 && (
-                <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">{count}</span>
+                <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">
+                  {count}
+                </span>
               )}
             </button>
           );
@@ -328,15 +432,23 @@ function MaterialsCrudTab() {
       {/* Content */}
       {isError ? (
         <Card>
-          <p className="py-8 text-center text-sm text-red-600">⚠ Error loading materials</p>
+          <p className="py-8 text-center text-sm text-red-600">
+            ⚠ Error loading materials
+          </p>
         </Card>
       ) : isLoading ? (
-        <div className="flex justify-center py-16"><Spinner className="h-8 w-8" /></div>
+        <div className="flex justify-center py-16">
+          <Spinner className="h-8 w-8" />
+        </div>
       ) : displayItems.length === 0 ? (
         <Card>
           <div className="py-12 text-center">
             <p className="text-gray-400">No materials found</p>
-            <Button className="mt-4" variant="secondary" onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}>
+            <Button
+              className="mt-4"
+              variant="secondary"
+              onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}
+            >
               + Add first material
             </Button>
           </div>
@@ -344,6 +456,7 @@ function MaterialsCrudTab() {
       ) : (
         <MaterialsTable
           items={displayItems}
+          subgroups={subgroups}
           onEdit={openEdit}
           onTransaction={openTx}
         />
@@ -373,11 +486,11 @@ function MaterialsCrudTab() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Type *</label>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Subgroup *</label>
               <Select
-                options={typeOptions}
-                value={form.material_type}
-                onChange={(e) => setForm({ ...form, material_type: e.target.value as MaterialTypeValue })}
+                options={subgroupOptions}
+                value={form.subgroup_id}
+                onChange={(e) => handleSubgroupChange(e.target.value)}
               />
             </div>
           </div>
@@ -408,16 +521,21 @@ function MaterialsCrudTab() {
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">Supplier</label>
             <Select
-              options={[{ value: '', label: '— no supplier —' }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
+              options={[
+                { value: '', label: '\u2014 no supplier \u2014' },
+                ...suppliers.map((s) => ({ value: s.id, label: s.name })),
+              ]}
               value={form.supplier_id}
               onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
             />
           </div>
           {formError && <p className="text-sm text-red-600">{formError}</p>}
           <div className="flex justify-end gap-2 border-t pt-3">
-            <Button variant="secondary" onClick={closeEdit}>Cancel</Button>
+            <Button variant="secondary" onClick={closeEdit}>
+              Cancel
+            </Button>
             <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving…' : editDialog.item ? 'Update' : 'Create'}
+              {saving ? 'Saving\u2026' : editDialog.item ? 'Update' : 'Create'}
             </Button>
           </div>
         </div>
@@ -427,14 +545,16 @@ function MaterialsCrudTab() {
       <Dialog
         open={txDialog.open}
         onClose={closeTx}
-        title={txDialog.item ? `Transaction — ${txDialog.item.name}` : 'Transaction'}
+        title={txDialog.item ? `Transaction \u2014 ${txDialog.item.name}` : 'Transaction'}
         className="w-full max-w-sm"
       >
         {txDialog.item && (
           <div className="space-y-4">
             <div className="rounded-lg bg-gray-50 px-4 py-3 text-sm">
               <span className="text-gray-500">Current balance: </span>
-              <span className="font-semibold">{txDialog.item.balance} {txDialog.item.unit}</span>
+              <span className="font-semibold">
+                {txDialog.item.balance} {txDialog.item.unit}
+              </span>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Operation</label>
@@ -477,13 +597,23 @@ function MaterialsCrudTab() {
             />
             {txError && <p className="text-sm text-red-600">{txError}</p>}
             <div className="flex justify-end gap-2 border-t pt-3">
-              <Button variant="secondary" onClick={closeTx}>Cancel</Button>
+              <Button variant="secondary" onClick={closeTx}>
+                Cancel
+              </Button>
               <Button
                 onClick={handleTx}
                 disabled={txPending}
-                className={txForm.type === 'manual_write_off' ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500' : ''}
+                className={
+                  txForm.type === 'manual_write_off'
+                    ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500'
+                    : ''
+                }
               >
-                {txPending ? 'Saving…' : txForm.type === 'receive' ? '↑ Receive' : '↓ Write-off'}
+                {txPending
+                  ? 'Saving\u2026'
+                  : txForm.type === 'receive'
+                    ? '↑ Receive'
+                    : '↓ Write-off'}
               </Button>
             </div>
           </div>
@@ -493,14 +623,517 @@ function MaterialsCrudTab() {
   );
 }
 
-// ── Materials table ───────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// Tab 2: Groups & Subgroups Management
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface GroupForm {
+  name: string;
+  code: string;
+  description: string;
+  icon: string;
+  display_order: string;
+}
+
+interface SubgroupForm {
+  group_id: string;
+  name: string;
+  code: string;
+  description: string;
+  icon: string;
+  default_lead_time_days: string;
+  default_unit: string;
+  display_order: string;
+}
+
+const emptyGroupForm: GroupForm = {
+  name: '',
+  code: '',
+  description: '',
+  icon: '',
+  display_order: '0',
+};
+
+const emptySubgroupForm: SubgroupForm = {
+  group_id: '',
+  name: '',
+  code: '',
+  description: '',
+  icon: '',
+  default_lead_time_days: '',
+  default_unit: 'kg',
+  display_order: '0',
+};
+
+function GroupsSubgroupsTab() {
+  const { data: hierarchy, isLoading } = useMaterialHierarchy(true);
+  const createGroup = useCreateMaterialGroup();
+  const updateGroup = useUpdateMaterialGroup();
+  const createSubgroup = useCreateMaterialSubgroup();
+  const updateSubgroup = useUpdateMaterialSubgroup();
+
+  // Group dialog
+  const [groupDialog, setGroupDialog] = useState<{
+    open: boolean;
+    item: MaterialGroup | null;
+  }>({ open: false, item: null });
+  const [groupForm, setGroupForm] = useState<GroupForm>(emptyGroupForm);
+  const [groupError, setGroupError] = useState('');
+
+  // Subgroup dialog
+  const [sgDialog, setSgDialog] = useState<{
+    open: boolean;
+    item: MaterialSubgroup | null;
+  }>({ open: false, item: null });
+  const [sgForm, setSgForm] = useState<SubgroupForm>(emptySubgroupForm);
+  const [sgError, setSgError] = useState('');
+
+  // ── Group CRUD ────────────────────────────────────────────────────────
+
+  const openCreateGroup = useCallback(() => {
+    setGroupForm(emptyGroupForm);
+    setGroupError('');
+    setGroupDialog({ open: true, item: null });
+  }, []);
+
+  const openEditGroup = useCallback((g: MaterialGroup) => {
+    setGroupForm({
+      name: g.name,
+      code: g.code,
+      description: g.description ?? '',
+      icon: g.icon ?? '',
+      display_order: String(g.display_order),
+    });
+    setGroupError('');
+    setGroupDialog({ open: true, item: g });
+  }, []);
+
+  const handleSaveGroup = useCallback(async () => {
+    if (!groupForm.name.trim()) {
+      setGroupError('Name is required');
+      return;
+    }
+    if (!groupForm.code.trim()) {
+      setGroupError('Code is required');
+      return;
+    }
+    setGroupError('');
+
+    try {
+      if (groupDialog.item) {
+        await updateGroup.mutateAsync({
+          id: groupDialog.item.id,
+          data: {
+            name: groupForm.name.trim(),
+            code: groupForm.code.trim(),
+            description: groupForm.description || undefined,
+            icon: groupForm.icon || undefined,
+            display_order: parseInt(groupForm.display_order) || 0,
+          },
+        });
+      } else {
+        await createGroup.mutateAsync({
+          name: groupForm.name.trim(),
+          code: groupForm.code.trim(),
+          description: groupForm.description || undefined,
+          icon: groupForm.icon || undefined,
+          display_order: parseInt(groupForm.display_order) || 0,
+        });
+      }
+      setGroupDialog({ open: false, item: null });
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data
+        ?.detail;
+      setGroupError(detail ?? 'Save failed');
+    }
+  }, [groupForm, groupDialog.item, createGroup, updateGroup]);
+
+  const toggleGroupActive = useCallback(
+    async (g: MaterialGroup) => {
+      try {
+        await updateGroup.mutateAsync({
+          id: g.id,
+          data: { is_active: !g.is_active },
+        });
+      } catch {
+        // silent
+      }
+    },
+    [updateGroup],
+  );
+
+  // ── Subgroup CRUD ─────────────────────────────────────────────────────
+
+  const openCreateSubgroup = useCallback((groupId?: string) => {
+    setSgForm({ ...emptySubgroupForm, group_id: groupId ?? '' });
+    setSgError('');
+    setSgDialog({ open: true, item: null });
+  }, []);
+
+  const openEditSubgroup = useCallback((sg: MaterialSubgroup) => {
+    setSgForm({
+      group_id: sg.group_id,
+      name: sg.name,
+      code: sg.code,
+      description: sg.description ?? '',
+      icon: sg.icon ?? '',
+      default_lead_time_days: sg.default_lead_time_days != null ? String(sg.default_lead_time_days) : '',
+      default_unit: sg.default_unit || 'kg',
+      display_order: String(sg.display_order),
+    });
+    setSgError('');
+    setSgDialog({ open: true, item: sg });
+  }, []);
+
+  const handleSaveSubgroup = useCallback(async () => {
+    if (!sgForm.name.trim()) {
+      setSgError('Name is required');
+      return;
+    }
+    if (!sgForm.code.trim()) {
+      setSgError('Code is required');
+      return;
+    }
+    if (!sgForm.group_id) {
+      setSgError('Group is required');
+      return;
+    }
+    setSgError('');
+
+    try {
+      const payload = {
+        group_id: sgForm.group_id,
+        name: sgForm.name.trim(),
+        code: sgForm.code.trim(),
+        description: sgForm.description || undefined,
+        icon: sgForm.icon || undefined,
+        default_lead_time_days: sgForm.default_lead_time_days
+          ? parseInt(sgForm.default_lead_time_days)
+          : undefined,
+        default_unit: sgForm.default_unit || 'kg',
+        display_order: parseInt(sgForm.display_order) || 0,
+      };
+
+      if (sgDialog.item) {
+        await updateSubgroup.mutateAsync({ id: sgDialog.item.id, data: payload });
+      } else {
+        await createSubgroup.mutateAsync(payload);
+      }
+      setSgDialog({ open: false, item: null });
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data
+        ?.detail;
+      setSgError(detail ?? 'Save failed');
+    }
+  }, [sgForm, sgDialog.item, createSubgroup, updateSubgroup]);
+
+  const toggleSubgroupActive = useCallback(
+    async (sg: MaterialSubgroup) => {
+      try {
+        await updateSubgroup.mutateAsync({
+          id: sg.id,
+          data: { is_active: !sg.is_active },
+        });
+      } catch {
+        // silent
+      }
+    },
+    [updateSubgroup],
+  );
+
+  // ── Group dropdown for subgroup form ──────────────────────────────────
+  const groupOptions = useMemo(
+    () => (hierarchy ?? []).map((g) => ({ value: g.id, label: g.name })),
+    [hierarchy],
+  );
+
+  const groupSaving = createGroup.isPending || updateGroup.isPending;
+  const sgSaving = createSubgroup.isPending || updateSubgroup.isPending;
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner className="h-8 w-8" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Actions */}
+      <div className="flex items-center gap-3">
+        <Button onClick={openCreateGroup}>+ Add Group</Button>
+        <Button variant="secondary" onClick={() => openCreateSubgroup()}>
+          + Add Subgroup
+        </Button>
+      </div>
+
+      {/* Groups accordion */}
+      {!hierarchy || hierarchy.length === 0 ? (
+        <Card>
+          <div className="py-12 text-center">
+            <p className="text-gray-400">No groups yet. Create one to get started.</p>
+          </div>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {hierarchy.map((g) => (
+            <Card key={g.id}>
+              {/* Group header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {g.icon && <span className="text-xl">{g.icon}</span>}
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-900">{g.name}</h3>
+                    <p className="text-xs text-gray-400">
+                      Code: {g.code} &middot; Order: {g.display_order}
+                      {g.description && ` \u2014 ${g.description}`}
+                    </p>
+                  </div>
+                  {!g.is_active && (
+                    <Badge status="inactive" label="Inactive" />
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => openCreateSubgroup(g.id)}
+                  >
+                    + Subgroup
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => openEditGroup(g)}>
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => toggleGroupActive(g)}
+                  >
+                    {g.is_active ? 'Deactivate' : 'Activate'}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Subgroups table */}
+              {g.subgroups.length > 0 && (
+                <div className="mt-4 overflow-x-auto rounded-lg border border-gray-100">
+                  <table className="w-full text-left text-sm">
+                    <thead className="border-b bg-gray-50 text-xs font-medium uppercase tracking-wider text-gray-500">
+                      <tr>
+                        <th className="px-3 py-2">Icon</th>
+                        <th className="px-3 py-2">Name</th>
+                        <th className="px-3 py-2">Code</th>
+                        <th className="px-3 py-2">Default Unit</th>
+                        <th className="px-3 py-2">Lead Time</th>
+                        <th className="px-3 py-2 text-right">Materials</th>
+                        <th className="px-3 py-2">Status</th>
+                        <th className="px-3 py-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {g.subgroups.map((sg) => (
+                        <tr key={sg.id} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 text-center">{sg.icon || '\u2014'}</td>
+                          <td className="px-3 py-2 font-medium text-gray-900">{sg.name}</td>
+                          <td className="px-3 py-2 font-mono text-xs text-gray-500">{sg.code}</td>
+                          <td className="px-3 py-2 text-gray-500">{sg.default_unit}</td>
+                          <td className="px-3 py-2 text-gray-500">
+                            {sg.default_lead_time_days != null ? `${sg.default_lead_time_days}d` : '\u2014'}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-gray-600">
+                            {sg.material_count}
+                          </td>
+                          <td className="px-3 py-2">
+                            {sg.is_active ? (
+                              <Badge status="active" label="Active" />
+                            ) : (
+                              <Badge status="inactive" label="Inactive" />
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => openEditSubgroup(sg)}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => toggleSubgroupActive(sg)}
+                              >
+                                {sg.is_active ? 'Off' : 'On'}
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Group dialog */}
+      <Dialog
+        open={groupDialog.open}
+        onClose={() => setGroupDialog({ open: false, item: null })}
+        title={groupDialog.item ? `Edit Group: ${groupDialog.item.name}` : 'New Material Group'}
+        className="w-full max-w-md"
+      >
+        <div className="space-y-4">
+          <Input
+            label="Name *"
+            value={groupForm.name}
+            onChange={(e) => setGroupForm({ ...groupForm, name: e.target.value })}
+            placeholder="e.g. Tile Materials"
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Code *"
+              value={groupForm.code}
+              onChange={(e) => setGroupForm({ ...groupForm, code: e.target.value })}
+              placeholder="e.g. tile_materials"
+            />
+            <Input
+              label="Icon"
+              value={groupForm.icon}
+              onChange={(e) => setGroupForm({ ...groupForm, icon: e.target.value })}
+              placeholder="e.g. emoji"
+            />
+          </div>
+          <Input
+            label="Description"
+            value={groupForm.description}
+            onChange={(e) => setGroupForm({ ...groupForm, description: e.target.value })}
+          />
+          <Input
+            label="Display Order"
+            type="number"
+            value={groupForm.display_order}
+            onChange={(e) => setGroupForm({ ...groupForm, display_order: e.target.value })}
+          />
+          {groupError && <p className="text-sm text-red-600">{groupError}</p>}
+          <div className="flex justify-end gap-2 border-t pt-3">
+            <Button
+              variant="secondary"
+              onClick={() => setGroupDialog({ open: false, item: null })}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveGroup} disabled={groupSaving}>
+              {groupSaving ? 'Saving\u2026' : groupDialog.item ? 'Update' : 'Create'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Subgroup dialog */}
+      <Dialog
+        open={sgDialog.open}
+        onClose={() => setSgDialog({ open: false, item: null })}
+        title={sgDialog.item ? `Edit Subgroup: ${sgDialog.item.name}` : 'New Subgroup'}
+        className="w-full max-w-md"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Group *</label>
+            <Select
+              options={groupOptions}
+              value={sgForm.group_id}
+              onChange={(e) => setSgForm({ ...sgForm, group_id: e.target.value })}
+            />
+          </div>
+          <Input
+            label="Name *"
+            value={sgForm.name}
+            onChange={(e) => setSgForm({ ...sgForm, name: e.target.value })}
+            placeholder="e.g. Stone"
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Code *"
+              value={sgForm.code}
+              onChange={(e) => setSgForm({ ...sgForm, code: e.target.value })}
+              placeholder="e.g. stone"
+            />
+            <Input
+              label="Icon"
+              value={sgForm.icon}
+              onChange={(e) => setSgForm({ ...sgForm, icon: e.target.value })}
+              placeholder="e.g. emoji"
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Default Unit</label>
+              <Select
+                options={UNIT_OPTIONS}
+                value={sgForm.default_unit}
+                onChange={(e) => setSgForm({ ...sgForm, default_unit: e.target.value })}
+              />
+            </div>
+            <Input
+              label="Lead Time (days)"
+              type="number"
+              value={sgForm.default_lead_time_days}
+              onChange={(e) =>
+                setSgForm({ ...sgForm, default_lead_time_days: e.target.value })
+              }
+            />
+            <Input
+              label="Display Order"
+              type="number"
+              value={sgForm.display_order}
+              onChange={(e) => setSgForm({ ...sgForm, display_order: e.target.value })}
+            />
+          </div>
+          <Input
+            label="Description"
+            value={sgForm.description}
+            onChange={(e) => setSgForm({ ...sgForm, description: e.target.value })}
+          />
+          {sgError && <p className="text-sm text-red-600">{sgError}</p>}
+          <div className="flex justify-end gap-2 border-t pt-3">
+            <Button
+              variant="secondary"
+              onClick={() => setSgDialog({ open: false, item: null })}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveSubgroup} disabled={sgSaving}>
+              {sgSaving ? 'Saving\u2026' : sgDialog.item ? 'Update' : 'Create'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Materials table (shared)
+// ═══════════════════════════════════════════════════════════════════════════
+
 interface MaterialsTableProps {
   items: MaterialItem[];
+  subgroups: { value: string; label: string; icon: string }[];
   onEdit: (item: MaterialItem) => void;
   onTransaction: (item: MaterialItem) => void;
 }
 
-function MaterialsTable({ items, onEdit, onTransaction }: MaterialsTableProps) {
+function MaterialsTable({ items, subgroups, onEdit, onTransaction }: MaterialsTableProps) {
+  const typeLabel = (code: string) =>
+    subgroups.find((s) => s.value === code)?.label ?? code;
+  const typeIcon = (code: string) =>
+    subgroups.find((s) => s.value === code)?.icon ?? '';
+
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200">
       <table className="w-full text-left text-sm">
@@ -518,24 +1151,34 @@ function MaterialsTable({ items, onEdit, onTransaction }: MaterialsTableProps) {
         </thead>
         <tbody className="divide-y divide-gray-100">
           {items.map((m) => (
-            <tr key={m.id} className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}>
+            <tr
+              key={`${m.id}-${m.factory_id}`}
+              className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}
+            >
               <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
               <td className="px-4 py-3">
                 <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
-                  {typeEmoji(m.material_type)} {typeLabel(m.material_type)}
+                  {typeIcon(m.material_type)} {typeLabel(m.material_type)}
                 </span>
               </td>
-              <td className={`px-4 py-3 text-right font-mono font-semibold ${m.is_low_stock ? 'text-red-600' : 'text-gray-900'}`}>
+              <td
+                className={`px-4 py-3 text-right font-mono font-semibold ${m.is_low_stock ? 'text-red-600' : 'text-gray-900'}`}
+              >
                 {Number(m.balance).toFixed(3)}
               </td>
               <td className="px-4 py-3 text-right font-mono text-gray-500">
                 {Number(m.min_balance).toFixed(3)}
               </td>
               <td className="px-4 py-3 text-gray-500">{m.unit}</td>
-              <td className="px-4 py-3 text-gray-500">{m.supplier_name ?? <span className="text-gray-300">—</span>}</td>
+              <td className="px-4 py-3 text-gray-500">
+                {m.supplier_name ?? <span className="text-gray-300">\u2014</span>}
+              </td>
               <td className="px-4 py-3">
                 {m.is_low_stock ? (
-                  <Badge status="error" label={`Deficit: ${(Number(m.min_balance) - Number(m.balance)).toFixed(1)} ${m.unit}`} />
+                  <Badge
+                    status="error"
+                    label={`Deficit: ${(Number(m.min_balance) - Number(m.balance)).toFixed(1)} ${m.unit}`}
+                  />
                 ) : (
                   <Badge status="active" label="OK" />
                 )}

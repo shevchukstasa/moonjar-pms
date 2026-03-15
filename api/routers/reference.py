@@ -109,7 +109,17 @@ async def list_material_types(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Return all material types (enum values)."""
+    """Return material types from subgroups (dynamic) with enum fallback."""
+    from api.models import MaterialSubgroup
+    subgroups = (
+        db.query(MaterialSubgroup)
+        .filter(MaterialSubgroup.is_active.is_(True))
+        .order_by(MaterialSubgroup.display_order)
+        .all()
+    )
+    if subgroups:
+        return [{"value": sg.code, "label": sg.name} for sg in subgroups]
+    # Fallback to enum if no subgroups seeded yet
     return _enum_to_list(MaterialType)
 
 
@@ -150,11 +160,48 @@ async def list_all_reference_data(
     current_user=Depends(get_current_user),
 ):
     """Return all reference data in a single payload (for initial frontend load)."""
+    from api.models import MaterialSubgroup, MaterialGroup
+    from sqlalchemy.orm import joinedload
+
+    # Dynamic material types from subgroups (with enum fallback)
+    subgroups = (
+        db.query(MaterialSubgroup)
+        .filter(MaterialSubgroup.is_active.is_(True))
+        .order_by(MaterialSubgroup.display_order)
+        .all()
+    )
+    material_types_list = (
+        [{"value": sg.code, "label": sg.name} for sg in subgroups]
+        if subgroups else _enum_to_list(MaterialType)
+    )
+
+    # Material groups hierarchy
+    groups = (
+        db.query(MaterialGroup)
+        .options(joinedload(MaterialGroup.subgroups))
+        .filter(MaterialGroup.is_active.is_(True))
+        .order_by(MaterialGroup.display_order)
+        .all()
+    )
+    material_groups_list = [
+        {
+            "id": str(g.id),
+            "name": g.name,
+            "code": g.code,
+            "subgroups": [
+                {"id": str(sg.id), "code": sg.code, "name": sg.name}
+                for sg in (g.subgroups or []) if sg.is_active
+            ],
+        }
+        for g in groups
+    ]
+
     # Static enums
     result = {
         "product_types": _enum_to_list(ProductType),
         "shape_types": _enum_to_list(ShapeType),
-        "material_types": _enum_to_list(MaterialType),
+        "material_types": material_types_list,
+        "material_groups": material_groups_list,
         "position_statuses": _enum_to_list(PositionStatus),
         "order_statuses": _enum_to_list(OrderStatus),
         "split_categories": _enum_to_list(SplitCategory),

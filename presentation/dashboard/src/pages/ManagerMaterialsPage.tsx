@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { useMaterials, useCreateMaterial, useUpdateMaterial, useCreateTransaction, type MaterialItem } from '@/hooks/useMaterials';
+import { useMaterialHierarchy, type MaterialGroup } from '@/hooks/useMaterialGroups';
 import { useFactories } from '@/hooks/useFactories';
 import { useSuppliers } from '@/hooks/useSuppliers';
 import { Card } from '@/components/ui/Card';
@@ -12,19 +13,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 
-// ── Material type definitions ─────────────────────────────────────────────
-const MATERIAL_TYPES = [
-  { value: 'stone',           label: 'Stone',                emoji: '🪨' },
-  { value: 'pigment',         label: 'Pigments',             emoji: '🎨' },
-  { value: 'frit',            label: 'Frits',                emoji: '⚗️' },
-  { value: 'oxide_carbonate', label: 'Oxides & Carbonates',  emoji: '🧪' },
-  { value: 'other_bulk',      label: 'Other Bulk',           emoji: '📦' },
-  { value: 'packaging',       label: 'Packaging',            emoji: '📦' },
-  { value: 'consumable',      label: 'Consumables',          emoji: '🔧' },
-  { value: 'other',           label: 'Other',                emoji: '📋' },
-] as const;
-
-type MaterialTypeValue = typeof MATERIAL_TYPES[number]['value'];
+// ── Constants ────────────────────────────────────────────────────────────
 
 const UNIT_OPTIONS = [
   { value: 'kg',  label: 'kg' },
@@ -32,22 +21,28 @@ const UNIT_OPTIONS = [
   { value: 'l',   label: 'L' },
   { value: 'pcs', label: 'pcs' },
   { value: 'm',   label: 'm' },
-  { value: 'm2',  label: 'm²' },
+  { value: 'm2',  label: 'm\u00B2' },
 ];
 
-function typeLabel(type: string): string {
-  return MATERIAL_TYPES.find((t) => t.value === type)?.label ?? type;
+/** Build a flat list of subgroups from hierarchy */
+function flatSubgroups(hierarchy: MaterialGroup[] | undefined) {
+  if (!hierarchy) return [];
+  const result: { value: string; label: string; subgroupId: string; icon: string }[] = [];
+  for (const g of hierarchy) {
+    for (const sg of g.subgroups) {
+      result.push({ value: sg.code, label: sg.name, subgroupId: sg.id, icon: sg.icon || '' });
+    }
+  }
+  return result;
 }
 
-function typeEmoji(type: string): string {
-  return MATERIAL_TYPES.find((t) => t.value === type)?.emoji ?? '📋';
-}
+// ── Interfaces ───────────────────────────────────────────────────────────
 
-// ── Interfaces ────────────────────────────────────────────────────────────
 interface MaterialForm {
   name: string;
   factory_id: string;
-  material_type: MaterialTypeValue | '';
+  subgroup_id: string;
+  material_type: string;
   unit: string;
   balance: string;
   min_balance: string;
@@ -58,6 +53,7 @@ interface MaterialForm {
 const emptyForm: MaterialForm = {
   name: '',
   factory_id: '',
+  subgroup_id: '',
   material_type: '',
   unit: 'kg',
   balance: '0',
@@ -72,19 +68,21 @@ interface TxForm {
   notes: string;
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────
+// ── Main page ───────────────────────────────────────────────────────────
+
 export default function ManagerMaterialsPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
 
+  // Dynamic hierarchy for type tabs
+  const { data: hierarchy, isLoading: hierarchyLoading } = useMaterialHierarchy();
+  const subgroups = useMemo(() => flatSubgroups(hierarchy), [hierarchy]);
+
   // Filters
   const { data: factoriesData } = useFactories();
   const factories = factoriesData?.items ?? [];
-  const [factoryId, setFactoryId] = useState<string>(() => {
-    // Default to user's primary factory if available
-    return '';
-  });
-  const [activeType, setActiveType] = useState<MaterialTypeValue | 'all'>('all');
+  const [factoryId, setFactoryId] = useState('');
+  const [activeType, setActiveType] = useState('all');
   const [search, setSearch] = useState('');
 
   // Data
@@ -96,7 +94,7 @@ export default function ManagerMaterialsPage() {
   });
   const items = data?.items ?? [];
 
-  // Suppliers for form dropdown
+  // Suppliers
   const { data: suppliersData } = useSuppliers();
   const suppliers = suppliersData?.items ?? [];
 
@@ -114,18 +112,26 @@ export default function ManagerMaterialsPage() {
   const [txForm, setTxForm] = useState<TxForm>({ type: 'receive', quantity: '', notes: '' });
   const [txError, setTxError] = useState('');
 
-  // ── Edit/create dialog ─────────────────────────────────────────────────
-  const openCreate = useCallback((defaultType?: MaterialTypeValue) => {
-    setForm({ ...emptyForm, material_type: defaultType ?? '', factory_id: factoryId });
+  // ── Edit/create dialog ──────────────────────────────────────────────────
+
+  const openCreate = useCallback((defaultType?: string) => {
+    const sg = subgroups.find((s) => s.value === defaultType);
+    setForm({
+      ...emptyForm,
+      material_type: defaultType ?? '',
+      subgroup_id: sg?.subgroupId ?? '',
+      factory_id: factoryId,
+    });
     setFormError('');
     setEditDialog({ open: true, item: null });
-  }, [factoryId]);
+  }, [factoryId, subgroups]);
 
   const openEdit = useCallback((item: MaterialItem) => {
     setForm({
       name: item.name,
       factory_id: item.factory_id ?? '',
-      material_type: item.material_type as MaterialTypeValue,
+      subgroup_id: item.subgroup_id ?? '',
+      material_type: item.material_type ?? '',
       unit: item.unit,
       balance: String(item.balance),
       min_balance: String(item.min_balance),
@@ -144,13 +150,14 @@ export default function ManagerMaterialsPage() {
   const handleSave = useCallback(async () => {
     if (!form.name.trim()) { setFormError('Name is required'); return; }
     if (!form.factory_id) { setFormError('Factory is required'); return; }
-    if (!form.material_type) { setFormError('Type is required'); return; }
+    if (!form.subgroup_id && !form.material_type) { setFormError('Type is required'); return; }
     setFormError('');
 
     const payload: Record<string, unknown> = {
       name: form.name.trim(),
       factory_id: form.factory_id,
       material_type: form.material_type,
+      subgroup_id: form.subgroup_id || null,
       unit: form.unit,
       balance: parseFloat(form.balance) || 0,
       min_balance: parseFloat(form.min_balance) || 0,
@@ -171,7 +178,8 @@ export default function ManagerMaterialsPage() {
     }
   }, [form, editDialog.item, createMaterial, updateMaterial, closeEdit]);
 
-  // ── Transaction dialog ─────────────────────────────────────────────────
+  // ── Transaction dialog ──────────────────────────────────────────────────
+
   const openTx = useCallback((item: MaterialItem) => {
     setTxForm({ type: 'receive', quantity: '', notes: '' });
     setTxError('');
@@ -203,10 +211,9 @@ export default function ManagerMaterialsPage() {
     }
   }, [txDialog.item, txForm, createTransaction, closeTx]);
 
-  // ── Per-type counts for tab badges ─────────────────────────────────────
+  // ── Counts ──────────────────────────────────────────────────────────────
+
   const countsByType = useMemo(() => {
-    // When filtering active, still want ALL counts — re-fetch would be needed for accuracy,
-    // but for the current items we compute from current page
     const map: Record<string, number> = {};
     items.forEach((m) => { map[m.material_type] = (map[m.material_type] ?? 0) + 1; });
     return map;
@@ -214,7 +221,6 @@ export default function ManagerMaterialsPage() {
 
   const lowStockCount = useMemo(() => items.filter((m) => m.is_low_stock).length, [items]);
 
-  // ── Filtered display items ─────────────────────────────────────────────
   const displayItems = useMemo(() => {
     if (activeType === 'all') return items;
     return items.filter((m) => m.material_type === activeType);
@@ -223,16 +229,34 @@ export default function ManagerMaterialsPage() {
   const saving = createMaterial.isPending || updateMaterial.isPending;
   const txPending = createTransaction.isPending;
 
-  // ── Factory options ────────────────────────────────────────────────────
   const factoryOptions = [
     { value: '', label: 'All factories' },
     ...factories.map((f) => ({ value: f.id, label: f.name })),
   ];
 
-  // ── Type select options for form ──────────────────────────────────────
-  const typeOptions = MATERIAL_TYPES.map((t) => ({ value: t.value, label: `${t.emoji} ${t.label}` }));
+  // Grouped subgroup options for the form
+  const subgroupOptions = useMemo(() => {
+    if (!hierarchy) return [];
+    const opts: { value: string; label: string }[] = [];
+    for (const g of hierarchy) {
+      for (const sg of g.subgroups) {
+        opts.push({ value: sg.id, label: `${g.name} / ${sg.name}` });
+      }
+    }
+    return opts;
+  }, [hierarchy]);
+
+  const handleSubgroupChange = useCallback((sgId: string) => {
+    const sg = subgroups.find((s) => s.subgroupId === sgId);
+    setForm((prev) => ({
+      ...prev,
+      subgroup_id: sgId,
+      material_type: sg?.value ?? prev.material_type,
+    }));
+  }, [subgroups]);
 
   // ── Render ────────────────────────────────────────────────────────────
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -267,48 +291,52 @@ export default function ManagerMaterialsPage() {
         </div>
         <div className="flex-1 min-w-48">
           <Input
-            placeholder="Search materials…"
+            placeholder="Search materials\u2026"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
       </div>
 
-      {/* Type tabs */}
-      <div className="flex flex-wrap gap-1 rounded-lg bg-gray-100 p-1">
-        <button
-          onClick={() => setActiveType('all')}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-            activeType === 'all'
-              ? 'bg-white text-gray-900 shadow-sm'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          All
-          {items.length > 0 && (
-            <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">{items.length}</span>
-          )}
-        </button>
-        {MATERIAL_TYPES.map((t) => {
-          const count = countsByType[t.value] ?? 0;
-          return (
-            <button
-              key={t.value}
-              onClick={() => setActiveType(t.value)}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                activeType === t.value
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {t.emoji} {t.label}
-              {count > 0 && (
-                <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">{count}</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      {/* Dynamic type tabs */}
+      {hierarchyLoading ? (
+        <div className="flex justify-center py-4"><Spinner className="h-5 w-5" /></div>
+      ) : (
+        <div className="flex flex-wrap gap-1 rounded-lg bg-gray-100 p-1">
+          <button
+            onClick={() => setActiveType('all')}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              activeType === 'all'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            All
+            {items.length > 0 && (
+              <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">{items.length}</span>
+            )}
+          </button>
+          {subgroups.map((sg) => {
+            const count = countsByType[sg.value] ?? 0;
+            return (
+              <button
+                key={sg.value}
+                onClick={() => setActiveType(sg.value)}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  activeType === sg.value
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {sg.icon ? `${sg.icon} ` : ''}{sg.label}
+                {count > 0 && (
+                  <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">{count}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Content */}
       {isError ? (
@@ -329,6 +357,7 @@ export default function ManagerMaterialsPage() {
       ) : (
         <MaterialsTable
           items={displayItems}
+          subgroups={subgroups}
           onEdit={openEdit}
           onTransaction={openTx}
         />
@@ -358,11 +387,11 @@ export default function ManagerMaterialsPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Type *</label>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Subgroup *</label>
               <Select
-                options={typeOptions}
-                value={form.material_type}
-                onChange={(e) => setForm({ ...form, material_type: e.target.value as MaterialTypeValue })}
+                options={subgroupOptions}
+                value={form.subgroup_id}
+                onChange={(e) => handleSubgroupChange(e.target.value)}
               />
             </div>
           </div>
@@ -393,7 +422,7 @@ export default function ManagerMaterialsPage() {
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">Supplier</label>
             <Select
-              options={[{ value: '', label: '— no supplier —' }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
+              options={[{ value: '', label: '\u2014 no supplier \u2014' }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
               value={form.supplier_id}
               onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
             />
@@ -402,7 +431,7 @@ export default function ManagerMaterialsPage() {
           <div className="flex justify-end gap-2 border-t pt-3">
             <Button variant="secondary" onClick={closeEdit}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving…' : editDialog.item ? 'Update' : 'Create'}
+              {saving ? 'Saving\u2026' : editDialog.item ? 'Update' : 'Create'}
             </Button>
           </div>
         </div>
@@ -412,7 +441,7 @@ export default function ManagerMaterialsPage() {
       <Dialog
         open={txDialog.open}
         onClose={closeTx}
-        title={txDialog.item ? `Transaction — ${txDialog.item.name}` : 'Transaction'}
+        title={txDialog.item ? `Transaction \u2014 ${txDialog.item.name}` : 'Transaction'}
         className="w-full max-w-sm"
       >
         {txDialog.item && (
@@ -468,7 +497,7 @@ export default function ManagerMaterialsPage() {
                 disabled={txPending}
                 className={txForm.type === 'manual_write_off' ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500' : ''}
               >
-                {txPending ? 'Saving…' : txForm.type === 'receive' ? '↑ Receive' : '↓ Write-off'}
+                {txPending ? 'Saving\u2026' : txForm.type === 'receive' ? '↑ Receive' : '↓ Write-off'}
               </Button>
             </div>
           </div>
@@ -478,14 +507,19 @@ export default function ManagerMaterialsPage() {
   );
 }
 
-// ── Materials table ───────────────────────────────────────────────────────
+// ── Materials table ──────────────────────────────────────────────────────
+
 interface MaterialsTableProps {
   items: MaterialItem[];
+  subgroups: { value: string; label: string; icon: string }[];
   onEdit: (item: MaterialItem) => void;
   onTransaction: (item: MaterialItem) => void;
 }
 
-function MaterialsTable({ items, onEdit, onTransaction }: MaterialsTableProps) {
+function MaterialsTable({ items, subgroups, onEdit, onTransaction }: MaterialsTableProps) {
+  const typeLabel = (code: string) => subgroups.find((s) => s.value === code)?.label ?? code;
+  const typeIcon = (code: string) => subgroups.find((s) => s.value === code)?.icon ?? '';
+
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200">
       <table className="w-full text-left text-sm">
@@ -503,11 +537,11 @@ function MaterialsTable({ items, onEdit, onTransaction }: MaterialsTableProps) {
         </thead>
         <tbody className="divide-y divide-gray-100">
           {items.map((m) => (
-            <tr key={m.id} className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}>
+            <tr key={`${m.id}-${m.factory_id}`} className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}>
               <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
               <td className="px-4 py-3">
                 <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
-                  {typeEmoji(m.material_type)} {typeLabel(m.material_type)}
+                  {typeIcon(m.material_type)} {typeLabel(m.material_type)}
                 </span>
               </td>
               <td className={`px-4 py-3 text-right font-mono font-semibold ${m.is_low_stock ? 'text-red-600' : 'text-gray-900'}`}>
@@ -517,7 +551,7 @@ function MaterialsTable({ items, onEdit, onTransaction }: MaterialsTableProps) {
                 {Number(m.min_balance).toFixed(3)}
               </td>
               <td className="px-4 py-3 text-gray-500">{m.unit}</td>
-              <td className="px-4 py-3 text-gray-500">{m.supplier_name ?? <span className="text-gray-300">—</span>}</td>
+              <td className="px-4 py-3 text-gray-500">{m.supplier_name ?? <span className="text-gray-300">{'\u2014'}</span>}</td>
               <td className="px-4 py-3">
                 {m.is_low_stock ? (
                   <Badge status="error" label={`Deficit: ${(Number(m.min_balance) - Number(m.balance)).toFixed(1)} ${m.unit}`} />

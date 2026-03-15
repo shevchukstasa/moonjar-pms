@@ -64,6 +64,7 @@ from api.routers import finished_goods
 from api.routers import firing_profiles
 from api.routers import batches
 from api.routers import cleanup
+from api.routers import material_groups
 
 
 def _ensure_schema():
@@ -901,6 +902,97 @@ def _ensure_schema():
 
     _run_section("glaze_recipes", _seed_glaze_recipes)
 
+    # --- Section 9: Material groups & subgroups hierarchy ---
+    def _create_material_groups_tables(conn):
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS material_groups (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(200) NOT NULL UNIQUE,
+                code VARCHAR(50) NOT NULL UNIQUE,
+                description TEXT,
+                icon VARCHAR(10),
+                display_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS material_subgroups (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                group_id UUID NOT NULL REFERENCES material_groups(id) ON DELETE CASCADE,
+                name VARCHAR(200) NOT NULL,
+                code VARCHAR(50) NOT NULL UNIQUE,
+                description TEXT,
+                icon VARCHAR(10),
+                default_lead_time_days INTEGER,
+                default_unit VARCHAR(20) DEFAULT 'kg',
+                display_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_subgroup_group_name UNIQUE(group_id, name)
+            )
+        """))
+
+    _run_section("material_groups_tables", _create_material_groups_tables)
+
+    def _add_material_subgroup_fk(conn):
+        conn.execute(text(
+            "ALTER TABLE materials ADD COLUMN IF NOT EXISTS subgroup_id UUID REFERENCES material_subgroups(id)"
+        ))
+
+    _run_section("materials_subgroup_fk", _add_material_subgroup_fk)
+
+    def _seed_material_groups(conn):
+        count = conn.execute(text("SELECT COUNT(*) FROM material_groups")).scalar()
+        if count and count > 0:
+            return
+
+        # Create groups
+        conn.execute(text("""
+            INSERT INTO material_groups (name, code, icon, display_order) VALUES
+                ('Материалы для плитки', 'tile_materials', '🧱', 1),
+                ('Упаковка и расходные', 'packaging_consumables', '📦', 2),
+                ('Прочее', 'other', '📋', 3)
+        """))
+
+        tile_gid = conn.execute(text(
+            "SELECT id FROM material_groups WHERE code = 'tile_materials'"
+        )).scalar()
+        pack_gid = conn.execute(text(
+            "SELECT id FROM material_groups WHERE code = 'packaging_consumables'"
+        )).scalar()
+        other_gid = conn.execute(text(
+            "SELECT id FROM material_groups WHERE code = 'other'"
+        )).scalar()
+
+        # Create subgroups matching old material_type enum values
+        conn.execute(text("""
+            INSERT INTO material_subgroups (group_id, name, code, icon, default_lead_time_days, display_order) VALUES
+                (:tile, 'Stone',               'stone',           '🪨', 35, 1),
+                (:tile, 'Pigments',            'pigment',         '🎨',  7, 2),
+                (:tile, 'Frits',               'frit',            '⚗️', 14, 3),
+                (:tile, 'Oxides & Carbonates', 'oxide_carbonate', '🧪', 14, 4),
+                (:tile, 'Other Bulk',          'other_bulk',      '📦', 14, 5),
+                (:pack, 'Packaging',           'packaging',       '📦', 14, 1),
+                (:pack, 'Consumables',         'consumable',      '🔧', 14, 2),
+                (:other, 'Other',              'other',           '📋', 14, 1)
+        """), {"tile": str(tile_gid), "pack": str(pack_gid), "other": str(other_gid)})
+
+    _run_section("seed_material_groups", _seed_material_groups)
+
+    def _backfill_material_subgroups(conn):
+        conn.execute(text("""
+            UPDATE materials m
+            SET subgroup_id = sg.id
+            FROM material_subgroups sg
+            WHERE m.material_type = sg.code
+              AND m.subgroup_id IS NULL
+        """))
+
+    _run_section("backfill_material_subgroups", _backfill_material_subgroups)
+
     # --- Section 8: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""
@@ -1055,5 +1147,6 @@ def setup_routers():
     app.include_router(firing_profiles.router, prefix="/api/firing-profiles", tags=["firing-profiles"])
     app.include_router(batches.router, prefix="/api/batches", tags=["batches"])
     app.include_router(cleanup.router, prefix="/api/cleanup", tags=["cleanup"])
+    app.include_router(material_groups.router, prefix="/api/material-groups", tags=["material-groups"])
 
 setup_routers()

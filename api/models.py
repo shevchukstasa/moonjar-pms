@@ -337,6 +337,49 @@ class Recipe(Base):
     )
 
 
+class MaterialGroup(Base):
+    """Top-level material category — e.g. 'Tile materials', 'Finished products', 'Equipment'."""
+    __tablename__ = 'material_groups'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(sa.String(200), nullable=False, unique=True)
+    code = Column(sa.String(50), nullable=False, unique=True)
+    description = Column(sa.Text)
+    icon = Column(sa.String(10))
+    display_order = Column(sa.Integer, nullable=False, default=0)
+    is_active = Column(sa.Boolean, nullable=False, default=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    subgroups = relationship('MaterialSubgroup', back_populates='group', cascade='all, delete-orphan',
+                             order_by='MaterialSubgroup.display_order')
+
+
+class MaterialSubgroup(Base):
+    """Second-level material category — e.g. 'Stone', 'Pigment' within 'Tile materials'."""
+    __tablename__ = 'material_subgroups'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id = Column(UUID(as_uuid=True), ForeignKey('material_groups.id', ondelete='CASCADE'), nullable=False)
+    name = Column(sa.String(200), nullable=False)
+    code = Column(sa.String(50), nullable=False, unique=True)
+    description = Column(sa.Text)
+    icon = Column(sa.String(10))
+    default_lead_time_days = Column(sa.Integer)
+    default_unit = Column(sa.String(20), default='kg')
+    display_order = Column(sa.Integer, nullable=False, default=0)
+    is_active = Column(sa.Boolean, nullable=False, default=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('group_id', 'name', name='uq_subgroup_group_name'),
+    )
+
+    group = relationship('MaterialGroup', back_populates='subgroups')
+    materials = relationship('Material', back_populates='subgroup')
+
+
 class Material(Base):
     """Shared material catalog — name, type, unit, supplier (no factory scope)."""
     __tablename__ = 'materials'
@@ -345,11 +388,13 @@ class Material(Base):
     name = Column(sa.String(300), unique=True, nullable=False)
     unit = Column(sa.String(20), nullable=False, default='pcs')
     material_type = Column(sa.String(50), nullable=False)
+    subgroup_id = Column(UUID(as_uuid=True), ForeignKey('material_subgroups.id'))
     supplier_id = Column(UUID(as_uuid=True), ForeignKey('suppliers.id'))
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     supplier = relationship('Supplier', foreign_keys=[supplier_id])
+    subgroup = relationship('MaterialSubgroup', back_populates='materials')
     stocks = relationship('MaterialStock', back_populates='material', cascade='all, delete-orphan')
 
 

@@ -5,6 +5,8 @@ export interface MaterialListParams {
   per_page?: number;
   factory_id?: string;
   material_type?: string;
+  subgroup_id?: string;
+  group_id?: string;
   warehouse_section?: string;
   low_stock?: boolean;
   search?: string;
@@ -23,6 +25,9 @@ export interface MaterialItem {
   avg_monthly_consumption: number;
   unit: string;
   material_type: string;
+  subgroup_id: string | null;
+  subgroup_name: string | null;
+  group_name: string | null;
   warehouse_section: string | null;
   supplier_id: string | null;
   supplier_name: string | null;

@@ -85,6 +85,9 @@ async def list_recipes(
 
     results = []
     for item in items:
+        # Guard against NULL glaze_settings in DB (legacy data)
+        if item.glaze_settings is None:
+            item.glaze_settings = {}
         d = RecipeResponse.model_validate(item).model_dump(mode="json")
         # Count ingredients for the list view
         d["ingredients_count"] = (
@@ -114,6 +117,9 @@ async def get_recipes_item(
     if not item:
         raise HTTPException(404, "Recipe not found")
 
+    # Guard against NULL glaze_settings in DB (legacy data)
+    if item.glaze_settings is None:
+        item.glaze_settings = {}
     d = RecipeResponse.model_validate(item).model_dump(mode="json")
 
     # Include materials (ingredients)
@@ -206,6 +212,9 @@ async def update_recipes_item(
         raise HTTPException(404, "Recipe not found")
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(item, k, v)
+    # Ensure glaze_settings is never None
+    if item.glaze_settings is None:
+        item.glaze_settings = {}
     db.commit()
     db.refresh(item)
     return item

@@ -133,13 +133,35 @@ def generate_csrf_token(session_id: str) -> str:
     ).hexdigest()
 
 def validate_csrf(request: Request):
-    """Validate CSRF token on mutating requests."""
+    """Validate CSRF token on mutating requests.
+
+    Supports two modes:
+    1. Double-submit: cookie == header (same-origin or SameSite=None works)
+    2. JWT fallback: header == HMAC(SECRET_KEY, jti) from access_token
+       (cross-origin when third-party cookies are blocked)
+    """
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
     csrf_cookie = request.cookies.get("csrf_token")
     csrf_header = request.headers.get("X-CSRF-Token")
-    if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
-        raise HTTPException(status_code=403, detail="CSRF token mismatch")
+
+    # Fast path: double-submit
+    if csrf_cookie and csrf_header and csrf_cookie == csrf_header:
+        return
+
+    # Fallback: verify against JWT session
+    if csrf_header:
+        access_token = request.cookies.get("access_token")
+        if access_token:
+            try:
+                payload = decode_token(access_token)
+                expected = generate_csrf_token(payload.get("jti", ""))
+                if csrf_header == expected:
+                    return
+            except Exception:
+                pass
+
+    raise HTTPException(status_code=403, detail="CSRF token mismatch")
 
 
 # --- Current user dependency ---

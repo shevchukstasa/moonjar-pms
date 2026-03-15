@@ -389,8 +389,8 @@ export default function AdminRecipesPage() {
       { key: 'actions', header: '', render: (r: RecipeItem) => (
         <div className="flex gap-1">
           <Button variant="ghost" size="sm" onClick={() => openEdit(r)}>Edit</Button>
-          <Button variant="ghost" size="sm" onClick={() => openClone(r)} title="Clone recipe">
-            <Copy className="h-3.5 w-3.5" />
+          <Button variant="ghost" size="sm" className="text-blue-600" onClick={() => openClone(r)} title="Clone recipe">
+            <Copy className="mr-1 h-3.5 w-3.5" /> Clone
           </Button>
           <Button variant="ghost" size="sm" className="text-red-600" onClick={() => setDeleteId(r.id)}>Delete</Button>
         </div>

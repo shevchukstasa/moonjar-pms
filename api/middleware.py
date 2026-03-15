@@ -68,12 +68,24 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             if not request.url.path.startswith(self.SKIP_PREFIXES):
                 csrf_cookie = request.cookies.get("csrf_token")
                 csrf_header = request.headers.get("X-CSRF-Token")
-                if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
-                    # Return JSON directly — do NOT raise HTTPException here.
-                    # Raising inside BaseHTTPMiddleware bypasses ExceptionMiddleware
-                    # (it's inner) and hits ServerErrorMiddleware (outer) which
-                    # returns a plain-text 500, not a JSON 403.
-                    # Add CORS headers manually (CORSMiddleware is inner → bypassed).
+
+                # Double-submit: cookie == header (fast path)
+                csrf_ok = bool(csrf_cookie and csrf_header and csrf_cookie == csrf_header)
+
+                # Fallback for cross-origin (third-party cookies blocked):
+                # Verify header token against HMAC(SECRET_KEY, jti_from_jwt)
+                if not csrf_ok and csrf_header:
+                    access_token = request.cookies.get("access_token")
+                    if access_token:
+                        try:
+                            from api.auth import decode_token, generate_csrf_token
+                            payload = decode_token(access_token)
+                            expected = generate_csrf_token(payload.get("jti", ""))
+                            csrf_ok = (csrf_header == expected)
+                        except Exception:
+                            pass  # invalid JWT — let it fail as CSRF mismatch
+
+                if not csrf_ok:
                     return JSONResponse(
                         {"detail": "CSRF token mismatch"},
                         status_code=403,

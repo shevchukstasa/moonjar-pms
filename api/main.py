@@ -560,6 +560,33 @@ def _ensure_schema():
 
     _run_section("shape_coefficients", _seed_shape_coefficients)
 
+    # --- Section 21: Temperature groups — replace min/max with single temperature ---
+    # (Must run BEFORE seed, because seed uses the 'temperature' column)
+    def _temp_groups_single_temperature(conn):
+        """Add 'temperature' column, populate from avg(min,max), remove NOT NULL from old cols."""
+        conn.execute(text("""
+            ALTER TABLE firing_temperature_groups
+            ADD COLUMN IF NOT EXISTS temperature INTEGER;
+        """))
+        # Populate from average of existing min/max (for existing rows)
+        conn.execute(text("""
+            UPDATE firing_temperature_groups
+            SET temperature = ROUND((COALESCE(min_temperature, 0) + COALESCE(max_temperature, 0)) / 2.0)
+            WHERE temperature IS NULL
+              AND (min_temperature IS NOT NULL OR max_temperature IS NOT NULL);
+        """))
+        # Make min/max nullable (they were NOT NULL before)
+        conn.execute(text("""
+            ALTER TABLE firing_temperature_groups
+            ALTER COLUMN min_temperature DROP NOT NULL;
+        """))
+        conn.execute(text("""
+            ALTER TABLE firing_temperature_groups
+            ALTER COLUMN max_temperature DROP NOT NULL;
+        """))
+
+    _run_section("temp_groups_single_temperature", _temp_groups_single_temperature)
+
     # --- Section 6c: Firing temperature groups ---
     def _seed_temperature_groups(conn):
         """Seed 2 default firing temperature groups: Low and High."""
@@ -1486,32 +1513,6 @@ def _ensure_schema():
             logger.info("_cleanup_zombie_materials: no orphan materials found")
 
     _run_section("cleanup_zombie_materials", _cleanup_zombie_materials)
-
-    # --- Section 21: Temperature groups — replace min/max with single temperature ---
-    def _temp_groups_single_temperature(conn):
-        """Add 'temperature' column, populate from avg(min,max), remove NOT NULL from old cols."""
-        conn.execute(text("""
-            ALTER TABLE firing_temperature_groups
-            ADD COLUMN IF NOT EXISTS temperature INTEGER;
-        """))
-        # Populate from average of existing min/max (for existing rows)
-        conn.execute(text("""
-            UPDATE firing_temperature_groups
-            SET temperature = ROUND((COALESCE(min_temperature, 0) + COALESCE(max_temperature, 0)) / 2.0)
-            WHERE temperature IS NULL
-              AND (min_temperature IS NOT NULL OR max_temperature IS NOT NULL);
-        """))
-        # Make min/max nullable (they were NOT NULL before)
-        conn.execute(text("""
-            ALTER TABLE firing_temperature_groups
-            ALTER COLUMN min_temperature DROP NOT NULL;
-        """))
-        conn.execute(text("""
-            ALTER TABLE firing_temperature_groups
-            ALTER COLUMN max_temperature DROP NOT NULL;
-        """))
-
-    _run_section("temp_groups_single_temperature", _temp_groups_single_temperature)
 
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):

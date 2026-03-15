@@ -21,7 +21,7 @@ const CONTROL_CABLE_OPTIONS = [
 const CONTROL_DEVICE_OPTIONS = [
   { value: '', label: '-- Select --' },
   { value: 'oven', label: 'OVEN' },
-  { value: 'self_made', label: 'Self Made' },
+  { value: 'moonjar', label: 'Moonjar' },
 ] as const;
 
 interface RecipeLink {

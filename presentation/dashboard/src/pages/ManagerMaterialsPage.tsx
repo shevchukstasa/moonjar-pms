@@ -5,9 +5,11 @@ import { useMaterials, useCreateMaterial, useUpdateMaterial, useCreateTransactio
 import { useMaterialHierarchy, type MaterialGroup } from '@/hooks/useMaterialGroups';
 import { useFactories } from '@/hooks/useFactories';
 import { useSuppliers } from '@/hooks/useSuppliers';
+import { useWarehouseSections } from '@/hooks/useWarehouseSections';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { NumericInput } from '@/components/ui/NumericInput';
 import { Select } from '@/components/ui/Select';
 import { Dialog } from '@/components/ui/Dialog';
 import { Badge } from '@/components/ui/Badge';
@@ -98,6 +100,10 @@ export default function ManagerMaterialsPage() {
   const { data: suppliersData } = useSuppliers();
   const suppliers = suppliersData?.items ?? [];
 
+  // Warehouse Sections
+  const { data: warehouseSectionsData } = useWarehouseSections({ factory_id: factoryId || undefined });
+  const warehouseSections = warehouseSectionsData?.items ?? [];
+
   // Mutations
   const createMaterial = useCreateMaterial();
   const updateMaterial = useUpdateMaterial();
@@ -147,15 +153,16 @@ export default function ManagerMaterialsPage() {
     setFormError('');
   }, []);
 
+  // Are we in aggregate mode (no specific factory selected)?
+  const isAggregateMode = !factoryId;
+
   const handleSave = useCallback(async () => {
     if (!form.name.trim()) { setFormError('Name is required'); return; }
-    if (!form.factory_id) { setFormError('Factory is required'); return; }
     if (!form.subgroup_id && !form.material_type) { setFormError('Type is required'); return; }
     setFormError('');
 
     const payload: Record<string, unknown> = {
       name: form.name.trim(),
-      factory_id: form.factory_id,
       material_type: form.material_type,
       subgroup_id: form.subgroup_id || null,
       unit: form.unit,
@@ -164,6 +171,9 @@ export default function ManagerMaterialsPage() {
       supplier_id: form.supplier_id || null,
       warehouse_section: form.warehouse_section || 'raw_materials',
     };
+    if (form.factory_id) {
+      payload.factory_id = form.factory_id;
+    }
 
     try {
       if (editDialog.item) {
@@ -358,6 +368,8 @@ export default function ManagerMaterialsPage() {
         <MaterialsTable
           items={displayItems}
           subgroups={subgroups}
+          isAggregate={isAggregateMode}
+          hideNames={user?.role === 'production_manager'}
           onEdit={openEdit}
           onTransaction={openTx}
         />
@@ -367,21 +379,28 @@ export default function ManagerMaterialsPage() {
       <Dialog
         open={editDialog.open}
         onClose={closeEdit}
-        title={editDialog.item ? `Edit: ${editDialog.item.name}` : 'Add Material'}
+        title={editDialog.item
+          ? `Edit: ${user?.role === 'production_manager' ? (editDialog.item.material_code ?? editDialog.item.name) : editDialog.item.name}`
+          : 'Add Material'}
         className="w-full max-w-lg"
       >
         <div className="space-y-4">
-          <Input
-            label="Name *"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-            placeholder="e.g. Zinc Oxide ZnO"
-          />
+          {user?.role !== 'production_manager' && (
+            <Input
+              label="Name *"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="e.g. Zinc Oxide ZnO"
+            />
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Factory *</label>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Factory</label>
               <Select
-                options={factories.map((f) => ({ value: f.id, label: f.name }))}
+                options={[
+                  { value: '', label: 'All factories (auto)' },
+                  ...factories.map((f) => ({ value: f.id, label: f.name })),
+                ]}
                 value={form.factory_id}
                 onChange={(e) => setForm({ ...form, factory_id: e.target.value })}
               />
@@ -395,6 +414,11 @@ export default function ManagerMaterialsPage() {
               />
             </div>
           </div>
+          {!editDialog.item && !form.factory_id && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+              Stock will be auto-created for all active factories with the specified balance and min balance.
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Unit</label>
@@ -404,19 +428,17 @@ export default function ManagerMaterialsPage() {
                 onChange={(e) => setForm({ ...form, unit: e.target.value })}
               />
             </div>
-            <Input
+            <NumericInput
               label="Balance"
-              type="number"
-              step="0.001"
               value={form.balance}
               onChange={(e) => setForm({ ...form, balance: e.target.value })}
+              placeholder="0"
             />
-            <Input
+            <NumericInput
               label="Min Balance"
-              type="number"
-              step="0.001"
               value={form.min_balance}
               onChange={(e) => setForm({ ...form, min_balance: e.target.value })}
+              placeholder="0"
             />
           </div>
           <div>
@@ -425,6 +447,14 @@ export default function ManagerMaterialsPage() {
               options={[{ value: '', label: '\u2014 no supplier \u2014' }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
               value={form.supplier_id}
               onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Warehouse Section</label>
+            <Select
+              options={warehouseSections.map((ws) => ({ value: ws.code, label: ws.name }))}
+              value={form.warehouse_section}
+              onChange={(e) => setForm({ ...form, warehouse_section: e.target.value })}
             />
           </div>
           {formError && <p className="text-sm text-red-600">{formError}</p>}
@@ -441,7 +471,9 @@ export default function ManagerMaterialsPage() {
       <Dialog
         open={txDialog.open}
         onClose={closeTx}
-        title={txDialog.item ? `Transaction \u2014 ${txDialog.item.name}` : 'Transaction'}
+        title={txDialog.item
+          ? `Transaction \u2014 ${user?.role === 'production_manager' ? (txDialog.item.material_code ?? txDialog.item.name) : txDialog.item.name}`
+          : 'Transaction'}
         className="w-full max-w-sm"
       >
         {txDialog.item && (
@@ -475,10 +507,8 @@ export default function ManagerMaterialsPage() {
                 </button>
               </div>
             </div>
-            <Input
+            <NumericInput
               label={`Quantity (${txDialog.item.unit})`}
-              type="number"
-              step="0.001"
               value={txForm.quantity}
               onChange={(e) => setTxForm({ ...txForm, quantity: e.target.value })}
               placeholder="0.000"
@@ -512,11 +542,13 @@ export default function ManagerMaterialsPage() {
 interface MaterialsTableProps {
   items: MaterialItem[];
   subgroups: { value: string; label: string; icon: string }[];
+  isAggregate?: boolean;
+  hideNames?: boolean;
   onEdit: (item: MaterialItem) => void;
   onTransaction: (item: MaterialItem) => void;
 }
 
-function MaterialsTable({ items, subgroups, onEdit, onTransaction }: MaterialsTableProps) {
+function MaterialsTable({ items, subgroups, isAggregate, hideNames, onEdit, onTransaction }: MaterialsTableProps) {
   const typeLabel = (code: string) => subgroups.find((s) => s.value === code)?.label ?? code;
   const typeIcon = (code: string) => subgroups.find((s) => s.value === code)?.icon ?? '';
 
@@ -525,20 +557,23 @@ function MaterialsTable({ items, subgroups, onEdit, onTransaction }: MaterialsTa
       <table className="w-full text-left text-sm">
         <thead className="border-b bg-gray-50 text-xs font-medium uppercase tracking-wider text-gray-500">
           <tr>
-            <th className="px-4 py-3">Name</th>
+            <th className="px-4 py-3">Code</th>
+            {!hideNames && <th className="px-4 py-3">Name</th>}
             <th className="px-4 py-3">Type</th>
             <th className="px-4 py-3 text-right">Balance</th>
             <th className="px-4 py-3 text-right">Min</th>
             <th className="px-4 py-3">Unit</th>
-            <th className="px-4 py-3">Supplier</th>
+            {!hideNames && <th className="px-4 py-3">Supplier</th>}
+            {isAggregate && <th className="px-4 py-3 text-center">Factories</th>}
             <th className="px-4 py-3">Status</th>
             <th className="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
           {items.map((m) => (
-            <tr key={`${m.id}-${m.factory_id}`} className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}>
-              <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
+            <tr key={`${m.id}-${m.factory_id ?? 'all'}`} className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}>
+              <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '\u2014'}</td>
+              {!hideNames && <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>}
               <td className="px-4 py-3">
                 <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
                   {typeIcon(m.material_type)} {typeLabel(m.material_type)}
@@ -551,7 +586,16 @@ function MaterialsTable({ items, subgroups, onEdit, onTransaction }: MaterialsTa
                 {Number(m.min_balance).toFixed(3)}
               </td>
               <td className="px-4 py-3 text-gray-500">{m.unit}</td>
-              <td className="px-4 py-3 text-gray-500">{m.supplier_name ?? <span className="text-gray-300">{'\u2014'}</span>}</td>
+              {!hideNames && (
+                <td className="px-4 py-3 text-gray-500">{m.supplier_name ?? <span className="text-gray-300">{'\u2014'}</span>}</td>
+              )}
+              {isAggregate && (
+                <td className="px-4 py-3 text-center">
+                  <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                    {m.factory_count ?? 0}
+                  </span>
+                </td>
+              )}
               <td className="px-4 py-3">
                 {m.is_low_stock ? (
                   <Badge status="error" label={`Deficit: ${(Number(m.min_balance) - Number(m.balance)).toFixed(1)} ${m.unit}`} />
@@ -561,9 +605,15 @@ function MaterialsTable({ items, subgroups, onEdit, onTransaction }: MaterialsTa
               </td>
               <td className="px-4 py-3">
                 <div className="flex items-center gap-1">
-                  <Button size="sm" variant="ghost" onClick={() => onTransaction(m)}>
-                    ±
-                  </Button>
+                  {isAggregate ? (
+                    <Button size="sm" variant="ghost" disabled title="Select a factory to manage transactions">
+                      ±
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost" onClick={() => onTransaction(m)}>
+                      ±
+                    </Button>
+                  )}
                   <Button size="sm" variant="ghost" onClick={() => onEdit(m)}>
                     Edit
                   </Button>

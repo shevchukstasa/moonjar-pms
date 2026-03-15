@@ -12,9 +12,11 @@ import {
 } from '@/hooks/useMaterialGroups';
 import { useFactories } from '@/hooks/useFactories';
 import { useSuppliers } from '@/hooks/useSuppliers';
+import { useWarehouseSections } from '@/hooks/useWarehouseSections';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { NumericInput } from '@/components/ui/NumericInput';
 import { Select } from '@/components/ui/Select';
 import { Dialog } from '@/components/ui/Dialog';
 import { Badge } from '@/components/ui/Badge';
@@ -153,6 +155,10 @@ function MaterialsCrudTab() {
   const { data: suppliersData } = useSuppliers();
   const suppliers = suppliersData?.items ?? [];
 
+  // Warehouse Sections
+  const { data: warehouseSectionsData } = useWarehouseSections({ factory_id: factoryId || undefined });
+  const warehouseSections = warehouseSectionsData?.items ?? [];
+
   // Mutations
   const createMaterial = useCreateMaterial();
   const updateMaterial = useUpdateMaterial();
@@ -171,6 +177,7 @@ function MaterialsCrudTab() {
     open: false,
     item: null,
   });
+  const [deleteError, setDeleteError] = useState('');
 
   const [txDialog, setTxDialog] = useState<{ open: boolean; item: MaterialItem | null }>({
     open: false,
@@ -220,13 +227,12 @@ function MaterialsCrudTab() {
     setFormError('');
   }, []);
 
+  // Are we in aggregate mode (no specific factory selected)?
+  const isAggregateMode = !factoryId;
+
   const handleSave = useCallback(async () => {
     if (!form.name.trim()) {
       setFormError('Name is required');
-      return;
-    }
-    if (!form.factory_id) {
-      setFormError('Factory is required');
       return;
     }
     if (!form.subgroup_id && !form.material_type) {
@@ -237,7 +243,6 @@ function MaterialsCrudTab() {
 
     const payload: Record<string, unknown> = {
       name: form.name.trim(),
-      factory_id: form.factory_id,
       material_type: form.material_type,
       subgroup_id: form.subgroup_id || null,
       unit: form.unit,
@@ -246,6 +251,10 @@ function MaterialsCrudTab() {
       supplier_id: form.supplier_id || null,
       warehouse_section: form.warehouse_section || 'raw_materials',
     };
+    // Only include factory_id if explicitly selected
+    if (form.factory_id) {
+      payload.factory_id = form.factory_id;
+    }
 
     try {
       if (editDialog.item) {
@@ -302,18 +311,21 @@ function MaterialsCrudTab() {
 
   const openDelete = useCallback((item: MaterialItem) => {
     setDeleteDialog({ open: true, item });
+    setDeleteError('');
   }, []);
 
   const handleDelete = useCallback(async () => {
     if (!deleteDialog.item) return;
+    setDeleteError('');
     try {
       await deleteMaterial.mutateAsync({
         id: deleteDialog.item.id,
         factoryId: deleteDialog.item.factory_id ?? undefined,
       });
       setDeleteDialog({ open: false, item: null });
-    } catch {
-      // stay open on error
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setDeleteError(detail ?? 'Failed to delete material');
     }
   }, [deleteDialog.item, deleteMaterial]);
 
@@ -482,6 +494,7 @@ function MaterialsCrudTab() {
         <MaterialsTable
           items={displayItems}
           subgroups={subgroups}
+          isAggregate={isAggregateMode}
           onEdit={openEdit}
           onTransaction={openTx}
           onDelete={openDelete}
@@ -504,9 +517,12 @@ function MaterialsCrudTab() {
           />
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Factory *</label>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Factory</label>
               <Select
-                options={factories.map((f) => ({ value: f.id, label: f.name }))}
+                options={[
+                  { value: '', label: 'All factories (auto)' },
+                  ...factories.map((f) => ({ value: f.id, label: f.name })),
+                ]}
                 value={form.factory_id}
                 onChange={(e) => setForm({ ...form, factory_id: e.target.value })}
               />
@@ -520,6 +536,11 @@ function MaterialsCrudTab() {
               />
             </div>
           </div>
+          {!editDialog.item && !form.factory_id && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+              Stock will be auto-created for all active factories with the specified balance and min balance.
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Unit</label>
@@ -529,19 +550,17 @@ function MaterialsCrudTab() {
                 onChange={(e) => setForm({ ...form, unit: e.target.value })}
               />
             </div>
-            <Input
+            <NumericInput
               label="Balance"
-              type="number"
-              step="0.001"
               value={form.balance}
               onChange={(e) => setForm({ ...form, balance: e.target.value })}
+              placeholder="0"
             />
-            <Input
+            <NumericInput
               label="Min Balance"
-              type="number"
-              step="0.001"
               value={form.min_balance}
               onChange={(e) => setForm({ ...form, min_balance: e.target.value })}
+              placeholder="0"
             />
           </div>
           <div>
@@ -553,6 +572,16 @@ function MaterialsCrudTab() {
               ]}
               value={form.supplier_id}
               onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Warehouse Section</label>
+            <Select
+              options={[
+                ...warehouseSections.map((ws) => ({ value: ws.code, label: ws.name })),
+              ]}
+              value={form.warehouse_section}
+              onChange={(e) => setForm({ ...form, warehouse_section: e.target.value })}
             />
           </div>
           {formError && <p className="text-sm text-red-600">{formError}</p>}
@@ -607,10 +636,8 @@ function MaterialsCrudTab() {
                 </button>
               </div>
             </div>
-            <Input
+            <NumericInput
               label={`Quantity (${txDialog.item.unit})`}
-              type="number"
-              step="0.001"
               value={txForm.quantity}
               onChange={(e) => setTxForm({ ...txForm, quantity: e.target.value })}
               placeholder="0.000"
@@ -657,12 +684,16 @@ function MaterialsCrudTab() {
           <div className="space-y-4">
             <p className="text-sm text-gray-700">
               Are you sure you want to delete <strong>{deleteDialog.item.name}</strong>?
-              This will remove the material and all its stock records. This action cannot be undone.
+              This will remove the material and all its related records (stock, transactions, recipes).
+              This action cannot be undone.
             </p>
+            {deleteError && (
+              <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-600">{deleteError}</p>
+            )}
             <div className="flex justify-end gap-2 border-t pt-3">
               <Button
                 variant="secondary"
-                onClick={() => setDeleteDialog({ open: false, item: null })}
+                onClick={() => { setDeleteDialog({ open: false, item: null }); setDeleteError(''); }}
               >
                 Cancel
               </Button>
@@ -1182,12 +1213,13 @@ function GroupsSubgroupsTab() {
 interface MaterialsTableProps {
   items: MaterialItem[];
   subgroups: { value: string; label: string; icon: string }[];
+  isAggregate?: boolean;
   onEdit: (item: MaterialItem) => void;
   onTransaction: (item: MaterialItem) => void;
   onDelete?: (item: MaterialItem) => void;
 }
 
-function MaterialsTable({ items, subgroups, onEdit, onTransaction, onDelete }: MaterialsTableProps) {
+function MaterialsTable({ items, subgroups, isAggregate, onEdit, onTransaction, onDelete }: MaterialsTableProps) {
   const typeLabel = (code: string) =>
     subgroups.find((s) => s.value === code)?.label ?? code;
   const typeIcon = (code: string) =>
@@ -1198,12 +1230,15 @@ function MaterialsTable({ items, subgroups, onEdit, onTransaction, onDelete }: M
       <table className="w-full text-left text-sm">
         <thead className="border-b bg-gray-50 text-xs font-medium uppercase tracking-wider text-gray-500">
           <tr>
+            <th className="px-4 py-3">Code</th>
             <th className="px-4 py-3">Name</th>
             <th className="px-4 py-3">Type</th>
             <th className="px-4 py-3 text-right">Balance</th>
             <th className="px-4 py-3 text-right">Min</th>
             <th className="px-4 py-3">Unit</th>
             <th className="px-4 py-3">Supplier</th>
+            {isAggregate && <th className="px-4 py-3 text-center">Factories</th>}
+            {!isAggregate && <th className="px-4 py-3">Section</th>}
             <th className="px-4 py-3">Status</th>
             <th className="px-4 py-3"></th>
           </tr>
@@ -1211,9 +1246,10 @@ function MaterialsTable({ items, subgroups, onEdit, onTransaction, onDelete }: M
         <tbody className="divide-y divide-gray-100">
           {items.map((m) => (
             <tr
-              key={`${m.id}-${m.factory_id}`}
+              key={`${m.id}-${m.factory_id ?? 'all'}`}
               className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}
             >
+              <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '\u2014'}</td>
               <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
               <td className="px-4 py-3">
                 <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
@@ -1230,8 +1266,20 @@ function MaterialsTable({ items, subgroups, onEdit, onTransaction, onDelete }: M
               </td>
               <td className="px-4 py-3 text-gray-500">{m.unit}</td>
               <td className="px-4 py-3 text-gray-500">
-                {m.supplier_name ?? <span className="text-gray-300">\u2014</span>}
+                {m.supplier_name ?? <span className="text-gray-300">{'\u2014'}</span>}
               </td>
+              {isAggregate && (
+                <td className="px-4 py-3 text-center">
+                  <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                    {m.factory_count ?? 0}
+                  </span>
+                </td>
+              )}
+              {!isAggregate && (
+                <td className="px-4 py-3 text-xs text-gray-500">
+                  {m.warehouse_section ?? 'raw_materials'}
+                </td>
+              )}
               <td className="px-4 py-3">
                 {m.is_low_stock ? (
                   <Badge
@@ -1244,9 +1292,20 @@ function MaterialsTable({ items, subgroups, onEdit, onTransaction, onDelete }: M
               </td>
               <td className="px-4 py-3">
                 <div className="flex items-center gap-1">
-                  <Button size="sm" variant="ghost" onClick={() => onTransaction(m)}>
-                    ±
-                  </Button>
+                  {isAggregate ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled
+                      title="Select a factory to manage transactions"
+                    >
+                      ±
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost" onClick={() => onTransaction(m)}>
+                      ±
+                    </Button>
+                  )}
                   <Button size="sm" variant="ghost" onClick={() => onEdit(m)}>
                     Edit
                   </Button>

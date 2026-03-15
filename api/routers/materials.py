@@ -13,6 +13,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from api.database import get_db
@@ -34,6 +35,23 @@ router = APIRouter()
 
 def _ev(val):
     return val.value if hasattr(val, "value") else str(val) if val else None
+
+
+def _next_material_code(db: Session) -> str:
+    """Generate the next sequential material code: M-0001, M-0002, ..."""
+    from sqlalchemy import func as sa_func
+    result = db.query(
+        sa_func.max(
+            sa_func.cast(
+                sa_func.substr(Material.material_code, 3),  # strip "M-"
+                sa.Integer,
+            )
+        )
+    ).filter(
+        Material.material_code.ilike('M-%'),
+    ).scalar()
+    next_num = (result or 0) + 1
+    return f"M-{next_num:04d}"
 
 
 def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session) -> dict:
@@ -59,6 +77,7 @@ def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session)
 
     return {
         "id": str(mat.id),
+        "material_code": mat.material_code,
         "stock_id": str(stock.id) if stock else None,
         "name": mat.name,
         "factory_id": str(stock.factory_id) if stock else None,
@@ -79,6 +98,57 @@ def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session)
         "is_low_stock": balance < min_bal if min_bal > 0 else False,
         "created_at": mat.created_at.isoformat() if mat.created_at else None,
         "updated_at": (stock.updated_at if stock else mat.updated_at).isoformat() if (stock or mat) else None,
+    }
+
+
+def _serialize_material_aggregate(mat: Material, stocks: list[MaterialStock], db: Session) -> dict:
+    """Serialize catalog Material with aggregated data from ALL factory stocks."""
+    supplier_name = None
+    if mat.supplier_id:
+        sup = db.query(Supplier).filter(Supplier.id == mat.supplier_id).first()
+        supplier_name = sup.name if sup else None
+
+    total_balance = sum(float(s.balance or 0) for s in stocks)
+    total_min_bal = sum(float(s.min_balance or 0) for s in stocks)
+    is_low = any(
+        float(s.balance or 0) < float(s.min_balance or 0) and float(s.min_balance or 0) > 0
+        for s in stocks
+    )
+
+    subgroup_id = None
+    subgroup_name = None
+    group_name = None
+    if mat.subgroup_id:
+        subgroup_id = str(mat.subgroup_id)
+        if hasattr(mat, 'subgroup') and mat.subgroup:
+            subgroup_name = mat.subgroup.name
+            if mat.subgroup.group:
+                group_name = mat.subgroup.group.name
+
+    return {
+        "id": str(mat.id),
+        "material_code": mat.material_code,
+        "stock_id": None,
+        "name": mat.name,
+        "factory_id": None,  # aggregate mode
+        "balance": total_balance,
+        "min_balance": total_min_bal,
+        "min_balance_recommended": None,
+        "min_balance_auto": True,
+        "avg_daily_consumption": sum(float(s.avg_daily_consumption or 0) for s in stocks),
+        "avg_monthly_consumption": sum(float(s.avg_monthly_consumption or 0) for s in stocks),
+        "unit": mat.unit,
+        "material_type": _ev(mat.material_type),
+        "subgroup_id": subgroup_id,
+        "subgroup_name": subgroup_name,
+        "group_name": group_name,
+        "warehouse_section": stocks[0].warehouse_section if stocks else None,
+        "supplier_id": str(mat.supplier_id) if mat.supplier_id else None,
+        "supplier_name": supplier_name,
+        "is_low_stock": is_low,
+        "factory_count": len(stocks),
+        "created_at": mat.created_at.isoformat() if mat.created_at else None,
+        "updated_at": mat.updated_at.isoformat() if mat.updated_at else None,
     }
 
 
@@ -108,7 +178,7 @@ def _serialize_transaction(t, db) -> dict:
 
 class MaterialCreateInput(BaseModel):
     name: str
-    factory_id: UUID
+    factory_id: Optional[UUID] = None  # None → auto-create stock for ALL active factories
     material_type: str = ""
     subgroup_id: Optional[UUID] = None
     unit: str = "pcs"
@@ -162,8 +232,57 @@ async def list_materials(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    from api.models import MaterialSubgroup
+    from api.models import MaterialSubgroup, Factory
 
+    # ── Aggregate mode: no factory_id → deduplicated catalog with summed balances ──
+    if not factory_id and current_user.role in ("owner", "ceo", "administrator"):
+        query = db.query(Material)
+
+        if material_type:
+            query = query.filter(Material.material_type == material_type)
+        if subgroup_id:
+            query = query.filter(Material.subgroup_id == subgroup_id)
+        if group_id:
+            query = query.join(
+                MaterialSubgroup, Material.subgroup_id == MaterialSubgroup.id
+            ).filter(MaterialSubgroup.group_id == group_id)
+        if search:
+            query = query.filter(Material.name.ilike(f"%{search}%"))
+
+        # For low_stock / warehouse_section filters we still need stock join
+        if low_stock or warehouse_section:
+            query = query.join(MaterialStock, Material.id == MaterialStock.material_id)
+            if warehouse_section:
+                query = query.filter(MaterialStock.warehouse_section == warehouse_section)
+            if low_stock:
+                query = query.filter(
+                    MaterialStock.balance < MaterialStock.min_balance,
+                    MaterialStock.min_balance > 0,
+                )
+            # Deduplicate after join
+            query = query.distinct(Material.id)
+
+        total = query.count()
+        mats = query.order_by(Material.name).offset((page - 1) * per_page).limit(per_page).all()
+
+        # Batch-load all stocks for these materials (avoid N+1)
+        mat_ids = [m.id for m in mats]
+        all_stocks = db.query(MaterialStock).filter(
+            MaterialStock.material_id.in_(mat_ids)
+        ).all() if mat_ids else []
+
+        stocks_map: dict = {}
+        for s in all_stocks:
+            stocks_map.setdefault(s.material_id, []).append(s)
+
+        items = [
+            _serialize_material_aggregate(mat, stocks_map.get(mat.id, []), db)
+            for mat in mats
+        ]
+
+        return {"items": items, "total": total, "page": page, "per_page": per_page}
+
+    # ── Per-factory mode (existing behavior) ──
     query = db.query(Material, MaterialStock).outerjoin(
         MaterialStock, Material.id == MaterialStock.material_id
     )
@@ -790,6 +909,42 @@ async def cleanup_duplicates(
     }
 
 
+@router.post("/ensure-all-stocks")
+async def ensure_all_stocks(
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Backfill: create missing MaterialStock rows for all active factories.
+    For each Material → for each active Factory → if no stock → create with balance=0."""
+    from api.models import Factory
+
+    active_factories = db.query(Factory).filter(Factory.is_active == True).all()
+    all_materials = db.query(Material).all()
+
+    # Existing stock pairs
+    existing = set(
+        (row.material_id, row.factory_id)
+        for row in db.query(MaterialStock.material_id, MaterialStock.factory_id).all()
+    )
+
+    created = 0
+    for mat in all_materials:
+        for factory in active_factories:
+            if (mat.id, factory.id) not in existing:
+                db.add(MaterialStock(
+                    material_id=mat.id,
+                    factory_id=factory.id,
+                    balance=Decimal("0"),
+                    min_balance=Decimal("0"),
+                    min_balance_auto=True,
+                    warehouse_section="raw_materials",
+                ))
+                created += 1
+
+    db.commit()
+    return {"detail": f"Created {created} missing stock records", "created": created}
+
+
 # ── Single material CRUD (parameterized routes MUST come AFTER literal routes) ──
 
 @router.get("/{material_id}")
@@ -824,7 +979,7 @@ async def create_material(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    from api.models import MaterialSubgroup
+    from api.models import MaterialSubgroup, Factory
 
     # Resolve material_type from subgroup if provided
     material_type = data.material_type
@@ -837,9 +992,11 @@ async def create_material(
 
     # Get or create catalog material
     mat = db.query(Material).filter(Material.name == data.name).first()
+    is_new_mat = mat is None
     if not mat:
         mat = Material(
             name=data.name,
+            material_code=_next_material_code(db),
             material_type=material_type,
             unit=data.unit,
             supplier_id=data.supplier_id,
@@ -852,27 +1009,58 @@ async def create_material(
         mat.subgroup_id = subgroup_id
         mat.material_type = material_type
 
-    # Check if stock already exists for this factory
-    existing_stock = db.query(MaterialStock).filter(
-        MaterialStock.material_id == mat.id,
-        MaterialStock.factory_id == data.factory_id,
-    ).first()
-    if existing_stock:
-        raise HTTPException(409, f"Material '{data.name}' already exists in this factory")
+    primary_stock = None
 
-    stock = MaterialStock(
-        material_id=mat.id,
-        factory_id=data.factory_id,
-        balance=Decimal(str(data.balance)),
-        min_balance=Decimal(str(data.min_balance)),
-        min_balance_auto=data.min_balance_auto,
-        warehouse_section=data.warehouse_section or "raw_materials",
-    )
-    db.add(stock)
+    if data.factory_id:
+        # ── Specific factory mode: create stock for one factory ──
+        existing_stock = db.query(MaterialStock).filter(
+            MaterialStock.material_id == mat.id,
+            MaterialStock.factory_id == data.factory_id,
+        ).first()
+        if existing_stock:
+            raise HTTPException(409, f"Material '{data.name}' already exists in this factory")
+
+        primary_stock = MaterialStock(
+            material_id=mat.id,
+            factory_id=data.factory_id,
+            balance=Decimal(str(data.balance)),
+            min_balance=Decimal(str(data.min_balance)),
+            min_balance_auto=data.min_balance_auto,
+            warehouse_section=data.warehouse_section or "raw_materials",
+        )
+        db.add(primary_stock)
+    else:
+        # ── Auto mode: create stock for ALL active factories ──
+        active_factories = db.query(Factory).filter(Factory.is_active == True).all()
+        existing_factory_ids = set(
+            fid for (fid,) in db.query(MaterialStock.factory_id).filter(
+                MaterialStock.material_id == mat.id
+            ).all()
+        )
+
+        for factory in active_factories:
+            if factory.id in existing_factory_ids:
+                continue
+            s = MaterialStock(
+                material_id=mat.id,
+                factory_id=factory.id,
+                balance=Decimal(str(data.balance)),
+                min_balance=Decimal(str(data.min_balance)),
+                min_balance_auto=data.min_balance_auto,
+                warehouse_section=data.warehouse_section or "raw_materials",
+            )
+            db.add(s)
+            if primary_stock is None:
+                primary_stock = s
+
+        if primary_stock is None and not is_new_mat:
+            raise HTTPException(409, f"Material '{data.name}' already has stock for all factories")
+
     db.commit()
     db.refresh(mat)
-    db.refresh(stock)
-    return _serialize_material(mat, stock, db)
+    if primary_stock:
+        db.refresh(primary_stock)
+    return _serialize_material(mat, primary_stock, db)
 
 
 @router.patch("/{material_id}")
@@ -949,23 +1137,45 @@ async def delete_material(
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
 ):
-    """Delete a material and its stock records. Owner/Admin only."""
+    """Delete a material and all its related records. Owner/Admin only."""
     mat = db.query(Material).filter(Material.id == material_id).first()
     if not mat:
         raise HTTPException(404, "Material not found")
 
-    # Delete stock records (optionally only for specific factory)
-    stock_query = db.query(MaterialStock).filter(MaterialStock.material_id == material_id)
+    should_delete_mat = True
+
     if factory_id:
-        stock_query = stock_query.filter(MaterialStock.factory_id == factory_id)
-        stock_query.delete(synchronize_session=False)
-        # Check if any stock records remain — if not, delete the material itself
-        remaining = db.query(MaterialStock).filter(MaterialStock.material_id == material_id).count()
-        if remaining == 0:
-            db.delete(mat)
-    else:
-        # Delete all stock + the material catalog entry
-        stock_query.delete(synchronize_session=False)
+        # Delete only stock for the specific factory
+        db.query(MaterialStock).filter(
+            MaterialStock.material_id == material_id,
+            MaterialStock.factory_id == factory_id,
+        ).delete(synchronize_session=False)
+        remaining = db.query(MaterialStock).filter(
+            MaterialStock.material_id == material_id,
+        ).count()
+        if remaining > 0:
+            should_delete_mat = False
+
+    if should_delete_mat:
+        # Clean up ALL FK-dependent records before deleting the material
+        db.query(MaterialStock).filter(
+            MaterialStock.material_id == material_id,
+        ).delete(synchronize_session=False)
+        db.query(RecipeMaterial).filter(
+            RecipeMaterial.material_id == material_id,
+        ).delete(synchronize_session=False)
+        db.query(MaterialTransaction).filter(
+            MaterialTransaction.material_id == material_id,
+        ).delete(synchronize_session=False)
+        db.query(KilnMaintenanceMaterial).filter(
+            KilnMaintenanceMaterial.material_id == material_id,
+        ).delete(synchronize_session=False)
+        db.query(ConsumptionAdjustment).filter(
+            ConsumptionAdjustment.material_id == material_id,
+        ).delete(synchronize_session=False)
+        db.query(InventoryReconciliationItem).filter(
+            InventoryReconciliationItem.material_id == material_id,
+        ).delete(synchronize_session=False)
         db.delete(mat)
 
     db.commit()

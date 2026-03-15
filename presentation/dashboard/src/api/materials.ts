@@ -14,6 +14,7 @@ export interface MaterialListParams {
 
 export interface MaterialItem {
   id: string;
+  material_code: string | null;
   stock_id: string | null;
   name: string;
   factory_id: string | null;
@@ -33,6 +34,7 @@ export interface MaterialItem {
   supplier_name: string | null;
   is_low_stock: boolean;
   deficit?: number;
+  factory_count?: number;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -109,4 +111,6 @@ export const materialsApi = {
     apiClient.post(`/materials/consumption-adjustments/${id}/approve`, data || {}).then((r) => r.data),
   rejectAdjustment: (id: string, data?: { notes?: string }) =>
     apiClient.post(`/materials/consumption-adjustments/${id}/reject`, data || {}).then((r) => r.data),
+  ensureAllStocks: () =>
+    apiClient.post('/materials/ensure-all-stocks').then((r) => r.data),
 };

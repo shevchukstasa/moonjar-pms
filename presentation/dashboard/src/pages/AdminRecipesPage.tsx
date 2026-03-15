@@ -74,6 +74,8 @@ export default function AdminRecipesPage() {
   const [savingMaterials, setSavingMaterials] = useState(false);
   const [csvOpen, setCsvOpen] = useState(false);
   const [cloneFromId, setCloneFromId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
 
   /* ── queries ───────────────────────────────────────────────────────── */
   const { data, isLoading } = useQuery<{ items: RecipeItem[]; total: number }>({
@@ -184,6 +186,27 @@ export default function AdminRecipesPage() {
     mutationFn: (id: string) => recipesApi.remove(id),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admin-recipes'] }); setDeleteId(null); },
   });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => recipesApi.bulkDelete(ids),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-recipes'] });
+      setSelectedIds(new Set());
+      setBulkDeleteConfirm(false);
+    },
+  });
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds((prev) => prev.size === items.length ? new Set() : new Set(items.map((r) => r.id)));
+  }, [items]);
 
   /* ── dialog helpers ────────────────────────────────────────────────── */
   const closeDialog = useCallback(() => {
@@ -330,6 +353,9 @@ export default function AdminRecipesPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const columns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = useMemo(
     () => [
+      { key: '_select', header: '', render: (r: RecipeItem) => (
+        <input type="checkbox" checked={selectedIds.has(r.id)} onChange={() => toggleSelect(r.id)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
+      )},
       { key: 'name', header: 'Name' },
       { key: 'recipe_type', header: 'Type', render: (r: RecipeItem) => {
         const labels: Record<string, string> = { product: 'Product', glaze: 'Glaze', engobe: 'Engobe' };
@@ -370,7 +396,7 @@ export default function AdminRecipesPage() {
         </div>
       )},
     ],
-    [openEdit, openClone],
+    [openEdit, openClone, selectedIds, toggleSelect],
   );
 
   /* ── render ─────────────────────────────────────────────────────────── */
@@ -387,6 +413,29 @@ export default function AdminRecipesPage() {
           <Button onClick={openCreate}>+ Add Recipe</Button>
         </div>
       </div>
+
+      {/* Bulk selection controls */}
+      {items.length > 0 && (
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={selectedIds.size === items.length && items.length > 0}
+              onChange={toggleSelectAll}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            Select all ({items.length})
+          </label>
+          {selectedIds.size > 0 && (
+            <>
+              <span className="text-sm font-medium text-blue-600">{selectedIds.size} selected</span>
+              <Button variant="danger" size="sm" onClick={() => setBulkDeleteConfirm(true)}>
+                <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete Selected
+              </Button>
+            </>
+          )}
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>
@@ -574,6 +623,20 @@ export default function AdminRecipesPage() {
           <Button variant="secondary" onClick={() => setDeleteId(null)}>Cancel</Button>
           <Button variant="danger" onClick={() => deleteId && deleteMutation.mutate(deleteId)} disabled={deleteMutation.isPending}>
             {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+          </Button>
+        </div>
+      </Dialog>
+
+      {/* Bulk Delete Confirmation */}
+      <Dialog open={bulkDeleteConfirm} onClose={() => setBulkDeleteConfirm(false)} title="Delete Selected Recipes">
+        <p className="text-sm text-gray-600">
+          Are you sure you want to delete <span className="font-bold text-red-600">{selectedIds.size}</span> recipe{selectedIds.size !== 1 ? 's' : ''}?
+          This will also remove all their ingredients and temperature group assignments. This action cannot be undone.
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setBulkDeleteConfirm(false)}>Cancel</Button>
+          <Button variant="danger" onClick={() => bulkDeleteMutation.mutate(Array.from(selectedIds))} disabled={bulkDeleteMutation.isPending}>
+            {bulkDeleteMutation.isPending ? 'Deleting...' : `Delete ${selectedIds.size} Recipe${selectedIds.size !== 1 ? 's' : ''}`}
           </Button>
         </div>
       </Dialog>

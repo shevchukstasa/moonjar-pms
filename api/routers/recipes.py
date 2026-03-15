@@ -233,6 +233,40 @@ async def delete_recipes_item(
     db.commit()
 
 
+from pydantic import BaseModel as _BM
+
+class _BulkDeleteInput(_BM):
+    ids: List[str]
+
+@router.post("/bulk-delete", status_code=200)
+async def bulk_delete_recipes(
+    data: _BulkDeleteInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Delete multiple recipes by IDs."""
+    if not data.ids:
+        return {"deleted": 0}
+    # Delete linked recipe_materials first
+    db.query(RecipeMaterial).filter(
+        RecipeMaterial.recipe_id.in_(data.ids)
+    ).delete(synchronize_session=False)
+    # Delete linked temperature group assignments
+    db.query(FiringTemperatureGroupRecipe).filter(
+        FiringTemperatureGroupRecipe.recipe_id.in_(data.ids)
+    ).delete(synchronize_session=False)
+    # Delete linked firing stages
+    db.query(RecipeFiringStage).filter(
+        RecipeFiringStage.recipe_id.in_(data.ids)
+    ).delete(synchronize_session=False)
+    # Delete recipes
+    deleted = db.query(Recipe).filter(
+        Recipe.id.in_(data.ids)
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"deleted": deleted}
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Recipe Materials (ingredients) — bulk upsert
 # ══════════════════════════════════════════════════════════════════════════

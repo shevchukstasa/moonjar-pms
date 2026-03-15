@@ -60,6 +60,8 @@ export const recipesApi = {
     apiClient.patch(`/recipes/${id}`, data).then((r) => r.data),
   remove: (id: string) =>
     apiClient.delete(`/recipes/${id}`).then((r) => r.data),
+  bulkDelete: (ids: string[]) =>
+    apiClient.post('/recipes/bulk-delete', { ids }).then((r) => r.data),
   // Materials (ingredients)
   listMaterials: (recipeId: string) =>
     apiClient.get(`/recipes/${recipeId}/materials`).then((r) => r.data),

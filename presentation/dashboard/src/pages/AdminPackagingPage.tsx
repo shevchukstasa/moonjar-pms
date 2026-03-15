@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { packagingApi, type PackagingBoxType, type PackagingCapacity, type PackagingSpacerRule } from '@/api/packaging';
+import { packagingApi, type PackagingBoxType } from '@/api/packaging';
 import { usePackagingBoxTypes, usePackagingSizes, type SizeItem } from '@/hooks/usePackaging';
 import { useMaterials, type MaterialItem } from '@/hooks/useMaterials';
 import { Card } from '@/components/ui/Card';
@@ -66,8 +66,8 @@ export default function AdminPackagingPage() {
   const [boxForm, setBoxForm] = useState<BoxTypeForm>(emptyBoxForm);
   const [boxError, setBoxError] = useState('');
 
-  /* Capacity / Spacer panel */
-  const [selectedBox, setSelectedBox] = useState<PackagingBoxType | null>(null);
+  /* Expanded box (selected for capacity/spacer editing) */
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [capRows, setCapRows] = useState<CapRow[]>([]);
   const [spacerRows, setSpacerRows] = useState<SpacerRow[]>([]);
   const [panelError, setPanelError] = useState('');
@@ -75,11 +75,19 @@ export default function AdminPackagingPage() {
   /* Delete */
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
+  /* Auto-expand newly created box type */
+  const [pendingExpandId, setPendingExpandId] = useState<string | null>(null);
+
   /* ── Mutations ────────────────────────────────────────── */
 
   const createMut = useMutation({
     mutationFn: (p: Record<string, unknown>) => packagingApi.create(p as any),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['packaging-box-types'] }); closeBoxDialog(); },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['packaging-box-types'] });
+      closeBoxDialog();
+      // Auto-expand new box type after data refreshes
+      if (data?.id) setPendingExpandId(data.id);
+    },
     onError: (e: any) => setBoxError(e?.response?.data?.detail ?? 'Failed'),
   });
   const updateMut = useMutation({
@@ -89,7 +97,11 @@ export default function AdminPackagingPage() {
   });
   const deleteMut = useMutation({
     mutationFn: (id: string) => packagingApi.remove(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['packaging-box-types'] }); setDeleteId(null); setSelectedBox(null); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['packaging-box-types'] });
+      setDeleteId(null);
+      setExpandedId(null);
+    },
   });
   const capMut = useMutation({
     mutationFn: ({ id, caps }: { id: string; caps: any[] }) => packagingApi.setCapacities(id, caps),
@@ -101,6 +113,14 @@ export default function AdminPackagingPage() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['packaging-box-types'] }); setPanelError(''); },
     onError: (e: any) => setPanelError(e?.response?.data?.detail ?? 'Failed to save spacers'),
   });
+
+  /* Auto-expand after create */
+  useEffect(() => {
+    if (pendingExpandId && items.find((b) => b.id === pendingExpandId)) {
+      toggleExpand(items.find((b) => b.id === pendingExpandId)!);
+      setPendingExpandId(null);
+    }
+  }, [pendingExpandId, items]);
 
   /* ── Handlers ─────────────────────────────────────────── */
 
@@ -146,8 +166,12 @@ export default function AdminPackagingPage() {
     }
   }, [boxForm, editBox, createMut, updateMut]);
 
-  const selectBox = useCallback((bt: PackagingBoxType) => {
-    setSelectedBox(bt);
+  const toggleExpand = useCallback((bt: PackagingBoxType) => {
+    if (expandedId === bt.id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(bt.id);
     setPanelError('');
     setCapRows(
       bt.capacities.map((c) => ({
@@ -163,8 +187,9 @@ export default function AdminPackagingPage() {
         qty_per_box: String(sr.qty_per_box),
       }))
     );
-  }, []);
+  }, [expandedId]);
 
+  /* Capacity handlers */
   const addCapRow = useCallback(() => {
     if (capRows.length >= 10) return;
     setCapRows((prev) => [...prev, { size_id: '', pieces_per_box: '', sqm_per_box: '' }]);
@@ -179,7 +204,7 @@ export default function AdminPackagingPage() {
   }, []);
 
   const saveCapacities = useCallback(() => {
-    if (!selectedBox) return;
+    if (!expandedId) return;
     const caps = capRows
       .filter((r) => r.size_id)
       .map((r) => ({
@@ -187,9 +212,10 @@ export default function AdminPackagingPage() {
         pieces_per_box: r.pieces_per_box ? parseInt(r.pieces_per_box) : undefined,
         sqm_per_box: r.sqm_per_box ? parseFloat(r.sqm_per_box) : undefined,
       }));
-    capMut.mutate({ id: selectedBox.id, caps });
-  }, [selectedBox, capRows, capMut]);
+    capMut.mutate({ id: expandedId, caps });
+  }, [expandedId, capRows, capMut]);
 
+  /* Spacer handlers */
   const addSpacerRow = useCallback(() => {
     setSpacerRows((prev) => [...prev, { size_id: '', spacer_material_id: '', qty_per_box: '1' }]);
   }, []);
@@ -203,7 +229,7 @@ export default function AdminPackagingPage() {
   }, []);
 
   const saveSpacers = useCallback(() => {
-    if (!selectedBox) return;
+    if (!expandedId) return;
     const sp = spacerRows
       .filter((r) => r.size_id && r.spacer_material_id)
       .map((r) => ({
@@ -211,15 +237,16 @@ export default function AdminPackagingPage() {
         spacer_material_id: r.spacer_material_id,
         qty_per_box: parseInt(r.qty_per_box) || 1,
       }));
-    spacerMut.mutate({ id: selectedBox.id, sp });
-  }, [selectedBox, spacerRows, spacerMut]);
+    spacerMut.mutate({ id: expandedId, sp });
+  }, [expandedId, spacerRows, spacerMut]);
 
   const saving = createMut.isPending || updateMut.isPending;
 
-  /* Refresh selected box after mutation */
-  const refreshedSelectedBox = selectedBox
-    ? items.find((b) => b.id === selectedBox.id) ?? selectedBox
-    : null;
+  /* Keep expanded box data fresh */
+  const getExpandedBox = (): PackagingBoxType | null => {
+    if (!expandedId) return null;
+    return items.find((b) => b.id === expandedId) ?? null;
+  };
 
   return (
     <div className="space-y-6">
@@ -244,194 +271,230 @@ export default function AdminPackagingPage() {
       ) : isLoading ? (
         <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>
       ) : items.length === 0 ? (
-        <Card><p className="py-8 text-center text-gray-400">No box types configured</p></Card>
+        <Card>
+          <div className="py-10 text-center">
+            <p className="text-lg font-medium text-gray-500">No box types configured</p>
+            <p className="mt-2 text-sm text-gray-400">
+              Create a box type, then configure which tile sizes fit in it and how many pieces per box.
+            </p>
+            <Button className="mt-4" onClick={openCreate}>+ Add Box Type</Button>
+          </div>
+        </Card>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-2">
-          {/* Left: Box Types list */}
-          <div className="space-y-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Box Types</h2>
-            {items.map((bt) => (
-              <div
-                key={bt.id}
-                onClick={() => selectBox(bt)}
-                className={`cursor-pointer rounded-lg border p-4 transition-colors ${
-                  refreshedSelectedBox?.id === bt.id
-                    ? 'border-indigo-500 bg-indigo-50'
-                    : 'border-gray-200 bg-white hover:bg-gray-50'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-900">{bt.name}</p>
-                    <p className="text-xs text-gray-500">
-                      {bt.material_code ?? ''} {bt.material_name ?? 'No material'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge status={bt.is_active ? 'active' : 'inactive'} label={bt.is_active ? 'Active' : 'Inactive'} />
-                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-                      {bt.capacities.length} sizes
-                    </span>
-                  </div>
-                </div>
-                {bt.capacities.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {bt.capacities.map((c) => (
-                      <span key={c.id} className="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
-                        {c.size_name} {'\u2014'} {c.pieces_per_box != null ? `${c.pieces_per_box} pcs` : ''}{c.sqm_per_box != null ? ` ${c.sqm_per_box} m\u00B2` : ''}
+        <div className="space-y-4">
+          {items.map((bt) => {
+            const isExpanded = expandedId === bt.id;
+            return (
+              <Card key={bt.id} className="overflow-hidden">
+                {/* Card header (always visible) */}
+                <div
+                  onClick={() => toggleExpand(bt)}
+                  className="cursor-pointer p-4 transition-colors hover:bg-gray-50"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className={`text-lg transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
+                        {'\u25B6'}
                       </span>
-                    ))}
+                      <div>
+                        <p className="font-semibold text-gray-900">{bt.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {bt.material_code ?? ''} {bt.material_name ?? 'No material'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge status={bt.is_active ? 'active' : 'inactive'} label={bt.is_active ? 'Active' : 'Inactive'} />
+                      <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                        {bt.capacities.length} {bt.capacities.length === 1 ? 'size' : 'sizes'}
+                      </span>
+                      {bt.spacer_rules.length > 0 && (
+                        <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+                          {bt.spacer_rules.length} {bt.spacer_rules.length === 1 ? 'spacer' : 'spacers'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Summary badges (when collapsed) */}
+                  {!isExpanded && bt.capacities.length > 0 && (
+                    <div className="mt-2 ml-8 flex flex-wrap gap-1">
+                      {bt.capacities.map((c) => (
+                        <span key={c.id} className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                          {c.size_name}{' '}
+                          {c.pieces_per_box != null ? `${c.pieces_per_box} pcs` : ''}
+                          {c.pieces_per_box != null && c.sqm_per_box != null ? ' / ' : ''}
+                          {c.sqm_per_box != null ? `${c.sqm_per_box} m\u00B2` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Expanded panel */}
+                {isExpanded && (
+                  <div className="border-t border-gray-200 bg-gray-50 px-4 py-4 space-y-5">
+                    {/* Actions bar */}
+                    <div className="flex gap-2">
+                      <Button variant="secondary" size="sm" onClick={(e) => { e.stopPropagation(); openEdit(bt); }}>
+                        Edit Box Type
+                      </Button>
+                      <Button variant="secondary" size="sm" className="text-red-600 hover:bg-red-50" onClick={(e) => { e.stopPropagation(); setDeleteId(bt.id); }}>
+                        Delete
+                      </Button>
+                    </div>
+
+                    {panelError && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-600">{panelError}</p>}
+
+                    {/* Capacities section */}
+                    <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="text-sm font-semibold text-gray-800">Size Capacities</h3>
+                          <p className="text-xs text-gray-500">How many pieces / m{'\u00B2'} of each tile size fit in this box</p>
+                        </div>
+                        <Button size="sm" onClick={addCapRow} disabled={capRows.length >= 10}>+ Add Size</Button>
+                      </div>
+                      {capRows.length === 0 ? (
+                        <div className="rounded-md bg-amber-50 px-3 py-3 text-sm text-amber-700">
+                          No sizes configured yet. Click "+ Add Size" to specify how many tiles fit per box.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {/* Header row */}
+                          <div className="flex items-end gap-2 text-xs font-medium text-gray-500">
+                            <div className="flex-1">Size</div>
+                            <div className="w-28">Pieces / box</div>
+                            <div className="w-28">m{'\u00B2'} / box</div>
+                            <div className="w-8" />
+                          </div>
+                          {capRows.map((row, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <div className="flex-1">
+                                <select
+                                  value={row.size_id}
+                                  onChange={(e) => updateCapRow(idx, 'size_id', e.target.value)}
+                                  className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                                >
+                                  <option value="">Select size...</option>
+                                  {sizes.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                      {s.name} ({s.width_mm}x{s.height_mm}mm){s.is_custom ? ' \u2014 custom' : ''}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="w-28">
+                                <NumericInput
+                                  value={row.pieces_per_box}
+                                  onChange={(e) => updateCapRow(idx, 'pieces_per_box', e.target.value)}
+                                  placeholder="pcs"
+                                />
+                              </div>
+                              <div className="w-28">
+                                <NumericInput
+                                  value={row.sqm_per_box}
+                                  onChange={(e) => updateCapRow(idx, 'sqm_per_box', e.target.value)}
+                                  placeholder="m\u00B2"
+                                />
+                              </div>
+                              <button
+                                onClick={() => removeCapRow(idx)}
+                                className="flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
+                              >
+                                {'\u2715'}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {capRows.length > 0 && (
+                        <div className="flex justify-end pt-1">
+                          <Button size="sm" onClick={saveCapacities} disabled={capMut.isPending}>
+                            {capMut.isPending ? 'Saving\u2026' : 'Save Capacities'}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Spacer Rules section */}
+                    <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="text-sm font-semibold text-gray-800">Spacer Rules</h3>
+                          <p className="text-xs text-gray-500">How many spacers go into each box per tile size</p>
+                        </div>
+                        <Button size="sm" onClick={addSpacerRow}>+ Add Spacer</Button>
+                      </div>
+                      {spacerRows.length === 0 ? (
+                        <p className="text-sm text-gray-400">No spacer rules. Click "+ Add Spacer" if spacers are needed.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {/* Header row */}
+                          <div className="flex items-end gap-2 text-xs font-medium text-gray-500">
+                            <div className="w-36">Size</div>
+                            <div className="flex-1">Spacer Material</div>
+                            <div className="w-24">Qty / box</div>
+                            <div className="w-8" />
+                          </div>
+                          {spacerRows.map((row, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <div className="w-36">
+                                <select
+                                  value={row.size_id}
+                                  onChange={(e) => updateSpacerRow(idx, 'size_id', e.target.value)}
+                                  className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                                >
+                                  <option value="">Size...</option>
+                                  {sizes.map((s) => (
+                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="flex-1">
+                                <select
+                                  value={row.spacer_material_id}
+                                  onChange={(e) => updateSpacerRow(idx, 'spacer_material_id', e.target.value)}
+                                  className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                                >
+                                  <option value="">Select material...</option>
+                                  {allMaterials
+                                    .filter((m) => m.material_type === 'packaging' || m.material_type === 'consumable')
+                                    .map((m) => (
+                                      <option key={m.id} value={m.id}>{m.material_code} {m.name}</option>
+                                    ))}
+                                </select>
+                              </div>
+                              <div className="w-24">
+                                <NumericInput
+                                  value={row.qty_per_box}
+                                  onChange={(e) => updateSpacerRow(idx, 'qty_per_box', e.target.value)}
+                                  placeholder="qty"
+                                />
+                              </div>
+                              <button
+                                onClick={() => removeSpacerRow(idx)}
+                                className="flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
+                              >
+                                {'\u2715'}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {spacerRows.length > 0 && (
+                        <div className="flex justify-end pt-1">
+                          <Button size="sm" onClick={saveSpacers} disabled={spacerMut.isPending}>
+                            {spacerMut.isPending ? 'Saving\u2026' : 'Save Spacers'}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
-                <div className="mt-2 flex gap-1">
-                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEdit(bt); }}>Edit</Button>
-                  <Button variant="ghost" size="sm" className="text-red-600" onClick={(e) => { e.stopPropagation(); setDeleteId(bt.id); }}>Delete</Button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Right: Capacities + Spacers panel */}
-          {refreshedSelectedBox ? (
-            <div className="space-y-4">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">
-                {refreshedSelectedBox.name} {'\u2014'} Configuration
-              </h2>
-
-              {panelError && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-600">{panelError}</p>}
-
-              {/* Capacities */}
-              <Card>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-gray-700">Size Capacities</h3>
-                    <Button size="sm" onClick={addCapRow} disabled={capRows.length >= 10}>+ Add Size</Button>
-                  </div>
-                  {capRows.length === 0 ? (
-                    <p className="text-sm text-gray-400">No capacities configured. Add a size.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {capRows.map((row, idx) => (
-                        <div key={idx} className="flex items-end gap-2">
-                          <div className="flex-1">
-                            {idx === 0 && <label className="mb-1 block text-xs text-gray-500">Size</label>}
-                            <select
-                              value={row.size_id}
-                              onChange={(e) => updateCapRow(idx, 'size_id', e.target.value)}
-                              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                            >
-                              <option value="">Select size...</option>
-                              {sizes.map((s) => (
-                                <option key={s.id} value={s.id}>{s.name}{s.is_custom ? ' (custom)' : ''}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="w-24">
-                            {idx === 0 && <label className="mb-1 block text-xs text-gray-500">Pcs/box</label>}
-                            <NumericInput
-                              value={row.pieces_per_box}
-                              onChange={(e) => updateCapRow(idx, 'pieces_per_box', e.target.value)}
-                              placeholder="pcs"
-                            />
-                          </div>
-                          <div className="w-24">
-                            {idx === 0 && <label className="mb-1 block text-xs text-gray-500">m{'\u00B2'}/box</label>}
-                            <NumericInput
-                              value={row.sqm_per_box}
-                              onChange={(e) => updateCapRow(idx, 'sqm_per_box', e.target.value)}
-                              placeholder="m\u00B2"
-                            />
-                          </div>
-                          <button
-                            onClick={() => removeCapRow(idx)}
-                            className="mb-0.5 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                          >
-                            {'\u2715'}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex justify-end pt-1">
-                    <Button size="sm" onClick={saveCapacities} disabled={capMut.isPending}>
-                      {capMut.isPending ? 'Saving\u2026' : 'Save Capacities'}
-                    </Button>
-                  </div>
-                </div>
               </Card>
-
-              {/* Spacer Rules */}
-              <Card>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-gray-700">Spacer Rules</h3>
-                    <Button size="sm" onClick={addSpacerRow}>+ Add Spacer</Button>
-                  </div>
-                  {spacerRows.length === 0 ? (
-                    <p className="text-sm text-gray-400">No spacer rules. Add one.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {spacerRows.map((row, idx) => (
-                        <div key={idx} className="flex items-end gap-2">
-                          <div className="w-28">
-                            {idx === 0 && <label className="mb-1 block text-xs text-gray-500">Size</label>}
-                            <select
-                              value={row.size_id}
-                              onChange={(e) => updateSpacerRow(idx, 'size_id', e.target.value)}
-                              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                            >
-                              <option value="">Size...</option>
-                              {sizes.map((s) => (
-                                <option key={s.id} value={s.id}>{s.name}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="flex-1">
-                            {idx === 0 && <label className="mb-1 block text-xs text-gray-500">Spacer Material</label>}
-                            <select
-                              value={row.spacer_material_id}
-                              onChange={(e) => updateSpacerRow(idx, 'spacer_material_id', e.target.value)}
-                              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                            >
-                              <option value="">Select material...</option>
-                              {allMaterials
-                                .filter((m) => m.material_type === 'packaging' || m.material_type === 'consumable')
-                                .map((m) => (
-                                  <option key={m.id} value={m.id}>{m.material_code} {m.name}</option>
-                                ))}
-                            </select>
-                          </div>
-                          <div className="w-20">
-                            {idx === 0 && <label className="mb-1 block text-xs text-gray-500">Qty/box</label>}
-                            <NumericInput
-                              value={row.qty_per_box}
-                              onChange={(e) => updateSpacerRow(idx, 'qty_per_box', e.target.value)}
-                              placeholder="qty"
-                            />
-                          </div>
-                          <button
-                            onClick={() => removeSpacerRow(idx)}
-                            className="mb-0.5 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                          >
-                            {'\u2715'}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex justify-end pt-1">
-                    <Button size="sm" onClick={saveSpacers} disabled={spacerMut.isPending}>
-                      {spacerMut.isPending ? 'Saving\u2026' : 'Save Spacers'}
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            </div>
-          ) : (
-            <Card>
-              <p className="py-12 text-center text-gray-400">Select a box type to configure capacities and spacers</p>
-            </Card>
-          )}
+            );
+          })}
         </div>
       )}
 
@@ -457,6 +520,11 @@ export default function AdminPackagingPage() {
             <input type="checkbox" checked={boxForm.is_active} onChange={(e) => setBoxForm({ ...boxForm, is_active: e.target.checked })} className="rounded" />
             Active
           </label>
+          {!editBox && (
+            <p className="rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-700">
+              After creating, the box type will expand so you can add size capacities and spacer rules.
+            </p>
+          )}
           {boxError && <p className="text-sm text-red-600">{boxError}</p>}
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={closeBoxDialog}>Cancel</Button>

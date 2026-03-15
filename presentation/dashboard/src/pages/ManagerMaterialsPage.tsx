@@ -14,25 +14,25 @@ import { Spinner } from '@/components/ui/Spinner';
 
 // ── Material type definitions ─────────────────────────────────────────────
 const MATERIAL_TYPES = [
-  { value: 'stone',           label: 'Камень',               emoji: '🪨' },
-  { value: 'pigment',         label: 'Пигменты',             emoji: '🎨' },
-  { value: 'frit',            label: 'Фритты',               emoji: '⚗️' },
-  { value: 'oxide_carbonate', label: 'Оксиды и карбонаты',   emoji: '🧪' },
-  { value: 'other_bulk',      label: 'Прочее сыпучее',       emoji: '📦' },
-  { value: 'packaging',       label: 'Упаковка',             emoji: '📦' },
-  { value: 'consumable',      label: 'Расходные материалы',  emoji: '🔧' },
-  { value: 'other',           label: 'Прочее',               emoji: '📋' },
+  { value: 'stone',           label: 'Stone',                emoji: '🪨' },
+  { value: 'pigment',         label: 'Pigments',             emoji: '🎨' },
+  { value: 'frit',            label: 'Frits',                emoji: '⚗️' },
+  { value: 'oxide_carbonate', label: 'Oxides & Carbonates',  emoji: '🧪' },
+  { value: 'other_bulk',      label: 'Other Bulk',           emoji: '📦' },
+  { value: 'packaging',       label: 'Packaging',            emoji: '📦' },
+  { value: 'consumable',      label: 'Consumables',          emoji: '🔧' },
+  { value: 'other',           label: 'Other',                emoji: '📋' },
 ] as const;
 
 type MaterialTypeValue = typeof MATERIAL_TYPES[number]['value'];
 
 const UNIT_OPTIONS = [
-  { value: 'kg',  label: 'кг' },
-  { value: 'g',   label: 'г' },
-  { value: 'l',   label: 'л' },
-  { value: 'pcs', label: 'шт' },
-  { value: 'm',   label: 'м' },
-  { value: 'm2',  label: 'м²' },
+  { value: 'kg',  label: 'kg' },
+  { value: 'g',   label: 'g' },
+  { value: 'l',   label: 'L' },
+  { value: 'pcs', label: 'pcs' },
+  { value: 'm',   label: 'm' },
+  { value: 'm2',  label: 'm²' },
 ];
 
 function typeLabel(type: string): string {

@@ -1230,6 +1230,33 @@ def _ensure_schema():
 
     _run_section("fix_null_glaze_settings", _fix_null_glaze_settings)
 
+    # --- Section 23: Align recipe_firing_stages schema with model ---
+    def _fix_recipe_firing_stages_schema(conn):
+        """The CREATE TABLE used stage_order/target_temperature/hold_minutes/ramp_rate/atmosphere/notes
+        but the ORM model expects stage_number/firing_profile_id/requires_glazing_before/description."""
+        # Rename stage_order → stage_number if exists
+        conn.execute(text("""
+            DO $$ BEGIN
+                ALTER TABLE recipe_firing_stages RENAME COLUMN stage_order TO stage_number;
+            EXCEPTION WHEN undefined_column THEN NULL; END $$;
+        """))
+        # Add missing columns
+        add_cols = [
+            ("recipe_firing_stages", "stage_number INTEGER NOT NULL DEFAULT 1"),
+            ("recipe_firing_stages", "firing_profile_id UUID"),
+            ("recipe_firing_stages", "requires_glazing_before BOOLEAN NOT NULL DEFAULT TRUE"),
+            ("recipe_firing_stages", "description VARCHAR(200)"),
+        ]
+        for tbl, col_def in add_cols:
+            col_name = col_def.split()[0]
+            conn.execute(text(f"""
+                DO $$ BEGIN
+                    ALTER TABLE {tbl} ADD COLUMN {col_def};
+                EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+            """))
+
+    _run_section("fix_recipe_firing_stages_schema", _fix_recipe_firing_stages_schema)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""

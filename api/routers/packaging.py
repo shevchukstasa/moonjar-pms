@@ -134,6 +134,8 @@ async def list_sizes(
                 "name": s.name,
                 "width_mm": s.width_mm,
                 "height_mm": s.height_mm,
+                "thickness_mm": s.thickness_mm,
+                "shape": s.shape,
                 "is_custom": s.is_custom,
             }
             for s in sizes

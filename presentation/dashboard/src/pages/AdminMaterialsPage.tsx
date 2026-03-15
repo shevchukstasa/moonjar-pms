@@ -56,27 +56,31 @@ function flatSubgroups(hierarchy: MaterialGroup[] | undefined) {
 
 // ── Form interfaces ─────────────────────────────────────────────────────
 
-interface MaterialForm {
+interface CatalogForm {
   name: string;
-  factory_id: string;
   subgroup_id: string;
   material_type: string;
   unit: string;
-  balance: string;
-  min_balance: string;
   supplier_id: string;
-  warehouse_section: string;
 }
 
-const emptyForm: MaterialForm = {
+const emptyCatalogForm: CatalogForm = {
   name: '',
-  factory_id: '',
   subgroup_id: '',
   material_type: '',
   unit: 'kg',
+  supplier_id: '',
+};
+
+interface StockForm {
+  balance: string;
+  min_balance: string;
+  warehouse_section: string;
+}
+
+const emptyStockForm: StockForm = {
   balance: '0',
   min_balance: '0',
-  supplier_id: '',
   warehouse_section: 'raw_materials',
 };
 
@@ -86,11 +90,68 @@ interface TxForm {
   notes: string;
 }
 
+// ── SubgroupTypeTabs shared component ───────────────────────────────────
+
+function SubgroupTypeTabs({
+  subgroups,
+  activeType,
+  setActiveType,
+  countsByType,
+  totalCount,
+}: {
+  subgroups: { value: string; label: string; icon: string }[];
+  activeType: string;
+  setActiveType: (v: string) => void;
+  countsByType: Record<string, number>;
+  totalCount: number;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1 rounded-lg bg-gray-100 p-1">
+      <button
+        onClick={() => setActiveType('all')}
+        className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+          activeType === 'all'
+            ? 'bg-white text-gray-900 shadow-sm'
+            : 'text-gray-500 hover:text-gray-700'
+        }`}
+      >
+        All
+        {totalCount > 0 && (
+          <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">
+            {totalCount}
+          </span>
+        )}
+      </button>
+      {subgroups.map((sg) => {
+        const count = countsByType[sg.value] ?? 0;
+        return (
+          <button
+            key={sg.value}
+            onClick={() => setActiveType(sg.value)}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              activeType === sg.value
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {sg.icon ? `${sg.icon} ` : ''}{sg.label}
+            {count > 0 && (
+              <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">
+                {count}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Main page ───────────────────────────────────────────────────────────
 
 export default function AdminMaterialsPage() {
   const navigate = useNavigate();
-  const [mainTab, setMainTab] = useState('materials');
+  const [mainTab, setMainTab] = useState('catalog');
 
   return (
     <div className="space-y-6">
@@ -99,7 +160,7 @@ export default function AdminMaterialsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Materials</h1>
           <p className="mt-0.5 text-sm text-gray-500">
-            Manage materials, groups, subgroups, and deduplication
+            Manage materials, stock, groups, and deduplication
           </p>
         </div>
         <Button variant="secondary" onClick={() => navigate('/admin')}>
@@ -110,7 +171,8 @@ export default function AdminMaterialsPage() {
       {/* Tabs */}
       <Tabs
         tabs={[
-          { id: 'materials', label: 'All Materials' },
+          { id: 'catalog', label: 'Catalog' },
+          { id: 'stock', label: 'Stock by Factory' },
           { id: 'groups', label: 'Groups & Subgroups' },
           { id: 'dedup', label: 'Deduplication & Merge' },
         ]}
@@ -119,7 +181,8 @@ export default function AdminMaterialsPage() {
       />
 
       {/* Tab content */}
-      {mainTab === 'materials' && <MaterialsCrudTab />}
+      {mainTab === 'catalog' && <CatalogTab />}
+      {mainTab === 'stock' && <StockByFactoryTab />}
       {mainTab === 'groups' && <GroupsSubgroupsTab />}
       {mainTab === 'dedup' && <MaterialDeduplication />}
     </div>
@@ -127,24 +190,20 @@ export default function AdminMaterialsPage() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Tab 1: Materials CRUD (with dynamic subgroup tabs from hierarchy)
+// Tab 1: Catalog — material reference data (no factory-specific info)
 // ═══════════════════════════════════════════════════════════════════════════
 
-function MaterialsCrudTab() {
+function CatalogTab() {
   // Hierarchy for dynamic tabs & form dropdown
   const { data: hierarchy, isLoading: hierarchyLoading } = useMaterialHierarchy();
   const subgroups = useMemo(() => flatSubgroups(hierarchy), [hierarchy]);
 
   // Filters
-  const { data: factoriesData } = useFactories();
-  const factories = factoriesData?.items ?? [];
-  const [factoryId, setFactoryId] = useState('');
   const [activeType, setActiveType] = useState('all');
   const [search, setSearch] = useState('');
 
-  // Data
+  // Data — aggregate mode (no factory_id)
   const { data, isLoading, isError } = useMaterials({
-    factory_id: factoryId || undefined,
     material_type: activeType !== 'all' ? activeType : undefined,
     search: search || undefined,
     per_page: 200,
@@ -155,22 +214,17 @@ function MaterialsCrudTab() {
   const { data: suppliersData } = useSuppliers();
   const suppliers = suppliersData?.items ?? [];
 
-  // Warehouse Sections
-  const { data: warehouseSectionsData } = useWarehouseSections({ factory_id: factoryId || undefined });
-  const warehouseSections = warehouseSectionsData?.items ?? [];
-
   // Mutations
   const createMaterial = useCreateMaterial();
   const updateMaterial = useUpdateMaterial();
   const deleteMaterial = useDeleteMaterial();
-  const createTransaction = useCreateTransaction();
 
   // Dialog state
   const [editDialog, setEditDialog] = useState<{ open: boolean; item: MaterialItem | null }>({
     open: false,
     item: null,
   });
-  const [form, setForm] = useState<MaterialForm>(emptyForm);
+  const [form, setForm] = useState<CatalogForm>(emptyCatalogForm);
   const [formError, setFormError] = useState('');
 
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: MaterialItem | null }>({
@@ -179,42 +233,30 @@ function MaterialsCrudTab() {
   });
   const [deleteError, setDeleteError] = useState('');
 
-  const [txDialog, setTxDialog] = useState<{ open: boolean; item: MaterialItem | null }>({
-    open: false,
-    item: null,
-  });
-  const [txForm, setTxForm] = useState<TxForm>({ type: 'receive', quantity: '', notes: '' });
-  const [txError, setTxError] = useState('');
-
   // ── Edit/create helpers ─────────────────────────────────────────────────
 
   const openCreate = useCallback(
     (defaultType?: string) => {
       const sg = subgroups.find((s) => s.value === defaultType);
       setForm({
-        ...emptyForm,
+        ...emptyCatalogForm,
         material_type: defaultType ?? '',
         subgroup_id: sg?.subgroupId ?? '',
-        factory_id: factoryId,
       });
       setFormError('');
       setEditDialog({ open: true, item: null });
     },
-    [factoryId, subgroups],
+    [subgroups],
   );
 
   const openEdit = useCallback(
     (item: MaterialItem) => {
       setForm({
         name: item.name,
-        factory_id: item.factory_id ?? '',
         subgroup_id: item.subgroup_id ?? '',
         material_type: item.material_type ?? '',
         unit: item.unit,
-        balance: String(item.balance),
-        min_balance: String(item.min_balance),
         supplier_id: item.supplier_id ?? '',
-        warehouse_section: item.warehouse_section ?? 'raw_materials',
       });
       setFormError('');
       setEditDialog({ open: true, item });
@@ -226,9 +268,6 @@ function MaterialsCrudTab() {
     setEditDialog({ open: false, item: null });
     setFormError('');
   }, []);
-
-  // Are we in aggregate mode (no specific factory selected)?
-  const isAggregateMode = !factoryId;
 
   const handleSave = useCallback(async () => {
     if (!form.name.trim()) {
@@ -246,20 +285,16 @@ function MaterialsCrudTab() {
       material_type: form.material_type,
       subgroup_id: form.subgroup_id || null,
       unit: form.unit,
-      balance: parseFloat(form.balance) || 0,
-      min_balance: parseFloat(form.min_balance) || 0,
       supplier_id: form.supplier_id || null,
-      warehouse_section: form.warehouse_section || 'raw_materials',
     };
-    // Only include factory_id if explicitly selected
-    if (form.factory_id) {
-      payload.factory_id = form.factory_id;
-    }
 
     try {
       if (editDialog.item) {
-        await updateMaterial.mutateAsync({ id: editDialog.item.id, data: payload, factoryId: form.factory_id || undefined });
+        await updateMaterial.mutateAsync({ id: editDialog.item.id, data: payload });
       } else {
+        // Create with default 0 balance (stocks auto-created for all factories)
+        payload.balance = 0;
+        payload.min_balance = 0;
         await createMaterial.mutateAsync(payload);
       }
       closeEdit();
@@ -269,6 +304,371 @@ function MaterialsCrudTab() {
       setFormError(detail ?? 'Save failed');
     }
   }, [form, editDialog.item, createMaterial, updateMaterial, closeEdit]);
+
+  // ── Delete ──────────────────────────────────────────────────────────────
+
+  const openDelete = useCallback((item: MaterialItem) => {
+    setDeleteDialog({ open: true, item });
+    setDeleteError('');
+  }, []);
+
+  const handleDelete = useCallback(async () => {
+    if (!deleteDialog.item) return;
+    setDeleteError('');
+    try {
+      await deleteMaterial.mutateAsync({ id: deleteDialog.item.id });
+      setDeleteDialog({ open: false, item: null });
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setDeleteError(detail ?? 'Failed to delete material');
+    }
+  }, [deleteDialog.item, deleteMaterial]);
+
+  // ── Counts ──────────────────────────────────────────────────────────────
+
+  const countsByType = useMemo(() => {
+    const map: Record<string, number> = {};
+    items.forEach((m) => {
+      map[m.material_type] = (map[m.material_type] ?? 0) + 1;
+    });
+    return map;
+  }, [items]);
+
+  const displayItems = useMemo(() => {
+    if (activeType === 'all') return items;
+    return items.filter((m) => m.material_type === activeType);
+  }, [items, activeType]);
+
+  const saving = createMaterial.isPending || updateMaterial.isPending;
+
+  // ── Dropdown options ────────────────────────────────────────────────────
+
+  const subgroupOptions = useMemo(() => {
+    if (!hierarchy) return [];
+    const opts: { value: string; label: string }[] = [];
+    for (const g of hierarchy) {
+      for (const sg of g.subgroups) {
+        opts.push({ value: sg.id, label: `${g.name} / ${sg.name}` });
+      }
+    }
+    return opts;
+  }, [hierarchy]);
+
+  const handleSubgroupChange = useCallback(
+    (sgId: string) => {
+      const sg = subgroups.find((s) => s.subgroupId === sgId);
+      setForm((prev) => ({
+        ...prev,
+        subgroup_id: sgId,
+        material_type: sg?.value ?? prev.material_type,
+      }));
+    },
+    [subgroups],
+  );
+
+  if (hierarchyLoading) {
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner className="h-8 w-8" />
+      </div>
+    );
+  }
+
+  const typeLabel = (code: string) =>
+    subgroups.find((s) => s.value === code)?.label ?? code;
+  const typeIcon = (code: string) =>
+    subgroups.find((s) => s.value === code)?.icon ?? '';
+
+  return (
+    <div className="space-y-5">
+      {/* Filters + Add button */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="min-w-48 flex-1">
+          <Input
+            placeholder="Search materials\u2026"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <Button onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}>
+          + Add Material
+        </Button>
+      </div>
+
+      {/* Dynamic type tabs */}
+      <SubgroupTypeTabs
+        subgroups={subgroups}
+        activeType={activeType}
+        setActiveType={setActiveType}
+        countsByType={countsByType}
+        totalCount={items.length}
+      />
+
+      {/* Content */}
+      {isError ? (
+        <Card>
+          <p className="py-8 text-center text-sm text-red-600">⚠ Error loading materials</p>
+        </Card>
+      ) : isLoading ? (
+        <div className="flex justify-center py-16">
+          <Spinner className="h-8 w-8" />
+        </div>
+      ) : displayItems.length === 0 ? (
+        <Card>
+          <div className="py-12 text-center">
+            <p className="text-gray-400">No materials found</p>
+            <Button
+              className="mt-4"
+              variant="secondary"
+              onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}
+            >
+              + Add first material
+            </Button>
+          </div>
+        </Card>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b bg-gray-50 text-xs font-medium uppercase tracking-wider text-gray-500">
+              <tr>
+                <th className="px-4 py-3">Code</th>
+                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Type</th>
+                <th className="px-4 py-3">Unit</th>
+                <th className="px-4 py-3">Supplier</th>
+                <th className="px-4 py-3 text-center">Factories</th>
+                <th className="px-4 py-3"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {displayItems.map((m) => (
+                <tr
+                  key={m.id}
+                  className="bg-white transition-colors hover:bg-gray-50"
+                >
+                  <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '\u2014'}</td>
+                  <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
+                  <td className="px-4 py-3">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
+                      {typeIcon(m.material_type)} {typeLabel(m.material_type)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-500">{m.unit}</td>
+                  <td className="px-4 py-3 text-gray-500">
+                    {m.supplier_name ?? <span className="text-gray-300">{'\u2014'}</span>}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                      {m.factory_count ?? 0}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => openEdit(m)}>
+                        Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => openDelete(m)}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        Del
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Create / Edit dialog */}
+      <Dialog
+        open={editDialog.open}
+        onClose={closeEdit}
+        title={editDialog.item ? `Edit: ${editDialog.item.name}` : 'Add Material'}
+        className="w-full max-w-lg"
+      >
+        <div className="space-y-4">
+          <Input
+            label="Name *"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            placeholder="e.g. Zinc Oxide ZnO"
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Subgroup *</label>
+              <Select
+                options={subgroupOptions}
+                value={form.subgroup_id}
+                onChange={(e) => handleSubgroupChange(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Unit</label>
+              <Select
+                options={UNIT_OPTIONS}
+                value={form.unit}
+                onChange={(e) => setForm({ ...form, unit: e.target.value })}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Supplier</label>
+            <Select
+              options={[
+                { value: '', label: '\u2014 no supplier \u2014' },
+                ...suppliers.map((s) => ({ value: s.id, label: s.name })),
+              ]}
+              value={form.supplier_id}
+              onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
+            />
+          </div>
+          {!editDialog.item && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+              Stock will be auto-created for all active factories with balance 0.
+            </div>
+          )}
+          {formError && <p className="text-sm text-red-600">{formError}</p>}
+          <div className="flex justify-end gap-2 border-t pt-3">
+            <Button variant="secondary" onClick={closeEdit}>
+              Cancel
+            </Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving\u2026' : editDialog.item ? 'Update' : 'Create'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <Dialog
+        open={deleteDialog.open}
+        onClose={() => setDeleteDialog({ open: false, item: null })}
+        title="Delete Material"
+        className="w-full max-w-sm"
+      >
+        {deleteDialog.item && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-700">
+              Are you sure you want to delete <strong>{deleteDialog.item.name}</strong>?
+              This will remove the material and all its related records (stock, transactions, recipes).
+              This action cannot be undone.
+            </p>
+            {deleteError && (
+              <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-600">{deleteError}</p>
+            )}
+            <div className="flex justify-end gap-2 border-t pt-3">
+              <Button
+                variant="secondary"
+                onClick={() => { setDeleteDialog({ open: false, item: null }); setDeleteError(''); }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleDelete}
+                disabled={deleteMaterial.isPending}
+                className="bg-red-600 hover:bg-red-700 focus:ring-red-500"
+              >
+                {deleteMaterial.isPending ? 'Deleting\u2026' : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tab 2: Stock by Factory — balance, min_balance, section, transactions
+// ═══════════════════════════════════════════════════════════════════════════
+
+function StockByFactoryTab() {
+  const { data: hierarchy, isLoading: hierarchyLoading } = useMaterialHierarchy();
+  const subgroups = useMemo(() => flatSubgroups(hierarchy), [hierarchy]);
+
+  // Factories
+  const { data: factoriesData } = useFactories();
+  const factories = factoriesData?.items ?? [];
+  const [factoryId, setFactoryId] = useState('');
+
+  // Filters
+  const [activeType, setActiveType] = useState('all');
+  const [search, setSearch] = useState('');
+
+  // Data — per-factory mode
+  const { data, isLoading, isError } = useMaterials({
+    factory_id: factoryId || undefined,
+    material_type: activeType !== 'all' ? activeType : undefined,
+    search: search || undefined,
+    per_page: 200,
+  });
+  const items = data?.items ?? [];
+
+  // Warehouse sections
+  const { data: warehouseSectionsData } = useWarehouseSections({ factory_id: factoryId || undefined });
+  const warehouseSections = warehouseSectionsData?.items ?? [];
+
+  // Mutations
+  const updateMaterial = useUpdateMaterial();
+  const createTransaction = useCreateTransaction();
+
+  // Stock edit dialog
+  const [stockDialog, setStockDialog] = useState<{ open: boolean; item: MaterialItem | null }>({
+    open: false,
+    item: null,
+  });
+  const [stockForm, setStockForm] = useState<StockForm>(emptyStockForm);
+  const [stockError, setStockError] = useState('');
+
+  // Transaction dialog
+  const [txDialog, setTxDialog] = useState<{ open: boolean; item: MaterialItem | null }>({
+    open: false,
+    item: null,
+  });
+  const [txForm, setTxForm] = useState<TxForm>({ type: 'receive', quantity: '', notes: '' });
+  const [txError, setTxError] = useState('');
+
+  // ── Stock edit helpers ────────────────────────────────────────────────
+
+  const openStockEdit = useCallback((item: MaterialItem) => {
+    setStockForm({
+      balance: String(item.balance),
+      min_balance: String(item.min_balance),
+      warehouse_section: item.warehouse_section ?? 'raw_materials',
+    });
+    setStockError('');
+    setStockDialog({ open: true, item });
+  }, []);
+
+  const closeStockEdit = useCallback(() => {
+    setStockDialog({ open: false, item: null });
+    setStockError('');
+  }, []);
+
+  const handleStockSave = useCallback(async () => {
+    if (!stockDialog.item) return;
+    setStockError('');
+    const payload: Record<string, unknown> = {
+      min_balance: parseFloat(stockForm.min_balance) || 0,
+      warehouse_section: stockForm.warehouse_section || 'raw_materials',
+    };
+    try {
+      await updateMaterial.mutateAsync({
+        id: stockDialog.item.id,
+        data: payload,
+        factoryId: stockDialog.item.factory_id ?? undefined,
+      });
+      closeStockEdit();
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setStockError(detail ?? 'Save failed');
+    }
+  }, [stockForm, stockDialog.item, updateMaterial, closeStockEdit]);
 
   // ── Transaction dialog ──────────────────────────────────────────────────
 
@@ -307,29 +707,7 @@ function MaterialsCrudTab() {
     }
   }, [txDialog.item, txForm, createTransaction, closeTx]);
 
-  // ── Delete ──────────────────────────────────────────────────────────────
-
-  const openDelete = useCallback((item: MaterialItem) => {
-    setDeleteDialog({ open: true, item });
-    setDeleteError('');
-  }, []);
-
-  const handleDelete = useCallback(async () => {
-    if (!deleteDialog.item) return;
-    setDeleteError('');
-    try {
-      await deleteMaterial.mutateAsync({
-        id: deleteDialog.item.id,
-        factoryId: deleteDialog.item.factory_id ?? undefined,
-      });
-      setDeleteDialog({ open: false, item: null });
-    } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setDeleteError(detail ?? 'Failed to delete material');
-    }
-  }, [deleteDialog.item, deleteMaterial]);
-
-  // ── Counts ──────────────────────────────────────────────────────────────
+  // ── Counts & display ──────────────────────────────────────────────────
 
   const countsByType = useMemo(() => {
     const map: Record<string, number> = {};
@@ -346,43 +724,11 @@ function MaterialsCrudTab() {
     return items.filter((m) => m.material_type === activeType);
   }, [items, activeType]);
 
-  const saving = createMaterial.isPending || updateMaterial.isPending;
   const txPending = createTransaction.isPending;
+  const stockSaving = updateMaterial.isPending;
 
-  // ── Dropdown options ────────────────────────────────────────────────────
-
-  const factoryOptions = [
-    { value: '', label: 'All factories' },
-    ...factories.map((f) => ({ value: f.id, label: f.name })),
-  ];
-
-  // Build grouped subgroup options for the form (Group → Subgroups)
-  const subgroupOptions = useMemo(() => {
-    if (!hierarchy) return [];
-    const opts: { value: string; label: string }[] = [];
-    for (const g of hierarchy) {
-      for (const sg of g.subgroups) {
-        opts.push({
-          value: sg.id,
-          label: `${g.name} / ${sg.name}`,
-        });
-      }
-    }
-    return opts;
-  }, [hierarchy]);
-
-  // When user selects a subgroup in the form, also sync material_type
-  const handleSubgroupChange = useCallback(
-    (sgId: string) => {
-      const sg = subgroups.find((s) => s.subgroupId === sgId);
-      setForm((prev) => ({
-        ...prev,
-        subgroup_id: sgId,
-        material_type: sg?.value ?? prev.material_type,
-      }));
-    },
-    [subgroups],
-  );
+  const typeLabel = (code: string) =>
+    subgroups.find((s) => s.value === code)?.label ?? code;
 
   if (hierarchyLoading) {
     return (
@@ -394,11 +740,14 @@ function MaterialsCrudTab() {
 
   return (
     <div className="space-y-5">
-      {/* Filters + Add button */}
+      {/* Factory selector + search */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="w-56">
           <Select
-            options={factoryOptions}
+            options={[
+              { value: '', label: '— Select factory —' },
+              ...factories.map((f) => ({ value: f.id, label: f.name })),
+            ]}
             value={factoryId}
             onChange={(e) => setFactoryId(e.target.value)}
           />
@@ -410,190 +759,156 @@ function MaterialsCrudTab() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <Button
-          onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}
-        >
-          + Add Material
-        </Button>
       </div>
 
-      {/* Low stock indicator */}
-      {lowStockCount > 0 && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2">
-          <span className="text-sm font-medium text-red-700">
-            ⚠ {lowStockCount} material{lowStockCount > 1 ? 's' : ''} below minimum stock level
-          </span>
-        </div>
-      )}
-
-      {/* Dynamic type tabs from hierarchy */}
-      <div className="flex flex-wrap gap-1 rounded-lg bg-gray-100 p-1">
-        <button
-          onClick={() => setActiveType('all')}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-            activeType === 'all'
-              ? 'bg-white text-gray-900 shadow-sm'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          All
-          {items.length > 0 && (
-            <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">
-              {items.length}
-            </span>
-          )}
-        </button>
-        {subgroups.map((sg) => {
-          const count = countsByType[sg.value] ?? 0;
-          return (
-            <button
-              key={sg.value}
-              onClick={() => setActiveType(sg.value)}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                activeType === sg.value
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {sg.icon ? `${sg.icon} ` : ''}{sg.label}
-              {count > 0 && (
-                <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 py-0.5 text-xs">
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Content */}
-      {isError ? (
-        <Card>
-          <p className="py-8 text-center text-sm text-red-600">
-            ⚠ Error loading materials
-          </p>
-        </Card>
-      ) : isLoading ? (
-        <div className="flex justify-center py-16">
-          <Spinner className="h-8 w-8" />
-        </div>
-      ) : displayItems.length === 0 ? (
+      {!factoryId ? (
         <Card>
           <div className="py-12 text-center">
-            <p className="text-gray-400">No materials found</p>
-            <Button
-              className="mt-4"
-              variant="secondary"
-              onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}
-            >
-              + Add first material
-            </Button>
+            <p className="text-lg text-gray-400">Select a factory to view stock levels</p>
+            <p className="mt-1 text-sm text-gray-300">
+              Choose a factory from the dropdown above to see balances and manage transactions
+            </p>
           </div>
         </Card>
       ) : (
-        <MaterialsTable
-          items={displayItems}
-          subgroups={subgroups}
-          isAggregate={isAggregateMode}
-          onEdit={openEdit}
-          onTransaction={openTx}
-          onDelete={openDelete}
-        />
-      )}
-
-      {/* Create / Edit dialog */}
-      <Dialog
-        open={editDialog.open}
-        onClose={closeEdit}
-        title={editDialog.item ? `Edit: ${editDialog.item.name}` : 'Add Material'}
-        className="w-full max-w-lg"
-      >
-        <div className="space-y-4">
-          <Input
-            label="Name *"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-            placeholder="e.g. Zinc Oxide ZnO"
-          />
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Factory</label>
-              <Select
-                options={[
-                  { value: '', label: 'All factories (auto)' },
-                  ...factories.map((f) => ({ value: f.id, label: f.name })),
-                ]}
-                value={form.factory_id}
-                onChange={(e) => setForm({ ...form, factory_id: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Subgroup *</label>
-              <Select
-                options={subgroupOptions}
-                value={form.subgroup_id}
-                onChange={(e) => handleSubgroupChange(e.target.value)}
-              />
-            </div>
-          </div>
-          {!editDialog.item && !form.factory_id && (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
-              Stock will be auto-created for all active factories with the specified balance and min balance.
+        <>
+          {/* Low stock indicator */}
+          {lowStockCount > 0 && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2">
+              <span className="text-sm font-medium text-red-700">
+                ⚠ {lowStockCount} material{lowStockCount > 1 ? 's' : ''} below minimum stock level
+              </span>
             </div>
           )}
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Unit</label>
-              <Select
-                options={UNIT_OPTIONS}
-                value={form.unit}
-                onChange={(e) => setForm({ ...form, unit: e.target.value })}
-              />
+
+          {/* Dynamic type tabs */}
+          <SubgroupTypeTabs
+            subgroups={subgroups}
+            activeType={activeType}
+            setActiveType={setActiveType}
+            countsByType={countsByType}
+            totalCount={items.length}
+          />
+
+          {/* Content */}
+          {isError ? (
+            <Card>
+              <p className="py-8 text-center text-sm text-red-600">⚠ Error loading materials</p>
+            </Card>
+          ) : isLoading ? (
+            <div className="flex justify-center py-16">
+              <Spinner className="h-8 w-8" />
+            </div>
+          ) : displayItems.length === 0 ? (
+            <Card>
+              <div className="py-12 text-center">
+                <p className="text-gray-400">No materials found for this factory</p>
+              </div>
+            </Card>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b bg-gray-50 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  <tr>
+                    <th className="px-4 py-3">Code</th>
+                    <th className="px-4 py-3">Name</th>
+                    <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3 text-right">Balance</th>
+                    <th className="px-4 py-3 text-right">Min</th>
+                    <th className="px-4 py-3">Unit</th>
+                    <th className="px-4 py-3">Section</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {displayItems.map((m) => (
+                    <tr
+                      key={`${m.id}-${m.factory_id ?? 'all'}`}
+                      className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}
+                    >
+                      <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '\u2014'}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{typeLabel(m.material_type)}</td>
+                      <td
+                        className={`px-4 py-3 text-right font-mono font-semibold ${m.is_low_stock ? 'text-red-600' : 'text-gray-900'}`}
+                      >
+                        {Number(m.balance).toFixed(3)}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-gray-500">
+                        {Number(m.min_balance).toFixed(3)}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">{m.unit}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">
+                        {m.warehouse_section ?? 'raw_materials'}
+                      </td>
+                      <td className="px-4 py-3">
+                        {m.is_low_stock ? (
+                          <Badge
+                            status="error"
+                            label={`Deficit: ${(Number(m.min_balance) - Number(m.balance)).toFixed(1)} ${m.unit}`}
+                          />
+                        ) : (
+                          <Badge status="active" label="OK" />
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => openTx(m)}>
+                            ±
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => openStockEdit(m)}>
+                            Edit
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Stock edit dialog — min_balance, warehouse_section */}
+      <Dialog
+        open={stockDialog.open}
+        onClose={closeStockEdit}
+        title={stockDialog.item ? `Stock: ${stockDialog.item.name}` : 'Edit Stock'}
+        className="w-full max-w-sm"
+      >
+        {stockDialog.item && (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-gray-50 px-4 py-3 text-sm">
+              <span className="text-gray-500">Current balance: </span>
+              <span className="font-semibold">
+                {Number(stockDialog.item.balance).toFixed(3)} {stockDialog.item.unit}
+              </span>
             </div>
             <NumericInput
-              label="Balance"
-              value={form.balance}
-              onChange={(e) => setForm({ ...form, balance: e.target.value })}
-              placeholder="0"
-            />
-            <NumericInput
               label="Min Balance"
-              value={form.min_balance}
-              onChange={(e) => setForm({ ...form, min_balance: e.target.value })}
+              value={stockForm.min_balance}
+              onChange={(e) => setStockForm({ ...stockForm, min_balance: e.target.value })}
               placeholder="0"
             />
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Warehouse Section</label>
+              <Select
+                options={warehouseSections.map((ws) => ({ value: ws.code, label: ws.name }))}
+                value={stockForm.warehouse_section}
+                onChange={(e) => setStockForm({ ...stockForm, warehouse_section: e.target.value })}
+              />
+            </div>
+            {stockError && <p className="text-sm text-red-600">{stockError}</p>}
+            <div className="flex justify-end gap-2 border-t pt-3">
+              <Button variant="secondary" onClick={closeStockEdit}>Cancel</Button>
+              <Button onClick={handleStockSave} disabled={stockSaving}>
+                {stockSaving ? 'Saving\u2026' : 'Update'}
+              </Button>
+            </div>
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Supplier</label>
-            <Select
-              options={[
-                { value: '', label: '\u2014 no supplier \u2014' },
-                ...suppliers.map((s) => ({ value: s.id, label: s.name })),
-              ]}
-              value={form.supplier_id}
-              onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Warehouse Section</label>
-            <Select
-              options={[
-                ...warehouseSections.map((ws) => ({ value: ws.code, label: ws.name })),
-              ]}
-              value={form.warehouse_section}
-              onChange={(e) => setForm({ ...form, warehouse_section: e.target.value })}
-            />
-          </div>
-          {formError && <p className="text-sm text-red-600">{formError}</p>}
-          <div className="flex justify-end gap-2 border-t pt-3">
-            <Button variant="secondary" onClick={closeEdit}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving\u2026' : editDialog.item ? 'Update' : 'Create'}
-            </Button>
-          </div>
-        </div>
+        )}
       </Dialog>
 
       {/* Transaction dialog */}
@@ -686,48 +1001,12 @@ function MaterialsCrudTab() {
           </div>
         )}
       </Dialog>
-
-      {/* Delete confirmation dialog */}
-      <Dialog
-        open={deleteDialog.open}
-        onClose={() => setDeleteDialog({ open: false, item: null })}
-        title="Delete Material"
-        className="w-full max-w-sm"
-      >
-        {deleteDialog.item && (
-          <div className="space-y-4">
-            <p className="text-sm text-gray-700">
-              Are you sure you want to delete <strong>{deleteDialog.item.name}</strong>?
-              This will remove the material and all its related records (stock, transactions, recipes).
-              This action cannot be undone.
-            </p>
-            {deleteError && (
-              <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-600">{deleteError}</p>
-            )}
-            <div className="flex justify-end gap-2 border-t pt-3">
-              <Button
-                variant="secondary"
-                onClick={() => { setDeleteDialog({ open: false, item: null }); setDeleteError(''); }}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleDelete}
-                disabled={deleteMaterial.isPending}
-                className="bg-red-600 hover:bg-red-700 focus:ring-red-500"
-              >
-                {deleteMaterial.isPending ? 'Deleting\u2026' : 'Delete'}
-              </Button>
-            </div>
-          </div>
-        )}
-      </Dialog>
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Tab 2: Groups & Subgroups Management
+// Tab 3: Groups & Subgroups Management
 // ═══════════════════════════════════════════════════════════════════════════
 
 interface GroupForm {
@@ -1216,129 +1495,6 @@ function GroupsSubgroupsTab() {
           </div>
         </div>
       </Dialog>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Materials table (shared)
-// ═══════════════════════════════════════════════════════════════════════════
-
-interface MaterialsTableProps {
-  items: MaterialItem[];
-  subgroups: { value: string; label: string; icon: string }[];
-  isAggregate?: boolean;
-  onEdit: (item: MaterialItem) => void;
-  onTransaction: (item: MaterialItem) => void;
-  onDelete?: (item: MaterialItem) => void;
-}
-
-function MaterialsTable({ items, subgroups, isAggregate, onEdit, onTransaction, onDelete }: MaterialsTableProps) {
-  const typeLabel = (code: string) =>
-    subgroups.find((s) => s.value === code)?.label ?? code;
-  const typeIcon = (code: string) =>
-    subgroups.find((s) => s.value === code)?.icon ?? '';
-
-  return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200">
-      <table className="w-full text-left text-sm">
-        <thead className="border-b bg-gray-50 text-xs font-medium uppercase tracking-wider text-gray-500">
-          <tr>
-            <th className="px-4 py-3">Code</th>
-            <th className="px-4 py-3">Name</th>
-            <th className="px-4 py-3">Type</th>
-            <th className="px-4 py-3 text-right">Balance</th>
-            <th className="px-4 py-3 text-right">Min</th>
-            <th className="px-4 py-3">Unit</th>
-            <th className="px-4 py-3">Supplier</th>
-            {isAggregate && <th className="px-4 py-3 text-center">Factories</th>}
-            {!isAggregate && <th className="px-4 py-3">Section</th>}
-            <th className="px-4 py-3">Status</th>
-            <th className="px-4 py-3"></th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
-          {items.map((m) => (
-            <tr
-              key={`${m.id}-${m.factory_id ?? 'all'}`}
-              className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}
-            >
-              <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '\u2014'}</td>
-              <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
-              <td className="px-4 py-3">
-                <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
-                  {typeIcon(m.material_type)} {typeLabel(m.material_type)}
-                </span>
-              </td>
-              <td
-                className={`px-4 py-3 text-right font-mono font-semibold ${m.is_low_stock ? 'text-red-600' : 'text-gray-900'}`}
-              >
-                {Number(m.balance).toFixed(3)}
-              </td>
-              <td className="px-4 py-3 text-right font-mono text-gray-500">
-                {Number(m.min_balance).toFixed(3)}
-              </td>
-              <td className="px-4 py-3 text-gray-500">{m.unit}</td>
-              <td className="px-4 py-3 text-gray-500">
-                {m.supplier_name ?? <span className="text-gray-300">{'\u2014'}</span>}
-              </td>
-              {isAggregate && (
-                <td className="px-4 py-3 text-center">
-                  <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                    {m.factory_count ?? 0}
-                  </span>
-                </td>
-              )}
-              {!isAggregate && (
-                <td className="px-4 py-3 text-xs text-gray-500">
-                  {m.warehouse_section ?? 'raw_materials'}
-                </td>
-              )}
-              <td className="px-4 py-3">
-                {m.is_low_stock ? (
-                  <Badge
-                    status="error"
-                    label={`Deficit: ${(Number(m.min_balance) - Number(m.balance)).toFixed(1)} ${m.unit}`}
-                  />
-                ) : (
-                  <Badge status="active" label="OK" />
-                )}
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex items-center gap-1">
-                  {isAggregate ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled
-                      title="Select a factory to manage transactions"
-                    >
-                      ±
-                    </Button>
-                  ) : (
-                    <Button size="sm" variant="ghost" onClick={() => onTransaction(m)}>
-                      ±
-                    </Button>
-                  )}
-                  <Button size="sm" variant="ghost" onClick={() => onEdit(m)}>
-                    Edit
-                  </Button>
-                  {onDelete && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onDelete(m)}
-                      className="text-red-500 hover:text-red-700"
-                    >
-                      Del
-                    </Button>
-                  )}
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

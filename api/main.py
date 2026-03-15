@@ -66,6 +66,7 @@ from api.routers import batches
 from api.routers import cleanup
 from api.routers import material_groups
 from api.routers import packaging
+from api.routers import sizes
 
 
 def _ensure_schema():
@@ -1151,6 +1152,71 @@ def _ensure_schema():
 
     _run_section("create_packaging_tables", _create_packaging_tables)
 
+    # --- Section 14: Add thickness_mm and shape to sizes table ---
+    def _add_size_columns(conn):
+        conn.execute(text("""
+            ALTER TABLE sizes ADD COLUMN IF NOT EXISTS thickness_mm INTEGER;
+        """))
+        conn.execute(text("""
+            ALTER TABLE sizes ADD COLUMN IF NOT EXISTS shape VARCHAR(20) DEFAULT 'rectangle';
+        """))
+
+    _run_section("add_size_columns", _add_size_columns)
+
+    # --- Section 15: Restructure recipe columns ---
+    def _restructure_recipe_columns(conn):
+        # Rename collection → color_collection
+        conn.execute(text("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'recipes' AND column_name = 'collection'
+                ) THEN
+                    ALTER TABLE recipes RENAME COLUMN collection TO color_collection;
+                END IF;
+            END $$;
+        """))
+        # Add new consumption columns
+        conn.execute(text("""
+            ALTER TABLE recipes ADD COLUMN IF NOT EXISTS consumption_spray_ml_per_sqm NUMERIC(8,2);
+        """))
+        conn.execute(text("""
+            ALTER TABLE recipes ADD COLUMN IF NOT EXISTS consumption_brush_ml_per_sqm NUMERIC(8,2);
+        """))
+        # Migrate data from glaze_settings.consumption_ml_per_sqm into new columns
+        conn.execute(text("""
+            UPDATE recipes SET
+                consumption_spray_ml_per_sqm = (glaze_settings->>'consumption_ml_per_sqm')::numeric,
+                consumption_brush_ml_per_sqm = (glaze_settings->>'consumption_ml_per_sqm')::numeric
+            WHERE glaze_settings->>'consumption_ml_per_sqm' IS NOT NULL
+              AND consumption_spray_ml_per_sqm IS NULL;
+        """))
+        # Drop old unique constraint, create new one
+        conn.execute(text("""
+            ALTER TABLE recipes DROP CONSTRAINT IF EXISTS uq_recipes_collection_color_apptype;
+        """))
+        conn.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'uq_recipes_colcollection_name'
+                ) THEN
+                    ALTER TABLE recipes ADD CONSTRAINT uq_recipes_colcollection_name
+                        UNIQUE (color_collection, name);
+                END IF;
+            END $$;
+        """))
+        # Drop removed columns
+        conn.execute(text("""
+            ALTER TABLE recipes DROP COLUMN IF EXISTS color;
+        """))
+        conn.execute(text("""
+            ALTER TABLE recipes DROP COLUMN IF EXISTS application_type;
+        """))
+
+    _run_section("restructure_recipe_columns", _restructure_recipe_columns)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""
@@ -1307,5 +1373,6 @@ def setup_routers():
     app.include_router(cleanup.router, prefix="/api/cleanup", tags=["cleanup"])
     app.include_router(material_groups.router, prefix="/api/material-groups", tags=["material-groups"])
     app.include_router(packaging.router, prefix="/api/packaging", tags=["packaging"])
+    app.include_router(sizes.router, prefix="/api/sizes", tags=["sizes"])
 
 setup_routers()

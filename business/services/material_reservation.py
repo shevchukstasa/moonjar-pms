@@ -64,16 +64,21 @@ def _get_area_for_position(position) -> Decimal:
     return Decimal(str(position.quantity))
 
 
-def _calculate_required(rm, position) -> Decimal:
+def _calculate_required(rm, position, recipe=None) -> Decimal:
     """Calculate required material quantity based on recipe-material unit.
 
     Units:
     - per_sqm:    qty_per_unit × total_glazeable_area (m²)
     - g_per_100g: qty_per_unit is grams per 100g of dry glaze batch.
-                  Approximate via area: treat as per_sqm with a base
-                  consumption factor (glaze_settings.consumption_ml_per_sqm).
-                  Fallback: use area × qty_per_unit as a rough approximation.
+                  Formula: area × rate_ml_per_sqm → total_ml × SG → total_grams
+                  Then: (qty_per_100g / 100) × total_grams
+                  Rate is chosen by position.application_type (spray/brush).
     - per_piece:  qty_per_unit × quantity (default)
+
+    Args:
+        rm: RecipeMaterial row
+        position: OrderPosition / ProductionOrderItem
+        recipe: Recipe object (optional, falls back to rm.recipe)
     """
     qty = Decimal(str(rm.quantity_per_unit))
 
@@ -82,27 +87,45 @@ def _calculate_required(rm, position) -> Decimal:
         return qty * area
 
     if rm.unit == "g_per_100g":
-        # g_per_100g: qty_per_unit is grams per 100g reference batch.
-        # To estimate total material, we need total glaze weight.
-        # Approximation: total_area_sqm × default consumption (500 ml/sqm ≈ 500 g/sqm)
-        # Then scale: (qty_per_100g / 100) × total_glaze_grams
-        # With default ~500 g/sqm: total_glaze = area × 500
-        # required = (qty_per_100g / 100) × total_glaze
         area = _get_area_for_position(position)
-        # Use recipe glaze_settings consumption_ml_per_sqm if available
-        consumption_per_sqm = Decimal("500")  # default: 500 g/sqm
-        try:
-            recipe = getattr(rm, '_sa_instance_state', None)
-            # Try to get from recipe glaze_settings
-            if hasattr(rm, 'recipe') and rm.recipe and hasattr(rm.recipe, 'glaze_settings'):
-                gs = rm.recipe.glaze_settings or {}
-                if gs.get("consumption_ml_per_sqm"):
-                    consumption_per_sqm = Decimal(str(gs["consumption_ml_per_sqm"]))
-        except Exception:
-            pass  # Use default
 
-        total_glaze_grams = area * consumption_per_sqm
-        return (qty / Decimal("100")) * total_glaze_grams
+        # Resolve recipe object
+        r = recipe
+        if not r:
+            try:
+                if hasattr(rm, 'recipe') and rm.recipe:
+                    r = rm.recipe
+            except Exception:
+                pass
+
+        # Determine consumption rate (ml/m²) based on application type
+        rate_ml_per_sqm = Decimal("500")  # default fallback
+        if r:
+            app_type = (getattr(position, 'application_type', None) or "").lower().strip()
+            if app_type == "spray" and r.consumption_spray_ml_per_sqm:
+                rate_ml_per_sqm = Decimal(str(r.consumption_spray_ml_per_sqm))
+            elif app_type == "brush" and r.consumption_brush_ml_per_sqm:
+                rate_ml_per_sqm = Decimal(str(r.consumption_brush_ml_per_sqm))
+            elif r.consumption_spray_ml_per_sqm:
+                # Default to spray rate if no specific match
+                rate_ml_per_sqm = Decimal(str(r.consumption_spray_ml_per_sqm))
+            elif r.consumption_brush_ml_per_sqm:
+                rate_ml_per_sqm = Decimal(str(r.consumption_brush_ml_per_sqm))
+            else:
+                # Legacy fallback: glaze_settings.consumption_ml_per_sqm
+                gs = r.glaze_settings or {} if hasattr(r, 'glaze_settings') else {}
+                if gs.get("consumption_ml_per_sqm"):
+                    rate_ml_per_sqm = Decimal(str(gs["consumption_ml_per_sqm"]))
+
+        # Determine SG (specific gravity) for ml → grams conversion
+        sg = Decimal("1.0")
+        if r and r.specific_gravity and float(r.specific_gravity) > 0:
+            sg = Decimal(str(r.specific_gravity))
+
+        # Formula: area × rate_ml → total_ml × SG → total_grams
+        total_ml = area * rate_ml_per_sqm
+        total_grams = total_ml * sg
+        return (qty / Decimal("100")) * total_grams
 
     # Default: per_piece
     return qty * Decimal(str(position.quantity))
@@ -308,7 +331,7 @@ def reserve_materials_for_position(
             continue
 
         # --- Calculate required quantity ---
-        required = _calculate_required(rm, position)
+        required = _calculate_required(rm, position, recipe=recipe)
 
         # --- Current stock balance ---
         stock = (
@@ -429,7 +452,7 @@ def force_reserve_materials(
             continue
 
         # Calculate required quantity
-        required = _calculate_required(rm, position)
+        required = _calculate_required(rm, position, recipe=recipe)
 
         # Create reserve transaction regardless of balance
         txn = MaterialTransaction(

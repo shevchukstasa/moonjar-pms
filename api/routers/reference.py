@@ -139,8 +139,8 @@ async def list_collections(
 ):
     """Return distinct collection names from recipes + order positions."""
     recipe_cols = (
-        db.query(Recipe.collection)
-        .filter(Recipe.collection.isnot(None))
+        db.query(Recipe.color_collection)
+        .filter(Recipe.color_collection.isnot(None))
         .distinct()
         .all()
     )
@@ -235,7 +235,7 @@ async def list_all_reference_data(
     )
     result["finish_types"] = [{"value": r[0], "label": r[0]} for r in finish_rows]
 
-    recipe_cols = db.query(Recipe.collection).filter(Recipe.collection.isnot(None)).distinct().all()
+    recipe_cols = db.query(Recipe.color_collection).filter(Recipe.color_collection.isnot(None)).distinct().all()
     pos_cols = db.query(OrderPosition.collection).filter(OrderPosition.collection.isnot(None)).distinct().all()
     all_cols = sorted({r[0] for r in recipe_cols} | {r[0] for r in pos_cols})
     result["collections"] = [{"value": c, "label": c} for c in all_cols]
@@ -391,7 +391,7 @@ def _serialize_temperature_group(group: FiringTemperatureGroup) -> dict:
                 "id": str(link.id),
                 "recipe_id": str(link.recipe_id),
                 "recipe_name": link.recipe.name if link.recipe else None,
-                "recipe_collection": link.recipe.collection if link.recipe else None,
+                "recipe_color_collection": link.recipe.color_collection if link.recipe else None,
                 "is_default": link.is_default,
             }
             for link in (group.recipes or [])

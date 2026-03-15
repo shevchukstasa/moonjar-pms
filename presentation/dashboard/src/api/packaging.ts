@@ -37,6 +37,8 @@ export interface SizeItem {
   name: string;
   width_mm: number;
   height_mm: number;
+  thickness_mm: number | null;
+  shape: string | null;
   is_custom: boolean;
 }
 

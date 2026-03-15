@@ -300,14 +300,24 @@ def _estimate_glaze_qty_kg(position, recipe) -> Decimal:
 
     total_area = per_piece_sqm * Decimal(str(position.quantity))
 
-    # Consumption rate (g/sqm -> kg/sqm)
+    # Consumption rate (ml/sqm -> kg/sqm, using SG for ml→grams conversion)
     consumption_kg_per_sqm = DEFAULT_GLAZE_CONSUMPTION_KG_PER_SQM
-    if recipe and recipe.glaze_settings:
-        gs = recipe.glaze_settings
-        ml_per_sqm = gs.get("consumption_ml_per_sqm")
+    if recipe:
+        # Prefer dedicated columns, fallback to glaze_settings
+        ml_per_sqm = None
+        if getattr(recipe, 'consumption_spray_ml_per_sqm', None):
+            ml_per_sqm = float(recipe.consumption_spray_ml_per_sqm)
+        elif getattr(recipe, 'consumption_brush_ml_per_sqm', None):
+            ml_per_sqm = float(recipe.consumption_brush_ml_per_sqm)
+        elif recipe.glaze_settings:
+            gs_val = recipe.glaze_settings.get("consumption_ml_per_sqm")
+            if gs_val:
+                ml_per_sqm = float(gs_val)
+
         if ml_per_sqm:
-            # ml ~= grams for glaze; convert to kg
-            consumption_kg_per_sqm = Decimal(str(ml_per_sqm)) / Decimal("1000")
+            sg = float(recipe.specific_gravity) if recipe.specific_gravity and float(recipe.specific_gravity) > 0 else 1.0
+            # ml × SG → grams → kg
+            consumption_kg_per_sqm = Decimal(str(ml_per_sqm * sg)) / Decimal("1000")
 
     return round(total_area * consumption_kg_per_sqm, 2)
 

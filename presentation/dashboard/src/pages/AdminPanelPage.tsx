@@ -400,6 +400,9 @@ export default function AdminPanelPage() {
           <Button variant="secondary" onClick={() => navigate('/admin/packaging')}>
             Packaging Rules &rarr;
           </Button>
+          <Button variant="secondary" onClick={() => navigate('/admin/sizes')}>
+            Sizes &rarr;
+          </Button>
         </div>
       </Card>
 

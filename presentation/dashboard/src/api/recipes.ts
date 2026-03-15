@@ -12,13 +12,13 @@ export interface TemperatureGroupInfo {
 export interface RecipeItem {
   id: string;
   name: string;
-  collection: string | null;
-  color: string | null;
-  application_type: string | null;
+  color_collection: string | null;
   description: string | null;
   recipe_type: string;
   color_type: string | null;
   specific_gravity: number | null;
+  consumption_spray_ml_per_sqm: number | null;
+  consumption_brush_ml_per_sqm: number | null;
   glaze_settings: Record<string, unknown>;
   is_active: boolean;
   ingredients_count?: number;

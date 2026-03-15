@@ -579,26 +579,26 @@ class ProductionOrderStatusLogResponse(BaseModel):
 
 class RecipeCreate(BaseModel):
     name: str
-    collection: Optional[str] = None
-    color: Optional[str] = None
-    application_type: Optional[str] = None
+    color_collection: Optional[str] = None
     description: Optional[str] = None
     recipe_type: str = 'product'
     color_type: Optional[str] = None
     specific_gravity: Optional[float] = None
+    consumption_spray_ml_per_sqm: Optional[float] = None
+    consumption_brush_ml_per_sqm: Optional[float] = None
     glaze_settings: Optional[dict] = None
     is_active: Optional[bool] = None
 
 
 class RecipeUpdate(BaseModel):
     name: Optional[str] = None
-    collection: Optional[str] = None
-    color: Optional[str] = None
-    application_type: Optional[str] = None
+    color_collection: Optional[str] = None
     description: Optional[str] = None
     recipe_type: Optional[str] = None
     color_type: Optional[str] = None
     specific_gravity: Optional[float] = None
+    consumption_spray_ml_per_sqm: Optional[float] = None
+    consumption_brush_ml_per_sqm: Optional[float] = None
     glaze_settings: Optional[dict] = None
     is_active: Optional[bool] = None
 
@@ -606,13 +606,13 @@ class RecipeUpdate(BaseModel):
 class RecipeResponse(BaseModel):
     id: UUID
     name: str
-    collection: Optional[str] = None
-    color: Optional[str] = None
-    application_type: Optional[str] = None
+    color_collection: Optional[str] = None
     description: Optional[str] = None
     recipe_type: str
     color_type: Optional[str] = None
     specific_gravity: Optional[float] = None
+    consumption_spray_ml_per_sqm: Optional[float] = None
+    consumption_brush_ml_per_sqm: Optional[float] = None
     glaze_settings: dict
     is_active: bool
     created_at: datetime

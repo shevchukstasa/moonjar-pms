@@ -182,6 +182,8 @@ class Size(Base):
     name = Column(sa.String(50), unique=True, nullable=False)
     width_mm = Column(sa.Integer, nullable=False)
     height_mm = Column(sa.Integer, nullable=False)
+    thickness_mm = Column(sa.Integer, nullable=True)
+    shape = Column(sa.String(20), nullable=True, default='rectangle')
     is_custom = Column(sa.Boolean, nullable=False, default=False)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
@@ -325,9 +327,8 @@ class Recipe(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(sa.String(300), nullable=False)
-    collection = Column(sa.String(100))
-    color = Column(sa.String(100))
-    application_type = Column(sa.String(100))
+    color_collection = Column(sa.String(100))
+    # Color collection (e.g. "Collection 2025/2026") — renamed from 'collection'
     description = Column(sa.Text)
     recipe_type = Column(sa.String(20), nullable=False, default='product')
     # values: 'product', 'glaze', 'engobe'
@@ -335,21 +336,19 @@ class Recipe(Base):
     # values: 'base', 'custom', None
     specific_gravity = Column(sa.Numeric(5, 3))
     # SG (удельный вес) — for converting dry grams → ml of liquid glaze
+    consumption_spray_ml_per_sqm = Column(sa.Numeric(8, 2))
+    # Spray application consumption rate in ml per m²
+    consumption_brush_ml_per_sqm = Column(sa.Numeric(8, 2))
+    # Brush application consumption rate in ml per m²
     glaze_settings = Column(JSONB, nullable=False, default=dict)
-    # Stores per-recipe glaze config:
-    # {
-    #   "grams_to_ml_use_default": true,
-    #   "grams_to_ml_ratio": 1.0,
-    #   "consumption_use_default": true,
-    #   "consumption_ml_per_sqm": 1022.7,
-    # }
+    # Legacy per-recipe glaze config (consumption_ml_per_sqm migrated to dedicated columns)
     is_active = Column(sa.Boolean, nullable=False, default=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     __table_args__ = (
-        UniqueConstraint('collection', 'color', 'application_type',
-                         name='uq_recipes_collection_color_apptype'),
+        UniqueConstraint('color_collection', 'name',
+                         name='uq_recipes_colcollection_name'),
     )
 
 

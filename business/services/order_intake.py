@@ -643,21 +643,16 @@ def check_blocking_tasks(
 
 def _find_recipe(db: Session, item: ProductionOrderItem) -> Optional[Recipe]:
     """
-    Find matching recipe by collection + color + size + application_type +
-    place_of_application + finishing + thickness.
+    Find matching recipe by color_collection + name + place_of_application + finishing.
 
-    Uses the unique constraint columns on recipes table.
+    Note: application_type removed from Recipe (spray/brush rates are on the recipe itself).
     """
     query = db.query(Recipe).filter(Recipe.is_active.is_(True))
 
     if item.collection:
-        query = query.filter(Recipe.collection == item.collection)
+        query = query.filter(Recipe.color_collection == item.collection)
     if item.color:
-        query = query.filter(Recipe.color == item.color)
-    if item.size:
-        query = query.filter(Recipe.size == item.size)
-    if item.application_type:
-        query = query.filter(Recipe.application_type == item.application_type)
+        query = query.filter(Recipe.name == item.color)
     if item.place_of_application:
         query = query.filter(Recipe.place_of_application == item.place_of_application)
     if item.finishing:

@@ -77,7 +77,7 @@ def on_glazing_start(
             continue
 
         # Expected quantity from calculation
-        expected = _calculate_required(rm, position)
+        expected = _calculate_required(rm, position, recipe=recipe)
 
         # Actual quantity (from glazing master, or use expected as default)
         mat_id_str = str(rm.material_id)
@@ -249,7 +249,7 @@ def consume_refire_materials(
             continue
 
         # Expected quantity from calculation
-        expected = _calculate_required(rm, position)
+        expected = _calculate_required(rm, position, recipe=recipe)
 
         # Actual quantity (from glazing master, or use expected)
         mat_id_str = str(rm.material_id)

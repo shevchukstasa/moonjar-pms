@@ -26,6 +26,7 @@ async def get_bot_status(current_user=Depends(require_admin)):
     """
     Check Telegram bot connection status.
     Calls Telegram API getMe to verify the bot token is valid.
+    Retries once on timeout.
     """
     settings = get_settings()
     token = settings.TELEGRAM_BOT_TOKEN
@@ -37,33 +38,59 @@ async def get_bot_status(current_user=Depends(require_admin)):
         }
 
     import httpx
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"https://api.telegram.org/bot{token}/getMe",
-                timeout=10.0,
-            )
+
+    # Mask token for debug: show first 5 and last 4 chars
+    masked = f"{token[:5]}...{token[-4:]}" if len(token) > 12 else "***"
+
+    last_error = ""
+    for attempt in range(2):  # retry once on timeout
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"https://api.telegram.org/bot{token}/getMe",
+                    timeout=15.0,
+                )
+
+            if resp.status_code == 401:
+                logger.warning(f"Telegram bot token invalid (401): {masked}")
+                return {
+                    "connected": False,
+                    "error": f"Invalid bot token ({masked}). Check TELEGRAM_BOT_TOKEN.",
+                }
+
             data = resp.json()
 
-        if data.get("ok"):
-            bot = data["result"]
-            return {
-                "connected": True,
-                "bot_username": f"@{bot.get('username', '')}",
-                "bot_name": bot.get("first_name", ""),
-                "bot_id": bot.get("id"),
-                "owner_chat_configured": bool(settings.TELEGRAM_OWNER_CHAT_ID),
-            }
-        else:
-            return {
-                "connected": False,
-                "error": data.get("description", "Unknown error from Telegram API"),
-            }
-    except httpx.TimeoutException:
-        return {"connected": False, "error": "Telegram API timeout"}
-    except Exception as e:
-        logger.warning(f"Telegram bot status check failed: {e}")
-        return {"connected": False, "error": "Failed to check bot status"}
+            if data.get("ok"):
+                bot = data["result"]
+                logger.info(f"Telegram bot connected: @{bot.get('username', '')}")
+                return {
+                    "connected": True,
+                    "bot_username": f"@{bot.get('username', '')}",
+                    "bot_name": bot.get("first_name", ""),
+                    "bot_id": bot.get("id"),
+                    "owner_chat_configured": bool(settings.TELEGRAM_OWNER_CHAT_ID),
+                }
+            else:
+                err_desc = data.get("description", "Unknown error from Telegram API")
+                logger.warning(f"Telegram getMe error: {err_desc}")
+                return {
+                    "connected": False,
+                    "error": err_desc,
+                }
+        except httpx.TimeoutException:
+            last_error = f"Telegram API timeout (attempt {attempt + 1}/2, token: {masked})"
+            logger.warning(last_error)
+            continue
+        except httpx.ConnectError as e:
+            last_error = f"Cannot connect to Telegram API: {e}"
+            logger.warning(last_error)
+            break
+        except Exception as e:
+            last_error = f"Telegram bot check failed: {e}"
+            logger.warning(last_error)
+            break
+
+    return {"connected": False, "error": last_error or "Failed to check bot status"}
 
 
 class OwnerChatRequest(BaseModel):

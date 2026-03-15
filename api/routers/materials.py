@@ -422,6 +422,349 @@ async def reject_consumption_adjustment(
     return _serialize_adjustment(adj, db)
 
 
+# ── Duplicates & Merge ────────────────────────────────────────────────
+# NOTE: These routes MUST be defined BEFORE /{material_id} to avoid
+# "duplicates" / "merge" / "cleanup-duplicates" being captured as UUID.
+
+@router.get("/duplicates")
+async def find_duplicates(
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Find potential duplicate materials by similar names."""
+    all_mats = db.query(Material).order_by(Material.name).all()
+
+    # Group by normalized name (lowercase, strip whitespace)
+    groups: dict[str, list] = {}
+    for mat in all_mats:
+        key = mat.name.strip().lower()
+        groups.setdefault(key, []).append(mat)
+
+    duplicates = []
+    for key, mats in groups.items():
+        if len(mats) > 1:
+            duplicates.append({
+                "normalized_name": key,
+                "materials": [
+                    {
+                        "id": str(m.id),
+                        "name": m.name,
+                        "material_type": _ev(m.material_type),
+                        "unit": m.unit,
+                        "stock_count": db.query(MaterialStock).filter(
+                            MaterialStock.material_id == m.id
+                        ).count(),
+                        "recipe_count": db.query(RecipeMaterial).filter(
+                            RecipeMaterial.material_id == m.id
+                        ).count(),
+                        "transaction_count": db.query(MaterialTransaction).filter(
+                            MaterialTransaction.material_id == m.id
+                        ).count(),
+                    }
+                    for m in mats
+                ],
+            })
+
+    # Also list all materials for overview
+    summary = []
+    for mat in all_mats:
+        stock = db.query(MaterialStock).filter(MaterialStock.material_id == mat.id).first()
+        summary.append({
+            "id": str(mat.id),
+            "name": mat.name,
+            "material_type": _ev(mat.material_type),
+            "unit": mat.unit,
+            "has_stock": stock is not None,
+            "balance": float(stock.balance) if stock else 0,
+        })
+
+    return {
+        "total_materials": len(all_mats),
+        "duplicate_groups": duplicates,
+        "all_materials": summary,
+    }
+
+
+class MergeMaterialsInput(BaseModel):
+    target_id: UUID = Field(description="Material ID to keep (target)")
+    source_ids: list[UUID] = Field(description="Material IDs to merge into target and delete")
+    new_name: Optional[str] = Field(None, description="Optional new name for the target material")
+
+
+@router.post("/merge")
+async def merge_materials(
+    data: MergeMaterialsInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Merge multiple materials into one. Moves all references, sums stock balances,
+    then deletes the source materials.
+
+    Admin-only operation. Used for deduplication.
+    """
+    target = db.query(Material).filter(Material.id == data.target_id).first()
+    if not target:
+        raise HTTPException(404, "Target material not found")
+
+    if data.target_id in data.source_ids:
+        raise HTTPException(400, "Target ID cannot be in source IDs")
+
+    sources = db.query(Material).filter(Material.id.in_(data.source_ids)).all()
+    if len(sources) != len(data.source_ids):
+        found = {s.id for s in sources}
+        missing = [str(sid) for sid in data.source_ids if sid not in found]
+        raise HTTPException(404, f"Source materials not found: {missing}")
+
+    moved = {"stocks": 0, "recipes": 0, "transactions": 0, "adjustments": 0,
+             "maintenance": 0, "reconciliation": 0}
+
+    for source in sources:
+        sid = source.id
+        tid = target.id
+
+        # 1. MaterialStock — merge balances per factory
+        source_stocks = db.query(MaterialStock).filter(MaterialStock.material_id == sid).all()
+        for ss in source_stocks:
+            existing = db.query(MaterialStock).filter(
+                MaterialStock.material_id == tid,
+                MaterialStock.factory_id == ss.factory_id,
+            ).first()
+            if existing:
+                # Sum balances
+                existing.balance = (existing.balance or 0) + (ss.balance or 0)
+                # Keep higher min_balance
+                if (ss.min_balance or 0) > (existing.min_balance or 0):
+                    existing.min_balance = ss.min_balance
+                db.delete(ss)
+            else:
+                # Move stock to target
+                ss.material_id = tid
+            moved["stocks"] += 1
+
+        # 2. RecipeMaterial — re-point to target
+        recipe_mats = db.query(RecipeMaterial).filter(RecipeMaterial.material_id == sid).all()
+        for rm in recipe_mats:
+            # Check if target already has this recipe link
+            existing = db.query(RecipeMaterial).filter(
+                RecipeMaterial.recipe_id == rm.recipe_id,
+                RecipeMaterial.material_id == tid,
+            ).first()
+            if existing:
+                db.delete(rm)  # Duplicate link, remove
+            else:
+                rm.material_id = tid
+            moved["recipes"] += 1
+
+        # 3. MaterialTransaction — re-point to target
+        txns = db.query(MaterialTransaction).filter(MaterialTransaction.material_id == sid).all()
+        for t in txns:
+            t.material_id = tid
+            moved["transactions"] += 1
+
+        # 4. ConsumptionAdjustment — re-point to target
+        adjs = db.query(ConsumptionAdjustment).filter(ConsumptionAdjustment.material_id == sid).all()
+        for a in adjs:
+            a.material_id = tid
+            moved["adjustments"] += 1
+
+        # 5. KilnMaintenanceMaterial — re-point
+        maint = db.query(KilnMaintenanceMaterial).filter(KilnMaintenanceMaterial.material_id == sid).all()
+        for m in maint:
+            m.material_id = tid
+            moved["maintenance"] += 1
+
+        # 6. InventoryReconciliationItem — re-point
+        recon = db.query(InventoryReconciliationItem).filter(
+            InventoryReconciliationItem.material_id == sid
+        ).all()
+        for r in recon:
+            r.material_id = tid
+            moved["reconciliation"] += 1
+
+        # Delete source material
+        db.delete(source)
+
+    # Rename target if requested
+    if data.new_name:
+        target.name = data.new_name
+        target.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(target)
+
+    return {
+        "ok": True,
+        "target": {"id": str(target.id), "name": target.name},
+        "merged_count": len(sources),
+        "moved_references": moved,
+    }
+
+
+class BulkCleanupInput(BaseModel):
+    """Auto-cleanup: merge exact duplicates + normalize frit names."""
+    dry_run: bool = Field(True, description="If true, only show what would be done")
+    frit_mappings: Optional[dict[str, list[str]]] = Field(
+        None,
+        description="Canonical name → list of alternate names to merge",
+    )
+
+
+@router.post("/cleanup-duplicates")
+async def cleanup_duplicates(
+    data: BulkCleanupInput = BulkCleanupInput(),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Auto-detect and merge duplicate materials.
+
+    1. Exact name duplicates (case-insensitive)
+    2. Frit normalization per provided mappings
+
+    Use dry_run=true first to preview changes.
+    """
+    all_mats = db.query(Material).order_by(Material.name).all()
+    actions = []
+
+    # 1. Find exact duplicates (case-insensitive)
+    seen: dict[str, Material] = {}
+    for mat in all_mats:
+        key = mat.name.strip().lower()
+        if key in seen:
+            actions.append({
+                "action": "merge_duplicate",
+                "source": {"id": str(mat.id), "name": mat.name},
+                "target": {"id": str(seen[key].id), "name": seen[key].name},
+            })
+        else:
+            seen[key] = mat
+
+    # 2. Frit normalization
+    default_frit_mappings = {
+        "Fritt Tomatec 12-3614P": [],
+        "Fritt Kasmaji K 0387": [],
+        "Fritt 360": [],
+        "Fritt Fajar": [],
+    }
+    frit_map = data.frit_mappings or default_frit_mappings
+
+    # Auto-detect frit variations: find all materials with "frit" in name
+    frit_mats = [m for m in all_mats if "frit" in m.name.lower()]
+
+    # Try to match frit materials to canonical names
+    for mat in frit_mats:
+        name_lower = mat.name.strip().lower()
+        matched = False
+
+        for canonical, alternates in frit_map.items():
+            canon_lower = canonical.lower()
+            alt_lowers = [a.lower() for a in alternates]
+
+            if name_lower == canon_lower:
+                matched = True
+                break
+            if name_lower in alt_lowers:
+                matched = True
+                canon_mat = next((m for m in all_mats if m.name.strip().lower() == canon_lower), None)
+                if canon_mat and mat.id != canon_mat.id:
+                    actions.append({
+                        "action": "merge_frit",
+                        "source": {"id": str(mat.id), "name": mat.name},
+                        "target": {"id": str(canon_mat.id), "name": canon_mat.name},
+                    })
+                break
+
+            # Fuzzy: check if canonical name is contained in material name
+            if canon_lower in name_lower or any(a in name_lower for a in alt_lowers):
+                matched = True
+                canon_mat = next((m for m in all_mats if m.name.strip().lower() == canon_lower), None)
+                if canon_mat and mat.id != canon_mat.id:
+                    actions.append({
+                        "action": "merge_frit_fuzzy",
+                        "source": {"id": str(mat.id), "name": mat.name},
+                        "target": {"id": str(canon_mat.id), "name": canon_mat.name},
+                    })
+                break
+
+        if not matched:
+            actions.append({
+                "action": "unmatched_frit",
+                "material": {"id": str(mat.id), "name": mat.name},
+                "note": "Could not auto-match to canonical frit name",
+            })
+
+    if data.dry_run:
+        return {
+            "dry_run": True,
+            "total_materials": len(all_mats),
+            "frit_materials": [{"id": str(m.id), "name": m.name} for m in frit_mats],
+            "planned_actions": actions,
+        }
+
+    # Execute merges
+    merged = 0
+    for act in actions:
+        if act["action"] in ("merge_duplicate", "merge_frit", "merge_frit_fuzzy"):
+            source_id = UUID(act["source"]["id"])
+            target_id = UUID(act["target"]["id"])
+            source = db.query(Material).filter(Material.id == source_id).first()
+            target_mat = db.query(Material).filter(Material.id == target_id).first()
+            if not source or not target_mat:
+                continue
+
+            # Move all references
+            for stock in db.query(MaterialStock).filter(MaterialStock.material_id == source_id).all():
+                existing = db.query(MaterialStock).filter(
+                    MaterialStock.material_id == target_id,
+                    MaterialStock.factory_id == stock.factory_id,
+                ).first()
+                if existing:
+                    existing.balance = (existing.balance or 0) + (stock.balance or 0)
+                    if (stock.min_balance or 0) > (existing.min_balance or 0):
+                        existing.min_balance = stock.min_balance
+                    db.delete(stock)
+                else:
+                    stock.material_id = target_id
+
+            for rm in db.query(RecipeMaterial).filter(RecipeMaterial.material_id == source_id).all():
+                existing = db.query(RecipeMaterial).filter(
+                    RecipeMaterial.recipe_id == rm.recipe_id,
+                    RecipeMaterial.material_id == target_id,
+                ).first()
+                if existing:
+                    db.delete(rm)
+                else:
+                    rm.material_id = target_id
+
+            db.query(MaterialTransaction).filter(
+                MaterialTransaction.material_id == source_id
+            ).update({MaterialTransaction.material_id: target_id})
+
+            db.query(ConsumptionAdjustment).filter(
+                ConsumptionAdjustment.material_id == source_id
+            ).update({ConsumptionAdjustment.material_id: target_id})
+
+            db.query(KilnMaintenanceMaterial).filter(
+                KilnMaintenanceMaterial.material_id == source_id
+            ).update({KilnMaintenanceMaterial.material_id: target_id})
+
+            db.query(InventoryReconciliationItem).filter(
+                InventoryReconciliationItem.material_id == source_id
+            ).update({InventoryReconciliationItem.material_id: target_id})
+
+            db.delete(source)
+            merged += 1
+
+    db.commit()
+
+    return {
+        "dry_run": False,
+        "merged_count": merged,
+        "planned_actions": actions,
+    }
+
+
+# ── Single material CRUD (parameterized routes MUST come AFTER literal routes) ──
+
 @router.get("/{material_id}")
 async def get_material(
     material_id: UUID,
@@ -661,348 +1004,4 @@ async def create_purchase_request(
         "source": pr.source,
         "notes": pr.notes,
         "created_at": pr.created_at.isoformat() if pr.created_at else None,
-    }
-
-
-# ── Duplicates & Merge ────────────────────────────────────────────────
-
-@router.get("/duplicates")
-async def find_duplicates(
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
-):
-    """Find potential duplicate materials by similar names."""
-    from sqlalchemy import func
-
-    all_mats = db.query(Material).order_by(Material.name).all()
-
-    # Group by normalized name (lowercase, strip whitespace)
-    groups: dict[str, list] = {}
-    for mat in all_mats:
-        key = mat.name.strip().lower()
-        groups.setdefault(key, []).append(mat)
-
-    duplicates = []
-    for key, mats in groups.items():
-        if len(mats) > 1:
-            duplicates.append({
-                "normalized_name": key,
-                "materials": [
-                    {
-                        "id": str(m.id),
-                        "name": m.name,
-                        "material_type": _ev(m.material_type),
-                        "unit": m.unit,
-                        "stock_count": db.query(MaterialStock).filter(
-                            MaterialStock.material_id == m.id
-                        ).count(),
-                        "recipe_count": db.query(RecipeMaterial).filter(
-                            RecipeMaterial.material_id == m.id
-                        ).count(),
-                        "transaction_count": db.query(MaterialTransaction).filter(
-                            MaterialTransaction.material_id == m.id
-                        ).count(),
-                    }
-                    for m in mats
-                ],
-            })
-
-    # Also list all materials for overview
-    summary = []
-    for mat in all_mats:
-        stock = db.query(MaterialStock).filter(MaterialStock.material_id == mat.id).first()
-        summary.append({
-            "id": str(mat.id),
-            "name": mat.name,
-            "material_type": _ev(mat.material_type),
-            "unit": mat.unit,
-            "has_stock": stock is not None,
-            "balance": float(stock.balance) if stock else 0,
-        })
-
-    return {
-        "total_materials": len(all_mats),
-        "duplicate_groups": duplicates,
-        "all_materials": summary,
-    }
-
-
-class MergeMaterialsInput(BaseModel):
-    target_id: UUID = Field(description="Material ID to keep (target)")
-    source_ids: list[UUID] = Field(description="Material IDs to merge into target and delete")
-    new_name: Optional[str] = Field(None, description="Optional new name for the target material")
-
-
-@router.post("/merge")
-async def merge_materials(
-    data: MergeMaterialsInput,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
-):
-    """Merge multiple materials into one. Moves all references, sums stock balances,
-    then deletes the source materials.
-
-    Admin-only operation. Used for deduplication.
-    """
-    target = db.query(Material).filter(Material.id == data.target_id).first()
-    if not target:
-        raise HTTPException(404, "Target material not found")
-
-    if data.target_id in data.source_ids:
-        raise HTTPException(400, "Target ID cannot be in source IDs")
-
-    sources = db.query(Material).filter(Material.id.in_(data.source_ids)).all()
-    if len(sources) != len(data.source_ids):
-        found = {s.id for s in sources}
-        missing = [str(sid) for sid in data.source_ids if sid not in found]
-        raise HTTPException(404, f"Source materials not found: {missing}")
-
-    moved = {"stocks": 0, "recipes": 0, "transactions": 0, "adjustments": 0,
-             "maintenance": 0, "reconciliation": 0}
-
-    for source in sources:
-        sid = source.id
-        tid = target.id
-
-        # 1. MaterialStock — merge balances per factory
-        source_stocks = db.query(MaterialStock).filter(MaterialStock.material_id == sid).all()
-        for ss in source_stocks:
-            existing = db.query(MaterialStock).filter(
-                MaterialStock.material_id == tid,
-                MaterialStock.factory_id == ss.factory_id,
-            ).first()
-            if existing:
-                # Sum balances
-                existing.balance = (existing.balance or 0) + (ss.balance or 0)
-                # Keep higher min_balance
-                if (ss.min_balance or 0) > (existing.min_balance or 0):
-                    existing.min_balance = ss.min_balance
-                db.delete(ss)
-            else:
-                # Move stock to target
-                ss.material_id = tid
-            moved["stocks"] += 1
-
-        # 2. RecipeMaterial — re-point to target
-        recipe_mats = db.query(RecipeMaterial).filter(RecipeMaterial.material_id == sid).all()
-        for rm in recipe_mats:
-            # Check if target already has this recipe link
-            existing = db.query(RecipeMaterial).filter(
-                RecipeMaterial.recipe_id == rm.recipe_id,
-                RecipeMaterial.material_id == tid,
-            ).first()
-            if existing:
-                db.delete(rm)  # Duplicate link, remove
-            else:
-                rm.material_id = tid
-            moved["recipes"] += 1
-
-        # 3. MaterialTransaction — re-point to target
-        txns = db.query(MaterialTransaction).filter(MaterialTransaction.material_id == sid).all()
-        for t in txns:
-            t.material_id = tid
-            moved["transactions"] += 1
-
-        # 4. ConsumptionAdjustment — re-point to target
-        adjs = db.query(ConsumptionAdjustment).filter(ConsumptionAdjustment.material_id == sid).all()
-        for a in adjs:
-            a.material_id = tid
-            moved["adjustments"] += 1
-
-        # 5. KilnMaintenanceMaterial — re-point
-        maint = db.query(KilnMaintenanceMaterial).filter(KilnMaintenanceMaterial.material_id == sid).all()
-        for m in maint:
-            m.material_id = tid
-            moved["maintenance"] += 1
-
-        # 6. InventoryReconciliationItem — re-point
-        recon = db.query(InventoryReconciliationItem).filter(
-            InventoryReconciliationItem.material_id == sid
-        ).all()
-        for r in recon:
-            r.material_id = tid
-            moved["reconciliation"] += 1
-
-        # Delete source material
-        db.delete(source)
-
-    # Rename target if requested
-    if data.new_name:
-        target.name = data.new_name
-        target.updated_at = datetime.now(timezone.utc)
-
-    db.commit()
-    db.refresh(target)
-
-    return {
-        "ok": True,
-        "target": {"id": str(target.id), "name": target.name},
-        "merged_count": len(sources),
-        "moved_references": moved,
-    }
-
-
-class BulkCleanupInput(BaseModel):
-    """Auto-cleanup: merge exact duplicates + normalize frit names."""
-    dry_run: bool = Field(True, description="If true, only show what would be done")
-    frit_mappings: Optional[dict[str, list[str]]] = Field(
-        None,
-        description="Canonical name → list of alternate names to merge",
-    )
-
-
-@router.post("/cleanup-duplicates")
-async def cleanup_duplicates(
-    data: BulkCleanupInput = BulkCleanupInput(),
-    db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
-):
-    """Auto-detect and merge duplicate materials.
-
-    1. Exact name duplicates (case-insensitive)
-    2. Frit normalization per provided mappings
-
-    Use dry_run=true first to preview changes.
-    """
-    from sqlalchemy import func
-
-    all_mats = db.query(Material).order_by(Material.name).all()
-    actions = []
-
-    # 1. Find exact duplicates (case-insensitive)
-    seen: dict[str, Material] = {}
-    for mat in all_mats:
-        key = mat.name.strip().lower()
-        if key in seen:
-            actions.append({
-                "action": "merge_duplicate",
-                "source": {"id": str(mat.id), "name": mat.name},
-                "target": {"id": str(seen[key].id), "name": seen[key].name},
-            })
-        else:
-            seen[key] = mat
-
-    # 2. Frit normalization
-    default_frit_mappings = {
-        "Fritt Tomatec 12-3614P": [],
-        "Fritt Kasmaji K 0387": [],
-        "Fritt 360": [],
-        "Fritt Fajar": [],
-    }
-    frit_map = data.frit_mappings or default_frit_mappings
-
-    # Auto-detect frit variations: find all materials with "frit" in name
-    frit_mats = [m for m in all_mats if "frit" in m.name.lower()]
-
-    # Try to match frit materials to canonical names
-    for mat in frit_mats:
-        name_lower = mat.name.strip().lower()
-        matched = False
-
-        for canonical, alternates in frit_map.items():
-            canon_lower = canonical.lower()
-            alt_lowers = [a.lower() for a in alternates]
-
-            if name_lower == canon_lower:
-                matched = True
-                break
-            if name_lower in alt_lowers:
-                matched = True
-                canon_mat = next((m for m in all_mats if m.name.strip().lower() == canon_lower), None)
-                if canon_mat and mat.id != canon_mat.id:
-                    actions.append({
-                        "action": "merge_frit",
-                        "source": {"id": str(mat.id), "name": mat.name},
-                        "target": {"id": str(canon_mat.id), "name": canon_mat.name},
-                    })
-                break
-
-            # Fuzzy: check if canonical name is contained in material name
-            # e.g., "Fritt Tomatec 12-3614P (old)" → "Fritt Tomatec 12-3614P"
-            if canon_lower in name_lower or any(a in name_lower for a in alt_lowers):
-                matched = True
-                canon_mat = next((m for m in all_mats if m.name.strip().lower() == canon_lower), None)
-                if canon_mat and mat.id != canon_mat.id:
-                    actions.append({
-                        "action": "merge_frit_fuzzy",
-                        "source": {"id": str(mat.id), "name": mat.name},
-                        "target": {"id": str(canon_mat.id), "name": canon_mat.name},
-                    })
-                break
-
-        if not matched:
-            actions.append({
-                "action": "unmatched_frit",
-                "material": {"id": str(mat.id), "name": mat.name},
-                "note": "Could not auto-match to canonical frit name",
-            })
-
-    if data.dry_run:
-        return {
-            "dry_run": True,
-            "total_materials": len(all_mats),
-            "frit_materials": [{"id": str(m.id), "name": m.name} for m in frit_mats],
-            "planned_actions": actions,
-        }
-
-    # Execute merges
-    merged = 0
-    for act in actions:
-        if act["action"] in ("merge_duplicate", "merge_frit", "merge_frit_fuzzy"):
-            source_id = UUID(act["source"]["id"])
-            target_id = UUID(act["target"]["id"])
-            source = db.query(Material).filter(Material.id == source_id).first()
-            target_mat = db.query(Material).filter(Material.id == target_id).first()
-            if not source or not target_mat:
-                continue
-
-            # Move all references
-            for stock in db.query(MaterialStock).filter(MaterialStock.material_id == source_id).all():
-                existing = db.query(MaterialStock).filter(
-                    MaterialStock.material_id == target_id,
-                    MaterialStock.factory_id == stock.factory_id,
-                ).first()
-                if existing:
-                    existing.balance = (existing.balance or 0) + (stock.balance or 0)
-                    if (stock.min_balance or 0) > (existing.min_balance or 0):
-                        existing.min_balance = stock.min_balance
-                    db.delete(stock)
-                else:
-                    stock.material_id = target_id
-
-            for rm in db.query(RecipeMaterial).filter(RecipeMaterial.material_id == source_id).all():
-                existing = db.query(RecipeMaterial).filter(
-                    RecipeMaterial.recipe_id == rm.recipe_id,
-                    RecipeMaterial.material_id == target_id,
-                ).first()
-                if existing:
-                    db.delete(rm)
-                else:
-                    rm.material_id = target_id
-
-            db.query(MaterialTransaction).filter(
-                MaterialTransaction.material_id == source_id
-            ).update({MaterialTransaction.material_id: target_id})
-
-            db.query(ConsumptionAdjustment).filter(
-                ConsumptionAdjustment.material_id == source_id
-            ).update({ConsumptionAdjustment.material_id: target_id})
-
-            db.query(KilnMaintenanceMaterial).filter(
-                KilnMaintenanceMaterial.material_id == source_id
-            ).update({KilnMaintenanceMaterial.material_id: target_id})
-
-            db.query(InventoryReconciliationItem).filter(
-                InventoryReconciliationItem.material_id == source_id
-            ).update({InventoryReconciliationItem.material_id: target_id})
-
-            db.delete(source)
-            merged += 1
-
-    db.commit()
-
-    return {
-        "dry_run": False,
-        "merged_count": merged,
-        "planned_actions": actions,
     }

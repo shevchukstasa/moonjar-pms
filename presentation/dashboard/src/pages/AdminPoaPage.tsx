@@ -8,6 +8,8 @@ import { DataTable } from '@/components/ui/Table';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
+import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
+import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 
 interface PoaItem {
   id: string;
@@ -31,6 +33,7 @@ export default function AdminPoaPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editItem, setEditItem] = useState<PoaItem | null>(null);
   const [form, setForm] = useState<PoaForm>(emptyForm);
+  const [csvOpen, setCsvOpen] = useState(false);
 
   const { data, isLoading } = useQuery<PoaItem[]>({
     queryKey: ['ref-places-of-application'],
@@ -115,6 +118,7 @@ export default function AdminPoaPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => navigate('/admin')}>Back to Admin</Button>
+          <Button variant="secondary" onClick={() => setCsvOpen(true)}>Import CSV</Button>
           <Button onClick={openCreate}>+ Add Place</Button>
         </div>
       </div>
@@ -139,6 +143,8 @@ export default function AdminPoaPage() {
           </div>
         </div>
       </Dialog>
+
+      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} {...CSV_CONFIGS.places_of_application} onSuccess={() => queryClient.invalidateQueries({ queryKey: ['ref-places-of-application'] })} />
 
       <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} title="Delete Place of Application">
         <p className="text-sm text-gray-600">Are you sure you want to delete this place of application? This action cannot be undone.</p>

@@ -6,6 +6,8 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import apiClient from '@/api/client';
 import { Thermometer, Plus, Pencil, Trash2, X, Save } from 'lucide-react';
+import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
+import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 
 interface RecipeLink {
   id: string;
@@ -49,6 +51,7 @@ export default function AdminTemperatureGroupsPage() {
   const [editing, setEditing] = useState<string | null>(null); // group id or 'new'
   const [form, setForm] = useState<FormData>(emptyForm);
   const [error, setError] = useState('');
+  const [csvOpen, setCsvOpen] = useState(false);
 
   const { data: groups, isLoading } = useQuery<TemperatureGroup[]>({
     queryKey: ['temperature-groups'],
@@ -127,10 +130,13 @@ export default function AdminTemperatureGroupsPage() {
             Manage firing temperature groups and linked recipes
           </p>
         </div>
-        <Button size="sm" onClick={startNew} disabled={editing === 'new'}>
-          <Plus className="h-4 w-4 mr-1" />
-          Add Group
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="secondary" onClick={() => setCsvOpen(true)}>Import CSV</Button>
+          <Button size="sm" onClick={startNew} disabled={editing === 'new'}>
+            <Plus className="h-4 w-4 mr-1" />
+            Add Group
+          </Button>
+        </div>
       </div>
 
       {isLoading && (
@@ -256,6 +262,8 @@ export default function AdminTemperatureGroupsPage() {
           </Card>
         ))}
       </div>
+
+      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} {...CSV_CONFIGS.temperature_groups} onSuccess={() => qc.invalidateQueries({ queryKey: ['temperature-groups'] })} />
 
       {!isLoading && (!groups || groups.length === 0) && (
         <div className="text-center text-gray-400 py-8">

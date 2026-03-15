@@ -9,6 +9,8 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
+import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
+import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 
 interface ColorItem {
   id: string;
@@ -34,6 +36,7 @@ export default function AdminColorsPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editItem, setEditItem] = useState<ColorItem | null>(null);
   const [form, setForm] = useState<ColorForm>(emptyForm);
+  const [csvOpen, setCsvOpen] = useState(false);
 
   const { data, isLoading } = useQuery<ColorItem[]>({
     queryKey: ['ref-colors'],
@@ -128,6 +131,7 @@ export default function AdminColorsPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => navigate('/admin')}>Back to Admin</Button>
+          <Button variant="secondary" onClick={() => setCsvOpen(true)}>Import CSV</Button>
           <Button onClick={openCreate}>+ Add Color</Button>
         </div>
       </div>
@@ -156,6 +160,8 @@ export default function AdminColorsPage() {
           </div>
         </div>
       </Dialog>
+
+      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} {...CSV_CONFIGS.colors} onSuccess={() => queryClient.invalidateQueries({ queryKey: ['ref-colors'] })} />
 
       <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} title="Delete Color">
         <p className="text-sm text-gray-600">Are you sure you want to delete this color? This action cannot be undone.</p>

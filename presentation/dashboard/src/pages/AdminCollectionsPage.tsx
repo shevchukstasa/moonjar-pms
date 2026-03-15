@@ -8,6 +8,8 @@ import { DataTable } from '@/components/ui/Table';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
+import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
+import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 
 interface CollectionItem {
   id: string;
@@ -24,6 +26,7 @@ export default function AdminCollectionsPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editItem, setEditItem] = useState<CollectionItem | null>(null);
   const [name, setName] = useState('');
+  const [csvOpen, setCsvOpen] = useState(false);
 
   const { data, isLoading } = useQuery<CollectionItem[]>({
     queryKey: ['ref-collections'],
@@ -107,6 +110,7 @@ export default function AdminCollectionsPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => navigate('/admin')}>Back to Admin</Button>
+          <Button variant="secondary" onClick={() => setCsvOpen(true)}>Import CSV</Button>
           <Button onClick={openCreate}>+ Add Collection</Button>
         </div>
       </div>
@@ -130,6 +134,8 @@ export default function AdminCollectionsPage() {
           </div>
         </div>
       </Dialog>
+
+      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} {...CSV_CONFIGS.collections} onSuccess={() => queryClient.invalidateQueries({ queryKey: ['ref-collections'] })} />
 
       <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} title="Delete Collection">
         <p className="text-sm text-gray-600">Are you sure you want to delete this collection? This action cannot be undone.</p>

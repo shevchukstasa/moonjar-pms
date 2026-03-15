@@ -13,6 +13,8 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
+import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
+import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 
 /* ── ingredient group labels (by material_type) ─────────────────────── */
 const INGREDIENT_GROUPS: { type: string; label: string; emoji: string }[] = [
@@ -67,6 +69,7 @@ export default function AdminRecipesPage() {
   const [ingredients, setIngredients] = useState<IngredientRow[]>([]);
   const [waterGrams, setWaterGrams] = useState('');
   const [savingMaterials, setSavingMaterials] = useState(false);
+  const [csvOpen, setCsvOpen] = useState(false);
 
   /* ── queries ───────────────────────────────────────────────────────── */
   const { data, isLoading } = useQuery<{ items: RecipeItem[]; total: number }>({
@@ -298,6 +301,7 @@ export default function AdminRecipesPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => navigate('/admin')}>Back to Admin</Button>
+          <Button variant="secondary" onClick={() => setCsvOpen(true)}>Import CSV</Button>
           <Button onClick={openCreate}>+ Add Recipe</Button>
         </div>
       </div>
@@ -453,6 +457,8 @@ export default function AdminRecipesPage() {
           </div>
         </div>
       </Dialog>
+
+      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} {...CSV_CONFIGS.recipes} onSuccess={() => queryClient.invalidateQueries({ queryKey: ['admin-recipes'] })} />
 
       {/* Delete Confirmation */}
       <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} title="Delete Recipe">

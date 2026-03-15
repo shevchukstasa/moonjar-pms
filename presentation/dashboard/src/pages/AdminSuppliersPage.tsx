@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/Input';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
+import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
+import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 
 interface SupplierForm {
   name: string;
@@ -45,6 +47,7 @@ export default function AdminSuppliersPage() {
   const [editItem, setEditItem] = useState<SupplierItem | null>(null);
   const [form, setForm] = useState<SupplierForm>(emptyForm);
   const [formError, setFormError] = useState('');
+  const [csvOpen, setCsvOpen] = useState(false);
 
   const { data, isLoading, isError } = useSuppliers();
   const items = data?.items ?? [];
@@ -150,6 +153,7 @@ export default function AdminSuppliersPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => navigate('/admin')}>Back to Admin</Button>
+          <Button variant="secondary" onClick={() => setCsvOpen(true)}>Import CSV</Button>
           <Button onClick={openCreate}>+ Add Supplier</Button>
         </div>
       </div>
@@ -213,6 +217,8 @@ export default function AdminSuppliersPage() {
           </table>
         </div>
       )}
+
+      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} {...CSV_CONFIGS.suppliers} onSuccess={() => queryClient.invalidateQueries({ queryKey: ['suppliers'] })} />
 
       {/* Create / Edit dialog */}
       <Dialog open={dialogOpen} onClose={closeDialog} title={editItem ? 'Edit Supplier' : 'Add Supplier'} className="w-full max-w-lg">

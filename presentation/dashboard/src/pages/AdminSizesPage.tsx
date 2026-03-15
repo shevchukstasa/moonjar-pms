@@ -8,7 +8,10 @@ import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 import { useSizes, useCreateSize, useUpdateSize, useDeleteSize } from '@/hooks/useSizes';
+import { useQueryClient } from '@tanstack/react-query';
 import type { SizeItem } from '@/api/sizes';
+import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
+import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 
 const SHAPES = [
   { value: 'rectangle', label: 'Rectangle' },
@@ -49,6 +52,8 @@ export default function AdminSizesPage() {
   const [editItem, setEditItem] = useState<SizeItem | null>(null);
   const [form, setForm] = useState<SizeForm>(emptyForm);
   const [errorMsg, setErrorMsg] = useState('');
+  const [csvOpen, setCsvOpen] = useState(false);
+  const queryClient = useQueryClient();
 
   const items = data?.items ?? [];
 
@@ -214,6 +219,7 @@ export default function AdminSizesPage() {
           <Button variant="secondary" onClick={() => navigate('/admin')}>
             Back to Admin
           </Button>
+          <Button variant="secondary" onClick={() => setCsvOpen(true)}>Import CSV</Button>
           <Button onClick={openCreate}>+ Add Size</Button>
         </div>
       </div>
@@ -306,6 +312,8 @@ export default function AdminSizesPage() {
           </div>
         </div>
       </Dialog>
+
+      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} {...CSV_CONFIGS.sizes} onSuccess={() => queryClient.invalidateQueries({ queryKey: ['sizes'] })} />
 
       {/* Delete Confirmation */}
       <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} title="Delete Size">

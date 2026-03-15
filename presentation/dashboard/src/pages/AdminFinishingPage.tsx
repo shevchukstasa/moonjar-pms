@@ -8,6 +8,8 @@ import { DataTable } from '@/components/ui/Table';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
+import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
+import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 
 interface FinishingItem {
   id: string;
@@ -24,6 +26,7 @@ export default function AdminFinishingPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editItem, setEditItem] = useState<FinishingItem | null>(null);
   const [name, setName] = useState('');
+  const [csvOpen, setCsvOpen] = useState(false);
 
   const { data, isLoading } = useQuery<FinishingItem[]>({
     queryKey: ['ref-finishing-types'],
@@ -107,6 +110,7 @@ export default function AdminFinishingPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => navigate('/admin')}>Back to Admin</Button>
+          <Button variant="secondary" onClick={() => setCsvOpen(true)}>Import CSV</Button>
           <Button onClick={openCreate}>+ Add Finishing Type</Button>
         </div>
       </div>
@@ -130,6 +134,8 @@ export default function AdminFinishingPage() {
           </div>
         </div>
       </Dialog>
+
+      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} {...CSV_CONFIGS.finishing_types} onSuccess={() => queryClient.invalidateQueries({ queryKey: ['ref-finishing-types'] })} />
 
       <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} title="Delete Finishing Type">
         <p className="text-sm text-gray-600">Are you sure you want to delete this finishing type? This action cannot be undone.</p>

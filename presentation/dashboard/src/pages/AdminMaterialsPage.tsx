@@ -23,6 +23,9 @@ import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
 import { MaterialDeduplication } from '@/components/admin/MaterialDeduplication';
+import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
+import { CSV_CONFIGS } from '@/config/csvImportConfigs';
+import { useQueryClient } from '@tanstack/react-query';
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -233,6 +236,9 @@ function CatalogTab() {
   });
   const [deleteError, setDeleteError] = useState('');
 
+  const [csvOpen, setCsvOpen] = useState(false);
+  const csvQueryClient = useQueryClient();
+
   // ── Edit/create helpers ─────────────────────────────────────────────────
 
   const openCreate = useCallback(
@@ -390,6 +396,7 @@ function CatalogTab() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        <Button variant="secondary" onClick={() => setCsvOpen(true)}>Import CSV</Button>
         <Button onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}>
           + Add Material
         </Button>
@@ -573,6 +580,8 @@ function CatalogTab() {
           </div>
         )}
       </Dialog>
+
+      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} {...CSV_CONFIGS.materials} onSuccess={() => csvQueryClient.invalidateQueries({ queryKey: ['materials'] })} />
     </div>
   );
 }

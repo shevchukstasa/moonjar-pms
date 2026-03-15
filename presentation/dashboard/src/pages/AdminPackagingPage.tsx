@@ -10,6 +10,8 @@ import { Dialog } from '@/components/ui/Dialog';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
+import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
+import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 
 /* ── Row types ────────────────────────────────────────── */
 
@@ -58,6 +60,7 @@ export default function AdminPackagingPage() {
 
   /* Delete */
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [csvOpen, setCsvOpen] = useState(false);
 
   /* ── Mutations ──────────────────────────────────────── */
 
@@ -309,6 +312,7 @@ export default function AdminPackagingPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => navigate('/admin')}>Back to Admin</Button>
+          <Button variant="secondary" onClick={() => setCsvOpen(true)}>Import CSV</Button>
           {!showNewForm && <Button onClick={() => setShowNewForm(true)}>+ Add Box Type</Button>}
         </div>
       </div>
@@ -479,6 +483,8 @@ export default function AdminPackagingPage() {
           })}
         </div>
       )}
+
+      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} {...CSV_CONFIGS.packaging} onSuccess={() => qc.invalidateQueries({ queryKey: ['packaging-box-types'] })} />
 
       {/* Delete dialog */}
       <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} title="Delete Box Type">

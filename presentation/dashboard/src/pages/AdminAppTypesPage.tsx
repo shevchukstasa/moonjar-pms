@@ -8,6 +8,8 @@ import { DataTable } from '@/components/ui/Table';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
+import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
+import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 
 interface AppTypeItem {
   id: string;
@@ -24,6 +26,7 @@ export default function AdminAppTypesPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editItem, setEditItem] = useState<AppTypeItem | null>(null);
   const [name, setName] = useState('');
+  const [csvOpen, setCsvOpen] = useState(false);
 
   const { data, isLoading } = useQuery<AppTypeItem[]>({
     queryKey: ['ref-application-types'],
@@ -107,6 +110,7 @@ export default function AdminAppTypesPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => navigate('/admin')}>Back to Admin</Button>
+          <Button variant="secondary" onClick={() => setCsvOpen(true)}>Import CSV</Button>
           <Button onClick={openCreate}>+ Add Application Type</Button>
         </div>
       </div>
@@ -130,6 +134,8 @@ export default function AdminAppTypesPage() {
           </div>
         </div>
       </Dialog>
+
+      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} {...CSV_CONFIGS.application_types} onSuccess={() => queryClient.invalidateQueries({ queryKey: ['ref-application-types'] })} />
 
       <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} title="Delete Application Type">
         <p className="text-sm text-gray-600">Are you sure you want to delete this application type? This action cannot be undone.</p>

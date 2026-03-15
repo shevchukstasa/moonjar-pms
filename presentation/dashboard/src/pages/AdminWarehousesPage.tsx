@@ -12,6 +12,9 @@ import {
 } from '@/hooks/useWarehouseSections';
 import { useFactories } from '@/hooks/useFactories';
 import { useUsers } from '@/hooks/useUsers';
+import { useQueryClient } from '@tanstack/react-query';
+import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
+import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 
 interface FormData {
   name: string;
@@ -56,6 +59,8 @@ export default function AdminWarehousesPage() {
   const [form, setForm] = useState<FormData>(EMPTY_FORM);
   const [error, setError] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [csvOpen, setCsvOpen] = useState(false);
+  const queryClient = useQueryClient();
 
   const items = data?.items ?? [];
   const factories = factoriesData?.items ?? [];
@@ -248,9 +253,12 @@ export default function AdminWarehousesPage() {
           <h1 className="text-2xl font-bold text-gray-900">Warehouse Sections</h1>
           <p className="text-sm text-gray-500">Manage warehouses and storage sections. Global warehouses are shared across all factories.</p>
         </div>
-        {editing !== 'new' && (
-          <Button onClick={startCreate}>+ Add Warehouse</Button>
-        )}
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => setCsvOpen(true)}>Import CSV</Button>
+          {editing !== 'new' && (
+            <Button onClick={startCreate}>+ Add Warehouse</Button>
+          )}
+        </div>
       </div>
 
       {isLoading && (
@@ -333,6 +341,8 @@ export default function AdminWarehousesPage() {
           )}
         </Card>
       ))}
+
+      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} {...CSV_CONFIGS.warehouse_sections} onSuccess={() => queryClient.invalidateQueries({ queryKey: ['warehouse-sections-all'] })} />
 
       {!isLoading && items.length === 0 && (
         <Card>

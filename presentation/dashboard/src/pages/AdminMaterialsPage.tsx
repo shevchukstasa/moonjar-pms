@@ -12,6 +12,8 @@ import {
 } from '@/hooks/useMaterialGroups';
 import { useFactories } from '@/hooks/useFactories';
 import { useSuppliers } from '@/hooks/useSuppliers';
+import { useSizes } from '@/hooks/useSizes';
+import type { SizeItem } from '@/api/sizes';
 import { useWarehouseSections } from '@/hooks/useWarehouseSections';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -66,6 +68,7 @@ interface CatalogForm {
   material_type: string;
   unit: string;
   supplier_id: string;
+  size_id: string;
 }
 
 const emptyCatalogForm: CatalogForm = {
@@ -74,7 +77,19 @@ const emptyCatalogForm: CatalogForm = {
   material_type: '',
   unit: 'kg',
   supplier_id: '',
+  size_id: '',
 };
+
+/** Build auto-name for stone material from a Size record */
+function stoneName(size: SizeItem | undefined): string {
+  if (!size) return '';
+  const dims = `${size.width_mm}x${size.height_mm}`;
+  const th = size.thickness_mm ? ` ${size.thickness_mm}mm` : '';
+  const sh = size.shape && size.shape !== 'rectangle' ? ` ${size.shape}` : '';
+  return `LAVA STONE ${dims}${th}${sh}`;
+}
+
+const STONE_TYPES = ['stone', 'tile', 'sink', 'custom_product'];
 
 interface StockForm {
   balance: string;
@@ -218,6 +233,10 @@ function CatalogTab() {
   const { data: suppliersData } = useSuppliers();
   const suppliers = suppliersData?.items ?? [];
 
+  // Sizes (for stone materials)
+  const { data: sizesData } = useSizes();
+  const sizes = sizesData?.items ?? [];
+
   // Mutations
   const createMaterial = useCreateMaterial();
   const updateMaterial = useUpdateMaterial();
@@ -230,6 +249,7 @@ function CatalogTab() {
   });
   const [form, setForm] = useState<CatalogForm>(emptyCatalogForm);
   const [formError, setFormError] = useState('');
+  const isStoneType = STONE_TYPES.includes(form.material_type);
 
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: MaterialItem | null }>({
     open: false,
@@ -264,6 +284,7 @@ function CatalogTab() {
         material_type: item.material_type ?? '',
         unit: item.unit,
         supplier_id: item.supplier_id ?? '',
+        size_id: ((item as unknown as Record<string, unknown>).size_id as string) ?? '',
       });
       setFormError('');
       setEditDialog({ open: true, item });
@@ -293,6 +314,7 @@ function CatalogTab() {
       subgroup_id: form.subgroup_id || null,
       unit: form.unit,
       supplier_id: form.supplier_id || null,
+      size_id: form.size_id || null,
     };
 
     try {
@@ -529,6 +551,39 @@ function CatalogTab() {
               onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
             />
           </div>
+          {/* Stone size picker — auto-names material from Size */}
+          {isStoneType && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Size (from reference)
+              </label>
+              <Select
+                options={[
+                  { value: '', label: '\u2014 select size \u2014' },
+                  ...sizes.map((s) => ({
+                    value: s.id,
+                    label: `${s.name}  (${s.width_mm}\u00D7${s.height_mm}${s.thickness_mm ? ` \u00D7 ${s.thickness_mm}` : ''}mm${s.shape && s.shape !== 'rectangle' ? ` ${s.shape}` : ''})`,
+                  })),
+                ]}
+                value={form.size_id}
+                onChange={(e) => {
+                  const sizeId = e.target.value;
+                  const chosen = sizes.find((s) => s.id === sizeId);
+                  setForm((prev) => ({
+                    ...prev,
+                    size_id: sizeId,
+                    name: chosen ? stoneName(chosen) : prev.name,
+                    unit: 'pcs',
+                  }));
+                }}
+              />
+              {form.size_id && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Auto-name: <span className="font-medium">{stoneName(sizes.find((s) => s.id === form.size_id))}</span>
+                </p>
+              )}
+            </div>
+          )}
           {!editDialog.item && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
               Stock will be auto-created for all active factories with balance 0.

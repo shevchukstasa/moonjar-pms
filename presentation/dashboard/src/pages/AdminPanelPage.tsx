@@ -406,6 +406,9 @@ export default function AdminPanelPage() {
           <Button variant="secondary" onClick={() => navigate('/admin/sizes')}>
             Sizes &rarr;
           </Button>
+          <Button variant="secondary" onClick={() => navigate('/admin/consumption-rules')}>
+            Consumption Rules &rarr;
+          </Button>
         </div>
       </Card>
 

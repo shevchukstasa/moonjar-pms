@@ -67,6 +67,7 @@ from api.routers import cleanup
 from api.routers import material_groups
 from api.routers import packaging
 from api.routers import sizes
+from api.routers import consumption_rules
 
 
 def _ensure_schema():
@@ -954,9 +955,9 @@ def _ensure_schema():
         # Create groups
         conn.execute(text("""
             INSERT INTO material_groups (name, code, icon, display_order) VALUES
-                ('Материалы для плитки', 'tile_materials', '🧱', 1),
-                ('Упаковка и расходные', 'packaging_consumables', '📦', 2),
-                ('Прочее', 'other', '📋', 3)
+                ('Tile Materials', 'tile_materials', '🧱', 1),
+                ('Packaging & Consumables', 'packaging_consumables', '📦', 2),
+                ('Other', 'other', '📋', 3)
         """))
 
         tile_gid = conn.execute(text(
@@ -1036,7 +1037,7 @@ def _ensure_schema():
 
         conn.execute(text("""
             INSERT INTO material_groups (id, name, code, icon, display_order, is_active)
-            VALUES (gen_random_uuid(), 'Готовая продукция', 'finished_goods', '🏭', 4, TRUE)
+            VALUES (gen_random_uuid(), 'Finished Goods', 'finished_goods', '🏭', 4, TRUE)
         """))
 
         fg_gid = conn.execute(text(
@@ -1044,9 +1045,9 @@ def _ensure_schema():
         )).scalar()
 
         for code, name, icon, order in [
-            ('tile', 'Плитка', '🧱', 1),
-            ('sink', 'Раковины', '🚿', 2),
-            ('custom_product', 'Прочие изделия', '📦', 3),
+            ('tile', 'Tiles', '🧱', 1),
+            ('sink', 'Sinks', '🚿', 2),
+            ('custom_product', 'Custom Products', '📦', 3),
         ]:
             conn.execute(text("""
                 INSERT INTO material_subgroups (id, group_id, name, code, icon, default_unit, display_order, is_active)
@@ -1360,6 +1361,89 @@ def _ensure_schema():
 
     _run_section("size_resolution_migration", _size_resolution_migration)
 
+    # --- Section 19: Materials size_id + Recipe client_name + Consumption rules table + Russian→English names ---
+    def _materials_recipes_consumption(conn):
+        # Material → size_id FK
+        conn.execute(text("""
+            ALTER TABLE materials
+            ADD COLUMN IF NOT EXISTS size_id UUID REFERENCES sizes(id);
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_materials_size_id ON materials(size_id);
+        """))
+        # Recipe → client_name
+        conn.execute(text("""
+            ALTER TABLE recipes
+            ADD COLUMN IF NOT EXISTS client_name VARCHAR(200);
+        """))
+        # Consumption rules table
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS consumption_rules (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                rule_number INTEGER NOT NULL,
+                name VARCHAR(200) NOT NULL,
+                description TEXT,
+                collection VARCHAR(200),
+                color_collection VARCHAR(200),
+                product_type VARCHAR(100),
+                size_id UUID REFERENCES sizes(id),
+                shape VARCHAR(100),
+                thickness_mm_min NUMERIC(8,2),
+                thickness_mm_max NUMERIC(8,2),
+                place_of_application VARCHAR(200),
+                recipe_type VARCHAR(100),
+                application_method VARCHAR(100),
+                consumption_ml_per_sqm NUMERIC(12,4) NOT NULL,
+                coats INTEGER NOT NULL DEFAULT 1,
+                specific_gravity_override NUMERIC(8,4),
+                priority INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                notes TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_consumption_rules_rule_number
+            ON consumption_rules(rule_number);
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_consumption_rules_active
+            ON consumption_rules(is_active) WHERE is_active = TRUE;
+        """))
+        # Russian → English: material_groups names
+        conn.execute(text("""
+            UPDATE material_groups SET name = 'Tile Materials'
+            WHERE name = 'Материалы для плитки';
+        """))
+        conn.execute(text("""
+            UPDATE material_groups SET name = 'Packaging & Consumables'
+            WHERE name = 'Упаковка и расходные';
+        """))
+        conn.execute(text("""
+            UPDATE material_groups SET name = 'Other'
+            WHERE name = 'Прочее';
+        """))
+        conn.execute(text("""
+            UPDATE material_groups SET name = 'Finished Goods'
+            WHERE name = 'Готовая продукция';
+        """))
+        # Russian → English: material_subgroups names
+        conn.execute(text("""
+            UPDATE material_subgroups SET name = 'Tiles'
+            WHERE name = 'Плитка';
+        """))
+        conn.execute(text("""
+            UPDATE material_subgroups SET name = 'Sinks'
+            WHERE name = 'Раковины';
+        """))
+        conn.execute(text("""
+            UPDATE material_subgroups SET name = 'Custom Products'
+            WHERE name = 'Прочие изделия';
+        """))
+
+    _run_section("materials_recipes_consumption", _materials_recipes_consumption)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""
@@ -1517,5 +1601,6 @@ def setup_routers():
     app.include_router(material_groups.router, prefix="/api/material-groups", tags=["material-groups"])
     app.include_router(packaging.router, prefix="/api/packaging", tags=["packaging"])
     app.include_router(sizes.router, prefix="/api/sizes", tags=["sizes"])
+    app.include_router(consumption_rules.router, prefix="/api/consumption-rules", tags=["consumption-rules"])
 
 setup_routers()

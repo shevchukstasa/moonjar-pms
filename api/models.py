@@ -354,6 +354,8 @@ class Recipe(Base):
     # Brush application consumption rate in ml per m²
     is_default = Column(sa.Boolean, nullable=False, default=False)
     # Default recipe flag — system auto-picks this recipe for given recipe_type (e.g. engobe)
+    client_name = Column(sa.String(200))
+    # Client name — for color matching recipes linked to a specific client
     glaze_settings = Column(JSONB, nullable=False, default=dict)
     # Legacy per-recipe glaze config (consumption_ml_per_sqm migrated to dedicated columns)
     is_active = Column(sa.Boolean, nullable=False, default=True)
@@ -420,11 +422,13 @@ class Material(Base):
     material_type = Column(sa.String(50), nullable=False)
     subgroup_id = Column(UUID(as_uuid=True), ForeignKey('material_subgroups.id'))
     supplier_id = Column(UUID(as_uuid=True), ForeignKey('suppliers.id'))
+    size_id = Column(UUID(as_uuid=True), ForeignKey('sizes.id'), nullable=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     supplier = relationship('Supplier', foreign_keys=[supplier_id])
     subgroup = relationship('MaterialSubgroup', back_populates='materials')
+    size = relationship('Size', foreign_keys=[size_id])
     stocks = relationship('MaterialStock', back_populates='material', cascade='all, delete-orphan')
 
 
@@ -1839,3 +1843,54 @@ class SystemSetting(Base):
     key = Column(sa.String(100), nullable=False, unique=True)
     value = Column(sa.Text)
     updated_at = Column(sa.DateTime(timezone=True), server_default=sa.func.now())
+
+
+class ConsumptionRule(Base):
+    """
+    Consumption calculation rules for glaze/engobe per product configuration.
+
+    Defines HOW to calculate material consumption based on:
+    - collection, size, shape, thickness, product_type, place_of_application
+    - recipe_type (glaze/engobe)
+    - application_method (spray/brush)
+
+    The rule stores consumption_ml_per_sqm — milliliters per square meter
+    for a given combination of parameters.
+
+    When multiple rules match, the most specific one wins (more non-null fields = higher priority).
+    """
+    __tablename__ = 'consumption_rules'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    rule_number = Column(sa.Integer, nullable=False)
+    name = Column(sa.String(200), nullable=False)
+    description = Column(sa.Text)
+
+    # Matching criteria (all nullable — null means "any")
+    collection = Column(sa.String(100))          # e.g. "New Collection"
+    color_collection = Column(sa.String(100))    # e.g. "Season 2025/2026"
+    product_type = Column(sa.String(30))         # tile / countertop / sink / 3d
+    size_id = Column(UUID(as_uuid=True), ForeignKey('sizes.id'))
+    shape = Column(sa.String(20))                # rectangle / round / freeform / etc.
+    thickness_mm_min = Column(sa.Numeric(5, 1))  # min thickness (inclusive)
+    thickness_mm_max = Column(sa.Numeric(5, 1))  # max thickness (inclusive)
+    place_of_application = Column(sa.String(50)) # face_only / face_and_sides / etc.
+    recipe_type = Column(sa.String(20))          # glaze / engobe
+    application_method = Column(sa.String(20))   # spray / brush
+
+    # Output: how much material per m²
+    consumption_ml_per_sqm = Column(sa.Numeric(10, 2), nullable=False)
+    # Number of coats (layers)
+    coats = Column(sa.Integer, nullable=False, default=1)
+    # Specific gravity override (if different from recipe default)
+    specific_gravity_override = Column(sa.Numeric(5, 3))
+
+    # Priority — higher number = higher priority when multiple rules match
+    priority = Column(sa.Integer, nullable=False, default=0)
+    is_active = Column(sa.Boolean, nullable=False, default=True)
+    notes = Column(sa.Text)
+
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    size = relationship('Size', foreign_keys=[size_id])

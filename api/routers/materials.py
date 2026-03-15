@@ -96,6 +96,7 @@ def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session)
         "warehouse_section": stock.warehouse_section if stock else None,
         "supplier_id": str(mat.supplier_id) if mat.supplier_id else None,
         "supplier_name": supplier_name,
+        "size_id": str(mat.size_id) if mat.size_id else None,
         "is_low_stock": balance < min_bal if min_bal > 0 else False,
         "created_at": mat.created_at.isoformat() if mat.created_at else None,
         "updated_at": (stock.updated_at if stock else mat.updated_at).isoformat() if (stock or mat) else None,
@@ -146,6 +147,7 @@ def _serialize_material_aggregate(mat: Material, stocks: list[MaterialStock], db
         "warehouse_section": stocks[0].warehouse_section if stocks else None,
         "supplier_id": str(mat.supplier_id) if mat.supplier_id else None,
         "supplier_name": supplier_name,
+        "size_id": str(mat.size_id) if mat.size_id else None,
         "is_low_stock": is_low,
         "factory_count": len(stocks),
         "created_at": mat.created_at.isoformat() if mat.created_at else None,
@@ -192,6 +194,7 @@ class MaterialCreateInput(BaseModel):
     min_balance_auto: bool = True
     supplier_id: Optional[UUID] = None
     warehouse_section: Optional[str] = "raw_materials"
+    size_id: Optional[UUID] = None  # For stone materials — link to sizes reference
 
 
 class MaterialUpdateInput(BaseModel):
@@ -203,6 +206,7 @@ class MaterialUpdateInput(BaseModel):
     unit: Optional[str] = None
     warehouse_section: Optional[str] = None
     supplier_id: Optional[UUID] = None
+    size_id: Optional[UUID] = None
 
 
 class TransactionInput(BaseModel):
@@ -1040,6 +1044,7 @@ async def create_material(
             unit=data.unit,
             supplier_id=data.supplier_id,
             subgroup_id=subgroup_id,
+            size_id=data.size_id,
         )
         db.add(mat)
         db.flush()
@@ -1128,6 +1133,10 @@ async def update_material(
             mat.material_type = sg.code
         else:
             mat.subgroup_id = None
+
+    # Handle size_id
+    if 'size_id' in updates:
+        mat.size_id = updates.pop('size_id')
 
     # Catalog-level fields
     catalog_fields = {'name', 'unit', 'supplier_id'}

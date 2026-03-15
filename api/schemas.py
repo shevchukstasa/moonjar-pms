@@ -587,8 +587,10 @@ class RecipeCreate(BaseModel):
     consumption_spray_ml_per_sqm: Optional[float] = None
     consumption_brush_ml_per_sqm: Optional[float] = None
     is_default: Optional[bool] = None
+    client_name: Optional[str] = None
     glaze_settings: Optional[dict] = None
     is_active: Optional[bool] = None
+    clone_from_id: Optional[UUID] = None  # Clone materials + firing stages from existing recipe
 
 
 class RecipeUpdate(BaseModel):
@@ -601,6 +603,7 @@ class RecipeUpdate(BaseModel):
     consumption_spray_ml_per_sqm: Optional[float] = None
     consumption_brush_ml_per_sqm: Optional[float] = None
     is_default: Optional[bool] = None
+    client_name: Optional[str] = None
     glaze_settings: Optional[dict] = None
     is_active: Optional[bool] = None
 
@@ -616,6 +619,7 @@ class RecipeResponse(BaseModel):
     consumption_spray_ml_per_sqm: Optional[float] = None
     consumption_brush_ml_per_sqm: Optional[float] = None
     is_default: bool = False
+    client_name: Optional[str] = None
     glaze_settings: dict
     is_active: bool
     created_at: datetime

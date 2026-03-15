@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, FlaskConical } from 'lucide-react';
+import { Plus, Trash2, FlaskConical, Copy } from 'lucide-react';
 import { recipesApi, type RecipeItem, type RecipeMaterialItem, type RecipeMaterialBulkItem, type TemperatureGroupInfo } from '@/api/recipes';
 import { Thermometer } from 'lucide-react';
 import { materialsApi, type MaterialItem } from '@/api/materials';
@@ -29,6 +29,7 @@ interface RecipeForm {
   name: string;
   color_collection: string;
   recipe_type: string;
+  client_name: string;
   specific_gravity: string;
   consumption_spray_ml_per_sqm: string;
   consumption_brush_ml_per_sqm: string;
@@ -51,6 +52,7 @@ const emptyForm: RecipeForm = {
   name: '',
   color_collection: '',
   recipe_type: 'product',
+  client_name: '',
   specific_gravity: '',
   consumption_spray_ml_per_sqm: '',
   consumption_brush_ml_per_sqm: '',
@@ -70,6 +72,7 @@ export default function AdminRecipesPage() {
   const [waterGrams, setWaterGrams] = useState('');
   const [savingMaterials, setSavingMaterials] = useState(false);
   const [csvOpen, setCsvOpen] = useState(false);
+  const [cloneFromId, setCloneFromId] = useState<string | null>(null);
 
   /* ── queries ───────────────────────────────────────────────────────── */
   const { data, isLoading } = useQuery<{ items: RecipeItem[]; total: number }>({
@@ -156,19 +159,21 @@ export default function AdminRecipesPage() {
 
   /* ── dialog helpers ────────────────────────────────────────────────── */
   const closeDialog = useCallback(() => {
-    setDialogOpen(false); setEditItem(null); setForm(emptyForm); setIngredients([]); setWaterGrams('');
+    setDialogOpen(false); setEditItem(null); setForm(emptyForm); setIngredients([]); setWaterGrams(''); setCloneFromId(null);
   }, []);
 
   const openCreate = useCallback(() => {
-    setEditItem(null); setForm(emptyForm); setIngredients([]); setWaterGrams(''); setSelectedTempGroupId(''); setDialogOpen(true);
+    setEditItem(null); setForm(emptyForm); setIngredients([]); setWaterGrams(''); setSelectedTempGroupId(''); setCloneFromId(null); setDialogOpen(true);
   }, []);
 
   const openEdit = useCallback(async (item: RecipeItem) => {
     setEditItem(item);
+    setCloneFromId(null);
     setForm({
       name: item.name,
       color_collection: item.color_collection ?? '',
       recipe_type: item.recipe_type || 'product',
+      client_name: item.client_name ?? '',
       specific_gravity: item.specific_gravity != null ? String(item.specific_gravity) : '',
       consumption_spray_ml_per_sqm: item.consumption_spray_ml_per_sqm != null ? String(item.consumption_spray_ml_per_sqm) : '',
       consumption_brush_ml_per_sqm: item.consumption_brush_ml_per_sqm != null ? String(item.consumption_brush_ml_per_sqm) : '',
@@ -176,6 +181,41 @@ export default function AdminRecipesPage() {
       is_active: item.is_active,
     });
     // Set current temperature group
+    if (item.temperature_groups && item.temperature_groups.length > 0) {
+      setSelectedTempGroupId(item.temperature_groups[0].id);
+    } else {
+      setSelectedTempGroupId('');
+    }
+    try {
+      const mats: RecipeMaterialItem[] = await recipesApi.listMaterials(item.id);
+      const rows: IngredientRow[] = [];
+      let water = '';
+      for (const m of mats) {
+        if (m.material_name?.toLowerCase() === 'water') { water = String(m.quantity_per_unit); }
+        else { rows.push({ material_id: m.material_id, quantity: String(m.quantity_per_unit) }); }
+      }
+      setIngredients(rows);
+      setWaterGrams(water);
+    } catch { setIngredients([]); setWaterGrams(''); }
+    setDialogOpen(true);
+  }, []);
+
+  /** Clone: open create dialog pre-filled from an existing recipe */
+  const openClone = useCallback(async (item: RecipeItem) => {
+    setEditItem(null); // it's a CREATE, not edit
+    setCloneFromId(item.id);
+    setForm({
+      name: `${item.name} (copy)`,
+      color_collection: item.color_collection ?? '',
+      recipe_type: item.recipe_type || 'product',
+      client_name: item.client_name ?? '',
+      specific_gravity: item.specific_gravity != null ? String(item.specific_gravity) : '',
+      consumption_spray_ml_per_sqm: item.consumption_spray_ml_per_sqm != null ? String(item.consumption_spray_ml_per_sqm) : '',
+      consumption_brush_ml_per_sqm: item.consumption_brush_ml_per_sqm != null ? String(item.consumption_brush_ml_per_sqm) : '',
+      is_default: false,
+      is_active: true,
+    });
+    // Load original ingredients
     if (item.temperature_groups && item.temperature_groups.length > 0) {
       setSelectedTempGroupId(item.temperature_groups[0].id);
     } else {
@@ -219,19 +259,23 @@ export default function AdminRecipesPage() {
       name: form.name,
       color_collection: form.color_collection || null,
       recipe_type: form.recipe_type || 'product',
+      client_name: form.client_name || null,
       specific_gravity: form.specific_gravity ? parseFloat(form.specific_gravity) : null,
       consumption_spray_ml_per_sqm: form.consumption_spray_ml_per_sqm ? parseFloat(form.consumption_spray_ml_per_sqm) : null,
       consumption_brush_ml_per_sqm: form.consumption_brush_ml_per_sqm ? parseFloat(form.consumption_brush_ml_per_sqm) : null,
       is_default: form.is_default,
       is_active: form.is_active,
     };
+    if (cloneFromId && !editItem) {
+      payload.clone_from_id = cloneFromId;
+    }
     if (editItem) {
       updateMutation.mutate({ id: editItem.id, payload });
       await saveTempGroupAssignment(editItem.id, editItem.temperature_groups || []);
     } else {
       createMutation.mutate(payload);
     }
-  }, [form, editItem, createMutation, updateMutation, saveTempGroupAssignment]);
+  }, [form, editItem, cloneFromId, createMutation, updateMutation, saveTempGroupAssignment]);
 
   const addIngredient = useCallback(() => {
     setIngredients((prev) => [...prev, { material_id: '', quantity: '' }]);
@@ -264,6 +308,7 @@ export default function AdminRecipesPage() {
         return <span className="text-sm">{labels[r.recipe_type] || r.recipe_type}</span>;
       }},
       { key: 'color_collection', header: 'Color Collection', render: (r: RecipeItem) => r.color_collection || <span className="text-gray-400">&mdash;</span> },
+      { key: 'client_name', header: 'Client', render: (r: RecipeItem) => r.client_name || <span className="text-gray-400">&mdash;</span> },
       { key: 'specific_gravity', header: 'SG', render: (r: RecipeItem) => r.specific_gravity != null ? r.specific_gravity : <span className="text-gray-400">&mdash;</span> },
       { key: 'consumption_spray', header: 'Spray ml/m²', render: (r: RecipeItem) => r.consumption_spray_ml_per_sqm != null ? <span className="font-mono text-sm">{r.consumption_spray_ml_per_sqm}</span> : <span className="text-gray-400">&mdash;</span> },
       { key: 'consumption_brush', header: 'Brush ml/m²', render: (r: RecipeItem) => r.consumption_brush_ml_per_sqm != null ? <span className="font-mono text-sm">{r.consumption_brush_ml_per_sqm}</span> : <span className="text-gray-400">&mdash;</span> },
@@ -290,11 +335,14 @@ export default function AdminRecipesPage() {
       { key: 'actions', header: '', render: (r: RecipeItem) => (
         <div className="flex gap-1">
           <Button variant="ghost" size="sm" onClick={() => openEdit(r)}>Edit</Button>
+          <Button variant="ghost" size="sm" onClick={() => openClone(r)} title="Clone recipe">
+            <Copy className="h-3.5 w-3.5" />
+          </Button>
           <Button variant="ghost" size="sm" className="text-red-600" onClick={() => setDeleteId(r.id)}>Delete</Button>
         </div>
       )},
     ],
-    [openEdit],
+    [openEdit, openClone],
   );
 
   /* ── render ─────────────────────────────────────────────────────────── */
@@ -321,10 +369,18 @@ export default function AdminRecipesPage() {
       )}
 
       {/* ── Create / Edit Dialog ──────────────────────────────────────── */}
-      <Dialog open={dialogOpen} onClose={closeDialog} title={editItem ? 'Edit Recipe' : 'Add Recipe'} className="w-full max-w-2xl">
+      <Dialog open={dialogOpen} onClose={closeDialog} title={editItem ? 'Edit Recipe' : cloneFromId ? 'Clone Recipe' : 'Add Recipe'} className="w-full max-w-2xl">
         <div className="max-h-[75vh] space-y-5 overflow-y-auto pr-1">
-          <div className="grid grid-cols-3 gap-4">
+          {cloneFromId && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+              Cloning from existing recipe. Ingredients and firing stages will be copied.
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-4">
             <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+            <Input label="Client Name" placeholder="e.g. PT Bali Stone" value={form.client_name} onChange={(e) => setForm({ ...form, client_name: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Color Collection</label>
               <select

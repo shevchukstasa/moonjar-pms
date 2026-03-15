@@ -16,6 +16,7 @@ export interface RecipeItem {
   description: string | null;
   recipe_type: string;
   color_type: string | null;
+  client_name: string | null;
   specific_gravity: number | null;
   consumption_spray_ml_per_sqm: number | null;
   consumption_brush_ml_per_sqm: number | null;

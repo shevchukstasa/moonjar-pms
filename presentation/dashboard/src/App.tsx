@@ -34,6 +34,7 @@ import AdminMaterialsPage from '@/pages/AdminMaterialsPage';
 import AdminWarehousesPage from '@/pages/AdminWarehousesPage';
 import AdminPackagingPage from '@/pages/AdminPackagingPage';
 import AdminSizesPage from '@/pages/AdminSizesPage';
+import ConsumptionRulesPage from '@/pages/ConsumptionRulesPage';
 import SettingsPage from '@/pages/SettingsPage';
 import AppLayout from '@/components/layout/AppLayout';
 import { Spinner } from '@/components/ui/Spinner';
@@ -106,6 +107,7 @@ export default function App() {
           <Route path="/admin/warehouses" element={<AdminWarehousesPage />} />
           <Route path="/admin/packaging" element={<AdminPackagingPage />} />
           <Route path="/admin/sizes" element={<AdminSizesPage />} />
+          <Route path="/admin/consumption-rules" element={<ConsumptionRulesPage />} />
           <Route path="/admin/size-resolution/:taskId" element={<SizeResolutionPage />} />
         </Route>
         <Route element={<RequireRole roles={['owner', 'administrator', 'ceo']} />}>

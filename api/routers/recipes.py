@@ -134,8 +134,47 @@ async def create_recipes_item(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    item = Recipe(**data.model_dump())
+    import uuid as uuid_mod
+
+    create_data = data.model_dump(exclude={'clone_from_id'})
+    item = Recipe(**create_data)
     db.add(item)
+    db.flush()
+
+    # Clone materials + firing stages from source recipe if specified
+    if data.clone_from_id:
+        source = db.query(Recipe).filter(Recipe.id == data.clone_from_id).first()
+        if source:
+            # Clone recipe materials
+            source_materials = db.query(RecipeMaterial).filter(
+                RecipeMaterial.recipe_id == source.id
+            ).all()
+            for rm in source_materials:
+                new_rm = RecipeMaterial(
+                    id=uuid_mod.uuid4(),
+                    recipe_id=item.id,
+                    material_id=rm.material_id,
+                    quantity_per_unit=rm.quantity_per_unit,
+                    unit=rm.unit,
+                    notes=rm.notes,
+                )
+                db.add(new_rm)
+
+            # Clone firing stages
+            source_stages = db.query(RecipeFiringStage).filter(
+                RecipeFiringStage.recipe_id == source.id
+            ).all()
+            for stage in source_stages:
+                new_stage = RecipeFiringStage(
+                    id=uuid_mod.uuid4(),
+                    recipe_id=item.id,
+                    stage_number=stage.stage_number,
+                    firing_profile_id=stage.firing_profile_id,
+                    requires_glazing_before=stage.requires_glazing_before,
+                    description=stage.description,
+                )
+                db.add(new_stage)
+
     db.commit()
     db.refresh(item)
     return item

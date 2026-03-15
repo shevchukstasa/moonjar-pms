@@ -25,6 +25,7 @@ from api.models import (
     ConsumptionAdjustment, ShapeConsumptionCoefficient,
     OrderPosition, RecipeMaterial, KilnMaintenanceMaterial,
     InventoryReconciliationItem,
+    PackagingBoxType, PackagingSpacerRule,
 )
 from api.enums import PurchaseStatus
 
@@ -651,7 +652,15 @@ async def merge_materials(
     then deletes the source materials.
 
     Admin-only operation. Used for deduplication.
+
+    IMPORTANT: Session uses autoflush=False, so we must flush() all re-pointing
+    changes BEFORE db.delete(source). Otherwise ORM cascade='delete-orphan' on
+    Material.stocks would reload stale data from DB and cascade-delete the
+    re-pointed stocks, silently losing balances.
     """
+    import logging
+    log = logging.getLogger(__name__)
+
     target = db.query(Material).filter(Material.id == data.target_id).first()
     if not target:
         raise HTTPException(404, "Target material not found")
@@ -666,11 +675,12 @@ async def merge_materials(
         raise HTTPException(404, f"Source materials not found: {missing}")
 
     moved = {"stocks": 0, "recipes": 0, "transactions": 0, "adjustments": 0,
-             "maintenance": 0, "reconciliation": 0}
+             "maintenance": 0, "reconciliation": 0, "packaging": 0}
 
     for source in sources:
         sid = source.id
         tid = target.id
+        log.info("Merging material %s (%s) into %s (%s)", sid, source.name, tid, target.name)
 
         # 1. MaterialStock — merge balances per factory
         source_stocks = db.query(MaterialStock).filter(MaterialStock.material_id == sid).all()
@@ -731,7 +741,25 @@ async def merge_materials(
             r.material_id = tid
             moved["reconciliation"] += 1
 
-        # Delete source material
+        # 7. PackagingBoxType — re-point box material to target
+        box_types = db.query(PackagingBoxType).filter(PackagingBoxType.material_id == sid).all()
+        for bt in box_types:
+            bt.material_id = tid
+            moved["packaging"] += 1
+
+        # 8. PackagingSpacerRule — re-point spacer material to target
+        spacer_rules = db.query(PackagingSpacerRule).filter(PackagingSpacerRule.spacer_material_id == sid).all()
+        for sr in spacer_rules:
+            sr.spacer_material_id = tid
+            moved["packaging"] += 1
+
+        # CRITICAL: flush all re-pointing changes to DB BEFORE deleting source.
+        # With autoflush=False, the ORM cascade on Material.stocks would otherwise
+        # reload stale FK data from the DB and cascade-delete re-pointed stocks,
+        # causing the merge to silently lose stock balances.
+        db.flush()
+
+        # Now safe to delete — all FK references already point to target in DB
         db.delete(source)
 
     # Rename target if requested
@@ -739,8 +767,15 @@ async def merge_materials(
         target.name = data.new_name
         target.updated_at = datetime.now(timezone.utc)
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception as exc:
+        log.error("Material merge commit failed: %s", exc, exc_info=True)
+        db.rollback()
+        raise HTTPException(500, f"Merge failed during commit: {exc}")
+
     db.refresh(target)
+    log.info("Merge complete: %d sources into %s, moved=%s", len(sources), target.name, moved)
 
     return {
         "ok": True,

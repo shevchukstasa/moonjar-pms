@@ -1296,57 +1296,11 @@ def _ensure_schema():
 
     _run_section("cleanup_zombie_materials", _cleanup_zombie_materials)
 
-    # --- Section 22: Purge ALL seed recipes + seed temperature groups ---
-    # User will manage these manually. Safe to re-run (no-op if already clean).
-    def _purge_seed_data(conn):
-        """Delete all seed-created recipes and temperature groups.
-        User will re-enter data manually via Admin UI."""
-        SEED_RECIPE_NAMES = [
-            'Wabi Beige', 'Frosted White', 'Matcha Leaf', 'Frost Blue',
-            'Lavender Ash', 'Mocha Mousse', 'Wild Olive', 'Milk Crackle',
-            'Jade Mist', 'Lagoon Spark', 'Rose Dust', 'Wild Honey',
-        ]
-        SEED_TEMP_GROUP_NAMES = ['Low Temperature', 'High Temperature']
-
-        # 1. Delete recipe_materials for seed recipes
-        deleted_rm = conn.execute(text("""
-            DELETE FROM recipe_materials
-            WHERE recipe_id IN (SELECT id FROM recipes WHERE name = ANY(:names))
-        """), {"names": SEED_RECIPE_NAMES}).rowcount
-
-        # 2. Delete seed recipes
-        deleted_r = conn.execute(text("""
-            DELETE FROM recipes WHERE name = ANY(:names)
-        """), {"names": SEED_RECIPE_NAMES}).rowcount
-
-        # 3. Delete seed temperature groups (only if they still have seed names)
-        deleted_tg = conn.execute(text("""
-            DELETE FROM firing_temperature_groups WHERE name = ANY(:names)
-        """), {"names": SEED_TEMP_GROUP_NAMES}).rowcount
-
-        # 4. Clean up orphan glaze_ingredient materials (no recipe link, no stock)
-        deleted_ms = conn.execute(text("""
-            DELETE FROM material_stock
-            WHERE material_id IN (
-                SELECT m.id FROM materials m
-                WHERE m.material_type = 'glaze_ingredient'
-                  AND NOT EXISTS (SELECT 1 FROM recipe_materials rm WHERE rm.material_id = m.id)
-            ) AND (balance = 0 OR balance IS NULL)
-        """)).rowcount
-        deleted_m = conn.execute(text("""
-            DELETE FROM materials
-            WHERE material_type = 'glaze_ingredient'
-              AND NOT EXISTS (SELECT 1 FROM recipe_materials rm WHERE rm.material_id = materials.id)
-              AND NOT EXISTS (SELECT 1 FROM material_stock ms WHERE ms.material_id = materials.id AND ms.balance > 0)
-        """)).rowcount
-
-        if deleted_r or deleted_tg or deleted_m:
-            logger.info(
-                f"_purge_seed_data: recipes={deleted_r} recipe_materials={deleted_rm} "
-                f"temp_groups={deleted_tg} materials={deleted_m} material_stock={deleted_ms}"
-            )
-
-    _run_section("purge_seed_data_v1", _purge_seed_data)
+    # --- Section 22: Purge seed data (REMOVED) ---
+    # Previously deleted seed recipes/temp groups by name on every startup.
+    # This was buggy: it also deleted USER-created recipes with same names.
+    # Seeds are already disabled (removed in earlier commit), purge already ran once.
+    # No action needed here anymore.
 
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):

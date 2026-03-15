@@ -301,6 +301,9 @@ class TemperatureGroupCreate(BaseModel):
     min_temperature: int = Field(..., ge=0, le=2000, description="Min temperature in °C")
     max_temperature: int = Field(..., ge=0, le=2000, description="Max temperature in °C")
     description: Optional[str] = None
+    thermocouple: Optional[str] = Field(None, description="chinese | indonesia_manufacture")
+    control_cable: Optional[str] = Field(None, description="indonesia_manufacture")
+    control_device: Optional[str] = Field(None, description="oven | self_made")
     display_order: int = Field(default=0, description="Sort order in UI")
 
 
@@ -309,6 +312,9 @@ class TemperatureGroupUpdate(BaseModel):
     min_temperature: Optional[int] = Field(None, ge=0, le=2000)
     max_temperature: Optional[int] = Field(None, ge=0, le=2000)
     description: Optional[str] = None
+    thermocouple: Optional[str] = None
+    control_cable: Optional[str] = None
+    control_device: Optional[str] = None
     is_active: Optional[bool] = None
     display_order: Optional[int] = None
 
@@ -326,6 +332,9 @@ def _serialize_temperature_group(group: FiringTemperatureGroup) -> dict:
         "min_temperature": group.min_temperature,
         "max_temperature": group.max_temperature,
         "description": group.description,
+        "thermocouple": group.thermocouple,
+        "control_cable": group.control_cable,
+        "control_device": group.control_device,
         "is_active": group.is_active,
         "display_order": group.display_order,
         "created_at": group.created_at.isoformat() if group.created_at else None,
@@ -375,6 +384,9 @@ async def create_temperature_group(
         min_temperature=body.min_temperature,
         max_temperature=body.max_temperature,
         description=body.description,
+        thermocouple=body.thermocouple,
+        control_cable=body.control_cable,
+        control_device=body.control_device,
         display_order=body.display_order,
     )
     db.add(group)
@@ -407,6 +419,12 @@ async def update_temperature_group(
         group.max_temperature = body.max_temperature
     if body.description is not None:
         group.description = body.description
+    if body.thermocouple is not None:
+        group.thermocouple = body.thermocouple
+    if body.control_cable is not None:
+        group.control_cable = body.control_cable
+    if body.control_device is not None:
+        group.control_device = body.control_device
     if body.is_active is not None:
         group.is_active = body.is_active
     if body.display_order is not None:

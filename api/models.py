@@ -1595,6 +1595,7 @@ class BackupLog(Base):
 class FiringTemperatureGroup(Base):
     """Named temperature group for batch formation (replaces ±50°C auto-grouping).
     PM can create additional groups beyond the 2 defaults.
+    Includes equipment specifications: thermocouple, control cable, control device.
     """
     __tablename__ = 'firing_temperature_groups'
 
@@ -1603,6 +1604,10 @@ class FiringTemperatureGroup(Base):
     min_temperature = Column(sa.Integer, nullable=False)     # e.g. 800
     max_temperature = Column(sa.Integer, nullable=False)     # e.g. 1050
     description = Column(sa.Text)
+    # Equipment specifications
+    thermocouple = Column(sa.String(50))       # "chinese" | "indonesia_manufacture"
+    control_cable = Column(sa.String(50))      # "indonesia_manufacture"
+    control_device = Column(sa.String(50))     # "oven" | "self_made"
     is_active = Column(sa.Boolean, nullable=False, default=True)
     display_order = Column(sa.Integer, nullable=False, default=0)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())

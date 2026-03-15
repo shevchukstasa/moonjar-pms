@@ -5,6 +5,7 @@ import { Plus, Trash2, FlaskConical } from 'lucide-react';
 import { recipesApi, type RecipeItem, type RecipeMaterialItem, type RecipeMaterialBulkItem, type TemperatureGroupInfo } from '@/api/recipes';
 import { Thermometer } from 'lucide-react';
 import { materialsApi, type MaterialItem } from '@/api/materials';
+import apiClient from '@/api/client';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DataTable } from '@/components/ui/Table';
@@ -67,6 +68,14 @@ export default function AdminRecipesPage() {
     queryKey: ['materials-catalog'],
     queryFn: () => materialsApi.list({ per_page: 200 }),
   });
+
+  // Temperature groups for recipe assignment
+  interface TempGroupOption { id: string; name: string; min_temperature: number; max_temperature: number; thermocouple: string | null; control_device: string | null; }
+  const { data: tempGroups } = useQuery<TempGroupOption[]>({
+    queryKey: ['temperature-groups'],
+    queryFn: () => apiClient.get('/reference/temperature-groups').then((r) => r.data),
+  });
+  const [selectedTempGroupId, setSelectedTempGroupId] = useState<string>('');
 
   const allMaterials = materialsData?.items ?? [];
   const materialsByType = useMemo(() => {
@@ -132,7 +141,7 @@ export default function AdminRecipesPage() {
   }, []);
 
   const openCreate = useCallback(() => {
-    setEditItem(null); setForm(emptyForm); setIngredients([]); setWaterGrams(''); setDialogOpen(true);
+    setEditItem(null); setForm(emptyForm); setIngredients([]); setWaterGrams(''); setSelectedTempGroupId(''); setDialogOpen(true);
   }, []);
 
   const openEdit = useCallback(async (item: RecipeItem) => {
@@ -145,6 +154,12 @@ export default function AdminRecipesPage() {
       specific_gravity: item.specific_gravity != null ? String(item.specific_gravity) : '',
       is_active: item.is_active,
     });
+    // Set current temperature group
+    if (item.temperature_groups && item.temperature_groups.length > 0) {
+      setSelectedTempGroupId(item.temperature_groups[0].id);
+    } else {
+      setSelectedTempGroupId('');
+    }
     try {
       const mats: RecipeMaterialItem[] = await recipesApi.listMaterials(item.id);
       const rows: IngredientRow[] = [];
@@ -159,7 +174,26 @@ export default function AdminRecipesPage() {
     setDialogOpen(true);
   }, []);
 
-  const handleSubmit = useCallback(() => {
+  /** Save/update temperature group assignment for a recipe */
+  const saveTempGroupAssignment = useCallback(async (recipeId: string, prevGroups: TemperatureGroupInfo[]) => {
+    // Remove existing assignments
+    for (const g of prevGroups) {
+      try {
+        await apiClient.delete(`/reference/temperature-groups/${g.id}/recipes/${recipeId}`);
+      } catch { /* ignore if already removed */ }
+    }
+    // Add new assignment
+    if (selectedTempGroupId) {
+      try {
+        await apiClient.post(`/reference/temperature-groups/${selectedTempGroupId}/recipes`, {
+          recipe_id: recipeId,
+          is_default: true,
+        });
+      } catch { /* ignore duplicate */ }
+    }
+  }, [selectedTempGroupId]);
+
+  const handleSubmit = useCallback(async () => {
     const payload: Record<string, unknown> = {
       name: form.name,
       collection: form.collection || null,
@@ -168,9 +202,13 @@ export default function AdminRecipesPage() {
       specific_gravity: form.specific_gravity ? parseFloat(form.specific_gravity) : null,
       is_active: form.is_active,
     };
-    if (editItem) { updateMutation.mutate({ id: editItem.id, payload }); }
-    else { createMutation.mutate(payload); }
-  }, [form, editItem, createMutation, updateMutation]);
+    if (editItem) {
+      updateMutation.mutate({ id: editItem.id, payload });
+      await saveTempGroupAssignment(editItem.id, editItem.temperature_groups || []);
+    } else {
+      createMutation.mutate(payload);
+    }
+  }, [form, editItem, createMutation, updateMutation, saveTempGroupAssignment]);
 
   const addIngredient = useCallback(() => {
     setIngredients((prev) => [...prev, { material_id: '', quantity: '' }]);
@@ -269,29 +307,24 @@ export default function AdminRecipesPage() {
             </label>
           </div>
 
-          {/* ── Temperature Groups ──────────────────────────────────────── */}
-          {editItem?.temperature_groups && editItem.temperature_groups.length > 0 && (
-            <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
-              <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-orange-800">
-                <Thermometer className="h-4 w-4" /> Temperature Groups
-              </h3>
-              <div className="space-y-1.5">
-                {editItem.temperature_groups.map((g: TemperatureGroupInfo) => (
-                  <div key={g.id} className="flex items-center justify-between rounded-md bg-white px-3 py-2 text-sm shadow-sm">
-                    <div>
-                      <span className="font-medium text-gray-900">{g.name}</span>
-                      <span className="ml-2 text-gray-500">{g.min_temperature}–{g.max_temperature}°C</span>
-                    </div>
-                    {g.description && <span className="text-xs text-gray-400">{g.description}</span>}
-                    {g.is_default && <Badge status="active" label="Default" />}
-                  </div>
-                ))}
-              </div>
-              <p className="mt-2 text-xs text-orange-600">
-                Manage temperature group assignments in Reference → Temperature Groups
-              </p>
-            </div>
-          )}
+          {/* ── Temperature Group Selector ──────────────────────────────── */}
+          <div>
+            <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-gray-700">
+              <Thermometer className="h-4 w-4 text-orange-500" /> Temperature Group
+            </label>
+            <select
+              value={selectedTempGroupId}
+              onChange={(e) => setSelectedTempGroupId(e.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            >
+              <option value="">-- Not assigned --</option>
+              {(tempGroups || []).map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name} ({g.min_temperature}–{g.max_temperature}°C)
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* ── Ingredients ────────────────────────────────────────────── */}
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">

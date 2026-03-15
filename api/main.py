@@ -336,6 +336,9 @@ def _ensure_schema():
                 min_temperature INTEGER NOT NULL,
                 max_temperature INTEGER NOT NULL,
                 description TEXT,
+                thermocouple VARCHAR(50),
+                control_cable VARCHAR(50),
+                control_device VARCHAR(50),
                 is_active BOOLEAN NOT NULL DEFAULT TRUE,
                 display_order INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -423,6 +426,27 @@ def _ensure_schema():
                 logger.warning(f"_ensure_schema: skip {table}.{col_def.split()[0]}: {e}")
 
     _run_section("maintenance_columns", _add_maintenance_columns)
+
+    # --- Section 2c: Add equipment columns to firing_temperature_groups ---
+    def _add_temp_group_columns(conn):
+        cols = [
+            ("firing_temperature_groups", "thermocouple VARCHAR(50)"),
+            ("firing_temperature_groups", "control_cable VARCHAR(50)"),
+            ("firing_temperature_groups", "control_device VARCHAR(50)"),
+        ]
+        for table, col_def in cols:
+            try:
+                conn.execute(text(f"""
+                    DO $$ BEGIN
+                        IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = '{table}') THEN
+                            ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col_def};
+                        END IF;
+                    END $$
+                """))
+            except Exception as e:
+                logger.warning(f"_ensure_schema: skip {table}.{col_def.split()[0]}: {e}")
+
+    _run_section("temp_group_columns", _add_temp_group_columns)
 
     # --- Section 3: Get factory IDs (needed for all seed sections) ---
     factory_ids = {}  # {"Bali Factory": "uuid", ...}

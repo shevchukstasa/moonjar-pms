@@ -830,6 +830,9 @@ def _ensure_schema():
                     "UPDATE recipes SET recipe_type='glaze', color_type='base' "
                     "WHERE id = :id AND (recipe_type = 'product' OR color_type IS NULL)"
                 ), {"id": recipe_id})
+                # Recipe already exists → do NOT recreate materials.
+                # Materials may have been merged/renamed/deleted by the user.
+                continue
             else:
                 recipe_id = str(__import__('uuid').uuid4())
                 desc = _json.dumps({
@@ -858,6 +861,7 @@ def _ensure_schema():
                 created_recipes += 1
 
             # 2. Create materials (global catalog) + link to recipe
+            #    ONLY runs for newly-created recipes (existing recipes skip via 'continue' above)
             for ing_name, fraction in r["ingredients"]:
                 # Ensure material exists in global catalog (no factory_id since migration 006)
                 mat_row = conn.execute(text(
@@ -1443,6 +1447,41 @@ def _ensure_schema():
         """))
 
     _run_section("materials_recipes_consumption", _materials_recipes_consumption)
+
+    # --- Section 20: Cleanup zombie materials created by seed ---
+    # Materials of type 'glaze_ingredient' that are NOT linked to any recipe
+    # and have zero stock everywhere are orphans from seed re-creation after merge.
+    def _cleanup_zombie_materials(conn):
+        deleted = conn.execute(text("""
+            DELETE FROM material_stock
+            WHERE material_id IN (
+                SELECT m.id FROM materials m
+                WHERE m.material_type = 'glaze_ingredient'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM recipe_materials rm WHERE rm.material_id = m.id
+                  )
+            )
+            AND (balance = 0 OR balance IS NULL)
+        """)).rowcount
+        zombies = conn.execute(text("""
+            DELETE FROM materials
+            WHERE material_type = 'glaze_ingredient'
+              AND NOT EXISTS (
+                  SELECT 1 FROM recipe_materials rm WHERE rm.material_id = materials.id
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM material_stock ms
+                  WHERE ms.material_id = materials.id AND ms.balance > 0
+              )
+            RETURNING id, name
+        """)).fetchall()
+        if zombies:
+            names = [z[1] for z in zombies]
+            logger.info(f"_cleanup_zombie_materials: removed {len(zombies)} orphan glaze_ingredient materials: {names}")
+        else:
+            logger.info("_cleanup_zombie_materials: no orphan materials found")
+
+    _run_section("cleanup_zombie_materials", _cleanup_zombie_materials)
 
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):

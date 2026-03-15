@@ -1296,11 +1296,16 @@ def _ensure_schema():
 
     _run_section("cleanup_zombie_materials", _cleanup_zombie_materials)
 
-    # --- Section 22: Purge seed data (REMOVED) ---
-    # Previously deleted seed recipes/temp groups by name on every startup.
-    # This was buggy: it also deleted USER-created recipes with same names.
-    # Seeds are already disabled (removed in earlier commit), purge already ran once.
-    # No action needed here anymore.
+    # --- Section 22: Fix NULL glaze_settings in existing recipes ---
+    def _fix_null_glaze_settings(conn):
+        updated = conn.execute(text("""
+            UPDATE recipes SET glaze_settings = '{}'::jsonb
+            WHERE glaze_settings IS NULL
+        """)).rowcount
+        if updated:
+            logger.info(f"_fix_null_glaze_settings: fixed {updated} recipes")
+
+    _run_section("fix_null_glaze_settings", _fix_null_glaze_settings)
 
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):

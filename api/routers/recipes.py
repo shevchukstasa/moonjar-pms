@@ -136,11 +136,24 @@ async def create_recipes_item(
     current_user=Depends(get_current_user),
 ):
     import uuid as uuid_mod
+    from sqlalchemy.exc import IntegrityError
 
     create_data = data.model_dump(exclude={'clone_from_id'}, exclude_none=True)
+    # Ensure glaze_settings is always a dict (never None)
+    create_data.setdefault('glaze_settings', {})
     item = Recipe(**create_data)
     db.add(item)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as e:
+        db.rollback()
+        err_msg = str(e.orig) if e.orig else str(e)
+        if 'uq_recipes_colcollection_name' in err_msg or 'duplicate key' in err_msg.lower():
+            raise HTTPException(
+                409,
+                f"Recipe '{data.name}' already exists in this color collection"
+            )
+        raise HTTPException(400, f"Database error: {err_msg}")
 
     # Clone materials + firing stages from source recipe if specified
     if data.clone_from_id:

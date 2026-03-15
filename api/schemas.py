@@ -9,7 +9,7 @@ from datetime import date, datetime, time
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 # --- Pagination wrapper ---
@@ -620,12 +620,17 @@ class RecipeResponse(BaseModel):
     consumption_brush_ml_per_sqm: Optional[float] = None
     is_default: bool = False
     client_name: Optional[str] = None
-    glaze_settings: dict
-    is_active: bool
+    glaze_settings: dict = {}
+    is_active: bool = True
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator('glaze_settings', mode='before')
+    @classmethod
+    def _coerce_glaze_settings(cls, v):
+        return v if v is not None else {}
 
 
 class MaterialCreate(BaseModel):

@@ -121,6 +121,7 @@ class MaterialCreateInput(BaseModel):
 
 class MaterialUpdateInput(BaseModel):
     name: Optional[str] = None
+    subgroup_id: Optional[UUID] = None
     min_balance: Optional[float] = None
     min_balance_auto: Optional[bool] = None
     unit: Optional[str] = None
@@ -886,6 +887,19 @@ async def update_material(
         raise HTTPException(404, "Material not found")
 
     updates = data.model_dump(exclude_unset=True)
+
+    # Handle subgroup_id change — sync material_type from subgroup.code
+    if 'subgroup_id' in updates:
+        from api.models import MaterialSubgroup
+        new_sg_id = updates.pop('subgroup_id')
+        if new_sg_id:
+            sg = db.query(MaterialSubgroup).filter(MaterialSubgroup.id == new_sg_id).first()
+            if not sg:
+                raise HTTPException(404, "Material subgroup not found")
+            mat.subgroup_id = new_sg_id
+            mat.material_type = sg.code
+        else:
+            mat.subgroup_id = None
 
     # Catalog-level fields
     catalog_fields = {'name', 'unit', 'supplier_id'}

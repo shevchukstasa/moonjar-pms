@@ -25,6 +25,58 @@ _bot_status_cache: dict | None = None
 _bot_status_cached_at: float = 0
 _BOT_STATUS_TTL = 300  # 5 minutes
 
+# ────────────────────────────────────────────────────────────────
+# In-memory store: recent chats seen via webhook (for chat ID discovery)
+# Key: chat_id (str) → {chat_id, title, type, username, last_seen}
+# ────────────────────────────────────────────────────────────────
+_recent_webhook_chats: dict[str, dict] = {}
+_MAX_RECENT_CHATS = 50
+
+
+def _record_chat_from_update(body: dict) -> None:
+    """Extract chat info from a Telegram webhook update and store it."""
+    global _recent_webhook_chats
+    chat = None
+
+    # Try all possible locations where chat info lives in an update
+    for key in ("message", "edited_message", "channel_post", "edited_channel_post"):
+        if key in body and "chat" in body[key]:
+            chat = body[key]["chat"]
+            break
+
+    if not chat:
+        # my_chat_member / chat_member updates
+        for key in ("my_chat_member", "chat_member"):
+            if key in body and "chat" in body[key]:
+                chat = body[key]["chat"]
+                break
+
+    if not chat:
+        # callback_query
+        cb = body.get("callback_query", {})
+        if "message" in cb and "chat" in cb["message"]:
+            chat = cb["message"]["chat"]
+
+    if not chat:
+        return
+
+    chat_id = str(chat.get("id", ""))
+    if not chat_id:
+        return
+
+    _recent_webhook_chats[chat_id] = {
+        "chat_id": chat_id,
+        "title": chat.get("title") or chat.get("first_name", ""),
+        "type": chat.get("type", ""),
+        "username": chat.get("username"),
+        "last_seen": time.time(),
+    }
+
+    # Evict oldest if too many
+    if len(_recent_webhook_chats) > _MAX_RECENT_CHATS:
+        oldest_key = min(_recent_webhook_chats, key=lambda k: _recent_webhook_chats[k]["last_seen"])
+        del _recent_webhook_chats[oldest_key]
+
 
 # ────────────────────────────────────────────────────────────────
 # Bot status & testing (admin-only)
@@ -263,84 +315,33 @@ async def test_chat(
 
 
 # ────────────────────────────────────────────────────────────────
-# Discover chat IDs from recent bot messages (admin-only)
+# Discover chat IDs from webhook history (admin-only)
 # ────────────────────────────────────────────────────────────────
 
 @router.get("/recent-chats")
 async def get_recent_chats(current_user=Depends(require_admin)):
     """
-    Fetch recent messages received by the bot via getUpdates.
-    Returns unique chats with their IDs and titles — useful for discovering
-    the correct chat ID when configuring factory Telegram integration.
-
-    NOTE: This only works if the webhook is NOT set. If webhook is active,
-    Telegram sends updates there instead. We temporarily delete+restore webhook.
+    Return chats the bot has seen via webhook since last server restart.
+    Write a message or use /start in a group, then call this endpoint.
+    No external API calls needed — reads from in-memory store.
     """
-    settings = get_settings()
-    token = settings.TELEGRAM_BOT_TOKEN
-
-    if not token:
-        return {"chats": [], "error": "Bot token not configured"}
-
-    import httpx
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            # Check if webhook is set
-            wh_resp = await client.get(f"https://api.telegram.org/bot{token}/getWebhookInfo")
-            wh_data = wh_resp.json()
-            webhook_url = wh_data.get("result", {}).get("url", "")
-
-            if webhook_url:
-                # Temporarily remove webhook to allow getUpdates
-                await client.post(f"https://api.telegram.org/bot{token}/deleteWebhook")
-
-            # Fetch recent updates
-            resp = await client.get(
-                f"https://api.telegram.org/bot{token}/getUpdates",
-                params={"limit": 50, "timeout": 1},
-            )
-            result = resp.json()
-
-            # Restore webhook if it was set
-            if webhook_url:
-                await client.post(
-                    f"https://api.telegram.org/bot{token}/setWebhook",
-                    json={"url": webhook_url},
-                )
-
-        if not result.get("ok"):
-            return {"chats": [], "error": result.get("description", "Failed to get updates")}
-
-        # Extract unique chats
-        seen_ids: set[str] = set()
-        chats = []
-        for update in result.get("result", []):
-            msg = update.get("message") or update.get("my_chat_member", {}).get("chat")
-            if not msg:
-                continue
-            chat = msg.get("chat") if "chat" in msg else msg
-            chat_id = str(chat.get("id", ""))
-            if chat_id and chat_id not in seen_ids:
-                seen_ids.add(chat_id)
-                chats.append({
-                    "chat_id": chat_id,
-                    "title": chat.get("title") or chat.get("first_name", ""),
-                    "type": chat.get("type", ""),
-                    "username": chat.get("username"),
-                })
-
-        return {
-            "chats": chats,
-            "total_updates": len(result.get("result", [])),
-            "hint": "Write a message in the group where the bot is added, then call this endpoint again."
-                    if not chats else None,
-        }
-    except httpx.TimeoutException:
-        return {"chats": [], "error": "Telegram API timeout"}
-    except Exception as e:
-        logger.warning(f"Telegram recent-chats failed: {e}")
-        return {"chats": [], "error": str(e)}
+    chats = sorted(
+        _recent_webhook_chats.values(),
+        key=lambda c: c.get("last_seen", 0),
+        reverse=True,
+    )
+    # Strip last_seen from response
+    clean = [
+        {k: v for k, v in c.items() if k != "last_seen"}
+        for c in chats
+    ]
+    return {
+        "chats": clean,
+        "hint": (
+            "No chats recorded yet. Write any message (or /start) in the group "
+            "where the bot is added, then click Discover again."
+        ) if not clean else None,
+    }
 
 
 # ────────────────────────────────────────────────────────────────
@@ -362,6 +363,12 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
     except Exception:
         logger.warning("Telegram webhook: invalid JSON body")
         return JSONResponse({"ok": True})
+
+    # Record chat info for the "Discover Chat IDs" feature
+    try:
+        _record_chat_from_update(body)
+    except Exception:
+        pass  # never fail on recording
 
     # Dispatch to bot handler (fire-and-forget style, but we await to catch errors)
     try:

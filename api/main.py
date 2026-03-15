@@ -993,7 +993,104 @@ def _ensure_schema():
 
     _run_section("backfill_material_subgroups", _backfill_material_subgroups)
 
-    # --- Section 8: Stamp alembic version ---
+    # --- Section 9: Evolve warehouse_sections for independent warehouses ---
+    def _evolve_warehouse_sections(conn):
+        """Evolve warehouse_sections: nullable factory_id, new columns."""
+        cols = [
+            "description TEXT",
+            "managed_by UUID REFERENCES users(id)",
+            "warehouse_type VARCHAR(50) NOT NULL DEFAULT 'section'",
+            "display_order INTEGER NOT NULL DEFAULT 0",
+            "updated_at TIMESTAMPTZ DEFAULT now()",
+        ]
+        for col_def in cols:
+            col_name = col_def.split()[0]
+            conn.execute(text(f"""
+                DO $$ BEGIN
+                    ALTER TABLE warehouse_sections ADD COLUMN {col_def};
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$;
+            """))
+        # Make factory_id nullable (allows global warehouses)
+        conn.execute(text(
+            "ALTER TABLE warehouse_sections ALTER COLUMN factory_id DROP NOT NULL"
+        ))
+        # Partial unique index for global warehouses (factory_id IS NULL)
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_warehouse_section_code_global
+            ON warehouse_sections (code) WHERE factory_id IS NULL
+        """))
+
+    _run_section("evolve_warehouse_sections", _evolve_warehouse_sections)
+
+    # --- Section 10: Seed 'Finished Goods' material group ---
+    def _seed_finished_goods_group(conn):
+        """Add 'Finished Goods' material group if not exists."""
+        existing = conn.execute(text(
+            "SELECT id FROM material_groups WHERE code = 'finished_goods'"
+        )).scalar()
+        if existing:
+            return  # Already seeded
+
+        conn.execute(text("""
+            INSERT INTO material_groups (id, name, code, icon, display_order, is_active)
+            VALUES (gen_random_uuid(), 'Готовая продукция', 'finished_goods', '🏭', 4, TRUE)
+        """))
+
+        fg_gid = conn.execute(text(
+            "SELECT id FROM material_groups WHERE code = 'finished_goods'"
+        )).scalar()
+
+        for code, name, icon, order in [
+            ('tile', 'Плитка', '🧱', 1),
+            ('sink', 'Раковины', '🚿', 2),
+            ('custom_product', 'Прочие изделия', '📦', 3),
+        ]:
+            conn.execute(text("""
+                INSERT INTO material_subgroups (id, group_id, name, code, icon, default_unit, display_order, is_active)
+                SELECT gen_random_uuid(), :gid, :name, :code, :icon, 'pcs', :ord, TRUE
+                WHERE NOT EXISTS (SELECT 1 FROM material_subgroups WHERE code = :code)
+            """), {"gid": str(fg_gid), "name": name, "code": code, "icon": icon, "ord": order})
+
+    _run_section("seed_finished_goods_group", _seed_finished_goods_group)
+
+    # --- Section 11b: Add material_code column + backfill ---
+    def _add_material_code(conn):
+        """Add material_code column to materials and backfill existing rows."""
+        conn.execute(text("""
+            ALTER TABLE materials ADD COLUMN IF NOT EXISTS material_code VARCHAR(20)
+        """))
+        # Create unique index (if not exists)
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_materials_material_code
+            ON materials (material_code) WHERE material_code IS NOT NULL
+        """))
+        # Backfill: assign M-XXXX codes to materials that don't have one yet
+        # Order by created_at so older materials get lower numbers
+        conn.execute(text("""
+            WITH numbered AS (
+                SELECT id,
+                       ROW_NUMBER() OVER (ORDER BY created_at, name) AS rn
+                FROM materials
+                WHERE material_code IS NULL
+            )
+            UPDATE materials
+            SET material_code = 'M-' || LPAD(
+                (SELECT COALESCE(MAX(
+                    CASE WHEN m2.material_code ~ '^M-[0-9]+$'
+                         THEN CAST(SUBSTRING(m2.material_code FROM 3) AS INTEGER)
+                         ELSE 0
+                    END
+                ), 0) FROM materials m2 WHERE m2.material_code IS NOT NULL)
+                + numbered.rn,
+                4, '0')
+            FROM numbered
+            WHERE materials.id = numbered.id
+        """))
+
+    _run_section("add_material_code", _add_material_code)
+
+    # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""
             UPDATE alembic_version SET version_num = '003_seed_data'

@@ -385,6 +385,7 @@ class Material(Base):
     __tablename__ = 'materials'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    material_code = Column(sa.String(20), unique=True)  # auto-generated, e.g. "M-0001"
     name = Column(sa.String(300), unique=True, nullable=False)
     unit = Column(sa.String(20), nullable=False, default='pcs')
     material_type = Column(sa.String(50), nullable=False)
@@ -1318,18 +1319,24 @@ class WarehouseSection(Base):
     __tablename__ = 'warehouse_sections'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=True)
     code = Column(sa.String(50), nullable=False)
     name = Column(sa.String(200), nullable=False)
+    description = Column(sa.Text)
+    managed_by = Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    warehouse_type = Column(sa.String(50), nullable=False, default='section')
+    display_order = Column(sa.Integer, nullable=False, default=0)
     is_default = Column(sa.Boolean, nullable=False, default=False)
     is_active = Column(sa.Boolean, nullable=False, default=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), server_default=sa.func.now())
 
     __table_args__ = (
         UniqueConstraint('factory_id', 'code'),
     )
 
     factory = relationship('Factory', foreign_keys=[factory_id])
+    manager = relationship('User', foreign_keys=[managed_by])
 
 
 class InventoryReconciliation(Base):

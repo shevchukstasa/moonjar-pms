@@ -394,6 +394,9 @@ export default function AdminPanelPage() {
           <Button variant="secondary" onClick={() => navigate('/admin/materials')}>
             Materials &rarr;
           </Button>
+          <Button variant="secondary" onClick={() => navigate('/admin/warehouses')}>
+            Warehouses &rarr;
+          </Button>
         </div>
       </Card>
 

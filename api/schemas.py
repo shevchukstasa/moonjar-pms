@@ -2391,9 +2391,13 @@ class OrderFinancialResponse(BaseModel):
 
 
 class WarehouseSectionCreate(BaseModel):
-    factory_id: UUID
+    factory_id: Optional[UUID] = None
     code: str
     name: str
+    description: Optional[str] = None
+    managed_by: Optional[UUID] = None
+    warehouse_type: str = 'section'
+    display_order: int = 0
     is_default: Optional[bool] = None
     is_active: Optional[bool] = None
 
@@ -2402,18 +2406,28 @@ class WarehouseSectionUpdate(BaseModel):
     factory_id: Optional[UUID] = None
     code: Optional[str] = None
     name: Optional[str] = None
+    description: Optional[str] = None
+    managed_by: Optional[UUID] = None
+    warehouse_type: Optional[str] = None
+    display_order: Optional[int] = None
     is_default: Optional[bool] = None
     is_active: Optional[bool] = None
 
 
 class WarehouseSectionResponse(BaseModel):
     id: UUID
-    factory_id: UUID
+    factory_id: Optional[UUID] = None
     code: str
     name: str
+    description: Optional[str] = None
+    managed_by: Optional[UUID] = None
+    managed_by_name: Optional[str] = None
+    warehouse_type: str = 'section'
+    display_order: int = 0
     is_default: bool
     is_active: bool
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

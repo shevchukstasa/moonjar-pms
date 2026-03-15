@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import relationship
 
 from api.database import Base
-from api.enums import AuditActionType, BatchCreator, BatchMode, BatchStatus, BufferHealth, CastersRemovedReason, ChangeRequestStatus, DashboardType, DefectOutcome, DefectStage, ExpenseCategory, ExpenseType, GrindingStatus, IpScope, KilnConstantsMode, LanguagePreference, MaintenanceStatus, ManuShipmentStatus, MaterialType, MediaType, NotificationChannel, NotificationType, OrderSource, OrderStatus, PositionStatus, ProductType, PurchaseStatus, QcResult, QcStage, QmBlockType, ReconciliationStatus, ReferenceAction, RelatedEntityType, RepairStatus, ResourceStatus, ResourceType, ScheduleSlotStatus, ShapeType, SplitCategory, SurplusDispositionType, TaskStatus, TaskType, TpsDeviationType, TpsStatus, TransactionType, UserRole, WriteOffReason
+from api.enums import AuditActionType, BackupStatus, BackupType, BatchCreator, BatchMode, BatchStatus, BufferHealth, CastersRemovedReason, ChangeRequestStatus, DashboardType, DefectOutcome, DefectStage, ExpenseCategory, ExpenseType, GrindingStatus, IpScope, KilnConstantsMode, LanguagePreference, MaintenanceStatus, ManuShipmentStatus, MaterialType, MediaType, NotificationChannel, NotificationType, OrderSource, OrderStatus, PositionStatus, ProductType, PurchaseStatus, QcResult, QcStage, QmBlockType, ReconciliationStatus, ReferenceAction, RelatedEntityType, RepairStatus, ResourceStatus, ResourceType, ScheduleSlotStatus, ShapeType, SplitCategory, SurplusDispositionType, TaskStatus, TaskType, TpsDeviationType, TpsStatus, TransactionType, UserRole, WriteOffReason
 
 
 def PgEnum(enum_class, **kwargs):
@@ -1549,4 +1549,20 @@ class ConsumptionAdjustment(Base):
     position = relationship('OrderPosition', foreign_keys=[position_id])
     material = relationship('Material', foreign_keys=[material_id])
     factory = relationship('Factory', foreign_keys=[factory_id])
+
+
+# ─── Backup Log ─────────────────────────────────────────────
+
+class BackupLog(Base):
+    """Tracks database backup execution and status."""
+    __tablename__ = 'backup_logs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    started_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    completed_at = Column(sa.DateTime(timezone=True))
+    status = Column(sa.String(20), nullable=False, default=BackupStatus.IN_PROGRESS.value)
+    file_size_bytes = Column(sa.BigInteger)
+    s3_key = Column(sa.String(500))
+    error_message = Column(sa.Text)
+    backup_type = Column(sa.String(20), nullable=False, default=BackupType.SCHEDULED.value)
 

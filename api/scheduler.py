@@ -10,6 +10,14 @@ from apscheduler.triggers.interval import IntervalTrigger
 logger = logging.getLogger("moonjar.scheduler")
 scheduler = AsyncIOScheduler()
 
+# Backup status tracking — updated by daily_database_backup(), read by health endpoint
+_last_backup_status: dict | None = None
+
+
+def get_last_backup_status() -> dict | None:
+    """Return the last backup result (used by /api/health/backup endpoint)."""
+    return _last_backup_status
+
 
 def _get_db_session():
     """Get a new database session for scheduled tasks."""
@@ -313,20 +321,79 @@ async def hourly_webhook_retry():
         db.close()
 
 
-async def daily_database_backup():
-    """Create daily database backup using pg_dump → local file (rotated 7 days)."""
+async def daily_database_backup(backup_type: str = "scheduled"):
+    """Create daily database backup using pg_dump, upload to S3.
+
+    On Railway (ephemeral filesystem), S3 upload is REQUIRED — local files
+    vanish on every redeploy.  The function:
+    1. Creates a BackupLog entry (status=in_progress)
+    2. Checks pg_dump is available
+    3. Dumps database to /tmp (custom format)
+    4. Uploads to S3 if configured (mandatory on Railway)
+    5. Cleans up the local temp file
+    6. Updates BackupLog with final status
+    7. Sends Telegram alert on failure
+    8. Stores result in _last_backup_status for the health endpoint
+
+    Returns the backup_log id (UUID str) for tracking, or None.
+    """
+    import shutil
     import subprocess
     import os
-    from datetime import datetime
+    from datetime import datetime, timezone
     from urllib.parse import urlparse
 
-    logger.info("Starting daily database backup")
+    global _last_backup_status
+
+    is_railway = bool(os.getenv("RAILWAY_ENVIRONMENT"))
+    logger.info("Starting daily database backup (railway=%s, type=%s)", is_railway, backup_type)
+
+    # --- Create BackupLog entry ---
+    backup_log_id = _create_backup_log(backup_type)
 
     database_url = os.getenv("DATABASE_URL", "")
     if not database_url:
+        error_msg = "DATABASE_URL not set"
+        _last_backup_status = {
+            "status": "error",
+            "error": error_msg,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
         logger.error("DATABASE_URL not set — cannot create backup")
-        return
+        _finish_backup_log(backup_log_id, status="failed", error=error_msg)
+        _send_backup_telegram_alert(error_msg)
+        return backup_log_id
 
+    # Pre-flight: verify pg_dump is available
+    if not shutil.which("pg_dump"):
+        error_msg = "pg_dump not found in PATH (install postgresql-client)"
+        _last_backup_status = {
+            "status": "error",
+            "error": error_msg,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        logger.error("pg_dump not found — ensure postgresql-client is installed (nixpacks.toml)")
+        _finish_backup_log(backup_log_id, status="failed", error=error_msg)
+        _send_backup_telegram_alert(error_msg)
+        return backup_log_id
+
+    s3_bucket = os.getenv("S3_BACKUP_BUCKET", "")
+    if is_railway and not s3_bucket:
+        error_msg = "S3_BACKUP_BUCKET not configured (required on Railway — ephemeral filesystem)"
+        _last_backup_status = {
+            "status": "error",
+            "error": error_msg,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        logger.error(
+            "S3_BACKUP_BUCKET not configured. "
+            "On Railway local files are ephemeral — S3 is REQUIRED for backups."
+        )
+        _finish_backup_log(backup_log_id, status="failed", error=error_msg)
+        _send_backup_telegram_alert(error_msg)
+        return backup_log_id
+
+    backup_file = None
     try:
         parsed = urlparse(database_url)
         pg_env = {
@@ -342,15 +409,11 @@ async def daily_database_backup():
         backup_dir = "/tmp/moonjar_backups"
         os.makedirs(backup_dir, exist_ok=True)
 
-        # Filename with date (rotate weekly by using day-of-week)
-        day_of_week = datetime.utcnow().strftime("%A")
-        backup_file = os.path.join(backup_dir, f"moonjar_{day_of_week}.sql.gz")
+        # Filename with timestamp
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S")
+        backup_file = os.path.join(backup_dir, f"moonjar_{ts}.dump")
 
-        # Remove old backup for this day
-        if os.path.exists(backup_file):
-            os.remove(backup_file)
-
-        # Run pg_dump
+        # Run pg_dump (custom format — compressed, supports pg_restore)
         cmd = [
             "pg_dump",
             "-h", host,
@@ -372,29 +435,174 @@ async def daily_database_backup():
         )
 
         if result.returncode != 0:
-            logger.error("pg_dump failed: %s", result.stderr)
-            return
+            error_msg = f"pg_dump exit code {result.returncode}: {result.stderr[:500]}"
+            _last_backup_status = {
+                "status": "error",
+                "error": error_msg,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            logger.error("pg_dump failed (exit %d): %s", result.returncode, result.stderr)
+            _finish_backup_log(backup_log_id, status="failed", error=error_msg)
+            _send_backup_telegram_alert(error_msg)
+            return backup_log_id
 
-        file_size = os.path.getsize(backup_file) / (1024 * 1024)  # MB
-        logger.info(
-            "Database backup created: %s (%.1f MB)",
-            backup_file, file_size,
-        )
+        file_size_bytes = os.path.getsize(backup_file)
+        file_size_mb = file_size_bytes / (1024 * 1024)
+        logger.info("pg_dump complete: %s (%.1f MB)", backup_file, file_size_mb)
 
-        # Optional: upload to S3 if configured
-        s3_bucket = os.getenv("S3_BACKUP_BUCKET", "")
+        # Upload to S3
+        s3_uploaded = False
+        s3_key = None
         if s3_bucket:
             try:
                 import boto3
-                s3 = boto3.client("s3")
-                s3_key = f"moonjar-backups/{datetime.utcnow().strftime('%Y-%m-%d')}/moonjar_backup.dump"
+                s3 = boto3.client(
+                    "s3",
+                    region_name=os.getenv("AWS_DEFAULT_REGION", "ap-southeast-1"),
+                )
+                s3_key = f"moonjar-backups/{datetime.now(timezone.utc).strftime('%Y-%m-%d')}/moonjar_{ts}.dump"
                 s3.upload_file(backup_file, s3_bucket, s3_key)
+                s3_uploaded = True
                 logger.info("Backup uploaded to s3://%s/%s", s3_bucket, s3_key)
             except Exception as e:
-                logger.warning("S3 upload failed (backup still on disk): %s", e)
+                logger.error("S3 upload FAILED: %s", e)
+                if is_railway:
+                    # On Railway, S3 failure is critical — local file will vanish
+                    error_msg = f"S3 upload failed: {e}"
+                    _last_backup_status = {
+                        "status": "error",
+                        "error": error_msg,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "file_size_mb": round(file_size_mb, 1),
+                    }
+                    _finish_backup_log(backup_log_id, status="failed", error=error_msg,
+                                       file_size_bytes=file_size_bytes)
+                    _send_backup_telegram_alert(error_msg)
+                    return backup_log_id
 
+        # Success
+        _last_backup_status = {
+            "status": "ok",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "file_size_mb": round(file_size_mb, 1),
+            "s3_uploaded": s3_uploaded,
+            "s3_key": f"s3://{s3_bucket}/{s3_key}" if s3_uploaded else None,
+            "local_file": backup_file if not is_railway else None,
+        }
+        logger.info(
+            "Database backup SUCCESS: %.1f MB, s3=%s",
+            file_size_mb, s3_uploaded,
+        )
+        _finish_backup_log(
+            backup_log_id,
+            status="success",
+            file_size_bytes=file_size_bytes,
+            s3_key=f"s3://{s3_bucket}/{s3_key}" if s3_uploaded else None,
+        )
+        return backup_log_id
+
+    except subprocess.TimeoutExpired:
+        error_msg = "pg_dump timed out after 300 seconds"
+        _last_backup_status = {
+            "status": "error",
+            "error": error_msg,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        logger.error("pg_dump timed out after 300 seconds")
+        _finish_backup_log(backup_log_id, status="failed", error=error_msg)
+        _send_backup_telegram_alert(error_msg)
+        return backup_log_id
     except Exception as e:
+        error_msg = str(e)[:2000]
+        _last_backup_status = {
+            "status": "error",
+            "error": error_msg,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
         logger.error("Database backup failed: %s", e)
+        _finish_backup_log(backup_log_id, status="failed", error=error_msg)
+        _send_backup_telegram_alert(f"Backup exception: {error_msg}")
+        return backup_log_id
+    finally:
+        # On Railway, always clean up temp file (filesystem is ephemeral anyway)
+        if is_railway and backup_file and os.path.exists(backup_file):
+            try:
+                os.remove(backup_file)
+            except OSError:
+                pass
+
+
+def _create_backup_log(backup_type: str = "scheduled"):
+    """Create a BackupLog entry with status=in_progress. Returns log id or None."""
+    db = _get_db_session()
+    try:
+        from api.models import BackupLog
+        entry = BackupLog(status="in_progress", backup_type=backup_type)
+        db.add(entry)
+        db.commit()
+        db.refresh(entry)
+        return entry.id
+    except Exception as e:
+        logger.error("Failed to create BackupLog entry: %s", e)
+        db.rollback()
+        return None
+    finally:
+        db.close()
+
+
+def _finish_backup_log(
+    backup_log_id,
+    *,
+    status: str,
+    file_size_bytes: int | None = None,
+    s3_key: str | None = None,
+    error: str | None = None,
+):
+    """Update a BackupLog entry with final status."""
+    if not backup_log_id:
+        return
+    db = _get_db_session()
+    try:
+        from api.models import BackupLog
+        from datetime import datetime, timezone
+
+        entry = db.query(BackupLog).filter(BackupLog.id == backup_log_id).first()
+        if entry:
+            entry.status = status
+            entry.completed_at = datetime.now(timezone.utc)
+            if file_size_bytes is not None:
+                entry.file_size_bytes = file_size_bytes
+            if s3_key is not None:
+                entry.s3_key = s3_key
+            if error is not None:
+                entry.error_message = error
+            db.commit()
+    except Exception as e:
+        logger.error("Failed to update BackupLog %s: %s", backup_log_id, e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _send_backup_telegram_alert(message: str):
+    """Send backup failure alert to Telegram owner chat (fire-and-forget)."""
+    import os
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.getenv("TELEGRAM_OWNER_CHAT_ID", "")
+    if not token or not chat_id:
+        return
+    try:
+        import httpx
+        httpx.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={
+                "chat_id": chat_id,
+                "text": f"[Moonjar PMS] Backup Alert\n\n{message}",
+            },
+            timeout=10.0,
+        )
+    except Exception as e:
+        logger.warning("Telegram backup alert failed: %s", e)
 
 
 # --- Scheduler setup ---

@@ -1,13 +1,15 @@
-"""Auth router — login, Google OAuth, refresh, logout, TOTP."""
+"""Auth router — login, Google OAuth, refresh, logout, TOTP login verification."""
 
 import uuid as _uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from jose import JWTError
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from api.config import get_settings
 from api.database import get_db
 from api.enums import AuditActionType
 from api.auth import (
@@ -15,16 +17,52 @@ from api.auth import (
     decode_token, set_auth_cookies, clear_auth_cookies, generate_csrf_token,
     check_lockout, record_failed_login, reset_failed_logins, create_session,
     verify_google_token, log_security_event, get_current_user,
+    ALGORITHM,
 )
 from api.models import User, ActiveSession  # ActiveSession needed for refresh token rotation
 
 router = APIRouter()
 logger = logging.getLogger("moonjar.auth")
 
+# Temporary pre-2FA token lifetime (5 minutes)
+_TOTP_PENDING_EXPIRE_MINUTES = 5
+
 
 def _role_str(role) -> str:
     """Safely convert role to string value."""
     return role.value if hasattr(role, 'value') else str(role)
+
+
+def _create_totp_pending_token(user_id: str) -> str:
+    """Create a short-lived JWT that proves the user passed password auth
+    but still needs to complete 2FA. This token cannot be used as an access
+    token because its ``type`` is ``totp_pending``.
+    """
+    from jose import jwt
+    settings = get_settings()
+    expire = datetime.now(timezone.utc) + timedelta(minutes=_TOTP_PENDING_EXPIRE_MINUTES)
+    payload = {
+        "sub": user_id,
+        "exp": expire,
+        "type": "totp_pending",
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
+
+
+def _decode_totp_pending_token(token: str) -> dict:
+    """Decode and validate a totp_pending token."""
+    from jose import jwt
+    settings = get_settings()
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        if settings.SECRET_KEY_PREVIOUS:
+            payload = jwt.decode(token, settings.SECRET_KEY_PREVIOUS, algorithms=[ALGORITHM])
+        else:
+            raise
+    if payload.get("type") != "totp_pending":
+        raise ValueError("Not a TOTP pending token")
+    return payload
 
 
 class LoginRequest(BaseModel):
@@ -34,7 +72,9 @@ class LoginRequest(BaseModel):
 class GoogleLoginRequest(BaseModel):
     id_token: str
 
-class TOTPVerifyRequest(BaseModel):
+class TOTPLoginVerifyRequest(BaseModel):
+    """Used during the login flow when 2FA is required."""
+    totp_pending_token: str
     code: str
 
 
@@ -50,6 +90,19 @@ async def login(data: LoginRequest, request: Request, response: Response,
             record_failed_login(db, user)
             raise HTTPException(401, "Invalid credentials")
         reset_failed_logins(db, user)
+
+        # --- 2FA gate ---
+        if user.totp_enabled:
+            # Password is correct but 2FA is required.
+            # Return a short-lived pending token; no session or cookies yet.
+            pending_token = _create_totp_pending_token(str(user.id))
+            return {
+                "requires_totp": True,
+                "totp_pending_token": pending_token,
+                "message": "Two-factor authentication required",
+            }
+
+        # --- Normal login (no 2FA) ---
         jti = str(_uuid.uuid4())
         role_val = _role_str(user.role)
         access = create_access_token(str(user.id), role_val, jti)
@@ -80,6 +133,17 @@ async def google_login(data: GoogleLoginRequest, request: Request, response: Res
     if not user.google_id:
         user.google_id = info["google_id"]
         db.commit()
+
+    # --- 2FA gate ---
+    if user.totp_enabled:
+        pending_token = _create_totp_pending_token(str(user.id))
+        return {
+            "requires_totp": True,
+            "totp_pending_token": pending_token,
+            "message": "Two-factor authentication required",
+        }
+
+    # --- Normal login (no 2FA) ---
     jti = str(_uuid.uuid4())
     role_val = _role_str(user.role)
     access = create_access_token(str(user.id), role_val, jti)
@@ -180,6 +244,7 @@ async def get_me(current_user=Depends(get_current_user), db: Session = Depends(g
         "name": current_user.name,
         "language": getattr(current_user, 'language', None) or "en",
         "is_active": current_user.is_active,
+        "totp_enabled": bool(current_user.totp_enabled),
         "factories": factories,
     }
 
@@ -225,23 +290,68 @@ async def verify_owner_key(data: OwnerKeyRequest, db: Session = Depends(get_db))
     return {"status": "key_valid", "message": "Key verified. Proceed to create owner account."}
 
 
-@router.post("/totp/setup")
-async def totp_setup(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    # TODO: Implement TOTP setup — see BUSINESS_LOGIC.md §Security
-    import pyotp
-    secret = pyotp.random_base32()
-    uri = pyotp.totp.TOTP(secret).provisioning_uri(name=current_user.email, issuer_name="Moonjar PMS")
-    return {"secret": secret, "qr_uri": uri}
+@router.post("/totp-verify")
+async def totp_login_verify(
+    data: TOTPLoginVerifyRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    """Complete login by verifying a TOTP code (or backup code) after password auth.
 
+    The client must send the ``totp_pending_token`` received from ``/login`` or
+    ``/google`` along with a valid TOTP or backup code. On success, full JWT
+    cookies are issued and a session is created.
+    """
+    # Decode the pending token
+    try:
+        payload = _decode_totp_pending_token(data.totp_pending_token)
+    except Exception:
+        raise HTTPException(401, "Invalid or expired TOTP pending token. Please log in again.")
 
-@router.post("/totp/verify")
-async def totp_verify(data: TOTPVerifyRequest, db: Session = Depends(get_db),
-                      current_user=Depends(get_current_user)):
-    # TODO: Verify TOTP code and enable 2FA — see BUSINESS_LOGIC.md §Security
-    raise HTTPException(501, "Not implemented")
+    user_id = payload.get("sub")
+    user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+    if not user:
+        raise HTTPException(401, "User not found")
 
+    if not user.totp_enabled:
+        raise HTTPException(400, "TOTP is not enabled for this user")
 
-@router.post("/totp/disable")
-async def totp_disable(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    # TODO: Disable TOTP 2FA — see BUSINESS_LOGIC.md §Security
-    raise HTTPException(501, "Not implemented")
+    # Verify the code (TOTP or backup)
+    from api.routers.security import _verify_totp_or_backup
+    valid, method = _verify_totp_or_backup(db, user, data.code)
+    if not valid:
+        log_security_event(
+            db, AuditActionType.LOGIN_FAILED,
+            actor_id=str(user.id), actor_email=user.email,
+            ip_address=request.client.host if request.client else None,
+            details={"reason": "invalid_totp_code"},
+        )
+        raise HTTPException(401, "Invalid TOTP or backup code")
+
+    # Issue full session
+    jti = str(_uuid.uuid4())
+    role_val = _role_str(user.role)
+    access = create_access_token(str(user.id), role_val, jti)
+    refresh = create_refresh_token(str(user.id), jti)
+    csrf = generate_csrf_token(jti)
+    create_session(db, str(user.id), jti, request)
+    set_auth_cookies(response, access, refresh, csrf)
+
+    log_security_event(
+        db, AuditActionType.LOGIN_SUCCESS,
+        actor_id=str(user.id), actor_email=user.email,
+        ip_address=request.client.host if request.client else None,
+        details={"totp_method": method},
+    )
+
+    return {
+        "access_token": access,
+        "token_type": "bearer",
+        "user": {
+            "id": str(user.id),
+            "email": user.email,
+            "role": role_val,
+            "name": user.name,
+        },
+    }

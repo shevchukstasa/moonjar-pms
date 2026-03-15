@@ -1,28 +1,115 @@
-"""Security router — audit log, sessions, IP allowlist.
+"""Security router — audit log, sessions, IP allowlist, TOTP 2FA management.
 See API_CONTRACTS.md for full specification.
 """
 
+import logging
+import secrets
 from uuid import UUID
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
+import pyotp
+from cryptography.fernet import Fernet
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sa_func
 
+from api.config import get_settings
 from api.database import get_db
-from api.auth import get_current_user
+from api.auth import get_current_user, log_security_event, hash_password, verify_password
 from api.roles import require_admin
-from api.models import SecurityAuditLog, ActiveSession, IpAllowlist, User
+from api.models import SecurityAuditLog, ActiveSession, IpAllowlist, User, TotpBackupCode
 from api.enums import AuditActionType, IpScope
 
 router = APIRouter()
+logger = logging.getLogger("moonjar.security")
 
+# ---------------------------------------------------------------------------
+# TOTP encryption helpers
+# ---------------------------------------------------------------------------
+
+def _get_fernet() -> Fernet:
+    """Build Fernet cipher from TOTP_ENCRYPTION_KEY.
+
+    The config value is a passphrase-style string. We pad/truncate it to
+    exactly 32 bytes then base64-encode, which is what Fernet expects.
+    """
+    import base64
+    key_bytes = get_settings().TOTP_ENCRYPTION_KEY.encode("utf-8")
+    # Pad or truncate to 32 bytes
+    key_bytes = key_bytes.ljust(32, b"\0")[:32]
+    return Fernet(base64.urlsafe_b64encode(key_bytes))
+
+
+def _encrypt_totp_secret(secret: str) -> str:
+    return _get_fernet().encrypt(secret.encode("utf-8")).decode("utf-8")
+
+
+def _decrypt_totp_secret(encrypted: str) -> str:
+    return _get_fernet().decrypt(encrypted.encode("utf-8")).decode("utf-8")
+
+
+def _generate_backup_codes(count: int = 10) -> list[str]:
+    """Generate human-readable backup codes (8 hex chars each)."""
+    return [secrets.token_hex(4).upper() for _ in range(count)]
+
+
+def _hash_backup_code(code: str) -> str:
+    """Hash a backup code using bcrypt (same as passwords)."""
+    return hash_password(code.upper())
+
+
+def _verify_backup_code(code: str, hashed: str) -> bool:
+    """Verify a backup code against its hash."""
+    return verify_password(code.upper(), hashed)
+
+
+def _verify_totp_or_backup(
+    db: Session,
+    user: User,
+    code: str,
+) -> tuple[bool, str]:
+    """Verify a code as either TOTP or backup code.
+
+    Returns (valid, method) where method is 'totp' or 'backup'.
+    """
+    # Try TOTP first
+    if user.totp_secret_encrypted:
+        try:
+            secret = _decrypt_totp_secret(user.totp_secret_encrypted)
+            totp = pyotp.TOTP(secret)
+            if totp.verify(code, valid_window=1):
+                return True, "totp"
+        except Exception:
+            pass
+
+    # Try backup codes
+    unused_codes = db.query(TotpBackupCode).filter(
+        TotpBackupCode.user_id == user.id,
+        TotpBackupCode.used.is_(False),
+    ).all()
+    for bc in unused_codes:
+        if _verify_backup_code(code, bc.code_hash):
+            bc.used = True
+            bc.used_at = datetime.now(timezone.utc)
+            db.flush()
+            return True, "backup"
+
+    return False, ""
+
+
+# ---------------------------------------------------------------------------
+# Pydantic schemas
+# ---------------------------------------------------------------------------
 
 class IpAllowlistCreate(BaseModel):
     cidr: str
     scope: str = "admin_panel"
     description: str = ""
+
+
+class TOTPCodeRequest(BaseModel):
+    code: str
 
 
 # --- Audit Log ---
@@ -287,3 +374,208 @@ async def remove_ip_from_allowlist(
     entry.is_active = False
     db.commit()
     return {"message": "IP removed from allowlist"}
+
+
+# --- TOTP 2FA Management ---
+
+@router.post("/totp/setup")
+async def totp_setup(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Begin TOTP setup: generate secret, provisioning URI, and backup codes.
+
+    Does NOT enable 2FA yet — the user must call /totp/verify with a valid
+    code from their authenticator app to confirm setup.
+    """
+    if current_user.totp_enabled:
+        raise HTTPException(400, "TOTP is already enabled. Disable it first to re-setup.")
+
+    # Generate TOTP secret
+    secret = pyotp.random_base32()
+    totp = pyotp.TOTP(secret)
+    provisioning_uri = totp.provisioning_uri(
+        name=current_user.email,
+        issuer_name="Moonjar PMS",
+    )
+
+    # Encrypt and store (not yet enabled — user must verify first)
+    current_user.totp_secret_encrypted = _encrypt_totp_secret(secret)
+    current_user.totp_enabled = False
+
+    # Delete any existing backup codes for this user
+    db.query(TotpBackupCode).filter(TotpBackupCode.user_id == current_user.id).delete()
+
+    # Generate and store backup codes
+    backup_codes = _generate_backup_codes(10)
+    for code in backup_codes:
+        db.add(TotpBackupCode(
+            user_id=current_user.id,
+            code_hash=_hash_backup_code(code),
+        ))
+
+    db.commit()
+
+    logger.info(f"TOTP setup initiated for user {current_user.email}")
+
+    return {
+        "provisioning_uri": provisioning_uri,
+        "backup_codes": backup_codes,
+        "message": "Scan the QR code with your authenticator app, then call /totp/verify with a code to activate.",
+    }
+
+
+@router.post("/totp/verify")
+async def totp_verify(
+    data: TOTPCodeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Verify a TOTP code to confirm setup and enable 2FA.
+
+    Must be called after /totp/setup. Accepts only a TOTP code (not backup codes)
+    to ensure the user has properly configured their authenticator app.
+    """
+    if current_user.totp_enabled:
+        raise HTTPException(400, "TOTP is already enabled")
+
+    if not current_user.totp_secret_encrypted:
+        raise HTTPException(400, "No TOTP setup in progress. Call /totp/setup first.")
+
+    # Verify the code against the stored secret (TOTP only, not backup)
+    try:
+        secret = _decrypt_totp_secret(current_user.totp_secret_encrypted)
+    except Exception:
+        raise HTTPException(500, "Failed to decrypt TOTP secret. Re-run /totp/setup.")
+
+    totp = pyotp.TOTP(secret)
+    if not totp.verify(data.code, valid_window=1):
+        raise HTTPException(400, "Invalid TOTP code. Check your authenticator app and try again.")
+
+    # Enable 2FA
+    current_user.totp_enabled = True
+    db.commit()
+
+    # Audit log
+    log_security_event(
+        db,
+        AuditActionType.TOTP_SETUP,
+        actor_id=str(current_user.id),
+        actor_email=current_user.email,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        target_entity="user",
+        target_id=str(current_user.id),
+    )
+
+    logger.info(f"TOTP enabled for user {current_user.email}")
+
+    return {"message": "Two-factor authentication enabled successfully"}
+
+
+@router.post("/totp/disable")
+async def totp_disable(
+    data: TOTPCodeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Disable TOTP 2FA. Requires a valid TOTP code or backup code."""
+    if not current_user.totp_enabled:
+        raise HTTPException(400, "TOTP is not enabled")
+
+    # Verify the code (TOTP or backup)
+    valid, method = _verify_totp_or_backup(db, current_user, data.code)
+    if not valid:
+        raise HTTPException(400, "Invalid code. Provide a valid TOTP or backup code.")
+
+    # Disable 2FA and clear secret
+    current_user.totp_enabled = False
+    current_user.totp_secret_encrypted = None
+
+    # Delete all backup codes
+    db.query(TotpBackupCode).filter(TotpBackupCode.user_id == current_user.id).delete()
+
+    db.commit()
+
+    # Audit log
+    log_security_event(
+        db,
+        AuditActionType.TOTP_DISABLE,
+        actor_id=str(current_user.id),
+        actor_email=current_user.email,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        target_entity="user",
+        target_id=str(current_user.id),
+        details={"method": method},
+    )
+
+    logger.info(f"TOTP disabled for user {current_user.email} (verified via {method})")
+
+    return {"message": "Two-factor authentication disabled"}
+
+
+@router.get("/totp/status")
+async def totp_status(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Check whether TOTP 2FA is enabled for the current user."""
+    backup_count = 0
+    if current_user.totp_enabled:
+        backup_count = db.query(TotpBackupCode).filter(
+            TotpBackupCode.user_id == current_user.id,
+            TotpBackupCode.used.is_(False),
+        ).count()
+
+    return {
+        "totp_enabled": current_user.totp_enabled,
+        "backup_codes_remaining": backup_count,
+    }
+
+
+@router.post("/totp/backup-codes/regenerate")
+async def totp_regenerate_backup_codes(
+    data: TOTPCodeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Regenerate backup codes. Requires a valid TOTP code. Old codes are invalidated."""
+    if not current_user.totp_enabled:
+        raise HTTPException(400, "TOTP is not enabled")
+
+    # Verify with TOTP code only (not backup) to prevent chicken-and-egg
+    if not current_user.totp_secret_encrypted:
+        raise HTTPException(500, "TOTP secret missing")
+    try:
+        secret = _decrypt_totp_secret(current_user.totp_secret_encrypted)
+    except Exception:
+        raise HTTPException(500, "Failed to decrypt TOTP secret")
+
+    totp = pyotp.TOTP(secret)
+    if not totp.verify(data.code, valid_window=1):
+        raise HTTPException(400, "Invalid TOTP code")
+
+    # Delete old backup codes
+    db.query(TotpBackupCode).filter(TotpBackupCode.user_id == current_user.id).delete()
+
+    # Generate new ones
+    backup_codes = _generate_backup_codes(10)
+    for code in backup_codes:
+        db.add(TotpBackupCode(
+            user_id=current_user.id,
+            code_hash=_hash_backup_code(code),
+        ))
+
+    db.commit()
+
+    logger.info(f"Backup codes regenerated for user {current_user.email}")
+
+    return {
+        "backup_codes": backup_codes,
+        "message": "New backup codes generated. Previous codes are now invalid.",
+    }

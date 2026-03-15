@@ -359,6 +359,15 @@ class IpScope(str, Enum):
     WEBHOOK = 'webhook'
     ALL = 'all'
 
+class BackupStatus(str, Enum):
+    IN_PROGRESS = 'in_progress'
+    SUCCESS = 'success'
+    FAILED = 'failed'
+
+class BackupType(str, Enum):
+    SCHEDULED = 'scheduled'
+    MANUAL = 'manual'
+
 
 # --- Stock Collection Detection ---
 

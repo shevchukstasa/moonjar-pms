@@ -1,0 +1,5 @@
+# Moonjar PMS — Nixpacks configuration for Railway
+# Ensures postgresql-client is available for pg_dump (used by scheduled backups)
+
+[phases.setup]
+aptPkgs = ["postgresql-client"]

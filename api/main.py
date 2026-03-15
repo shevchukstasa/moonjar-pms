@@ -314,6 +314,19 @@ def _ensure_schema():
                 UNIQUE(factory_id, stage)
             )
         """))
+        # Backup logs — tracks backup execution and status
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS backup_logs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                completed_at TIMESTAMPTZ,
+                status VARCHAR(20) NOT NULL DEFAULT 'in_progress',
+                file_size_bytes BIGINT,
+                s3_key VARCHAR(500),
+                error_message TEXT,
+                backup_type VARCHAR(20) NOT NULL DEFAULT 'scheduled'
+            )
+        """))
 
     _run_section("tables", _create_tables)
 

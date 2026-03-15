@@ -564,18 +564,18 @@ def _ensure_schema():
     def _seed_temperature_groups(conn):
         """Seed 2 default firing temperature groups: Low and High."""
         groups = [
-            ("Low Temperature", 800, 1050, "Glazes and bodies fired at lower temperatures", 0),
-            ("High Temperature", 1050, 1300, "Stoneware and high-fire glazes", 1),
+            ("Low Temperature", 925, "Glazes and bodies fired at lower temperatures", 0),
+            ("High Temperature", 1175, "Stoneware and high-fire glazes", 1),
         ]
-        for name, min_t, max_t, desc, order in groups:
+        for name, temp, desc, order in groups:
             conn.execute(text(
                 "INSERT INTO firing_temperature_groups "
-                "(id, name, min_temperature, max_temperature, description, display_order) "
-                "SELECT gen_random_uuid(), :name, :min_t, :max_t, :desc, :ord "
+                "(id, name, temperature, min_temperature, max_temperature, description, display_order) "
+                "SELECT gen_random_uuid(), :name, :temp, :temp, :temp, :desc, :ord "
                 "WHERE NOT EXISTS ("
                 "  SELECT 1 FROM firing_temperature_groups WHERE name = :name"
                 ")"
-            ), {"name": name, "min_t": min_t, "max_t": max_t, "desc": desc, "ord": order})
+            ), {"name": name, "temp": temp, "desc": desc, "ord": order})
 
     _run_section("temperature_groups", _seed_temperature_groups)
 
@@ -1340,27 +1340,31 @@ def _ensure_schema():
     # --- Section 18: Size resolution — add size_id FK + enum values ---
     def _size_resolution_migration(conn):
         """Add size_id FK to order_positions, new enum values for size resolution."""
-        # Add enum values
+        # Add enum values (only if enum types exist — they're created by SQLAlchemy table creation)
         conn.execute(text("""
             DO $$ BEGIN
-                ALTER TYPE positionstatus ADD VALUE IF NOT EXISTS 'awaiting_size_confirmation';
+                IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'positionstatus') THEN
+                    EXECUTE 'ALTER TYPE positionstatus ADD VALUE IF NOT EXISTS ''awaiting_size_confirmation''';
+                END IF;
             EXCEPTION WHEN duplicate_object THEN NULL;
             END $$;
         """))
         conn.execute(text("""
             DO $$ BEGIN
-                ALTER TYPE tasktype ADD VALUE IF NOT EXISTS 'size_resolution';
+                IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tasktype') THEN
+                    EXECUTE 'ALTER TYPE tasktype ADD VALUE IF NOT EXISTS ''size_resolution''';
+                END IF;
             EXCEPTION WHEN duplicate_object THEN NULL;
             END $$;
         """))
-        # Add size_id column
+        # Add size_id column (only if table exists)
         conn.execute(text("""
-            ALTER TABLE order_positions
-            ADD COLUMN IF NOT EXISTS size_id UUID REFERENCES sizes(id);
-        """))
-        conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_order_positions_size_id
-            ON order_positions(size_id);
+            DO $$ BEGIN
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'order_positions') THEN
+                    EXECUTE 'ALTER TABLE order_positions ADD COLUMN IF NOT EXISTS size_id UUID REFERENCES sizes(id)';
+                    EXECUTE 'CREATE INDEX IF NOT EXISTS ix_order_positions_size_id ON order_positions(size_id)';
+                END IF;
+            END $$;
         """))
 
     _run_section("size_resolution_migration", _size_resolution_migration)
@@ -1482,6 +1486,32 @@ def _ensure_schema():
             logger.info("_cleanup_zombie_materials: no orphan materials found")
 
     _run_section("cleanup_zombie_materials", _cleanup_zombie_materials)
+
+    # --- Section 21: Temperature groups — replace min/max with single temperature ---
+    def _temp_groups_single_temperature(conn):
+        """Add 'temperature' column, populate from avg(min,max), remove NOT NULL from old cols."""
+        conn.execute(text("""
+            ALTER TABLE firing_temperature_groups
+            ADD COLUMN IF NOT EXISTS temperature INTEGER;
+        """))
+        # Populate from average of existing min/max (for existing rows)
+        conn.execute(text("""
+            UPDATE firing_temperature_groups
+            SET temperature = ROUND((COALESCE(min_temperature, 0) + COALESCE(max_temperature, 0)) / 2.0)
+            WHERE temperature IS NULL
+              AND (min_temperature IS NOT NULL OR max_temperature IS NOT NULL);
+        """))
+        # Make min/max nullable (they were NOT NULL before)
+        conn.execute(text("""
+            ALTER TABLE firing_temperature_groups
+            ALTER COLUMN min_temperature DROP NOT NULL;
+        """))
+        conn.execute(text("""
+            ALTER TABLE firing_temperature_groups
+            ALTER COLUMN max_temperature DROP NOT NULL;
+        """))
+
+    _run_section("temp_groups_single_temperature", _temp_groups_single_temperature)
 
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):

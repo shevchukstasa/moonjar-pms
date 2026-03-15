@@ -3,8 +3,9 @@ import apiClient from './client';
 export interface TemperatureGroupInfo {
   id: string;
   name: string;
-  min_temperature: number;
-  max_temperature: number;
+  temperature: number;
+  min_temperature?: number;
+  max_temperature?: number;
   description: string | null;
   is_default: boolean;
 }

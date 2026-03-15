@@ -20,8 +20,7 @@ interface RecipeLink {
 interface TemperatureGroup {
   id: string;
   name: string;
-  min_temperature: number;
-  max_temperature: number;
+  temperature: number;
   description: string | null;
   is_active: boolean;
   display_order: number;
@@ -32,16 +31,14 @@ interface TemperatureGroup {
 
 interface FormData {
   name: string;
-  min_temperature: number;
-  max_temperature: number;
+  temperature: number;
   description: string;
   display_order: number;
 }
 
 const emptyForm: FormData = {
   name: '',
-  min_temperature: 800,
-  max_temperature: 1050,
+  temperature: 1012,
   description: '',
   display_order: 0,
 };
@@ -90,8 +87,7 @@ export default function AdminTemperatureGroupsPage() {
   const startEdit = (group: TemperatureGroup) => {
     setForm({
       name: group.name,
-      min_temperature: group.min_temperature,
-      max_temperature: group.max_temperature,
+      temperature: group.temperature,
       description: group.description || '',
       display_order: group.display_order,
     });
@@ -110,8 +106,8 @@ export default function AdminTemperatureGroupsPage() {
       setError('Name is required');
       return;
     }
-    if (form.min_temperature >= form.max_temperature) {
-      setError('Min temperature must be less than max');
+    if (!form.temperature || form.temperature <= 0) {
+      setError('Temperature is required');
       return;
     }
     if (editing === 'new') {
@@ -207,28 +203,16 @@ export default function AdminTemperatureGroupsPage() {
                   <div className="flex items-center gap-2 mb-2">
                     <Thermometer className="h-5 w-5 text-orange-500" />
                     <h3 className="text-base font-semibold text-gray-900">{group.name}</h3>
+                    <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-sm font-semibold text-orange-800">
+                      {group.temperature} °C
+                    </span>
                     {!group.is_active && (
                       <Badge status="inactive" label="Inactive" />
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="text-gray-500 text-xs block">Temperature Range</span>
-                      <span className="font-medium text-gray-900">
-                        {group.min_temperature} – {group.max_temperature} °C
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500 text-xs block">Display Order</span>
-                      <span className="font-medium text-gray-900">
-                        {group.display_order}
-                      </span>
-                    </div>
-                  </div>
-
                   {group.description && (
-                    <p className="text-xs text-gray-400 mt-2">{group.description}</p>
+                    <p className="text-xs text-gray-400 mt-1">{group.description}</p>
                   )}
 
                   {/* Linked Recipes */}
@@ -267,7 +251,7 @@ export default function AdminTemperatureGroupsPage() {
 
       {!isLoading && (!groups || groups.length === 0) && (
         <div className="text-center text-gray-400 py-8">
-          No temperature groups configured. Click "Add Group" to create one.
+          No temperature groups configured. Click &quot;Add Group&quot; to create one.
         </div>
       )}
     </div>
@@ -287,7 +271,7 @@ function GroupForm({
     <div className="space-y-3">
       {error && <p className="text-xs text-red-500">{error}</p>}
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Name *</label>
           <input
@@ -299,32 +283,21 @@ function GroupForm({
           />
         </div>
         <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Temperature (°C) *</label>
+          <input
+            type="number"
+            value={form.temperature}
+            onChange={(e) => setForm({ ...form, temperature: parseInt(e.target.value) || 0 })}
+            className="w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+            placeholder="e.g. 1012"
+          />
+        </div>
+        <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Display Order</label>
           <input
             type="number"
             value={form.display_order}
             onChange={(e) => setForm({ ...form, display_order: parseInt(e.target.value) || 0 })}
-            className="w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Min Temperature (°C) *</label>
-          <input
-            type="number"
-            value={form.min_temperature}
-            onChange={(e) => setForm({ ...form, min_temperature: parseInt(e.target.value) || 0 })}
-            className="w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Max Temperature (°C) *</label>
-          <input
-            type="number"
-            value={form.max_temperature}
-            onChange={(e) => setForm({ ...form, max_temperature: parseInt(e.target.value) || 0 })}
             className="w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
           />
         </div>

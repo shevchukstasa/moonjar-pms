@@ -92,7 +92,7 @@ export default function AdminRecipesPage() {
   });
 
   // Temperature groups for recipe assignment
-  interface TempGroupOption { id: string; name: string; min_temperature: number; max_temperature: number; thermocouple: string | null; control_device: string | null; }
+  interface TempGroupOption { id: string; name: string; temperature: number; thermocouple: string | null; control_device: string | null; }
   const { data: tempGroups } = useQuery<TempGroupOption[]>({
     queryKey: ['temperature-groups'],
     queryFn: () => apiClient.get('/reference/temperature-groups').then((r) => r.data),
@@ -318,10 +318,10 @@ export default function AdminRecipesPage() {
         return (
           <div className="flex flex-col gap-0.5">
             {groups.map((g: TemperatureGroupInfo) => (
-              <span key={g.id} className="inline-flex items-center gap-1 text-xs" title={g.description ?? `${g.min_temperature}–${g.max_temperature}°C`}>
+              <span key={g.id} className="inline-flex items-center gap-1 text-xs" title={g.description ?? `${g.temperature}°C`}>
                 <Thermometer className="h-3 w-3 text-orange-500" />
                 <span className="font-medium">{g.name}</span>
-                <span className="text-gray-400">({g.min_temperature}–{g.max_temperature}°C)</span>
+                <span className="text-gray-400">({g.temperature}°C)</span>
               </span>
             ))}
           </div>
@@ -437,7 +437,7 @@ export default function AdminRecipesPage() {
               <option value="">-- Not assigned --</option>
               {(tempGroups || []).map((g) => (
                 <option key={g.id} value={g.id}>
-                  {g.name} ({g.min_temperature}–{g.max_temperature}°C)
+                  {g.name} ({g.temperature}°C)
                 </option>
               ))}
             </select>

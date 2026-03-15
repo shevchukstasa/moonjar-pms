@@ -146,21 +146,31 @@ def get_firing_profile_for_stage(
 def get_temperature_group(
     db: Session,
     target_temperature: int,
+    max_delta: int = 50,
 ) -> Optional[FiringTemperatureGroup]:
     """
-    Find which named temperature group a firing temperature falls into.
-    Returns the first active group whose [min, max] range contains the temperature.
+    Find the closest active temperature group for a given firing temperature.
+    Matches if the group's working temperature is within ±max_delta of the target.
+    Returns the closest match by temperature distance, then display_order.
     """
-    return (
+    from sqlalchemy import func as sa_func
+
+    groups = (
         db.query(FiringTemperatureGroup)
         .filter(
-            FiringTemperatureGroup.min_temperature <= target_temperature,
-            FiringTemperatureGroup.max_temperature >= target_temperature,
             FiringTemperatureGroup.is_active.is_(True),
+            FiringTemperatureGroup.temperature.isnot(None),
         )
-        .order_by(FiringTemperatureGroup.display_order)
-        .first()
+        .all()
     )
+    best = None
+    best_delta = max_delta + 1
+    for g in groups:
+        delta = abs(g.temperature - target_temperature)
+        if delta <= max_delta and delta < best_delta:
+            best = g
+            best_delta = delta
+    return best
 
 
 def get_temperature_group_recipes(

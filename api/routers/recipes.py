@@ -59,8 +59,9 @@ def _get_temperature_groups_for_recipe(db: Session, recipe_id: UUID) -> list[dic
             result.append({
                 "id": str(group.id),
                 "name": group.name,
-                "min_temperature": group.min_temperature,
-                "max_temperature": group.max_temperature,
+                "temperature": group.temperature,
+                "min_temperature": group.min_temperature,  # deprecated
+                "max_temperature": group.max_temperature,  # deprecated
                 "description": group.description,
                 "is_default": link.is_default,
             })

@@ -345,8 +345,7 @@ async def list_bowl_shapes(
 
 class TemperatureGroupCreate(BaseModel):
     name: str = Field(..., max_length=100, description="Group name, e.g. 'Low Temperature'")
-    min_temperature: int = Field(..., ge=0, le=2000, description="Min temperature in °C")
-    max_temperature: int = Field(..., ge=0, le=2000, description="Max temperature in °C")
+    temperature: int = Field(..., ge=0, le=2000, description="Working temperature in °C")
     description: Optional[str] = None
     thermocouple: Optional[str] = Field(None, description="chinese | indonesia_manufacture")
     control_cable: Optional[str] = Field(None, description="indonesia_manufacture")
@@ -356,8 +355,7 @@ class TemperatureGroupCreate(BaseModel):
 
 class TemperatureGroupUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
-    min_temperature: Optional[int] = Field(None, ge=0, le=2000)
-    max_temperature: Optional[int] = Field(None, ge=0, le=2000)
+    temperature: Optional[int] = Field(None, ge=0, le=2000)
     description: Optional[str] = None
     thermocouple: Optional[str] = None
     control_cable: Optional[str] = None
@@ -376,8 +374,9 @@ def _serialize_temperature_group(group: FiringTemperatureGroup) -> dict:
     return {
         "id": str(group.id),
         "name": group.name,
-        "min_temperature": group.min_temperature,
-        "max_temperature": group.max_temperature,
+        "temperature": group.temperature,
+        "min_temperature": group.min_temperature,  # deprecated, kept for compat
+        "max_temperature": group.max_temperature,  # deprecated, kept for compat
         "description": group.description,
         "thermocouple": group.thermocouple,
         "control_cable": group.control_cable,
@@ -422,14 +421,12 @@ async def create_temperature_group(
     """Create a new firing temperature group. PM/Admin only."""
     import uuid
 
-    if body.min_temperature >= body.max_temperature:
-        raise HTTPException(400, "min_temperature must be less than max_temperature")
-
     group = FiringTemperatureGroup(
         id=uuid.uuid4(),
         name=body.name,
-        min_temperature=body.min_temperature,
-        max_temperature=body.max_temperature,
+        temperature=body.temperature,
+        min_temperature=body.temperature,  # deprecated compat
+        max_temperature=body.temperature,  # deprecated compat
         description=body.description,
         thermocouple=body.thermocouple,
         control_cable=body.control_cable,
@@ -460,10 +457,10 @@ async def update_temperature_group(
 
     if body.name is not None:
         group.name = body.name
-    if body.min_temperature is not None:
-        group.min_temperature = body.min_temperature
-    if body.max_temperature is not None:
-        group.max_temperature = body.max_temperature
+    if body.temperature is not None:
+        group.temperature = body.temperature
+        group.min_temperature = body.temperature  # deprecated compat
+        group.max_temperature = body.temperature  # deprecated compat
     if body.description is not None:
         group.description = body.description
     if body.thermocouple is not None:
@@ -476,10 +473,6 @@ async def update_temperature_group(
         group.is_active = body.is_active
     if body.display_order is not None:
         group.display_order = body.display_order
-
-    # Validate range after updates
-    if group.min_temperature >= group.max_temperature:
-        raise HTTPException(400, "min_temperature must be less than max_temperature")
 
     group.updated_at = func.now()
     db.commit()
@@ -919,7 +912,7 @@ _BULK_ENTITY_CONFIG: dict = {
     "recipes":               {"model": Recipe,            "unique": ["name"],  "fields": {"name": str, "color_collection": str, "recipe_type": str, "specific_gravity": float, "consumption_spray_ml_per_sqm": float, "consumption_brush_ml_per_sqm": float, "is_default": bool, "is_active": bool}},
     "suppliers":             {"model": Supplier,          "unique": ["name"],  "fields": {"name": str, "contact_person": str, "phone": str, "email": str, "address": str, "default_lead_time_days": int, "notes": str, "is_active": bool}},
     "sizes":                 {"model": Size,              "unique": ["name"],  "fields": {"name": str, "width_mm": int, "height_mm": int, "thickness_mm": int, "shape": str, "is_custom": bool}},
-    "temperature_groups":    {"model": FiringTemperatureGroup, "unique": ["name"], "fields": {"name": str, "min_temperature": int, "max_temperature": int, "description": str, "thermocouple": str, "control_cable": str, "control_device": str, "display_order": int}},
+    "temperature_groups":    {"model": FiringTemperatureGroup, "unique": ["name"], "fields": {"name": str, "temperature": int, "description": str, "thermocouple": str, "control_cable": str, "control_device": str, "display_order": int}},
     "warehouse_sections":    {"model": WarehouseSection,  "unique": ["code"],  "fields": {"name": str, "code": str, "description": str, "warehouse_type": str, "display_order": int, "is_default": bool, "is_active": bool}},
     "materials":             {"model": Material,          "unique": ["name"],  "fields": {"name": str, "material_type": str, "unit": str}},
 }

@@ -1749,8 +1749,9 @@ class FiringTemperatureGroup(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(sa.String(100), nullable=False)           # e.g. "Low Temperature", "High Temperature"
-    min_temperature = Column(sa.Integer, nullable=False)     # e.g. 800
-    max_temperature = Column(sa.Integer, nullable=False)     # e.g. 1050
+    temperature = Column(sa.Integer, nullable=False)        # working temperature in °C, e.g. 1012
+    min_temperature = Column(sa.Integer)                    # DEPRECATED — kept for migration compatibility
+    max_temperature = Column(sa.Integer)                    # DEPRECATED — kept for migration compatibility
     description = Column(sa.Text)
     # Equipment specifications (DEPRECATED — equipment now lives on Resource/Kiln)
     thermocouple = Column(sa.String(50))       # "chinese" | "indonesia_manufacture"

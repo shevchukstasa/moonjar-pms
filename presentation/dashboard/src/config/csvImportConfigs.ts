@@ -143,8 +143,7 @@ export const CSV_CONFIGS: Record<string, CsvImportConfig> = {
     entityLabel: 'Temperature Groups',
     columns: [
       { key: 'name', header: 'name', required: true, type: 'string', example: 'Low Temperature' },
-      { key: 'min_temperature', header: 'min_temperature', required: true, type: 'number', example: '800' },
-      { key: 'max_temperature', header: 'max_temperature', required: true, type: 'number', example: '1050' },
+      { key: 'temperature', header: 'temperature', required: true, type: 'number', example: '925' },
       { key: 'description', header: 'description', required: false, type: 'string', example: 'Earthenware range' },
       { key: 'thermocouple', header: 'thermocouple', required: false, type: 'string', example: 'chinese' },
       { key: 'control_cable', header: 'control_cable', required: false, type: 'string', example: 'indonesia_manufacture' },

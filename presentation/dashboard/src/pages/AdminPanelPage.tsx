@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useFactories, type Factory } from '@/hooks/useFactories';
 import { useUsers } from '@/hooks/useUsers';
-import { useBotStatus, useTestChat } from '@/hooks/useTelegramBot';
+import { useBotStatus, useRefreshBotStatus, useTestChat, useRecentChats } from '@/hooks/useTelegramBot';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DataTable } from '@/components/ui/Table';
@@ -24,7 +24,10 @@ export default function AdminPanelPage() {
   const { data: factoriesData, isLoading: factoriesLoading, isError: factoriesError } = useFactories();
   const { data: usersData, isLoading: usersLoading, isError: usersError } = useUsers({ per_page: 1 });
   const { data: botStatus, isLoading: botLoading, isError: botError } = useBotStatus();
+  const refreshBot = useRefreshBotStatus();
   const testChat = useTestChat();
+  const recentChats = useRecentChats();
+  const [showRecentChats, setShowRecentChats] = useState(false);
   const [factoryDialogOpen, setFactoryDialogOpen] = useState(false);
   const [editFactory, setEditFactory] = useState<Factory | null>(null);
   const [securityTab, setSecurityTab] = useState('audit');
@@ -248,9 +251,58 @@ export default function AdminPanelPage() {
             </svg>
           </span>
         </div>
-        <p className="mt-3 text-xs text-gray-400">
-          Bot token is managed via environment variables. Contact DevOps to change.
-        </p>
+        <div className="mt-3 flex items-center justify-between">
+          <p className="text-xs text-gray-400">
+            Bot token is managed via environment variables. Contact DevOps to change.
+          </p>
+          <div className="flex gap-2">
+            <Button
+              type="button" variant="ghost" size="sm"
+              disabled={refreshBot.isPending}
+              onClick={() => refreshBot.mutate()}
+              className="text-xs"
+            >
+              {refreshBot.isPending ? <Spinner className="h-3 w-3" /> : '↻ Refresh'}
+            </Button>
+            <Button
+              type="button" variant="ghost" size="sm"
+              disabled={recentChats.isPending}
+              onClick={() => { recentChats.mutate(); setShowRecentChats(true); }}
+              className="text-xs"
+            >
+              {recentChats.isPending ? <Spinner className="h-3 w-3" /> : '🔍 Discover Chat IDs'}
+            </Button>
+          </div>
+        </div>
+        {/* Recent chats discovery panel */}
+        {showRecentChats && (
+          <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-xs font-semibold text-blue-800">Recent Chats (from bot updates)</h4>
+              <button onClick={() => setShowRecentChats(false)} className="text-xs text-blue-500 hover:text-blue-700">✕</button>
+            </div>
+            {recentChats.isPending ? (
+              <Spinner className="h-4 w-4" />
+            ) : recentChats.data?.error ? (
+              <p className="text-xs text-red-500">{recentChats.data.error}</p>
+            ) : recentChats.data?.chats && recentChats.data.chats.length > 0 ? (
+              <div className="space-y-1">
+                {recentChats.data.chats.map((c) => (
+                  <div key={c.chat_id} className="flex items-center gap-3 rounded bg-white px-2 py-1 text-xs">
+                    <code className="font-mono font-bold text-blue-700">{c.chat_id}</code>
+                    <span className="text-gray-700">{c.title}</span>
+                    <span className="rounded bg-gray-100 px-1 text-[10px] text-gray-500">{c.type}</span>
+                  </div>
+                ))}
+                <p className="mt-1 text-[10px] text-blue-600">Copy the chat ID and paste it into the factory's Telegram settings.</p>
+              </div>
+            ) : (
+              <p className="text-xs text-blue-700">
+                No recent messages found. Write something in the group where the bot is added, then click "Discover" again.
+              </p>
+            )}
+          </div>
+        )}
       </Card>
 
       {/* Factories Section */}

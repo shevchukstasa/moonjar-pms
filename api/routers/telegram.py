@@ -1,6 +1,7 @@
 """Telegram bot router — bot status, chat testing, webhook, subscriptions."""
 
 import logging
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -18,24 +19,44 @@ router = APIRouter()
 
 
 # ────────────────────────────────────────────────────────────────
+# In-memory cache for bot status (avoids repeated Telegram API calls)
+# ────────────────────────────────────────────────────────────────
+_bot_status_cache: dict | None = None
+_bot_status_cached_at: float = 0
+_BOT_STATUS_TTL = 300  # 5 minutes
+
+
+# ────────────────────────────────────────────────────────────────
 # Bot status & testing (admin-only)
 # ────────────────────────────────────────────────────────────────
 
 @router.get("/bot-status")
-async def get_bot_status(current_user=Depends(require_admin)):
+async def get_bot_status(
+    force: bool = False,
+    current_user=Depends(require_admin),
+):
     """
     Check Telegram bot connection status.
-    Calls Telegram API getMe to verify the bot token is valid.
-    Retries once on timeout.
+    Results are cached for 5 minutes to avoid slow API calls on every page load.
+    Pass ?force=true to bypass the cache.
     """
+    global _bot_status_cache, _bot_status_cached_at
+
+    # Return cached result if still valid
+    if not force and _bot_status_cache and (time.time() - _bot_status_cached_at < _BOT_STATUS_TTL):
+        return _bot_status_cache
+
     settings = get_settings()
     token = settings.TELEGRAM_BOT_TOKEN
 
     if not token:
-        return {
+        result = {
             "connected": False,
             "message": "Bot token not configured. Set TELEGRAM_BOT_TOKEN environment variable.",
         }
+        _bot_status_cache = result
+        _bot_status_cached_at = time.time()
+        return result
 
     import httpx
 
@@ -48,35 +69,44 @@ async def get_bot_status(current_user=Depends(require_admin)):
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
                     f"https://api.telegram.org/bot{token}/getMe",
-                    timeout=15.0,
+                    timeout=8.0,
                 )
 
             if resp.status_code == 401:
                 logger.warning(f"Telegram bot token invalid (401): {masked}")
-                return {
+                result = {
                     "connected": False,
                     "error": f"Invalid bot token ({masked}). Check TELEGRAM_BOT_TOKEN.",
                 }
+                _bot_status_cache = result
+                _bot_status_cached_at = time.time()
+                return result
 
             data = resp.json()
 
             if data.get("ok"):
                 bot = data["result"]
                 logger.info(f"Telegram bot connected: @{bot.get('username', '')}")
-                return {
+                result = {
                     "connected": True,
                     "bot_username": f"@{bot.get('username', '')}",
                     "bot_name": bot.get("first_name", ""),
                     "bot_id": bot.get("id"),
                     "owner_chat_configured": bool(settings.TELEGRAM_OWNER_CHAT_ID),
                 }
+                _bot_status_cache = result
+                _bot_status_cached_at = time.time()
+                return result
             else:
                 err_desc = data.get("description", "Unknown error from Telegram API")
                 logger.warning(f"Telegram getMe error: {err_desc}")
-                return {
+                result = {
                     "connected": False,
                     "error": err_desc,
                 }
+                _bot_status_cache = result
+                _bot_status_cached_at = time.time()
+                return result
         except httpx.TimeoutException:
             last_error = f"Telegram API timeout (attempt {attempt + 1}/2, token: {masked})"
             logger.warning(last_error)
@@ -90,7 +120,16 @@ async def get_bot_status(current_user=Depends(require_admin)):
             logger.warning(last_error)
             break
 
-    return {"connected": False, "error": last_error or "Failed to check bot status"}
+    # On total failure: return stale cache if available (better than empty spinner)
+    if _bot_status_cache and _bot_status_cache.get("connected"):
+        logger.info("Returning stale bot-status cache after timeout")
+        return {**_bot_status_cache, "cached": True}
+
+    result = {"connected": False, "error": last_error or "Failed to check bot status"}
+    # Cache failures for 60s (shorter TTL so we retry sooner)
+    _bot_status_cache = result
+    _bot_status_cached_at = time.time() - _BOT_STATUS_TTL + 60
+    return result
 
 
 class OwnerChatRequest(BaseModel):
@@ -174,6 +213,7 @@ async def test_chat(
 ):
     """
     Send a test message to a Telegram chat to verify the chat ID is correct.
+    Includes bot identity in error messages so user can verify it's the right bot.
     """
     settings = get_settings()
     token = settings.TELEGRAM_BOT_TOKEN
@@ -182,8 +222,14 @@ async def test_chat(
         raise HTTPException(400, "Bot token not configured")
 
     import httpx
+
+    # Get bot username for diagnostics (from cache if available)
+    bot_hint = ""
+    if _bot_status_cache and _bot_status_cache.get("bot_username"):
+        bot_hint = f" (bot: {_bot_status_cache['bot_username']})"
+
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
                 json={
@@ -191,7 +237,6 @@ async def test_chat(
                     "text": "✅ *Moonjar PMS connected!*\nThis chat is now linked to your production system.",
                     "parse_mode": "Markdown",
                 },
-                timeout=10.0,
             )
             result = resp.json()
 
@@ -204,12 +249,98 @@ async def test_chat(
             }
         else:
             error = result.get("description", "Unknown error")
+            # Add bot identity hint to common errors
+            if "not a member" in error.lower() or "forbidden" in error.lower():
+                error = f"{error}{bot_hint}. Make sure THIS bot is added to the group as admin."
+            elif "chat not found" in error.lower():
+                error = f"{error}. Check the chat ID — use 'Discover Chat IDs' button to find correct IDs."
             return {"success": False, "error": error}
     except httpx.TimeoutException:
-        return {"success": False, "error": "Telegram API timeout"}
+        return {"success": False, "error": f"Telegram API timeout{bot_hint}"}
     except Exception as e:
         logger.warning(f"Telegram test-chat failed: {e}")
-        return {"success": False, "error": "Failed to send test message"}
+        return {"success": False, "error": f"Failed to send test message: {e}"}
+
+
+# ────────────────────────────────────────────────────────────────
+# Discover chat IDs from recent bot messages (admin-only)
+# ────────────────────────────────────────────────────────────────
+
+@router.get("/recent-chats")
+async def get_recent_chats(current_user=Depends(require_admin)):
+    """
+    Fetch recent messages received by the bot via getUpdates.
+    Returns unique chats with their IDs and titles — useful for discovering
+    the correct chat ID when configuring factory Telegram integration.
+
+    NOTE: This only works if the webhook is NOT set. If webhook is active,
+    Telegram sends updates there instead. We temporarily delete+restore webhook.
+    """
+    settings = get_settings()
+    token = settings.TELEGRAM_BOT_TOKEN
+
+    if not token:
+        return {"chats": [], "error": "Bot token not configured"}
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Check if webhook is set
+            wh_resp = await client.get(f"https://api.telegram.org/bot{token}/getWebhookInfo")
+            wh_data = wh_resp.json()
+            webhook_url = wh_data.get("result", {}).get("url", "")
+
+            if webhook_url:
+                # Temporarily remove webhook to allow getUpdates
+                await client.post(f"https://api.telegram.org/bot{token}/deleteWebhook")
+
+            # Fetch recent updates
+            resp = await client.get(
+                f"https://api.telegram.org/bot{token}/getUpdates",
+                params={"limit": 50, "timeout": 1},
+            )
+            result = resp.json()
+
+            # Restore webhook if it was set
+            if webhook_url:
+                await client.post(
+                    f"https://api.telegram.org/bot{token}/setWebhook",
+                    json={"url": webhook_url},
+                )
+
+        if not result.get("ok"):
+            return {"chats": [], "error": result.get("description", "Failed to get updates")}
+
+        # Extract unique chats
+        seen_ids: set[str] = set()
+        chats = []
+        for update in result.get("result", []):
+            msg = update.get("message") or update.get("my_chat_member", {}).get("chat")
+            if not msg:
+                continue
+            chat = msg.get("chat") if "chat" in msg else msg
+            chat_id = str(chat.get("id", ""))
+            if chat_id and chat_id not in seen_ids:
+                seen_ids.add(chat_id)
+                chats.append({
+                    "chat_id": chat_id,
+                    "title": chat.get("title") or chat.get("first_name", ""),
+                    "type": chat.get("type", ""),
+                    "username": chat.get("username"),
+                })
+
+        return {
+            "chats": chats,
+            "total_updates": len(result.get("result", [])),
+            "hint": "Write a message in the group where the bot is added, then call this endpoint again."
+                    if not chats else None,
+        }
+    except httpx.TimeoutException:
+        return {"chats": [], "error": "Telegram API timeout"}
+    except Exception as e:
+        logger.warning(f"Telegram recent-chats failed: {e}")
+        return {"chats": [], "error": str(e)}
 
 
 # ────────────────────────────────────────────────────────────────

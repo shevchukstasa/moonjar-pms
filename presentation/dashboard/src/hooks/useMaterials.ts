@@ -47,8 +47,19 @@ export function useCreateMaterial() {
 export function useUpdateMaterial() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
-      materialsApi.update(id, data),
+    mutationFn: ({ id, data, factoryId }: { id: string; data: Record<string, unknown>; factoryId?: string }) =>
+      materialsApi.update(id, data, factoryId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['materials'] });
+    },
+  });
+}
+
+export function useDeleteMaterial() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, factoryId }: { id: string; factoryId?: string }) =>
+      materialsApi.delete(id, factoryId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['materials'] });
     },

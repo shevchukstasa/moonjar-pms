@@ -122,6 +122,7 @@ class MaterialCreateInput(BaseModel):
 class MaterialUpdateInput(BaseModel):
     name: Optional[str] = None
     subgroup_id: Optional[UUID] = None
+    balance: Optional[float] = None
     min_balance: Optional[float] = None
     min_balance_auto: Optional[bool] = None
     unit: Optional[str] = None
@@ -904,7 +905,7 @@ async def update_material(
     # Catalog-level fields
     catalog_fields = {'name', 'unit', 'supplier_id'}
     # Stock-level fields
-    stock_fields = {'min_balance', 'min_balance_auto', 'warehouse_section'}
+    stock_fields = {'balance', 'min_balance', 'min_balance_auto', 'warehouse_section'}
 
     for k, v in updates.items():
         if k in catalog_fields:
@@ -928,7 +929,7 @@ async def update_material(
 
         if stock:
             for k, v in stock_updates.items():
-                if k == "min_balance" and v is not None:
+                if k in ("balance", "min_balance") and v is not None:
                     setattr(stock, k, Decimal(str(v)))
                 else:
                     setattr(stock, k, v)
@@ -939,6 +940,36 @@ async def update_material(
     if stock:
         db.refresh(stock)
     return _serialize_material(mat, stock, db)
+
+
+@router.delete("/{material_id}")
+async def delete_material(
+    material_id: UUID,
+    factory_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Delete a material and its stock records. Owner/Admin only."""
+    mat = db.query(Material).filter(Material.id == material_id).first()
+    if not mat:
+        raise HTTPException(404, "Material not found")
+
+    # Delete stock records (optionally only for specific factory)
+    stock_query = db.query(MaterialStock).filter(MaterialStock.material_id == material_id)
+    if factory_id:
+        stock_query = stock_query.filter(MaterialStock.factory_id == factory_id)
+        stock_query.delete(synchronize_session=False)
+        # Check if any stock records remain — if not, delete the material itself
+        remaining = db.query(MaterialStock).filter(MaterialStock.material_id == material_id).count()
+        if remaining == 0:
+            db.delete(mat)
+    else:
+        # Delete all stock + the material catalog entry
+        stock_query.delete(synchronize_session=False)
+        db.delete(mat)
+
+    db.commit()
+    return {"detail": "Material deleted"}
 
 
 @router.get("/{material_id}/transactions")

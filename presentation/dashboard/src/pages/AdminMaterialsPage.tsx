@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useMaterials, useCreateMaterial, useUpdateMaterial, useCreateTransaction, type MaterialItem } from '@/hooks/useMaterials';
+import { useMaterials, useCreateMaterial, useUpdateMaterial, useDeleteMaterial, useCreateTransaction, type MaterialItem } from '@/hooks/useMaterials';
 import {
   useMaterialHierarchy,
   useCreateMaterialGroup,
@@ -156,6 +156,7 @@ function MaterialsCrudTab() {
   // Mutations
   const createMaterial = useCreateMaterial();
   const updateMaterial = useUpdateMaterial();
+  const deleteMaterial = useDeleteMaterial();
   const createTransaction = useCreateTransaction();
 
   // Dialog state
@@ -165,6 +166,11 @@ function MaterialsCrudTab() {
   });
   const [form, setForm] = useState<MaterialForm>(emptyForm);
   const [formError, setFormError] = useState('');
+
+  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: MaterialItem | null }>({
+    open: false,
+    item: null,
+  });
 
   const [txDialog, setTxDialog] = useState<{ open: boolean; item: MaterialItem | null }>({
     open: false,
@@ -243,7 +249,7 @@ function MaterialsCrudTab() {
 
     try {
       if (editDialog.item) {
-        await updateMaterial.mutateAsync({ id: editDialog.item.id, data: payload });
+        await updateMaterial.mutateAsync({ id: editDialog.item.id, data: payload, factoryId: form.factory_id || undefined });
       } else {
         await createMaterial.mutateAsync(payload);
       }
@@ -291,6 +297,25 @@ function MaterialsCrudTab() {
       setTxError(detail ?? 'Transaction failed');
     }
   }, [txDialog.item, txForm, createTransaction, closeTx]);
+
+  // ── Delete ──────────────────────────────────────────────────────────────
+
+  const openDelete = useCallback((item: MaterialItem) => {
+    setDeleteDialog({ open: true, item });
+  }, []);
+
+  const handleDelete = useCallback(async () => {
+    if (!deleteDialog.item) return;
+    try {
+      await deleteMaterial.mutateAsync({
+        id: deleteDialog.item.id,
+        factoryId: deleteDialog.item.factory_id ?? undefined,
+      });
+      setDeleteDialog({ open: false, item: null });
+    } catch {
+      // stay open on error
+    }
+  }, [deleteDialog.item, deleteMaterial]);
 
   // ── Counts ──────────────────────────────────────────────────────────────
 
@@ -459,6 +484,7 @@ function MaterialsCrudTab() {
           subgroups={subgroups}
           onEdit={openEdit}
           onTransaction={openTx}
+          onDelete={openDelete}
         />
       )}
 
@@ -614,6 +640,38 @@ function MaterialsCrudTab() {
                   : txForm.type === 'receive'
                     ? '↑ Receive'
                     : '↓ Write-off'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <Dialog
+        open={deleteDialog.open}
+        onClose={() => setDeleteDialog({ open: false, item: null })}
+        title="Delete Material"
+        className="w-full max-w-sm"
+      >
+        {deleteDialog.item && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-700">
+              Are you sure you want to delete <strong>{deleteDialog.item.name}</strong>?
+              This will remove the material and all its stock records. This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2 border-t pt-3">
+              <Button
+                variant="secondary"
+                onClick={() => setDeleteDialog({ open: false, item: null })}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleDelete}
+                disabled={deleteMaterial.isPending}
+                className="bg-red-600 hover:bg-red-700 focus:ring-red-500"
+              >
+                {deleteMaterial.isPending ? 'Deleting\u2026' : 'Delete'}
               </Button>
             </div>
           </div>
@@ -1126,9 +1184,10 @@ interface MaterialsTableProps {
   subgroups: { value: string; label: string; icon: string }[];
   onEdit: (item: MaterialItem) => void;
   onTransaction: (item: MaterialItem) => void;
+  onDelete?: (item: MaterialItem) => void;
 }
 
-function MaterialsTable({ items, subgroups, onEdit, onTransaction }: MaterialsTableProps) {
+function MaterialsTable({ items, subgroups, onEdit, onTransaction, onDelete }: MaterialsTableProps) {
   const typeLabel = (code: string) =>
     subgroups.find((s) => s.value === code)?.label ?? code;
   const typeIcon = (code: string) =>
@@ -1191,6 +1250,16 @@ function MaterialsTable({ items, subgroups, onEdit, onTransaction }: MaterialsTa
                   <Button size="sm" variant="ghost" onClick={() => onEdit(m)}>
                     Edit
                   </Button>
+                  {onDelete && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onDelete(m)}
+                      className="text-red-500 hover:text-red-700"
+                    >
+                      Del
+                    </Button>
+                  )}
                 </div>
               </td>
             </tr>

@@ -1037,20 +1037,35 @@ class BufferStatus(Base):
 
 
 class KilnMaintenanceSchedule(Base):
+    """Scheduled maintenance entries for kilns. PM creates these."""
     __tablename__ = 'kiln_maintenance_schedule'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     resource_id = Column(UUID(as_uuid=True), ForeignKey('resources.id'), nullable=False)
     maintenance_type = Column(sa.String(200), nullable=False)
+    maintenance_type_id = Column(UUID(as_uuid=True), ForeignKey('kiln_maintenance_types.id'))
     scheduled_date = Column(sa.Date, nullable=False)
+    scheduled_time = Column(sa.Time)                           # optional specific time
+    estimated_duration_hours = Column(sa.Numeric(5, 1))        # how long it will take
     status = Column(PgEnum(MaintenanceStatus), nullable=False, default=MaintenanceStatus.PLANNED)
     notes = Column(sa.Text)
+    completed_at = Column(sa.DateTime(timezone=True))
+    completed_by_id = Column(UUID(as_uuid=True), ForeignKey('users.id'))
     created_by = Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'))
+    is_recurring = Column(sa.Boolean, nullable=False, default=False)
+    recurrence_interval_days = Column(sa.Integer)               # how often to repeat
+    requires_empty_kiln = Column(sa.Boolean, nullable=False, default=False)
+    requires_cooled_kiln = Column(sa.Boolean, nullable=False, default=False)
+    requires_power_off = Column(sa.Boolean, nullable=False, default=False)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     resource = relationship('Resource', foreign_keys=[resource_id])
+    maintenance_type_rel = relationship('KilnMaintenanceType', foreign_keys=[maintenance_type_id])
+    completed_by = relationship('User', foreign_keys=[completed_by_id])
     created_by_rel = relationship('User', foreign_keys=[created_by])
+    factory = relationship('Factory', foreign_keys=[factory_id])
 
 
 class KilnMaintenanceMaterial(Base):
@@ -1624,4 +1639,23 @@ class FiringTemperatureGroupRecipe(Base):
 
     temperature_group = relationship('FiringTemperatureGroup', back_populates='recipes')
     recipe = relationship('Recipe', foreign_keys=[recipe_id])
+
+
+# ─── Kiln Maintenance Types ────────────────────────────────
+
+class KilnMaintenanceType(Base):
+    """Types of kiln maintenance/inspection with their requirements."""
+    __tablename__ = 'kiln_maintenance_types'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(sa.String(200), nullable=False)           # e.g. "Thermocouple calibration"
+    description = Column(sa.Text)
+    duration_hours = Column(sa.Numeric(5, 1), nullable=False, default=2)   # how long it takes
+    requires_empty_kiln = Column(sa.Boolean, nullable=False, default=False)  # kiln must be empty
+    requires_cooled_kiln = Column(sa.Boolean, nullable=False, default=False) # kiln must be cooled down
+    requires_power_off = Column(sa.Boolean, nullable=False, default=False)   # kiln must be turned off
+    default_interval_days = Column(sa.Integer)                # recommended interval between checks
+    is_active = Column(sa.Boolean, nullable=False, default=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 

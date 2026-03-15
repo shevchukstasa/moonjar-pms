@@ -33,6 +33,7 @@ from api.models import (
     Resource,
     ScheduleSlot,
     Batch,
+    KilnMaintenanceSchedule,
 )
 from api.enums import (
     PositionStatus,
@@ -40,6 +41,7 @@ from api.enums import (
     ResourceStatus,
     BatchStatus,
     ScheduleSlotStatus,
+    MaintenanceStatus,
 )
 
 logger = logging.getLogger("moonjar.production_scheduler")
@@ -67,6 +69,74 @@ def _skip_weekends(target: date) -> date:
 
 
 # ────────────────────────────────────────────────────────────────
+# Maintenance window helpers
+# ────────────────────────────────────────────────────────────────
+
+def get_kiln_maintenance_windows(
+    db: Session,
+    kiln_id: UUID,
+    date_start: date,
+    date_end: date,
+) -> list:
+    """
+    Return list of blocked date ranges for a kiln due to scheduled maintenance.
+
+    Each entry is a dict with:
+      - start: date when the maintenance window starts
+      - end: date when it ends (inclusive)
+      - requires_empty_kiln: bool
+      - maintenance_type: str description
+
+    Only includes planned/in_progress maintenance that overlaps the given range.
+    """
+    try:
+        schedules = db.query(KilnMaintenanceSchedule).filter(
+            KilnMaintenanceSchedule.resource_id == kiln_id,
+            KilnMaintenanceSchedule.scheduled_date >= date_start,
+            KilnMaintenanceSchedule.scheduled_date <= date_end,
+            KilnMaintenanceSchedule.status.in_([
+                MaintenanceStatus.PLANNED,
+                MaintenanceStatus.IN_PROGRESS,
+            ]),
+        ).all()
+    except Exception:
+        # Table may not exist yet during initial setup
+        return []
+
+    windows = []
+    for s in schedules:
+        # Calculate end date: maintenance_date + ceil(duration_hours / 8) working days
+        duration_days = 1  # minimum 1 day
+        if s.estimated_duration_hours:
+            duration_days = max(1, int(float(s.estimated_duration_hours) / 8) + (1 if float(s.estimated_duration_hours) % 8 > 0 else 0))
+
+        window_end = s.scheduled_date + timedelta(days=duration_days - 1)
+
+        windows.append({
+            "start": s.scheduled_date,
+            "end": window_end,
+            "requires_empty_kiln": getattr(s, 'requires_empty_kiln', False) or False,
+            "requires_cooled_kiln": getattr(s, 'requires_cooled_kiln', False) or False,
+            "requires_power_off": getattr(s, 'requires_power_off', False) or False,
+            "maintenance_type": s.maintenance_type or "Maintenance",
+        })
+
+    return windows
+
+
+def _kiln_blocked_on_date(maintenance_windows: list, target_date: date) -> bool:
+    """
+    Check if a kiln is blocked on a specific date by any maintenance
+    that requires the kiln to be empty (i.e., cannot fire while maintenance
+    is happening).
+    """
+    for w in maintenance_windows:
+        if w["start"] <= target_date <= w["end"] and w["requires_empty_kiln"]:
+            return True
+    return False
+
+
+# ────────────────────────────────────────────────────────────────
 # Find best kiln for a position
 # ────────────────────────────────────────────────────────────────
 
@@ -81,9 +151,11 @@ def find_best_kiln(
     Selection criteria:
     1. Only active kilns at the same factory
     2. Exclude kilns under emergency maintenance
-    3. Prefer kiln with the fewest planned/in-progress batches in the
+    3. Exclude kilns with scheduled maintenance that requires empty kiln
+       on/around the target date
+    4. Prefer kiln with the fewest planned/in-progress batches in the
        7-day window around the target date (least congested)
-    4. If no batches exist for any kiln, pick the first available
+    5. If no batches exist for any kiln, pick the first available
     """
     kilns = db.query(Resource).filter(
         Resource.factory_id == position.factory_id,
@@ -102,6 +174,18 @@ def find_best_kiln(
     min_load = float("inf")
 
     for kiln in kilns:
+        # Check maintenance windows — skip kiln if it requires being empty
+        # on the target date
+        maintenance_windows = get_kiln_maintenance_windows(
+            db, kiln.id, window_start, window_end,
+        )
+        if _kiln_blocked_on_date(maintenance_windows, target_date):
+            logger.debug(
+                "KILN_BLOCKED_BY_MAINTENANCE | kiln=%s date=%s",
+                kiln.id, target_date,
+            )
+            continue
+
         # Count batches in the window for this kiln
         batch_count = db.query(sa_func.count(Batch.id)).filter(
             Batch.resource_id == kiln.id,
@@ -118,7 +202,11 @@ def find_best_kiln(
             ScheduleSlot.status == ScheduleSlotStatus.PLANNED.value,
         ).scalar() or 0
 
-        total_load = batch_count + slot_count
+        # Add penalty for maintenance windows in the broader window
+        # (even if not blocking, it indicates reduced availability)
+        maintenance_penalty = len(maintenance_windows)
+
+        total_load = batch_count + slot_count + maintenance_penalty
         if total_load < min_load:
             min_load = total_load
             best_kiln_id = kiln.id

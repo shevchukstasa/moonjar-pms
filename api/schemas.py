@@ -1920,32 +1920,103 @@ class BufferStatusResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ─── Kiln Maintenance Types ────────────────────────────────
+
+class KilnMaintenanceTypeCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    duration_hours: float = 2
+    requires_empty_kiln: bool = False
+    requires_cooled_kiln: bool = False
+    requires_power_off: bool = False
+    default_interval_days: Optional[int] = None
+    is_active: bool = True
+
+
+class KilnMaintenanceTypeUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    duration_hours: Optional[float] = None
+    requires_empty_kiln: Optional[bool] = None
+    requires_cooled_kiln: Optional[bool] = None
+    requires_power_off: Optional[bool] = None
+    default_interval_days: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class KilnMaintenanceTypeResponse(BaseModel):
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    duration_hours: float
+    requires_empty_kiln: bool
+    requires_cooled_kiln: bool
+    requires_power_off: bool
+    default_interval_days: Optional[int] = None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ─── Kiln Maintenance Schedule ─────────────────────────────
+
 class KilnMaintenanceScheduleCreate(BaseModel):
     resource_id: UUID
     maintenance_type: str
+    maintenance_type_id: Optional[UUID] = None
     scheduled_date: date
+    scheduled_time: Optional[time] = None
+    estimated_duration_hours: Optional[float] = None
     status: Optional[str] = None
     notes: Optional[str] = None
     created_by: Optional[UUID] = None
+    factory_id: Optional[UUID] = None
+    is_recurring: bool = False
+    recurrence_interval_days: Optional[int] = None
+    requires_empty_kiln: bool = False
+    requires_cooled_kiln: bool = False
+    requires_power_off: bool = False
 
 
 class KilnMaintenanceScheduleUpdate(BaseModel):
     resource_id: Optional[UUID] = None
     maintenance_type: Optional[str] = None
+    maintenance_type_id: Optional[UUID] = None
     scheduled_date: Optional[date] = None
+    scheduled_time: Optional[time] = None
+    estimated_duration_hours: Optional[float] = None
     status: Optional[str] = None
     notes: Optional[str] = None
     created_by: Optional[UUID] = None
+    factory_id: Optional[UUID] = None
+    is_recurring: Optional[bool] = None
+    recurrence_interval_days: Optional[int] = None
+    requires_empty_kiln: Optional[bool] = None
+    requires_cooled_kiln: Optional[bool] = None
+    requires_power_off: Optional[bool] = None
 
 
 class KilnMaintenanceScheduleResponse(BaseModel):
     id: UUID
     resource_id: UUID
     maintenance_type: str
+    maintenance_type_id: Optional[UUID] = None
     scheduled_date: date
+    scheduled_time: Optional[time] = None
+    estimated_duration_hours: Optional[float] = None
     status: str
     notes: Optional[str] = None
+    completed_at: Optional[datetime] = None
+    completed_by_id: Optional[UUID] = None
     created_by: Optional[UUID] = None
+    factory_id: Optional[UUID] = None
+    is_recurring: bool = False
+    recurrence_interval_days: Optional[int] = None
+    requires_empty_kiln: bool = False
+    requires_cooled_kiln: bool = False
+    requires_power_off: bool = False
     created_at: datetime
     updated_at: datetime
 

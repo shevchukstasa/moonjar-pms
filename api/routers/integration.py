@@ -202,6 +202,27 @@ async def get_production_status(
     # Include factory info
     factory = db.query(Factory).filter(Factory.id == order.factory_id).first()
 
+    # Per-position schedule data (TOC/DBR upfront scheduling)
+    position_schedules = [
+        {
+            "position_number": p.position_number,
+            "status": _ev(p.status),
+            "color": p.color,
+            "size": p.size,
+            "quantity": p.quantity,
+            "planned_glazing_date": str(p.planned_glazing_date) if p.planned_glazing_date else None,
+            "planned_kiln_date": str(p.planned_kiln_date) if p.planned_kiln_date else None,
+            "planned_sorting_date": str(p.planned_sorting_date) if p.planned_sorting_date else None,
+            "planned_completion_date": str(p.planned_completion_date) if p.planned_completion_date else None,
+            "schedule_version": getattr(p, "schedule_version", None),
+        }
+        for p in positions
+    ]
+
+    # Earliest / latest schedule dates across all positions
+    glazing_dates = [p.planned_glazing_date for p in positions if p.planned_glazing_date]
+    completion_dates = [p.planned_completion_date for p in positions if p.planned_completion_date]
+
     return {
         "external_id": external_id,
         "order_number": order.order_number,
@@ -215,6 +236,10 @@ async def get_production_status(
         "positions_ready": ready,
         "progress_percent": round(ready / total * 100, 1) if total else 0,
         "estimated_completion_date": str(order.schedule_deadline) if order.schedule_deadline else None,
+        # Upfront schedule summary
+        "earliest_glazing_start": str(min(glazing_dates)) if glazing_dates else None,
+        "latest_completion": str(max(completion_dates)) if completion_dates else None,
+        "position_schedules": position_schedules,
         "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
         "updated_at": order.updated_at.isoformat() if order.updated_at else None,
         # Cancellation request state — so Sales app knows current decision state

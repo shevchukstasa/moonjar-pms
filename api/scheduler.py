@@ -605,6 +605,61 @@ def _send_backup_telegram_alert(message: str):
         logger.warning("Telegram backup alert failed: %s", e)
 
 
+async def daily_task_distribution_dispatcher():
+    """Hourly dispatcher: send daily task distribution at 21:00 local time per factory.
+
+    Runs every hour at :00.  For each active factory, checks if local time
+    is 21:xx.  If so, generates and sends the daily distribution message.
+    This approach supports factories across different timezones.
+    """
+    import pytz
+    from datetime import datetime
+
+    logger.info("Running daily task distribution dispatcher")
+    db = _get_db_session()
+    try:
+        from api.models import Factory
+        from business.services.daily_distribution import daily_task_distribution
+
+        factories = db.query(Factory).filter(
+            Factory.is_active.is_(True),
+            Factory.masters_group_chat_id.isnot(None),
+        ).all()
+        dispatched = 0
+
+        for factory in factories:
+            tz_name = factory.timezone or "Asia/Makassar"
+            try:
+                tz = pytz.timezone(tz_name)
+            except pytz.exceptions.UnknownTimeZoneError:
+                logger.warning(
+                    "Unknown timezone '%s' for factory %s, using Asia/Makassar",
+                    tz_name, factory.name,
+                )
+                tz = pytz.timezone("Asia/Makassar")
+
+            local_now = datetime.now(tz)
+            if local_now.hour == 21:
+                logger.info(
+                    "Dispatching daily distribution for factory %s (tz=%s, local=%s)",
+                    factory.name, tz_name, local_now.strftime("%H:%M"),
+                )
+                try:
+                    daily_task_distribution(db, factory.id)
+                    dispatched += 1
+                except Exception as e:
+                    logger.error(
+                        "Daily distribution failed for factory %s: %s",
+                        factory.name, e,
+                    )
+
+        logger.info("Daily distribution dispatcher: %d factories dispatched", dispatched)
+    except Exception as e:
+        logger.error("Daily distribution dispatcher failed: %s", e)
+    finally:
+        db.close()
+
+
 # --- Scheduler setup ---
 
 def setup_scheduler():
@@ -624,8 +679,13 @@ def setup_scheduler():
     # Weekly (Sunday 20:00)
     scheduler.add_job(weekly_min_balance_recalc, CronTrigger(day_of_week="sun", hour=20), id="min_balance_recalc")
 
-    # Hourly
+    # Hourly — webhook retry + daily task distribution per-factory timezone
     scheduler.add_job(hourly_webhook_retry, IntervalTrigger(hours=1), id="webhook_retry")
+    scheduler.add_job(
+        daily_task_distribution_dispatcher,
+        CronTrigger(minute=0),  # Every hour at :00
+        id="daily_distribution_dispatcher",
+    )
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

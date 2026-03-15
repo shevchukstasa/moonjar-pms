@@ -197,6 +197,18 @@ def transition_position_status(
     position.status = new_ps
     position.updated_at = datetime.now(timezone.utc)
 
+    # ── Batch assignment check for LOADED_IN_KILN ──────────────
+    # When a position transitions to LOADED_IN_KILN, it should
+    # already be assigned to a batch. Log a warning if not.
+    if new_ps == PositionStatus.LOADED_IN_KILN:
+        if not position.batch_id:
+            import logging
+            logging.getLogger("moonjar.status_machine").warning(
+                "Position %s transitioning to LOADED_IN_KILN without batch assignment. "
+                "Positions should be assigned to a batch before kiln loading.",
+                position_id,
+            )
+
     # Special routing: FIRED → multi-firing check
     if new_ps == PositionStatus.FIRED:
         route_after_firing(db, position)

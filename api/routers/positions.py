@@ -1234,6 +1234,13 @@ async def force_unblock_position(
     # Recalculate order status
     _recalculate_order_status(db, p.order_id)
 
+    # Reschedule position now that it is unblocked
+    try:
+        from business.services.production_scheduler import reschedule_position
+        reschedule_position(db, p)
+    except Exception as _e:
+        logger.warning("Failed to reschedule position %s after force-unblock: %s", p.id, _e)
+
     db.commit()
     db.refresh(p)
 

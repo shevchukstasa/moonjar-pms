@@ -62,6 +62,7 @@ from api.routers import ws
 from api.routers import packing_photos
 from api.routers import finished_goods
 from api.routers import firing_profiles
+from api.routers import batches
 from api.routers import cleanup
 
 
@@ -351,8 +352,53 @@ def _ensure_schema():
                 UNIQUE(temperature_group_id, recipe_id)
             )
         """))
+        # Kiln maintenance types — predefined types of maintenance/inspection
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS kiln_maintenance_types (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(200) NOT NULL,
+                description TEXT,
+                duration_hours NUMERIC(5,1) NOT NULL DEFAULT 2,
+                requires_empty_kiln BOOLEAN NOT NULL DEFAULT FALSE,
+                requires_cooled_kiln BOOLEAN NOT NULL DEFAULT FALSE,
+                requires_power_off BOOLEAN NOT NULL DEFAULT FALSE,
+                default_interval_days INTEGER,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
 
     _run_section("tables", _create_tables)
+
+    # --- Section 2b: Add new columns to existing maintenance schedule table ---
+    def _add_maintenance_columns(conn):
+        maint_cols = [
+            ("kiln_maintenance_schedule", "maintenance_type_id UUID REFERENCES kiln_maintenance_types(id)"),
+            ("kiln_maintenance_schedule", "scheduled_time TIME"),
+            ("kiln_maintenance_schedule", "estimated_duration_hours NUMERIC(5,1)"),
+            ("kiln_maintenance_schedule", "completed_at TIMESTAMPTZ"),
+            ("kiln_maintenance_schedule", "completed_by_id UUID REFERENCES users(id)"),
+            ("kiln_maintenance_schedule", "factory_id UUID REFERENCES factories(id)"),
+            ("kiln_maintenance_schedule", "is_recurring BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("kiln_maintenance_schedule", "recurrence_interval_days INTEGER"),
+            ("kiln_maintenance_schedule", "requires_empty_kiln BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("kiln_maintenance_schedule", "requires_cooled_kiln BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("kiln_maintenance_schedule", "requires_power_off BOOLEAN NOT NULL DEFAULT FALSE"),
+        ]
+        for table, col_def in maint_cols:
+            try:
+                conn.execute(text(f"""
+                    DO $$ BEGIN
+                        IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = '{table}') THEN
+                            ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col_def};
+                        END IF;
+                    END $$
+                """))
+            except Exception as e:
+                logger.warning(f"_ensure_schema: skip {table}.{col_def.split()[0]}: {e}")
+
+    _run_section("maintenance_columns", _add_maintenance_columns)
 
     # --- Section 3: Get factory IDs (needed for all seed sections) ---
     factory_ids = {}  # {"Bali Factory": "uuid", ...}
@@ -463,6 +509,36 @@ def _ensure_schema():
             ), {"name": name, "min_t": min_t, "max_t": max_t, "desc": desc, "ord": order})
 
     _run_section("temperature_groups", _seed_temperature_groups)
+
+    # --- Section 6d: Kiln maintenance types ---
+    def _seed_maintenance_types(conn):
+        """Seed default kiln maintenance/inspection types."""
+        types = [
+            ("Thermocouple Calibration", "Calibrate thermocouple sensors for accurate temperature readings", 4.0, False, True, True, 90),
+            ("Heating Element Inspection", "Inspect heating elements for wear, damage, or uneven heating", 3.0, False, True, True, 180),
+            ("Refractory Lining Check", "Inspect refractory lining for cracks, spalling, or deterioration", 2.0, True, True, False, 60),
+            ("Door Seal Inspection", "Check door seals for gaps and heat leakage", 1.0, False, True, False, 30),
+            ("Ventilation System Check", "Inspect ventilation system, dampers, and exhaust for proper airflow", 1.5, False, False, False, 30),
+            ("Electrical Connections Check", "Inspect wiring, terminals, contactors, and safety interlocks", 2.0, False, False, True, 90),
+            ("Temperature Uniformity Test", "Run empty kiln to verify temperature distribution across all zones", 6.0, True, False, False, 90),
+            ("Full Preventive Maintenance", "Complete preventive maintenance: all systems, cleaning, and calibration", 8.0, True, True, True, 365),
+        ]
+        for name, desc, hours, empty, cooled, power_off, interval in types:
+            conn.execute(text(
+                "INSERT INTO kiln_maintenance_types "
+                "(id, name, description, duration_hours, requires_empty_kiln, "
+                "requires_cooled_kiln, requires_power_off, default_interval_days) "
+                "SELECT gen_random_uuid(), :name, :desc, :hours, :empty, :cooled, :power_off, :interval "
+                "WHERE NOT EXISTS ("
+                "  SELECT 1 FROM kiln_maintenance_types WHERE name = :name"
+                ")"
+            ), {
+                "name": name, "desc": desc, "hours": hours,
+                "empty": empty, "cooled": cooled, "power_off": power_off,
+                "interval": interval,
+            })
+
+    _run_section("maintenance_types", _seed_maintenance_types)
 
     # --- Section 7: Kilns (resources) — 3 per factory (one-time only) ---
     def _seed_kilns(conn):
@@ -898,6 +974,7 @@ def setup_routers():
     app.include_router(packing_photos.router, prefix="/api/packing-photos", tags=["packing-photos"])
     app.include_router(finished_goods.router, prefix="/api/finished-goods", tags=["finished-goods"])
     app.include_router(firing_profiles.router, prefix="/api/firing-profiles", tags=["firing-profiles"])
+    app.include_router(batches.router, prefix="/api/batches", tags=["batches"])
     app.include_router(cleanup.router, prefix="/api/cleanup", tags=["cleanup"])
 
 setup_routers()

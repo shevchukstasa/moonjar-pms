@@ -183,6 +183,13 @@ def _order_detail(order, db: Session) -> dict:
                 "position_number": getattr(p, "position_number", None),
                 "split_index": getattr(p, "split_index", None),
                 "position_label": _position_label(p),
+                # Upfront schedule (TOC/DBR)
+                "planned_glazing_date": str(p.planned_glazing_date) if p.planned_glazing_date else None,
+                "planned_kiln_date": str(p.planned_kiln_date) if p.planned_kiln_date else None,
+                "planned_sorting_date": str(p.planned_sorting_date) if p.planned_sorting_date else None,
+                "planned_completion_date": str(p.planned_completion_date) if p.planned_completion_date else None,
+                "estimated_kiln_id": str(p.estimated_kiln_id) if p.estimated_kiln_id else None,
+                "schedule_version": getattr(p, "schedule_version", None),
                 "created_at": p.created_at.isoformat() if p.created_at else None,
             }
             for p in positions

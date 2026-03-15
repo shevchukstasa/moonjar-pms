@@ -114,6 +114,13 @@ def _serialize_position_brief(p) -> dict:
         "position_number": getattr(p, "position_number", None),
         "split_index": getattr(p, "split_index", None),
         "position_label": _position_label_brief(p),
+        # Upfront schedule (TOC/DBR)
+        "planned_glazing_date": str(p.planned_glazing_date) if p.planned_glazing_date else None,
+        "planned_kiln_date": str(p.planned_kiln_date) if p.planned_kiln_date else None,
+        "planned_sorting_date": str(p.planned_sorting_date) if p.planned_sorting_date else None,
+        "planned_completion_date": str(p.planned_completion_date) if p.planned_completion_date else None,
+        "estimated_kiln_id": str(p.estimated_kiln_id) if p.estimated_kiln_id else None,
+        "schedule_version": getattr(p, "schedule_version", None),
     }
 
 
@@ -320,12 +327,25 @@ async def reorder_positions(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
-    """Bulk reorder positions — assigns sequential priority_order values."""
+    """Bulk reorder positions — assigns sequential priority_order values.
+    Also triggers reschedule for affected positions."""
+    reordered = []
     for idx, pid in enumerate(data.position_ids):
         pos = db.query(OrderPosition).filter(OrderPosition.id == UUID(pid)).first()
         if pos:
             pos.priority_order = idx
+            reordered.append(pos)
     db.commit()
+
+    # Reschedule reordered positions (best-effort)
+    try:
+        from business.services.production_scheduler import reschedule_position
+        for pos in reordered:
+            reschedule_position(db, pos)
+        db.commit()
+    except Exception:
+        pass
+
     return {"ok": True, "count": len(data.position_ids)}
 
 
@@ -349,3 +369,98 @@ async def assign_batch_positions(
             count += 1
     db.commit()
     return _serialize_batch(batch, db)
+
+
+# ── Schedule visibility endpoints (Sales + management) ───────────
+
+@router.get("/orders/{order_id}/schedule")
+async def get_order_schedule(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Full production schedule for an order — visible to Sales for
+    real-time plan updates.
+
+    Returns planned dates for every position (glazing, kiln, sorting,
+    completion), kiln assignments, and on-track status.
+    """
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+
+    from business.services.production_scheduler import get_order_schedule_summary
+    return get_order_schedule_summary(db, order)
+
+
+@router.post("/orders/{order_id}/reschedule")
+async def reschedule_order_endpoint(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """
+    Manually trigger a full reschedule of all positions in an order.
+    PM/Admin only.
+    """
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+
+    from business.services.production_scheduler import reschedule_order
+    count = reschedule_order(db, order_id)
+    db.commit()
+
+    return {"ok": True, "positions_rescheduled": count, "order_id": str(order_id)}
+
+
+@router.post("/factory/{factory_id}/reschedule")
+async def reschedule_factory_endpoint(
+    factory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """
+    Reschedule all active positions across all orders in a factory.
+    PM/Admin only — use after major changes (new kiln, factory reset).
+    """
+    from api.models import Factory
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory:
+        raise HTTPException(404, "Factory not found")
+
+    from business.services.production_scheduler import reschedule_factory
+    count = reschedule_factory(db, factory_id)
+
+    return {
+        "ok": True,
+        "positions_rescheduled": count,
+        "factory_id": str(factory_id),
+        "factory_name": factory.name,
+    }
+
+
+@router.get("/positions/{position_id}/schedule")
+async def get_position_schedule_endpoint(
+    position_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Schedule details for a single position — planned dates, kiln
+    assignment, on-track status.
+    """
+    position = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not position:
+        raise HTTPException(404, "Position not found")
+
+    from business.services.production_scheduler import get_position_schedule
+    sched = get_position_schedule(position)
+
+    return {
+        "position_id": str(position.id),
+        "order_id": str(position.order_id),
+        "status": _ev(position.status),
+        **sched,
+    }

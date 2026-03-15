@@ -300,8 +300,8 @@ export default function AdminRecipesPage() {
           </div>
           <div className="grid grid-cols-3 gap-4">
             <Input label="Specific Gravity (SG)" type="number" step="0.001" placeholder="e.g. 1.450" value={form.specific_gravity} onChange={(e) => setForm({ ...form, specific_gravity: e.target.value })} />
-            <Input label="Spray (ml/m\u00B2)" type="number" step="0.01" placeholder="e.g. 850" value={form.consumption_spray_ml_per_sqm} onChange={(e) => setForm({ ...form, consumption_spray_ml_per_sqm: e.target.value })} />
-            <Input label="Brush (ml/m\u00B2)" type="number" step="0.01" placeholder="e.g. 1200" value={form.consumption_brush_ml_per_sqm} onChange={(e) => setForm({ ...form, consumption_brush_ml_per_sqm: e.target.value })} />
+            <Input label={"Spray (ml/m²)"} type="number" step="0.01" placeholder="e.g. 850" value={form.consumption_spray_ml_per_sqm} onChange={(e) => setForm({ ...form, consumption_spray_ml_per_sqm: e.target.value })} />
+            <Input label={"Brush (ml/m²)"} type="number" step="0.01" placeholder="e.g. 1200" value={form.consumption_brush_ml_per_sqm} onChange={(e) => setForm({ ...form, consumption_brush_ml_per_sqm: e.target.value })} />
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} className="rounded" />

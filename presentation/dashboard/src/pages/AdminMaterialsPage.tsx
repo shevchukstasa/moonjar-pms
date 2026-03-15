@@ -436,7 +436,6 @@ function CatalogTab() {
                 <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3">Unit</th>
                 <th className="px-4 py-3">Supplier</th>
-                <th className="px-4 py-3 text-center">Factories</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
@@ -456,11 +455,6 @@ function CatalogTab() {
                   <td className="px-4 py-3 text-gray-500">{m.unit}</td>
                   <td className="px-4 py-3 text-gray-500">
                     {m.supplier_name ?? <span className="text-gray-300">{'\u2014'}</span>}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                      {m.factory_count ?? 0}
-                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">

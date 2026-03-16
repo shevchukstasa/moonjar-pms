@@ -506,6 +506,45 @@ def process_order_item(
     size_result = resolve_size_for_position(db, position)
     if size_result.resolved:
         position.size_id = size_result.size_id
+
+        # If size was auto-created, notify PM for approval (non-blocking)
+        if size_result.reason == "auto_created":
+            _auto_size = size_result.candidates[0] if size_result.candidates else {}
+            _approval_task = Task(
+                factory_id=order.factory_id,
+                type=TaskType.SIZE_RESOLUTION,
+                status=TaskStatus.PENDING,
+                assigned_role=UserRole.PRODUCTION_MANAGER,
+                related_order_id=order.id,
+                related_position_id=position.id,
+                blocking=False,
+                description=(
+                    f"Approve auto-created size '{_auto_size.get('name', '?')}' "
+                    f"({_auto_size.get('width_mm', '?')}x{_auto_size.get('height_mm', '?')} mm) "
+                    f"from order {order.order_number}"
+                ),
+                metadata_json=__import__('json').dumps({
+                    "reason": "auto_created",
+                    "auto_created_size_id": str(size_result.size_id),
+                    "candidates": size_result.candidates,
+                    "position_size_string": position.size,
+                }),
+            )
+            db.add(_approval_task)
+            db.flush()
+            notify_pm(
+                db=db,
+                factory_id=order.factory_id,
+                type="task_assigned",
+                title=f"New size auto-created: {_auto_size.get('name', position.size)}",
+                message=(
+                    f"Order {order.order_number}: auto-created size "
+                    f"{_auto_size.get('width_mm', '?')}x{_auto_size.get('height_mm', '?')} mm. "
+                    f"Please review and approve."
+                ),
+                related_entity_type="position",
+                related_entity_id=position.id,
+            )
     else:
         # Only block if position is still in PLANNED state
         # (it might already be blocked by stencil/silkscreen/color matching)

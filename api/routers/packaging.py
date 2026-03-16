@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
-from api.roles import require_admin
+from api.roles import require_admin_or_pm
 from api.models import (
     PackagingBoxType, PackagingBoxCapacity, PackagingSpacerRule,
     Material, Size,
@@ -113,7 +113,7 @@ def _serialize_box_type(bt: PackagingBoxType, db: Session) -> dict:
 @router.get("")
 async def list_box_types(
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     """List all packaging box types with capacities and spacer rules."""
     items = db.query(PackagingBoxType).order_by(PackagingBoxType.name).all()
@@ -123,7 +123,7 @@ async def list_box_types(
 @router.get("/sizes")
 async def list_sizes(
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     """List all tile sizes for dropdown."""
     sizes = db.query(Size).order_by(Size.name).all()
@@ -147,7 +147,7 @@ async def list_sizes(
 async def get_box_type(
     box_type_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     bt = db.query(PackagingBoxType).filter(PackagingBoxType.id == box_type_id).first()
     if not bt:
@@ -159,7 +159,7 @@ async def get_box_type(
 async def create_box_type(
     data: BoxTypeInput,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     mat = db.query(Material).filter(Material.id == data.material_id).first()
     if not mat:
@@ -182,7 +182,7 @@ async def update_box_type(
     box_type_id: UUID,
     data: BoxTypeUpdateInput,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     bt = db.query(PackagingBoxType).filter(PackagingBoxType.id == box_type_id).first()
     if not bt:
@@ -204,7 +204,7 @@ async def update_box_type(
 async def delete_box_type(
     box_type_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     bt = db.query(PackagingBoxType).filter(PackagingBoxType.id == box_type_id).first()
     if not bt:
@@ -226,7 +226,7 @@ async def set_capacities(
     box_type_id: UUID,
     data: CapacitiesBulkInput,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     """Bulk-replace all capacity entries for a box type."""
     bt = db.query(PackagingBoxType).filter(PackagingBoxType.id == box_type_id).first()
@@ -276,7 +276,7 @@ async def set_spacers(
     box_type_id: UUID,
     data: SpacersBulkInput,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     """Bulk-replace all spacer rules for a box type."""
     bt = db.query(PackagingBoxType).filter(PackagingBoxType.id == box_type_id).first()

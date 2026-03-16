@@ -28,6 +28,7 @@ require_quality = require_role("owner", "administrator", "quality_manager")
 require_warehouse = require_role("owner", "administrator", "warehouse")
 require_sorting = require_role("owner", "administrator", "production_manager", "sorter_packer")
 require_purchaser = require_role("owner", "administrator", "purchaser")
+require_admin_or_pm = require_role("owner", "administrator", "production_manager")
 require_any = require_role(
     "owner", "administrator", "ceo", "production_manager",
     "quality_manager", "warehouse", "sorter_packer", "purchaser",

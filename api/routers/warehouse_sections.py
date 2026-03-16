@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
-from api.roles import require_admin
+from api.roles import require_admin_or_pm
 from api.models import WarehouseSection, User, Factory
 from api.schemas import WarehouseSectionCreate, WarehouseSectionUpdate, WarehouseSectionResponse
 
@@ -83,7 +83,7 @@ async def list_warehouse_sections(
 async def list_all_warehouse_sections(
     include_inactive: bool = False,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     """List ALL warehouse sections (admin view, including inactive)."""
     query = db.query(WarehouseSection)
@@ -112,7 +112,7 @@ async def get_warehouse_section(
 async def create_warehouse_section(
     data: WarehouseSectionCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     """Create a new warehouse section. Owner/Admin only."""
     item = WarehouseSection(**data.model_dump())
@@ -127,7 +127,7 @@ async def update_warehouse_section(
     item_id: UUID,
     data: WarehouseSectionUpdate,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     """Update a warehouse section. Owner/Admin only."""
     item = db.query(WarehouseSection).filter(WarehouseSection.id == item_id).first()
@@ -145,7 +145,7 @@ async def update_warehouse_section(
 async def delete_warehouse_section(
     item_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     """Delete a warehouse section. Owner/Admin only."""
     item = db.query(WarehouseSection).filter(WarehouseSection.id == item_id).first()

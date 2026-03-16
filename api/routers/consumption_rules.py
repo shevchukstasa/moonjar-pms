@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
-from api.roles import require_admin
+from api.roles import require_admin_or_pm
 from api.models import ConsumptionRule, Size
 
 router = APIRouter()
@@ -133,8 +133,12 @@ async def get_consumption_rule(
 async def create_consumption_rule(
     data: ConsumptionRuleInput,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
+    if data.size_id:
+        size = db.query(Size).filter(Size.id == data.size_id).first()
+        if not size:
+            raise HTTPException(400, f"Size {data.size_id} not found")
     r = ConsumptionRule(**data.model_dump())
     db.add(r)
     db.commit()
@@ -147,13 +151,18 @@ async def update_consumption_rule(
     rule_id: UUID,
     data: ConsumptionRuleUpdate,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     r = db.query(ConsumptionRule).filter(ConsumptionRule.id == rule_id).first()
     if not r:
         raise HTTPException(404, "Consumption rule not found")
 
-    for k, v in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    if "size_id" in updates and updates["size_id"]:
+        size = db.query(Size).filter(Size.id == updates["size_id"]).first()
+        if not size:
+            raise HTTPException(400, f"Size {updates['size_id']} not found")
+    for k, v in updates.items():
         setattr(r, k, v)
     r.updated_at = datetime.now(timezone.utc)
 
@@ -166,7 +175,7 @@ async def update_consumption_rule(
 async def delete_consumption_rule(
     rule_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     r = db.query(ConsumptionRule).filter(ConsumptionRule.id == rule_id).first()
     if not r:

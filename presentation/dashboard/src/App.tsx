@@ -94,7 +94,6 @@ export default function App() {
         </Route>
         <Route element={<RequireRole roles={['owner', 'administrator']} />}>
           <Route path="/admin" element={<AdminPanelPage />} />
-          <Route path="/admin/recipes" element={<AdminRecipesPage />} />
           <Route path="/admin/suppliers" element={<AdminSuppliersPage />} />
           <Route path="/admin/collections" element={<AdminCollectionsPage />} />
           <Route path="/admin/color-collections" element={<AdminColorCollectionsPage />} />
@@ -102,13 +101,16 @@ export default function App() {
           <Route path="/admin/application-types" element={<AdminAppTypesPage />} />
           <Route path="/admin/places-of-application" element={<AdminPoaPage />} />
           <Route path="/admin/finishing-types" element={<AdminFinishingPage />} />
-          <Route path="/admin/temperature-groups" element={<AdminTemperatureGroupsPage />} />
           <Route path="/admin/materials" element={<AdminMaterialsPage />} />
+          <Route path="/admin/size-resolution/:taskId" element={<SizeResolutionPage />} />
+        </Route>
+        <Route element={<RequireRole roles={['owner', 'administrator', 'production_manager']} />}>
+          <Route path="/admin/recipes" element={<AdminRecipesPage />} />
+          <Route path="/admin/temperature-groups" element={<AdminTemperatureGroupsPage />} />
           <Route path="/admin/warehouses" element={<AdminWarehousesPage />} />
           <Route path="/admin/packaging" element={<AdminPackagingPage />} />
           <Route path="/admin/sizes" element={<AdminSizesPage />} />
           <Route path="/admin/consumption-rules" element={<ConsumptionRulesPage />} />
-          <Route path="/admin/size-resolution/:taskId" element={<SizeResolutionPage />} />
         </Route>
         <Route element={<RequireRole roles={['owner', 'administrator', 'ceo']} />}>
           <Route path="/users" element={<UsersPage />} />

@@ -10,7 +10,7 @@ from sqlalchemy import or_
 
 from api.database import get_db
 from api.auth import get_current_user
-from api.roles import require_admin
+from api.roles import require_admin_or_pm
 from api.models import Size, PackagingBoxCapacity, PackagingSpacerRule
 
 router = APIRouter()
@@ -119,7 +119,7 @@ async def get_size(
 async def create_size(
     data: SizeInput,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     if data.shape and data.shape not in VALID_SHAPES:
         raise HTTPException(400, f"Invalid shape: {data.shape}. Must be one of: {', '.join(sorted(VALID_SHAPES))}")
@@ -148,7 +148,7 @@ async def update_size(
     size_id: UUID,
     data: SizeUpdateInput,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     s = db.query(Size).filter(Size.id == size_id).first()
     if not s:
@@ -182,7 +182,7 @@ async def update_size(
 async def delete_size(
     size_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_admin_or_pm),
 ):
     s = db.query(Size).filter(Size.id == size_id).first()
     if not s:

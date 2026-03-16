@@ -183,14 +183,58 @@ def resolve_size_for_position(
             candidates=candidate_dicts,
         )
     elif len(candidates) == 0:
-        logger.warning(
-            "SIZE_NO_MATCH | position=%s | no size found for %dx%d mm",
-            position.id, w_mm, h_mm,
+        # Auto-create the size as is_custom=True (pending PM approval)
+        auto_name = f"{w_mm}x{h_mm}"
+        # Check if auto-name already taken (e.g. created by a previous run)
+        existing = db.query(Size).filter(Size.name == auto_name).first()
+        if existing:
+            logger.info(
+                "SIZE_AUTO_REUSE | position=%s | reusing existing size '%s'",
+                position.id, existing.name,
+            )
+            return SizeResolutionResult(
+                resolved=True,
+                size_id=existing.id,
+                reason="auto_matched_existing",
+                candidates=[{
+                    "id": str(existing.id),
+                    "name": existing.name,
+                    "width_mm": existing.width_mm,
+                    "height_mm": existing.height_mm,
+                    "thickness_mm": existing.thickness_mm,
+                    "shape": existing.shape,
+                }],
+            )
+
+        pos_shape = position.shape.value if position.shape else "rectangle"
+        pos_thickness = int(position.thickness_mm) if position.thickness_mm else None
+        new_size = Size(
+            name=auto_name,
+            width_mm=w_mm,
+            height_mm=h_mm,
+            thickness_mm=pos_thickness,
+            shape=pos_shape,
+            is_custom=True,  # Pending PM approval
+        )
+        db.add(new_size)
+        db.flush()
+
+        logger.info(
+            "SIZE_AUTO_CREATED | position=%s | auto-created size '%s' (%dx%d mm), pending PM approval",
+            position.id, auto_name, w_mm, h_mm,
         )
         return SizeResolutionResult(
-            resolved=False,
-            reason="no_match",
-            candidates=[],
+            resolved=True,
+            size_id=new_size.id,
+            reason="auto_created",
+            candidates=[{
+                "id": str(new_size.id),
+                "name": new_size.name,
+                "width_mm": new_size.width_mm,
+                "height_mm": new_size.height_mm,
+                "thickness_mm": new_size.thickness_mm,
+                "shape": new_size.shape,
+            }],
         )
     else:
         logger.warning(

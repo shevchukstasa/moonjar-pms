@@ -141,6 +141,19 @@ def _ensure_schema():
             # Position photos — batch association + web URL
             ("position_photos", "batch_id UUID REFERENCES batches(id)"),
             ("position_photos", "photo_url VARCHAR(2048)"),
+            # Size Resolution — FK columns for size assignment
+            ("order_positions", "size_id UUID REFERENCES sizes(id)"),
+            ("materials", "size_id UUID REFERENCES sizes(id)"),
+            # FiringProfile — model was updated to new schema; add missing columns to existing table
+            ("firing_profiles", "product_type VARCHAR(20)"),
+            ("firing_profiles", "collection VARCHAR(100)"),
+            ("firing_profiles", "thickness_min_mm NUMERIC(5,1)"),
+            ("firing_profiles", "thickness_max_mm NUMERIC(5,1)"),
+            ("firing_profiles", "target_temperature INTEGER DEFAULT 1000"),
+            ("firing_profiles", "total_duration_hours NUMERIC(5,1) DEFAULT 24"),
+            ("firing_profiles", "stages JSONB DEFAULT '[]'"),
+            ("firing_profiles", "match_priority INTEGER DEFAULT 0"),
+            ("firing_profiles", "is_default BOOLEAN DEFAULT FALSE"),
         ]
         for table, col_def in add_cols:
             try:
@@ -171,6 +184,9 @@ def _ensure_schema():
         ("task_type", "material_receiving"),
         # Grinding stock enum values (type created in table section above;
         # keep entries here for any future additions only).
+        # Size Resolution (MUST be in AUTOCOMMIT block — not in DO $$ transactions)
+        ("positionstatus", "awaiting_size_confirmation"),
+        ("tasktype", "size_resolution"),
     ]
     try:
         raw_conn = engine.raw_connection()
@@ -515,6 +531,35 @@ def _ensure_schema():
                 approval_mode VARCHAR(20) NOT NULL DEFAULT 'all',
                 updated_by UUID REFERENCES users(id),
                 updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+        # Inventory reconciliations — periodic stock count sessions
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS inventory_reconciliations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                factory_id UUID NOT NULL REFERENCES factories(id),
+                started_by_id UUID REFERENCES users(id),
+                completed_by_id UUID REFERENCES users(id),
+                status VARCHAR(30) NOT NULL DEFAULT 'in_progress',
+                notes TEXT,
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                completed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS inventory_reconciliation_items (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                reconciliation_id UUID NOT NULL REFERENCES inventory_reconciliations(id) ON DELETE CASCADE,
+                material_id UUID REFERENCES materials(id),
+                warehouse_section_id UUID REFERENCES warehouse_sections(id),
+                expected_qty NUMERIC(12,3),
+                counted_qty NUMERIC(12,3),
+                variance NUMERIC(12,3),
+                unit VARCHAR(20),
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
         # Glazing board specs — board dimensions per tile size

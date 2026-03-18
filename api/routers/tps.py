@@ -1,8 +1,8 @@
-"""TPS (Toyota Production System) router — parameters, shift metrics, deviations."""
+"""TPS (Toyota Production System) router — parameters, shift metrics, deviations, operation time tracking."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -12,7 +12,10 @@ from sqlalchemy import func as sa_func
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
-from api.models import TpsParameter, TpsShiftMetric, TpsDeviation, Factory
+from api.models import (
+    TpsParameter, TpsShiftMetric, TpsDeviation, Factory,
+    OperationLog, Operation, OrderPosition,
+)
 from api.enums import TpsStatus, TpsDeviationType
 
 router = APIRouter()
@@ -329,3 +332,298 @@ async def update_deviation(
     db.commit()
     db.refresh(dev)
     return _serialize_deviation(dev)
+
+
+# ── Operation Time Tracking ──────────────────────────────────────────────
+
+class RecordOperationTime(BaseModel):
+    factory_id: UUID
+    operation_id: UUID
+    position_id: Optional[UUID] = None
+    batch_id: Optional[UUID] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    quantity_processed: Optional[int] = None
+    defect_count: int = 0
+    notes: Optional[str] = None
+    source: str = "dashboard"  # 'telegram', 'dashboard', 'auto'
+
+
+def _serialize_op_log(log) -> dict:
+    return {
+        "id": str(log.id),
+        "factory_id": str(log.factory_id),
+        "operation_id": str(log.operation_id),
+        "user_id": str(log.user_id),
+        "position_id": str(log.position_id) if log.position_id else None,
+        "batch_id": str(log.batch_id) if log.batch_id else None,
+        "shift_date": str(log.shift_date),
+        "shift_number": log.shift_number,
+        "started_at": log.started_at.isoformat() if log.started_at else None,
+        "completed_at": log.completed_at.isoformat() if log.completed_at else None,
+        "duration_minutes": float(log.duration_minutes) if log.duration_minutes else None,
+        "quantity_processed": log.quantity_processed,
+        "defect_count": log.defect_count or 0,
+        "notes": log.notes,
+        "source": log.source,
+        "created_at": log.created_at.isoformat() if log.created_at else None,
+    }
+
+
+@router.post("/record", status_code=201)
+async def record_operation_time(
+    data: RecordOperationTime,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Record operation start/end time for a position.
+
+    Masters enter via Telegram, PM enters via dashboard.
+    If only started_at is provided, the operation is in progress.
+    If both started_at and completed_at are provided, duration is calculated.
+    """
+    # Validate operation exists
+    operation = db.query(Operation).filter(Operation.id == data.operation_id).first()
+    if not operation:
+        raise HTTPException(404, "Operation not found")
+
+    # Validate position if provided
+    if data.position_id:
+        position = db.query(OrderPosition).filter(OrderPosition.id == data.position_id).first()
+        if not position:
+            raise HTTPException(404, "Position not found")
+
+    # Calculate duration if both timestamps provided
+    duration_minutes = None
+    if data.started_at and data.completed_at:
+        if data.completed_at <= data.started_at:
+            raise HTTPException(400, "completed_at must be after started_at")
+        delta = data.completed_at - data.started_at
+        duration_minutes = round(delta.total_seconds() / 60, 2)
+
+    # Determine shift date (use started_at date, or today)
+    shift_date = data.started_at.date() if data.started_at else date.today()
+
+    log = OperationLog(
+        factory_id=data.factory_id,
+        operation_id=data.operation_id,
+        user_id=current_user.id,
+        position_id=data.position_id,
+        batch_id=data.batch_id,
+        shift_date=shift_date,
+        started_at=data.started_at,
+        completed_at=data.completed_at,
+        duration_minutes=duration_minutes,
+        quantity_processed=data.quantity_processed,
+        defect_count=data.defect_count,
+        notes=data.notes,
+        source=data.source,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    return _serialize_op_log(log)
+
+
+@router.get("/position/{position_id}/timeline")
+async def get_position_timeline(
+    position_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Get full operation timeline for a position.
+
+    Returns all operation logs ordered chronologically, showing
+    how the position moved through each production stage.
+    """
+    position = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not position:
+        raise HTTPException(404, "Position not found")
+
+    logs = (
+        db.query(OperationLog)
+        .filter(OperationLog.position_id == position_id)
+        .order_by(OperationLog.started_at.asc().nullslast(), OperationLog.created_at.asc())
+        .all()
+    )
+
+    # Enrich with operation names
+    op_ids = list({log.operation_id for log in logs})
+    operations = {}
+    if op_ids:
+        ops = db.query(Operation).filter(Operation.id.in_(op_ids)).all()
+        operations = {op.id: op for op in ops}
+
+    timeline = []
+    total_duration = 0.0
+    for log in logs:
+        op = operations.get(log.operation_id)
+        entry = _serialize_op_log(log)
+        entry["operation_name"] = op.name if op else None
+        entry["norm_time_minutes"] = float(op.default_time_minutes) if op and op.default_time_minutes else None
+        if log.duration_minutes:
+            dur = float(log.duration_minutes)
+            total_duration += dur
+            # Flag if exceeds norm by more than 50%
+            if op and op.default_time_minutes:
+                norm = float(op.default_time_minutes)
+                if norm > 0:
+                    entry["deviation_percent"] = round((dur - norm) / norm * 100, 1)
+        timeline.append(entry)
+
+    return {
+        "position_id": str(position_id),
+        "timeline": timeline,
+        "total_operations": len(timeline),
+        "total_duration_minutes": round(total_duration, 2),
+    }
+
+
+@router.get("/throughput")
+async def get_stage_throughput(
+    factory_id: UUID,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    operation_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Get stage throughput statistics per factory and date range.
+
+    Returns average duration, count, and throughput rate per operation.
+    """
+    # Default to last 30 days
+    dt_to = date.fromisoformat(date_to) if date_to else date.today()
+    dt_from = date.fromisoformat(date_from) if date_from else dt_to - timedelta(days=30)
+
+    query = (
+        db.query(
+            OperationLog.operation_id,
+            sa_func.count(OperationLog.id).label("count"),
+            sa_func.avg(OperationLog.duration_minutes).label("avg_duration"),
+            sa_func.min(OperationLog.duration_minutes).label("min_duration"),
+            sa_func.max(OperationLog.duration_minutes).label("max_duration"),
+            sa_func.sum(OperationLog.quantity_processed).label("total_qty"),
+            sa_func.sum(OperationLog.defect_count).label("total_defects"),
+        )
+        .filter(
+            OperationLog.factory_id == factory_id,
+            OperationLog.shift_date >= dt_from,
+            OperationLog.shift_date <= dt_to,
+            OperationLog.duration_minutes.isnot(None),
+        )
+    )
+    if operation_id:
+        query = query.filter(OperationLog.operation_id == operation_id)
+
+    query = query.group_by(OperationLog.operation_id)
+    rows = query.all()
+
+    # Fetch operation names
+    op_ids = [r.operation_id for r in rows]
+    operations = {}
+    if op_ids:
+        ops = db.query(Operation).filter(Operation.id.in_(op_ids)).all()
+        operations = {op.id: op for op in ops}
+
+    items = []
+    for r in rows:
+        op = operations.get(r.operation_id)
+        avg_dur = float(r.avg_duration) if r.avg_duration else 0
+        total_qty = int(r.total_qty or 0)
+        total_defects = int(r.total_defects or 0)
+        items.append({
+            "operation_id": str(r.operation_id),
+            "operation_name": op.name if op else None,
+            "norm_time_minutes": float(op.default_time_minutes) if op and op.default_time_minutes else None,
+            "count": r.count,
+            "avg_duration_minutes": round(avg_dur, 2),
+            "min_duration_minutes": round(float(r.min_duration), 2) if r.min_duration else None,
+            "max_duration_minutes": round(float(r.max_duration), 2) if r.max_duration else None,
+            "total_quantity_processed": total_qty,
+            "total_defects": total_defects,
+            "defect_rate_percent": round(total_defects / total_qty * 100, 1) if total_qty > 0 else 0,
+        })
+
+    return {
+        "factory_id": str(factory_id),
+        "date_from": str(dt_from),
+        "date_to": str(dt_to),
+        "items": items,
+    }
+
+
+@router.get("/deviations/operations")
+async def get_operation_time_deviations(
+    factory_id: UUID,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    threshold_percent: float = Query(50.0, description="Deviation threshold from norm (%)"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Get positions with abnormal operation times.
+
+    Returns operation logs where actual duration deviates from the
+    operation norm by more than threshold_percent.
+    """
+    dt_to = date.fromisoformat(date_to) if date_to else date.today()
+    dt_from = date.fromisoformat(date_from) if date_from else dt_to - timedelta(days=30)
+
+    # Get all operations with norms for this factory
+    ops_with_norms = (
+        db.query(Operation)
+        .filter(
+            Operation.factory_id == factory_id,
+            Operation.default_time_minutes.isnot(None),
+            Operation.is_active.is_(True),
+        )
+        .all()
+    )
+    if not ops_with_norms:
+        return {"items": [], "total": 0, "page": page, "per_page": per_page}
+
+    norms = {op.id: float(op.default_time_minutes) for op in ops_with_norms}
+    op_names = {op.id: op.name for op in ops_with_norms}
+
+    # Query completed logs in date range for these operations
+    logs = (
+        db.query(OperationLog)
+        .filter(
+            OperationLog.factory_id == factory_id,
+            OperationLog.shift_date >= dt_from,
+            OperationLog.shift_date <= dt_to,
+            OperationLog.duration_minutes.isnot(None),
+            OperationLog.operation_id.in_(list(norms.keys())),
+        )
+        .order_by(OperationLog.shift_date.desc(), OperationLog.created_at.desc())
+        .all()
+    )
+
+    # Filter by deviation threshold
+    deviations: List[dict] = []
+    for log in logs:
+        norm = norms.get(log.operation_id, 0)
+        if norm <= 0:
+            continue
+        actual = float(log.duration_minutes)
+        deviation_pct = (actual - norm) / norm * 100
+        if abs(deviation_pct) >= threshold_percent:
+            entry = _serialize_op_log(log)
+            entry["operation_name"] = op_names.get(log.operation_id)
+            entry["norm_time_minutes"] = norm
+            entry["deviation_percent"] = round(deviation_pct, 1)
+            entry["severity"] = (
+                "high" if abs(deviation_pct) >= 100
+                else "medium" if abs(deviation_pct) >= 75
+                else "low"
+            )
+            deviations.append(entry)
+
+    total = len(deviations)
+    start = (page - 1) * per_page
+    paged = deviations[start:start + per_page]
+
+    return {"items": paged, "total": total, "page": page, "per_page": per_page}

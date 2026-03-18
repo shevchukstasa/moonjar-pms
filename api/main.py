@@ -149,6 +149,19 @@ def _ensure_schema():
             # Size Resolution — FK columns for size assignment
             ("order_positions", "size_id UUID REFERENCES sizes(id)"),
             ("materials", "size_id UUID REFERENCES sizes(id)"),
+            # MaterialTransaction — receiving approval columns added to model but never migrated
+            ("material_transactions", "defect_percent NUMERIC(5,2)"),
+            ("material_transactions", "quality_notes TEXT"),
+            ("material_transactions", "approval_status VARCHAR(20)"),
+            ("material_transactions", "approved_by UUID REFERENCES users(id)"),
+            ("material_transactions", "approved_at TIMESTAMPTZ"),
+            ("material_transactions", "accepted_quantity NUMERIC(12,3)"),
+            # inventory_reconciliations — fix column names to match model
+            ("inventory_reconciliations", "section_id UUID REFERENCES warehouse_sections(id)"),
+            ("inventory_reconciliations", "staff_count INTEGER"),
+            ("inventory_reconciliations", "scheduled_date DATE"),
+            ("inventory_reconciliations", "approved_by UUID REFERENCES users(id)"),
+            ("inventory_reconciliations", "approved_at TIMESTAMPTZ"),
             # FiringProfile — model was updated to new schema; add missing columns to existing table
             ("firing_profiles", "product_type VARCHAR(20)"),
             ("firing_profiles", "collection VARCHAR(100)"),
@@ -1383,6 +1396,49 @@ def _ensure_schema():
         """))
 
     _run_section("materials_recipes_consumption", _materials_recipes_consumption)
+
+    # --- Section 19b: Fix inventory_reconciliations column names to match model ---
+    def _fix_reconciliations_schema(conn):
+        """Rename started_by_id → started_by if it exists (column name mismatch between
+        first CREATE TABLE and the SQLAlchemy model)."""
+        conn.execute(text("""
+            DO $$ BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'inventory_reconciliations'
+                      AND column_name = 'started_by_id'
+                ) THEN
+                    ALTER TABLE inventory_reconciliations RENAME COLUMN started_by_id TO started_by;
+                END IF;
+                -- Ensure started_by column exists at all
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'inventory_reconciliations'
+                      AND column_name = 'started_by'
+                ) THEN
+                    ALTER TABLE inventory_reconciliations
+                    ADD COLUMN started_by UUID REFERENCES users(id);
+                END IF;
+            END $$;
+        """))
+        # Remove old completed_by_id if exists (not in model)
+        conn.execute(text("""
+            DO $$ BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'inventory_reconciliations'
+                      AND column_name = 'completed_by_id'
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'inventory_reconciliations'
+                      AND column_name = 'started_by'
+                ) THEN
+                    ALTER TABLE inventory_reconciliations RENAME COLUMN completed_by_id TO tmp_unused;
+                END IF;
+            END $$;
+        """))
+
+    _run_section("fix_reconciliations_schema", _fix_reconciliations_schema)
 
     # --- Section 20: Cleanup zombie materials created by seed ---
     # Materials of type 'glaze_ingredient' that are NOT linked to any recipe

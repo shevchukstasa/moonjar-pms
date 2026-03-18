@@ -305,6 +305,12 @@ async def delete_size(
             f"Cannot delete size '{s.name}': used in {cap_count} box capacity rule(s) and {spacer_count} spacer rule(s). Remove those first.",
         )
 
+    # Explicitly delete glazing_board_spec first to avoid NOT NULL FK violation
+    # (SQLAlchemy would try SET NULL before parent delete, but size_id is NOT NULL)
+    if s.glazing_board_spec:
+        db.delete(s.glazing_board_spec)
+        db.flush()
+
     db.delete(s)
     db.commit()
     return {"ok": True}

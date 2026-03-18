@@ -52,6 +52,7 @@ CYAN = "\033[96m"
 
 
 def section(title):
+    time.sleep(0.3)  # brief pause between sections to avoid rate-limiting (429)
     print(f"\n{BOLD}{CYAN}{'─'*60}{RESET}")
     print(f"{BOLD}{CYAN}  {title}{RESET}")
     print(f"{BOLD}{CYAN}{'─'*60}{RESET}")
@@ -630,7 +631,10 @@ if ctx.get("factory_id"):
         cal_id = ctx.get("calendar_id")
         if cal_id:
             r = delete(f"/factory-calendar/{cal_id}")
-            check(r, 200, "DELETE /factory-calendar/{id} (cleanup)")
+            if r.status_code in (200, 204):
+                ok("DELETE /factory-calendar/{id} (cleanup)")
+            else:
+                fail("DELETE /factory-calendar/{id} (cleanup)", f"{r.status_code}: {r.text[:80]}")
 
 section("STAGE 2 · Problem Cards")
 

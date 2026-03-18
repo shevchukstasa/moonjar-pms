@@ -1,6 +1,16 @@
 """
 Per-kiln loading rules (JSONB-based) and co-firing validation.
-See BUSINESS_LOGIC.md §30–§31, §37.
+See BUSINESS_LOGIC.md §30-§31, §37.
+
+NOTE: Actual kiln capacity calculations (flat/edge loading, geometry,
+filler tiles) live in business/kiln/capacity.py. This module provides:
+  - get_loading_rules()   -- loads per-kiln JSONB rules (used by capacity.py)
+  - validate_cofiring()   -- co-firing temperature compatibility check
+  - get_rotation_rules()  -- factory-level kiln rotation configuration
+
+Batch formation logic lives in business/services/batch_formation.py,
+which calls capacity.py for geometry-based calculations and this module
+for loading rules and co-firing validation.
 """
 from uuid import UUID
 from typing import Optional

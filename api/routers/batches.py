@@ -25,7 +25,7 @@ from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
 from api.models import Batch, OrderPosition, Resource
 from api.schemas import BatchCreate, BatchUpdate, BatchResponse
-from api.enums import BatchStatus
+from api.enums import BatchStatus, ResourceType
 
 router = APIRouter()
 
@@ -145,6 +145,64 @@ async def auto_form_batches(
 
 
 # ────────────────────────────────────────────────────────────────
+# POST /api/batches/capacity-preview
+# ────────────────────────────────────────────────────────────────
+
+class CapacityPreviewRequest(BaseModel):
+    position_id: UUID
+    kiln_id: UUID
+
+
+@router.post("/capacity-preview")
+async def preview_capacity(
+    data: CapacityPreviewRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Preview how a position would load in a specific kiln.
+
+    Uses geometry-based capacity calculations (edge vs flat optimization,
+    per-product validation, filler integration) from kiln/capacity.py.
+
+    Returns loading plan details including:
+    - Optimal and alternative loading methods (flat/edge)
+    - Pieces per level, number of levels, total pieces
+    - Area utilization
+    - Filler tile info (for small kilns)
+    """
+    position = db.query(OrderPosition).filter(
+        OrderPosition.id == data.position_id,
+    ).first()
+    if not position:
+        raise HTTPException(404, "Position not found")
+
+    kiln = db.query(Resource).filter(
+        Resource.id == data.kiln_id,
+        Resource.resource_type == ResourceType.KILN.value,
+    ).first()
+    if not kiln:
+        raise HTTPException(404, "Kiln not found")
+
+    from business.services.batch_formation import preview_position_in_kiln
+
+    try:
+        result = preview_position_in_kiln(db, position, kiln)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Capacity calculation failed: {str(e)}",
+        )
+
+    return {
+        "position_id": str(data.position_id),
+        "kiln_id": str(data.kiln_id),
+        "kiln_name": kiln.name,
+        **result,
+    }
+
+
+# ────────────────────────────────────────────────────────────────
 # GET /api/batches
 # ────────────────────────────────────────────────────────────────
 
@@ -237,6 +295,11 @@ async def get_batch_detail(
     from business.services.batch_formation import _get_position_area_sqm
     total_area = sum(float(_get_position_area_sqm(p)) for p in positions)
 
+    # Extract loading plan from metadata_json if available
+    loading_plan = None
+    if batch.metadata_json and isinstance(batch.metadata_json, dict):
+        loading_plan = batch.metadata_json.get("loading_plan")
+
     return {
         "id": batch.id,
         "resource_id": batch.resource_id,
@@ -252,6 +315,7 @@ async def get_batch_detail(
         "positions_count": len(positions),
         "total_area_sqm": round(total_area, 4),
         "kiln_capacity_sqm": float(kiln.capacity_sqm) if kiln and kiln.capacity_sqm else None,
+        "loading_plan": loading_plan,
         "created_at": batch.created_at,
         "updated_at": batch.updated_at,
     }

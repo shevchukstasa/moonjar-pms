@@ -4,6 +4,10 @@ Business Logic: §7, §19
 
 Groups kiln-ready positions into temperature-compatible batches,
 assigns kilns, and attaches firing profiles.
+
+Enhanced with geometry-based kiln capacity calculations from
+business/kiln/capacity.py — uses actual piece-level fit instead
+of simple capacity_sqm comparison.
 """
 import uuid as uuid_mod
 import logging
@@ -128,7 +132,7 @@ def _get_kiln_capacity_sqm(kiln: Resource) -> Decimal:
         w = dims.get("width", 0)
         h = dims.get("height", 0)
         if w and h:
-            return Decimal(str(w * h)) / Decimal("10000")  # cm² → m²
+            return Decimal(str(w * h)) / Decimal("10000")  # cm2 -> m2
     # Last resort
     return Decimal("1.0")
 
@@ -147,6 +151,181 @@ def _get_position_area_sqm(pos: OrderPosition) -> Decimal:
         return piece_sqm * Decimal(str(pos.quantity))
     # Absolute fallback
     return Decimal("0.04") * Decimal(str(pos.quantity))  # ~20x20 cm default
+
+
+# ────────────────────────────────────────────────────────────────
+# §2b  Geometry-based capacity helpers
+# ────────────────────────────────────────────────────────────────
+
+def _get_kiln_constants_and_rules(db: Session, kiln: Resource) -> tuple:
+    """
+    Load global kiln constants and per-kiln loading rules.
+    Returns (constants_dict, loading_rules_dict).
+    """
+    from business.kiln.constants import get_kiln_constants
+    from business.kiln.assignment_rules import get_loading_rules
+
+    constants = get_kiln_constants(db, kiln.factory_id)
+    loading_rules = get_loading_rules(db, kiln.id)
+    return constants, loading_rules
+
+
+def _position_has_geometry(pos: OrderPosition) -> bool:
+    """Check if position has enough data for geometry-based calculation."""
+    return bool(pos.size and pos.size != "0x0")
+
+
+def _calculate_position_loading(
+    pos: OrderPosition,
+    kiln: Resource,
+    constants: dict,
+    loading_rules: dict,
+) -> Optional[dict]:
+    """
+    Calculate how a position loads in a kiln using geometry-based capacity.
+
+    Calls calculate_kiln_capacity() from business/kiln/capacity.py.
+
+    The capacity calculator reads position attributes via getattr():
+      - size          -> "30x60" format string (from OrderPosition.size)
+      - thickness_cm  -> float in cm (converted from OrderPosition.thickness_mm)
+      - product_type  -> string like "tile", "sink", etc.
+      - shape         -> string like "rectangle", "round", "triangle"
+      - glaze_placement -> string like "face-only", "face-with-back", etc.
+
+    Returns the full capacity result dict from calculate_kiln_capacity(),
+    or None if calculation fails.
+    """
+    from business.kiln.capacity import calculate_kiln_capacity
+
+    # Build a lightweight adapter object so calculate_kiln_capacity can
+    # use getattr() to read position properties in the format it expects.
+    class _PosAdapter:
+        def __init__(self, op: OrderPosition):
+            self.size = op.size or "0x0"
+            # Convert thickness_mm -> thickness_cm (capacity.py expects cm)
+            tmm = float(op.thickness_mm) if op.thickness_mm else 11.0
+            self.thickness_cm = tmm / 10.0
+            # product_type: enum -> string value
+            pt = op.product_type
+            self.product_type = pt.value if hasattr(pt, "value") else str(pt) if pt else "tile"
+            # shape: enum -> string value
+            sh = op.shape
+            self.shape = sh.value if hasattr(sh, "value") else str(sh) if sh else "rectangle"
+            # glaze_placement: use place_of_application, or default
+            poa = op.place_of_application
+            self.glaze_placement = poa if poa else "face-only"
+
+    try:
+        adapter = _PosAdapter(pos)
+        result = calculate_kiln_capacity(adapter, kiln, constants, loading_rules)
+        return result
+    except (ValueError, ZeroDivisionError, TypeError, AttributeError) as exc:
+        logger.debug(
+            "GEOMETRY_CALC_FAIL | position=%s kiln=%s | %s: %s",
+            pos.id, kiln.id, type(exc).__name__, exc,
+        )
+        return None
+
+
+def _build_loading_plan_entry(
+    pos: OrderPosition,
+    capacity_result: dict,
+) -> dict:
+    """
+    Build a single loading plan entry for a position from capacity result.
+    """
+    optimal = capacity_result.get("optimal", {})
+    method = optimal.get("method", "flat")
+    per_level = optimal.get("per_level", optimal.get("edge_pieces", 0))
+    num_levels = optimal.get("num_levels", 1)
+    total_pieces = optimal.get("total_pieces", 0)
+    total_area = optimal.get("total_area_sqm", 0.0)
+
+    entry = {
+        "position_id": str(pos.id),
+        "loading_method": method,
+        "pieces_per_level": per_level,
+        "levels_used": num_levels,
+        "total_pieces": total_pieces,
+        "area_sqm": round(total_area, 4),
+    }
+
+    # Include filler info if present
+    filler = optimal.get("filler")
+    if filler:
+        entry["filler_pieces"] = filler.get("filler_pieces", 0)
+        entry["filler_area_sqm"] = filler.get("filler_area_sqm", 0.0)
+
+    # Include flat-on-top for edge loading
+    if method == "edge":
+        entry["edge_pieces"] = optimal.get("edge_pieces", 0)
+        entry["flat_on_top"] = optimal.get("flat_on_top", 0)
+
+    return entry
+
+
+def _build_loading_plan(
+    position_entries: list[dict],
+    kiln_capacity_sqm: float,
+) -> dict:
+    """
+    Build the complete loading_plan dict for batch metadata_json.
+    """
+    total_area = sum(e["area_sqm"] for e in position_entries)
+    filler_area = sum(e.get("filler_area_sqm", 0.0) for e in position_entries)
+    utilization = (total_area / kiln_capacity_sqm * 100.0) if kiln_capacity_sqm > 0 else 0.0
+
+    return {
+        "loading_plan": {
+            "positions": position_entries,
+            "total_area_sqm": round(total_area, 4),
+            "kiln_utilization_pct": round(utilization, 1),
+            "filler_area_sqm": round(filler_area, 4),
+        }
+    }
+
+
+def preview_position_in_kiln(
+    db: Session,
+    position: OrderPosition,
+    kiln: Resource,
+) -> dict:
+    """
+    Preview how a position would load in a specific kiln.
+    Used by the capacity-preview API endpoint.
+
+    Returns full capacity result with flat/edge/optimal breakdown,
+    plus a loading plan entry.
+    """
+    constants, loading_rules = _get_kiln_constants_and_rules(db, kiln)
+    result = _calculate_position_loading(position, kiln, constants, loading_rules)
+
+    if result is None:
+        # Fall back to simple area comparison
+        area = float(_get_position_area_sqm(position))
+        cap = float(_get_kiln_capacity_sqm(kiln))
+        return {
+            "geometry_available": False,
+            "fallback": True,
+            "position_area_sqm": area,
+            "kiln_capacity_sqm": cap,
+            "fits": area <= cap,
+        }
+
+    entry = _build_loading_plan_entry(position, result)
+    kiln_cap = float(_get_kiln_capacity_sqm(kiln))
+
+    return {
+        "geometry_available": True,
+        "fallback": False,
+        "loading_plan_entry": entry,
+        "kiln_capacity_sqm": kiln_cap,
+        "flat": result.get("flat"),
+        "edge": result.get("edge"),
+        "optimal": result.get("optimal"),
+        "alternative": result.get("alternative"),
+    }
 
 
 # ────────────────────────────────────────────────────────────────
@@ -309,8 +488,15 @@ def _build_batches_for_group(
     """
     Build one or more batches from a temperature group's positions.
 
-    Fills kiln capacity greedily: keeps adding positions until the kiln
-    is full, then starts a new batch on the next available kiln.
+    Uses geometry-based kiln capacity from calculate_kiln_capacity() to
+    determine actual piece-level fit (edge vs flat optimization).
+    Falls back to simple area comparison when geometry data is unavailable.
+
+    For each position added to a batch:
+    - Calls calculate_kiln_capacity() with position dimensions, shape,
+      product_type, glaze placement, and kiln geometry
+    - Tracks loading method (flat/edge) chosen for each position
+    - Stores loading details in batch metadata_json
     """
     from business.services.firing_profiles import get_batch_firing_profile
 
@@ -320,7 +506,10 @@ def _build_batches_for_group(
     while remaining_positions:
         # Start a new batch: determine how many positions fit in one kiln
         batch_positions: list[OrderPosition] = []
+        loading_entries: list[dict] = []
         total_area = Decimal("0")
+        total_pieces_used = 0
+        geometry_used = False
 
         # Find a kiln for this batch (use first position as reference)
         first_pos = remaining_positions[0]
@@ -340,28 +529,114 @@ def _build_batches_for_group(
 
         kiln_capacity = _get_kiln_capacity_sqm(kiln)
 
+        # Load kiln constants and per-kiln rules once per batch
+        constants, loading_rules = _get_kiln_constants_and_rules(db, kiln)
+
+        # Compute kiln's max piece capacity for the first position
+        # to estimate total kiln capacity in piece terms.
+        # We track remaining capacity both by area (fallback) and by
+        # piece count from geometry calculations.
+        kiln_max_pieces = None  # will be set on first geometry calc
+
         # Fill the kiln
         still_remaining = []
         for pos in remaining_positions:
             pos_area = _get_position_area_sqm(pos)
-            if total_area + pos_area <= kiln_capacity:
-                batch_positions.append(pos)
-                total_area += pos_area
+
+            # Try geometry-based calculation first
+            if _position_has_geometry(pos):
+                cap_result = _calculate_position_loading(
+                    pos, kiln, constants, loading_rules,
+                )
             else:
-                still_remaining.append(pos)
+                cap_result = None
+
+            if cap_result is not None:
+                optimal = cap_result.get("optimal", {})
+                calc_pieces = optimal.get("total_pieces", 0)
+                calc_area = optimal.get("total_area_sqm", 0.0)
+
+                if calc_pieces == 0:
+                    # Geometry says it does not fit at all (e.g. product type
+                    # not allowed, too tall for edge, etc.)
+                    reason = optimal.get("reason", "does not fit")
+                    logger.debug(
+                        "BATCH_SKIP | pos=%s kiln=%s | geometry: %s",
+                        pos.id, kiln.name, reason,
+                    )
+                    still_remaining.append(pos)
+                    continue
+
+                # Check if adding this position exceeds kiln capacity.
+                # Use the quantity the position actually needs vs. what
+                # the kiln can hold for this product.
+                pos_needed_pieces = pos.quantity
+                if calc_pieces < pos_needed_pieces:
+                    # Kiln cannot fit all pieces of this position
+                    # Still try area-based fallback to see if it fits
+                    if total_area + pos_area <= kiln_capacity:
+                        batch_positions.append(pos)
+                        total_area += pos_area
+                        entry = _build_loading_plan_entry(pos, cap_result)
+                        # Override with actual quantity needed
+                        entry["total_pieces"] = pos_needed_pieces
+                        entry["area_sqm"] = float(pos_area)
+                        loading_entries.append(entry)
+                        geometry_used = True
+                    else:
+                        still_remaining.append(pos)
+                    continue
+
+                # Geometry fit check: can the remaining kiln area hold this?
+                candidate_area = total_area + pos_area
+                if candidate_area <= kiln_capacity:
+                    batch_positions.append(pos)
+                    total_area = candidate_area
+                    loading_entries.append(
+                        _build_loading_plan_entry(pos, cap_result)
+                    )
+                    geometry_used = True
+                else:
+                    still_remaining.append(pos)
+            else:
+                # Fallback: simple area comparison (no geometry data)
+                if total_area + pos_area <= kiln_capacity:
+                    batch_positions.append(pos)
+                    total_area += pos_area
+                    # Build a basic loading entry without geometry detail
+                    loading_entries.append({
+                        "position_id": str(pos.id),
+                        "loading_method": "flat",
+                        "pieces_per_level": pos.quantity,
+                        "levels_used": 1,
+                        "total_pieces": pos.quantity,
+                        "area_sqm": float(pos_area),
+                        "geometry_fallback": True,
+                    })
+                else:
+                    still_remaining.append(pos)
 
         remaining_positions = still_remaining
 
         if not batch_positions:
-            # No positions fit — possible if single position exceeds capacity.
+            # No positions fit -- possible if single position exceeds capacity.
             # Force it into the batch anyway (oversized position still needs firing).
             if remaining_positions:
                 oversized = remaining_positions.pop(0)
                 batch_positions = [oversized]
                 total_area = _get_position_area_sqm(oversized)
+                loading_entries = [{
+                    "position_id": str(oversized.id),
+                    "loading_method": "flat",
+                    "pieces_per_level": oversized.quantity,
+                    "levels_used": 1,
+                    "total_pieces": oversized.quantity,
+                    "area_sqm": float(total_area),
+                    "oversized": True,
+                }]
                 logger.warning(
                     "BATCH_FORMATION | Oversized position %s (%.3f sqm) exceeds "
-                    "kiln capacity (%.3f sqm) — forced into batch",
+                    "kiln capacity (%.3f sqm) -- forced into batch",
                     oversized.id, _get_position_area_sqm(oversized), kiln_capacity,
                 )
             else:
@@ -385,6 +660,11 @@ def _build_batches_for_group(
                         target_temp = config.firing_temperature
                         break
 
+        # Build loading plan metadata
+        kiln_cap_float = float(kiln_capacity)
+        loading_plan = _build_loading_plan(loading_entries, kiln_cap_float)
+        loading_plan["geometry_used"] = geometry_used
+
         # Create the Batch record
         batch = Batch(
             id=uuid_mod.uuid4(),
@@ -395,6 +675,7 @@ def _build_batches_for_group(
             created_by=BatchCreator.AUTO,
             firing_profile_id=profile.id if profile else None,
             target_temperature=target_temp,
+            metadata_json=loading_plan,
         )
         db.add(batch)
         db.flush()  # get batch.id assigned
@@ -404,6 +685,10 @@ def _build_batches_for_group(
             pos.batch_id = batch.id
             pos.resource_id = kiln.id  # actual kiln assignment
 
+        fill_pct = float(
+            (total_area / kiln_capacity * 100) if kiln_capacity > 0 else 0
+        )
+
         batch_detail = {
             "batch_id": str(batch.id),
             "kiln_id": str(kiln.id),
@@ -412,10 +697,8 @@ def _build_batches_for_group(
             "status": batch_status.value,
             "positions_count": len(batch_positions),
             "total_area_sqm": float(total_area),
-            "kiln_capacity_sqm": float(kiln_capacity),
-            "fill_percentage": float(
-                (total_area / kiln_capacity * 100) if kiln_capacity > 0 else 0,
-            ),
+            "kiln_capacity_sqm": kiln_cap_float,
+            "fill_percentage": fill_pct,
             "target_temperature": target_temp,
             "firing_profile_id": str(profile.id) if profile else None,
             "firing_profile_name": profile.name if profile else None,
@@ -426,15 +709,17 @@ def _build_batches_for_group(
             ),
             "temperature_group_id": str(group_id) if group_id else None,
             "position_ids": [str(p.id) for p in batch_positions],
+            "loading_plan": loading_plan.get("loading_plan"),
+            "geometry_used": geometry_used,
         }
         created_batches.append(batch_detail)
 
         logger.info(
-            "BATCH_CREATED | batch=%s kiln=%s | %d positions, %.2f/%.2f sqm (%.0f%%), temp=%s",
+            "BATCH_CREATED | batch=%s kiln=%s | %d positions, %.2f/%.2f sqm (%.0f%%), "
+            "temp=%s, geometry=%s",
             batch.id, kiln.name,
             len(batch_positions), total_area, kiln_capacity,
-            batch_detail["fill_percentage"],
-            target_temp,
+            fill_pct, target_temp, geometry_used,
         )
 
     return created_batches
@@ -449,11 +734,13 @@ def build_batch_proposals(
     Group positions into optimal batch proposals without creating DB records.
     Returns list of proposal dicts for PM review.
 
+    Uses geometry-based kiln capacity when available, with area-based fallback.
+
     Steps:
     1. Group by temperature using firing_profiles.group_positions_by_temperature()
     2. Within each temperature bucket:
        a. Match to compatible kilns
-       b. Fill kiln capacity
+       b. Fill kiln capacity (geometry-based when possible)
        c. Select firing profile using get_batch_firing_profile() (slowest wins)
     3. Return list of batch proposals with assigned positions + profiles
     """
@@ -480,17 +767,57 @@ def build_batch_proposals(
                 break
 
             kiln_capacity = _get_kiln_capacity_sqm(kiln)
+            constants, loading_rules = _get_kiln_constants_and_rules(db, kiln)
+
             batch_positions: list[OrderPosition] = []
+            loading_entries: list[dict] = []
             total_area = Decimal("0")
+            geometry_used = False
             still_remaining = []
 
             for pos in remaining:
                 pos_area = _get_position_area_sqm(pos)
-                if total_area + pos_area <= kiln_capacity:
-                    batch_positions.append(pos)
-                    total_area += pos_area
+
+                # Try geometry-based calculation
+                if _position_has_geometry(pos):
+                    cap_result = _calculate_position_loading(
+                        pos, kiln, constants, loading_rules,
+                    )
                 else:
-                    still_remaining.append(pos)
+                    cap_result = None
+
+                if cap_result is not None:
+                    optimal = cap_result.get("optimal", {})
+                    calc_pieces = optimal.get("total_pieces", 0)
+
+                    if calc_pieces == 0:
+                        still_remaining.append(pos)
+                        continue
+
+                    if total_area + pos_area <= kiln_capacity:
+                        batch_positions.append(pos)
+                        total_area += pos_area
+                        loading_entries.append(
+                            _build_loading_plan_entry(pos, cap_result)
+                        )
+                        geometry_used = True
+                    else:
+                        still_remaining.append(pos)
+                else:
+                    if total_area + pos_area <= kiln_capacity:
+                        batch_positions.append(pos)
+                        total_area += pos_area
+                        loading_entries.append({
+                            "position_id": str(pos.id),
+                            "loading_method": "flat",
+                            "pieces_per_level": pos.quantity,
+                            "levels_used": 1,
+                            "total_pieces": pos.quantity,
+                            "area_sqm": float(pos_area),
+                            "geometry_fallback": True,
+                        })
+                    else:
+                        still_remaining.append(pos)
 
             remaining = still_remaining
 
@@ -501,6 +828,9 @@ def build_batch_proposals(
                 else:
                     break
 
+            kiln_cap_float = float(kiln_capacity)
+            loading_plan = _build_loading_plan(loading_entries, kiln_cap_float)
+
             profile = get_batch_firing_profile(db, batch_positions)
             proposals.append({
                 "kiln_id": str(kiln.id),
@@ -508,7 +838,7 @@ def build_batch_proposals(
                 "temperature_group_id": str(group_id) if group_id else None,
                 "positions_count": len(batch_positions),
                 "total_area_sqm": float(total_area),
-                "kiln_capacity_sqm": float(kiln_capacity),
+                "kiln_capacity_sqm": kiln_cap_float,
                 "fill_percentage": float(
                     (total_area / kiln_capacity * 100) if kiln_capacity > 0 else 0,
                 ),
@@ -518,6 +848,8 @@ def build_batch_proposals(
                     float(profile.total_duration_hours) if profile else None
                 ),
                 "position_ids": [str(p.id) for p in batch_positions],
+                "loading_plan": loading_plan.get("loading_plan"),
+                "geometry_used": geometry_used,
             })
 
     return proposals
@@ -530,7 +862,7 @@ def build_batch_proposals(
 def assign_batch_firing_profile(db: Session, batch_id: UUID) -> None:
     """
     Determine and store the firing profile for a batch.
-    Uses get_batch_firing_profile() — slowest profile among batch positions wins.
+    Uses get_batch_firing_profile() -- slowest profile among batch positions wins.
     Stores firing_profile_id and target_temperature on the batch record.
     """
     from business.services.firing_profiles import get_batch_firing_profile
@@ -622,6 +954,9 @@ def pm_confirm_batch(
     # Re-assign firing profile after adjustments
     assign_batch_firing_profile(db, batch_id)
 
+    # Re-generate loading plan after adjustments
+    _regenerate_batch_loading_plan(db, batch)
+
     db.commit()
     db.refresh(batch)
 
@@ -629,6 +964,61 @@ def pm_confirm_batch(
         "BATCH_CONFIRMED | batch=%s | by PM %s", batch_id, pm_user_id,
     )
     return batch
+
+
+def _regenerate_batch_loading_plan(db: Session, batch: Batch) -> None:
+    """
+    Regenerate the loading plan metadata for a batch after adjustments.
+    """
+    kiln = db.query(Resource).filter(Resource.id == batch.resource_id).first()
+    if not kiln:
+        return
+
+    positions = db.query(OrderPosition).filter(
+        OrderPosition.batch_id == batch.id,
+    ).all()
+    if not positions:
+        batch.metadata_json = None
+        return
+
+    constants, loading_rules = _get_kiln_constants_and_rules(db, kiln)
+    kiln_capacity = float(_get_kiln_capacity_sqm(kiln))
+
+    loading_entries = []
+    geometry_used = False
+
+    for pos in positions:
+        if _position_has_geometry(pos):
+            cap_result = _calculate_position_loading(
+                pos, kiln, constants, loading_rules,
+            )
+        else:
+            cap_result = None
+
+        if cap_result is not None:
+            optimal = cap_result.get("optimal", {})
+            if optimal.get("total_pieces", 0) > 0:
+                loading_entries.append(
+                    _build_loading_plan_entry(pos, cap_result)
+                )
+                geometry_used = True
+                continue
+
+        # Fallback
+        pos_area = float(_get_position_area_sqm(pos))
+        loading_entries.append({
+            "position_id": str(pos.id),
+            "loading_method": "flat",
+            "pieces_per_level": pos.quantity,
+            "levels_used": 1,
+            "total_pieces": pos.quantity,
+            "area_sqm": pos_area,
+            "geometry_fallback": True,
+        })
+
+    plan = _build_loading_plan(loading_entries, kiln_capacity)
+    plan["geometry_used"] = geometry_used
+    batch.metadata_json = plan
 
 
 def pm_reject_batch(db: Session, batch_id: UUID, pm_user_id: UUID) -> None:
@@ -771,7 +1161,7 @@ def fill_with_filler_tiles(db: Session, factory_id: UUID) -> None:
     Fill remaining space in PLANNED batches with filler tiles.
     Filler tiles are positions from stock collections or non-urgent orders.
 
-    This is a placeholder — full implementation depends on factory-specific
+    This is a placeholder -- full implementation depends on factory-specific
     filler tile inventory which will be configured in a later iteration.
     """
     batches = db.query(Batch).filter(

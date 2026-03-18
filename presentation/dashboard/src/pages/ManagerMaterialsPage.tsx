@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
-import { useMaterials, useCreateMaterial, useUpdateMaterial, useCreateTransaction, type MaterialItem } from '@/hooks/useMaterials';
+import { useMaterials, useCreateMaterial, useUpdateMaterial, useCreateTransaction, useMaterialTransactions, type MaterialItem } from '@/hooks/useMaterials';
 import { useMaterialHierarchy, type MaterialGroup } from '@/hooks/useMaterialGroups';
 import { useFactories } from '@/hooks/useFactories';
 import { useSuppliers } from '@/hooks/useSuppliers';
@@ -119,6 +119,11 @@ export default function ManagerMaterialsPage() {
   const [txForm, setTxForm] = useState<TxForm>({ type: 'receive', quantity: '', notes: '' });
   const [txError, setTxError] = useState('');
 
+  // Transaction history dialog
+  const [historyDialog, setHistoryDialog] = useState<{ open: boolean; item: MaterialItem | null }>({ open: false, item: null });
+  const { data: txHistoryData, isLoading: txHistoryLoading } = useMaterialTransactions(historyDialog.item?.id);
+  const txHistoryItems = txHistoryData?.items ?? [];
+
   // ── Edit/create dialog ──────────────────────────────────────────────────
 
   const openCreate = useCallback((defaultType?: string) => {
@@ -200,6 +205,14 @@ export default function ManagerMaterialsPage() {
   const closeTx = useCallback(() => {
     setTxDialog({ open: false, item: null });
     setTxError('');
+  }, []);
+
+  const openHistory = useCallback((item: MaterialItem) => {
+    setHistoryDialog({ open: true, item });
+  }, []);
+
+  const closeHistory = useCallback(() => {
+    setHistoryDialog({ open: false, item: null });
   }, []);
 
   const handleTx = useCallback(async () => {
@@ -373,6 +386,7 @@ export default function ManagerMaterialsPage() {
           hideNames={user?.role === 'production_manager'}
           onEdit={openEdit}
           onTransaction={openTx}
+          onHistory={openHistory}
         />
       )}
 
@@ -544,6 +558,69 @@ export default function ManagerMaterialsPage() {
           </div>
         )}
       </Dialog>
+
+      {/* Transaction History dialog */}
+      <Dialog
+        open={historyDialog.open}
+        onClose={closeHistory}
+        title={historyDialog.item
+          ? `Transaction History — ${user?.role === 'production_manager' ? (historyDialog.item.material_code ?? historyDialog.item.name) : historyDialog.item.name}`
+          : 'Transaction History'}
+        className="w-full max-w-2xl"
+      >
+        {txHistoryLoading ? (
+          <div className="flex justify-center py-8"><Spinner className="h-6 w-6" /></div>
+        ) : txHistoryItems.length === 0 ? (
+          <p className="py-8 text-center text-sm text-gray-400">No transactions found</p>
+        ) : (
+          <div className="max-h-96 overflow-y-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="sticky top-0 border-b bg-gray-50 text-xs font-medium uppercase tracking-wider text-gray-500">
+                <tr>
+                  <th className="px-3 py-2">Date</th>
+                  <th className="px-3 py-2">Type</th>
+                  <th className="px-3 py-2 text-right">Qty</th>
+                  <th className="px-3 py-2">By</th>
+                  <th className="px-3 py-2">Notes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {txHistoryItems.map((tx) => (
+                  <tr key={tx.id} className="bg-white hover:bg-gray-50">
+                    <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">
+                      {tx.created_at ? new Date(tx.created_at).toLocaleString() : '\u2014'}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                        tx.type === 'receive' ? 'bg-green-100 text-green-700' :
+                        tx.type === 'consume' || tx.type === 'manual_write_off' ? 'bg-red-100 text-red-700' :
+                        tx.type === 'reserve' || tx.type === 'unreserve' ? 'bg-blue-100 text-blue-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>
+                        {tx.type.replace(/_/g, ' ')}
+                      </span>
+                    </td>
+                    <td className={`px-3 py-2 text-right font-mono text-sm ${
+                      tx.type === 'receive' ? 'text-green-600' :
+                      tx.type === 'consume' || tx.type === 'manual_write_off' ? 'text-red-600' :
+                      'text-gray-900'
+                    }`}>
+                      {tx.type === 'receive' ? '+' : tx.type === 'consume' || tx.type === 'manual_write_off' ? '-' : ''}{Number(tx.quantity).toFixed(3)}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-gray-500">{tx.created_by_name ?? '\u2014'}</td>
+                    <td className="px-3 py-2 text-xs text-gray-500 max-w-48 truncate" title={tx.notes ?? ''}>
+                      {tx.notes ?? '\u2014'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="mt-4 flex justify-end border-t pt-3">
+          <Button variant="secondary" onClick={closeHistory}>Close</Button>
+        </div>
+      </Dialog>
     </div>
   );
 }
@@ -557,9 +634,10 @@ interface MaterialsTableProps {
   hideNames?: boolean;
   onEdit: (item: MaterialItem) => void;
   onTransaction: (item: MaterialItem) => void;
+  onHistory: (item: MaterialItem) => void;
 }
 
-function MaterialsTable({ items, subgroups, isAggregate, hideNames, onEdit, onTransaction }: MaterialsTableProps) {
+function MaterialsTable({ items, subgroups, isAggregate, hideNames, onEdit, onTransaction, onHistory }: MaterialsTableProps) {
   const typeLabel = (code: string) => subgroups.find((s) => s.value === code)?.label ?? code;
   const typeIcon = (code: string) => subgroups.find((s) => s.value === code)?.icon ?? '';
 
@@ -625,6 +703,9 @@ function MaterialsTable({ items, subgroups, isAggregate, hideNames, onEdit, onTr
                       ±
                     </Button>
                   )}
+                  <Button size="sm" variant="ghost" onClick={() => onHistory(m)} title="Transaction history">
+                    Hst
+                  </Button>
                   <Button size="sm" variant="ghost" onClick={() => onEdit(m)}>
                     Edit
                   </Button>

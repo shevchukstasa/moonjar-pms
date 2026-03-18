@@ -686,12 +686,20 @@ class MaterialTransaction(Base):
     notes = Column(sa.Text)
     created_by = Column(UUID(as_uuid=True), ForeignKey('users.id'))
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    # Receiving approval fields
+    defect_percent = Column(sa.Numeric(5, 2), nullable=True)
+    quality_notes = Column(sa.Text, nullable=True)
+    approval_status = Column(sa.String(20), nullable=True)  # 'pending', 'approved', 'rejected', 'partial'
+    approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    approved_at = Column(sa.DateTime(timezone=True), nullable=True)
+    accepted_quantity = Column(sa.Numeric(12, 3), nullable=True)
 
     material = relationship('Material', foreign_keys=[material_id])
     factory = relationship('Factory', foreign_keys=[factory_id])
     related_order = relationship('ProductionOrder', foreign_keys=[related_order_id])
     related_position = relationship('OrderPosition', foreign_keys=[related_position_id])
     created_by_rel = relationship('User', foreign_keys=[created_by])
+    approved_by_rel = relationship('User', foreign_keys=[approved_by])
 
 
 class MaterialPurchaseRequest(Base):

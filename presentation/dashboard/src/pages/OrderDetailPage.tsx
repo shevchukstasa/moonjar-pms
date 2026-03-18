@@ -8,6 +8,7 @@ import { Tabs } from '@/components/ui/Tabs';
 import { Spinner } from '@/components/ui/Spinner';
 import { DataTable } from '@/components/ui/Table';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { StatusDropdown } from '@/components/tablo/StatusDropdown';
 
 const VALID_STATUSES = [
   { value: 'new', label: 'New' },
@@ -85,7 +86,12 @@ export default function OrderDetailPage() {
     {
       key: 'status',
       header: 'Status',
-      render: (p) => <Badge status={p.status} />,
+      render: (p) =>
+        p.id ? (
+          <StatusDropdown positionId={p.id} currentStatus={p.status} section="" />
+        ) : (
+          <Badge status={p.status} />
+        ),
     },
     { key: 'product_type', header: 'Type' },
     {

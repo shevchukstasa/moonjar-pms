@@ -134,6 +134,9 @@ def _ensure_schema():
             ("grinding_stock", "decided_by UUID REFERENCES users(id)"),
             ("grinding_stock", "decided_at TIMESTAMPTZ"),
             ("grinding_stock", "notes TEXT"),
+            # Position photos — batch association + web URL
+            ("position_photos", "batch_id UUID REFERENCES batches(id)"),
+            ("position_photos", "photo_url VARCHAR(2048)"),
         ]
         for table, col_def in add_cols:
             try:
@@ -397,6 +400,21 @@ def _ensure_schema():
                 photo_type VARCHAR(30),
                 caption TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        # Grinding stock — positions awaiting PM decision
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS grinding_stock (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                factory_id UUID NOT NULL REFERENCES factories(id),
+                source_order_id UUID REFERENCES production_orders(id),
+                source_position_id UUID REFERENCES order_positions(id),
+                status VARCHAR(30) NOT NULL DEFAULT 'in_stock',
+                decided_by UUID REFERENCES users(id),
+                decided_at TIMESTAMPTZ,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
         # System settings (key-value for Telegram owner chat, etc.)

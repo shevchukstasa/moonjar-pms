@@ -1852,13 +1852,16 @@ class PositionPhoto(Base):
     telegram_chat_id = Column(sa.BigInteger)
     uploaded_by_telegram_id = Column(sa.BigInteger)
     uploaded_by_user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    batch_id = Column(UUID(as_uuid=True), ForeignKey('batches.id'), nullable=True)
     photo_type = Column(sa.String(30))  # glazing, firing, defect, packing, other
+    photo_url = Column(sa.String(2048), nullable=True)  # For web-uploaded photos
     caption = Column(sa.Text)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     position = relationship('OrderPosition', foreign_keys=[position_id])
     factory = relationship('Factory', foreign_keys=[factory_id])
     uploaded_by = relationship('User', foreign_keys=[uploaded_by_user_id])
+    batch = relationship('Batch', foreign_keys=[batch_id])
 
 
 class SystemSetting(Base):

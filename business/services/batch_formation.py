@@ -550,20 +550,54 @@ def preview_position_in_kiln(
 # §3  Find best kiln for a temperature group
 # ────────────────────────────────────────────────────────────────
 
+def _is_raku_kiln(kiln: Resource) -> bool:
+    """Check if a kiln is a Raku kiln by its type."""
+    return "raku" in (kiln.kiln_type or "").lower()
+
+
+# Gold tile standard firing temperature (700 °C)
+_GOLD_FIRING_TEMPERATURE = 700
+_GOLD_TEMP_TOLERANCE = 50  # °C — within this range counts as gold-compatible
+
+
+def _is_gold_firing(
+    cofiring_key: Optional[str] = None,
+    firing_temperature: Optional[int] = None,
+) -> bool:
+    """
+    Determine if a batch is a gold/700°C firing.
+
+    Checks both the co-firing sub-group key (set by _split_by_cofiring_compatibility)
+    and the actual firing temperature.
+    """
+    if cofiring_key and "gold" in cofiring_key:
+        return True
+    if firing_temperature is not None:
+        if abs(firing_temperature - _GOLD_FIRING_TEMPERATURE) <= _GOLD_TEMP_TOLERANCE:
+            return True
+    return False
+
+
 def _find_best_kiln_for_batch(
     db: Session,
     available_kilns: list[Resource],
     batch_date: date,
     required_area_sqm: Decimal,
     position: Optional[OrderPosition] = None,
+    cofiring_key: Optional[str] = None,
+    firing_temperature: Optional[int] = None,
 ) -> Optional[Resource]:
     """
     Find the best kiln for a batch.
 
     Strategy:
     1. If position has an estimated_kiln_id and it's available, prefer it
-    2. Otherwise, pick the least loaded kiln that has enough capacity
-    3. Among equally loaded kilns, prefer the one with smallest excess capacity
+    2. Raku-specific rules:
+       - Gold firings (700°C / two_stage_type='gold'): prefer Raku kiln
+       - Standard-temperature firings: avoid Raku if other kilns are available
+       - Raku can be used as overflow for any temperature if all others are full
+    3. Otherwise, pick the least loaded kiln that has enough capacity
+    4. Among equally loaded kilns, prefer the one with smallest excess capacity
        (tightest fit) to save larger kilns for bigger batches
     """
     # If a specific kiln is pre-assigned, check if it's in the available list
@@ -573,17 +607,43 @@ def _find_best_kiln_for_batch(
                 if _get_kiln_capacity_sqm(kiln) >= required_area_sqm:
                     return kiln
 
+    is_gold = _is_gold_firing(cofiring_key, firing_temperature)
+
+    # Separate kilns into Raku and non-Raku
+    raku_kilns = [k for k in available_kilns if _is_raku_kiln(k)]
+    non_raku_kilns = [k for k in available_kilns if not _is_raku_kiln(k)]
+
+    if is_gold:
+        # Gold firing: try Raku first, then fall back to others
+        kiln_order = raku_kilns + non_raku_kilns
+    else:
+        # Standard firing: try non-Raku first, then Raku as overflow
+        kiln_order = non_raku_kilns + raku_kilns
+
     best_kiln = None
     min_load = float("inf")
     best_excess = Decimal("999999")
+    # Track whether we've found a kiln in the preferred group
+    # so we don't pick a Raku for standard firing if non-Raku fits
+    best_is_preferred = False
 
     window_start = batch_date - timedelta(days=3)
     window_end = batch_date + timedelta(days=3)
 
-    for kiln in available_kilns:
+    for kiln in kiln_order:
         cap = _get_kiln_capacity_sqm(kiln)
         if cap < required_area_sqm:
             continue  # too small
+
+        is_raku = _is_raku_kiln(kiln)
+        # A kiln is "preferred" if it matches the firing type:
+        #   gold -> Raku is preferred; standard -> non-Raku is preferred
+        kiln_is_preferred = (is_gold and is_raku) or (not is_gold and not is_raku)
+
+        # If we already found a preferred kiln, skip non-preferred ones
+        # (this implements "Raku as overflow only" for standard firings)
+        if best_is_preferred and not kiln_is_preferred:
+            continue
 
         # Count existing batches in the window
         batch_count = db.query(sa_func.count(Batch.id)).filter(
@@ -595,11 +655,34 @@ def _find_best_kiln_for_batch(
 
         excess = cap - required_area_sqm
 
+        # If this kiln is preferred and current best is not, always take it
+        if kiln_is_preferred and not best_is_preferred:
+            min_load = batch_count
+            best_excess = excess
+            best_kiln = kiln
+            best_is_preferred = True
+            continue
+
         # Prefer: least loaded, then tightest fit
         if batch_count < min_load or (batch_count == min_load and excess < best_excess):
             min_load = batch_count
             best_excess = excess
             best_kiln = kiln
+            best_is_preferred = kiln_is_preferred
+
+    if best_kiln:
+        is_raku_selected = _is_raku_kiln(best_kiln)
+        if is_gold and is_raku_selected:
+            logger.info(
+                "RAKU_PREFERRED | Gold firing (700°C) assigned to Raku kiln %s",
+                best_kiln.name,
+            )
+        elif not is_gold and is_raku_selected:
+            logger.info(
+                "RAKU_OVERFLOW | Standard firing using Raku kiln %s as overflow "
+                "(all other kilns full or unavailable)",
+                best_kiln.name,
+            )
 
     return best_kiln
 

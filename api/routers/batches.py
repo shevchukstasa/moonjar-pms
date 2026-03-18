@@ -23,7 +23,7 @@ from sqlalchemy import func as sa_func
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
-from api.models import Batch, OrderPosition, Resource
+from api.models import Batch, OrderPosition, Resource, PositionPhoto
 from api.schemas import BatchCreate, BatchUpdate, BatchResponse
 from api.enums import BatchStatus, ResourceType
 
@@ -503,3 +503,76 @@ async def update_batch(
     db.commit()
     db.refresh(batch)
     return batch
+
+
+# ────────────────────────────────────────────────────────────────
+# POST /api/batches/{id}/photos — add firing photo
+# ────────────────────────────────────────────────────────────────
+
+class BatchPhotoCreate(BaseModel):
+    photo_url: str
+    position_id: Optional[UUID] = None
+    caption: Optional[str] = None
+
+
+@router.post("/{batch_id}/photos")
+async def add_batch_photo(
+    batch_id: UUID,
+    data: BatchPhotoCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Upload a firing photo for a batch (after kiln unloading)."""
+    batch = db.query(Batch).filter(Batch.id == batch_id).first()
+    if not batch:
+        raise HTTPException(404, "Batch not found")
+
+    import uuid as uuid_mod
+    photo = PositionPhoto(
+        id=uuid_mod.uuid4(),
+        position_id=data.position_id,
+        factory_id=batch.factory_id,
+        batch_id=batch.id,
+        photo_type="firing",
+        photo_url=data.photo_url,
+        caption=data.caption,
+        uploaded_by_user_id=current_user.id,
+    )
+    db.add(photo)
+    db.commit()
+    db.refresh(photo)
+
+    return {
+        "id": str(photo.id),
+        "batch_id": str(batch_id),
+        "photo_url": photo.photo_url,
+        "caption": photo.caption,
+        "created_at": photo.created_at.isoformat() if photo.created_at else None,
+    }
+
+
+@router.get("/{batch_id}/photos")
+async def list_batch_photos(
+    batch_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Get all photos for a batch."""
+    photos = db.query(PositionPhoto).filter(
+        PositionPhoto.batch_id == batch_id,
+    ).order_by(PositionPhoto.created_at.desc()).all()
+
+    return {
+        "items": [
+            {
+                "id": str(p.id),
+                "position_id": str(p.position_id) if p.position_id else None,
+                "photo_url": p.photo_url or (f"/api/telegram/photo/{p.telegram_file_id}" if p.telegram_file_id else None),
+                "caption": p.caption,
+                "photo_type": p.photo_type,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in photos
+        ],
+        "total": len(photos),
+    }

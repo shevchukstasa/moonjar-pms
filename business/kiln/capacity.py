@@ -102,8 +102,13 @@ def _kiln_cfg(kiln) -> dict:
     work = kiln.kiln_working_area_cm or {}
     ktype = (kiln.kiln_type or "").lower()
     is_small = "small" in ktype
+    is_raku = "raku" in ktype
 
-    if is_small:
+    if is_raku:
+        # Raku kiln: 60×100 cm working area, single level, no multi-level
+        dw, dd, dh = 60.0, 100.0, None
+        dm, dc = False, 0.85
+    elif is_small:
         dw, dd, dh = 100.0, 150.0, None
         dm, dc = False, 0.92
     else:
@@ -113,6 +118,7 @@ def _kiln_cfg(kiln) -> dict:
     return {
         "name": ktype,
         "is_small": is_small,
+        "is_raku": is_raku,
         "working_width": float(work.get("width_cm") or work.get("width") or dw),
         "working_depth": float(work.get("depth_cm") or work.get("depth") or dd),
         "working_height": (

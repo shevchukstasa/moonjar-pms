@@ -444,6 +444,30 @@ def _ensure_schema():
                 CONSTRAINT uq_factory_calendar_date UNIQUE (factory_id, date)
             )
         """))
+        # Escalation rules — PM→CEO→Owner timeout chain
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS escalation_rules (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                factory_id UUID NOT NULL REFERENCES factories(id),
+                task_type VARCHAR(50) NOT NULL,
+                pm_timeout_hours NUMERIC(6,2) NOT NULL DEFAULT 4,
+                ceo_timeout_hours NUMERIC(6,2) NOT NULL DEFAULT 8,
+                owner_timeout_hours NUMERIC(6,2) NOT NULL DEFAULT 24,
+                night_level INTEGER NOT NULL DEFAULT 1,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                CONSTRAINT uq_escalation_factory_type UNIQUE (factory_id, task_type)
+            )
+        """))
+        # Receiving settings — per-factory approval mode
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS receiving_settings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                factory_id UUID NOT NULL UNIQUE REFERENCES factories(id),
+                approval_mode VARCHAR(20) NOT NULL DEFAULT 'all',
+                updated_by UUID REFERENCES users(id),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
 
     _run_section("tables", _create_tables)
 

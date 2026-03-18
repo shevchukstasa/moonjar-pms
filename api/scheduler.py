@@ -623,6 +623,53 @@ def _send_backup_telegram_alert(message: str):
         logger.warning("Telegram backup alert failed: %s", e)
 
 
+async def escalation_check():
+    """Check all factories for escalation needs every 15 min."""
+    logger.info("Running escalation check")
+    db = _get_db_session()
+    try:
+        from business.services.escalation import check_and_escalate
+        factory_ids = _get_all_factory_ids(db)
+        total_actions = 0
+        for fid in factory_ids:
+            try:
+                actions = check_and_escalate(db, fid)
+                total_actions += len(actions)
+            except Exception as e:
+                logger.error("Escalation check failed for factory %s: %s", fid, e)
+        db.commit()
+        if total_actions:
+            logger.info("Escalation check: %d actions across %d factories", total_actions, len(factory_ids))
+    except Exception as e:
+        logger.error("Escalation check failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def morning_deferred_alerts():
+    """Send deferred non-kiln alerts at 06:00 Bali time."""
+    logger.info("Running morning deferred alerts")
+    db = _get_db_session()
+    try:
+        from business.services.escalation import get_deferred_morning_alerts, is_night_time
+        if is_night_time():
+            return  # Still night, skip
+
+        factory_ids = _get_all_factory_ids(db)
+        for fid in factory_ids:
+            try:
+                deferred = get_deferred_morning_alerts(db, fid)
+                if deferred:
+                    logger.info("Factory %s: %d deferred alerts", fid, len(deferred))
+            except Exception as e:
+                logger.error("Morning alerts failed for factory %s: %s", fid, e)
+    except Exception as e:
+        logger.error("Morning alerts failed: %s", e)
+    finally:
+        db.close()
+
+
 async def daily_task_distribution_dispatcher():
     """Hourly dispatcher: send daily task distribution at 21:00 local time per factory.
 
@@ -696,6 +743,12 @@ def setup_scheduler():
 
     # Weekly (Sunday 20:00)
     scheduler.add_job(weekly_min_balance_recalc, CronTrigger(day_of_week="sun", hour=20), id="min_balance_recalc")
+
+    # Every 15 min — escalation check
+    scheduler.add_job(escalation_check, IntervalTrigger(minutes=15), id="escalation_check")
+
+    # Morning at 06:00 Bali (22:00 UTC) — deferred alerts
+    scheduler.add_job(morning_deferred_alerts, CronTrigger(hour=22, minute=0), id="morning_alerts")
 
     # Hourly — webhook retry + daily task distribution per-factory timezone
     scheduler.add_job(hourly_webhook_retry, IntervalTrigger(hours=1), id="webhook_retry")

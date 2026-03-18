@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
-from api.models import Task, User, ProductionOrder, OrderPosition, ProductionOrderItem, Factory, Size
+from api.models import Task, User, ProductionOrder, OrderPosition, ProductionOrderItem, Factory, Size, GlazingBoardSpec
 from api.enums import TaskStatus, TaskType, PositionStatus, UserRole
 
 router = APIRouter()
@@ -422,6 +422,85 @@ async def resolve_size(
 
     db.flush()
 
+    # ── Glazing board calculation ──────────────────────────────
+    # After size is determined, calculate how tiles fit on glazing boards.
+    # If a custom board width is needed, create a task for PM.
+    glazing_board_result = None
+    try:
+        chosen_size = db.query(Size).filter(Size.id == chosen_size_id).first()
+        if chosen_size:
+            from business.services.glazing_board import calculate_glazing_board
+            board_calc = calculate_glazing_board(chosen_size.width_mm, chosen_size.height_mm)
+
+            # Upsert glazing board spec
+            spec = db.query(GlazingBoardSpec).filter(GlazingBoardSpec.size_id == chosen_size_id).first()
+            if spec is None:
+                spec = GlazingBoardSpec(size_id=chosen_size_id)
+                db.add(spec)
+            spec.board_length_cm = board_calc.board_length_cm
+            spec.board_width_cm = board_calc.board_width_cm
+            spec.tiles_per_board = board_calc.tiles_per_board
+            spec.area_per_board_m2 = board_calc.area_per_board_m2
+            spec.tiles_along_length = board_calc.tiles_along_length
+            spec.tiles_across_width = board_calc.tiles_across_width
+            spec.tile_orientation_cm = board_calc.tile_orientation_cm
+            spec.is_custom_board = not board_calc.is_standard_board
+            spec.notes = board_calc.notes
+            db.flush()
+
+            glazing_board_result = {
+                "board_length_cm": board_calc.board_length_cm,
+                "board_width_cm": board_calc.board_width_cm,
+                "tiles_per_board": board_calc.tiles_per_board,
+                "area_per_board_m2": board_calc.area_per_board_m2,
+                "is_custom_board": not board_calc.is_standard_board,
+            }
+
+            # Create PM task if custom board is needed
+            if not board_calc.is_standard_board:
+                import json
+                board_task = Task(
+                    factory_id=position.factory_id,
+                    type=TaskType.GLAZING_BOARD_NEEDED,
+                    status=TaskStatus.PENDING,
+                    assigned_role=UserRole.PRODUCTION_MANAGER,
+                    related_order_id=task.related_order_id,
+                    related_position_id=position.id,
+                    blocking=False,
+                    priority=5,
+                    description=(
+                        f"Custom glazing board needed for size '{chosen_size.name}' "
+                        f"({chosen_size.width_mm}×{chosen_size.height_mm} mm): "
+                        f"cut board to {board_calc.board_width_cm:.1f} cm wide "
+                        f"(standard 20cm doesn't fit neatly). "
+                        f"{board_calc.tiles_per_board} tiles/board = "
+                        f"{board_calc.area_per_board_m2:.4f} m²"
+                    ),
+                    metadata_json=json.dumps({
+                        "size_id": str(chosen_size_id),
+                        "size_name": chosen_size.name,
+                        "width_mm": chosen_size.width_mm,
+                        "height_mm": chosen_size.height_mm,
+                        "board_length_cm": float(board_calc.board_length_cm),
+                        "board_width_cm": float(board_calc.board_width_cm),
+                        "tiles_per_board": board_calc.tiles_per_board,
+                        "tiles_per_two_boards": board_calc.tiles_per_board * 2,
+                        "area_per_board_m2": float(board_calc.area_per_board_m2),
+                        "tiles_along_length": board_calc.tiles_along_length,
+                        "tiles_across_width": board_calc.tiles_across_width,
+                        "tile_orientation_cm": board_calc.tile_orientation_cm,
+                    }),
+                )
+                db.add(board_task)
+                db.flush()
+                glazing_board_result["task_created"] = True
+                glazing_board_result["task_id"] = str(board_task.id)
+    except Exception as exc:
+        import logging
+        logging.getLogger("moonjar.tasks").warning(
+            "Glazing board calc failed for size %s: %s", chosen_size_id, exc
+        )
+
     # Trigger material reservation for the unblocked position
     # (only if position is now PLANNED and has a recipe)
     reservation_result = None
@@ -456,4 +535,5 @@ async def resolve_size(
         "position_status": _ev(position.status),
         "created_new_size": data.create_new_size,
         "reservation": reservation_result,
+        "glazing_board": glazing_board_result,
     }

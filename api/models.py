@@ -199,6 +199,33 @@ class Size(Base):
     is_custom = Column(sa.Boolean, nullable=False, default=False)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
+    glazing_board_spec = relationship('GlazingBoardSpec', back_populates='size', uselist=False)
+
+
+class GlazingBoardSpec(Base):
+    """Glazing board spec for each tile size.
+
+    Stores how many tiles fit on one glazing board and whether a custom
+    board width is required. Masters measure glaze consumption per two boards,
+    so each board should hold ~0.22–0.23 m² of tile area.
+    """
+    __tablename__ = 'glazing_board_specs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    size_id = Column(UUID(as_uuid=True), ForeignKey('sizes.id'), nullable=False, unique=True)
+    board_length_cm = Column(sa.Numeric(6, 1), nullable=False, default=122.0)
+    board_width_cm = Column(sa.Numeric(6, 1), nullable=False)
+    tiles_per_board = Column(sa.Integer, nullable=False)
+    area_per_board_m2 = Column(sa.Numeric(8, 4), nullable=False)
+    tiles_along_length = Column(sa.Integer, nullable=False)
+    tiles_across_width = Column(sa.Integer, nullable=False)
+    tile_orientation_cm = Column(sa.String(30))  # e.g. "10×30"
+    is_custom_board = Column(sa.Boolean, nullable=False, default=False)
+    notes = Column(sa.Text)
+    calculated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    size = relationship('Size', back_populates='glazing_board_spec')
+
 
 class ReferenceAuditLog(Base):
     __tablename__ = 'reference_audit_log'

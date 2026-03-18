@@ -1,5 +1,17 @@
 import apiClient from './client';
 
+export interface GlazingBoardInfo {
+  board_length_cm: number;
+  board_width_cm: number;
+  tiles_per_board: number;
+  area_per_board_m2: number;
+  tiles_along_length: number;
+  tiles_across_width: number;
+  tile_orientation_cm: string | null;
+  is_custom_board: boolean;
+  notes: string | null;
+}
+
 export interface SizeItem {
   id: string;
   name: string;
@@ -9,6 +21,7 @@ export interface SizeItem {
   shape: string | null;
   is_custom: boolean;
   created_at: string | null;
+  glazing_board: GlazingBoardInfo | null;
 }
 
 export interface SizeInput {

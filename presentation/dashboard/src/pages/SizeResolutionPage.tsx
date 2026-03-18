@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
 import { useTask, useSizeResolution } from '@/hooks/useTasks';
+import type { GlazingBoardInfo } from '@/api/sizes';
 
 interface SizeOption {
   id: string;
@@ -30,6 +31,7 @@ export default function SizeResolutionPage() {
   const [selectedSizeId, setSelectedSizeId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState('');
+  const [glazingBoard, setGlazingBoard] = useState<GlazingBoardInfo & { task_created?: boolean } | null>(null);
 
   // New size form
   const [newName, setNewName] = useState('');
@@ -101,12 +103,13 @@ export default function SizeResolutionPage() {
     if (!taskId) return;
 
     try {
+      let result: { glazing_board?: GlazingBoardInfo & { task_created?: boolean } } | null = null;
       if (mode === 'select') {
         if (!selectedSizeId) {
           setError('Please select a size');
           return;
         }
-        await resolveMutation.mutateAsync({
+        result = await resolveMutation.mutateAsync({
           id: taskId,
           data: { size_id: selectedSizeId },
         });
@@ -115,7 +118,7 @@ export default function SizeResolutionPage() {
           setError('Name, width and height are required');
           return;
         }
-        await resolveMutation.mutateAsync({
+        result = await resolveMutation.mutateAsync({
           id: taskId,
           data: {
             create_new_size: true,
@@ -127,7 +130,12 @@ export default function SizeResolutionPage() {
           },
         });
       }
-      navigate(-1);
+      // If a custom glazing board is needed, show the info before going back
+      if (result?.glazing_board?.is_custom_board) {
+        setGlazingBoard(result.glazing_board);
+      } else {
+        navigate(-1);
+      }
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
@@ -135,6 +143,66 @@ export default function SizeResolutionPage() {
       setError(msg);
     }
   };
+
+  // Show custom glazing board notification after resolution
+  if (glazingBoard) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Size Resolved ✓</h1>
+          <p className="mt-1 text-sm text-gray-500">The size has been assigned to the position.</p>
+        </div>
+
+        <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-6">
+          <h2 className="mb-1 text-lg font-semibold text-amber-900">⚠ Custom Glazing Board Required</h2>
+          <p className="mb-4 text-sm text-amber-800">
+            This tile size doesn&apos;t fit neatly on a standard 122×20 cm board.
+            A custom board width is needed. A task has been created for the Production Manager.
+          </p>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="rounded bg-white border border-amber-200 p-3">
+              <div className="text-xs text-gray-500 uppercase tracking-wide">Board Size</div>
+              <div className="mt-1 text-xl font-bold text-gray-900">
+                122 × {glazingBoard.board_width_cm.toFixed(1)} cm
+              </div>
+              <div className="text-xs text-gray-500">(custom width, standard length)</div>
+            </div>
+            <div className="rounded bg-white border border-amber-200 p-3">
+              <div className="text-xs text-gray-500 uppercase tracking-wide">Tiles per Board</div>
+              <div className="mt-1 text-xl font-bold text-gray-900">{glazingBoard.tiles_per_board} pcs</div>
+              <div className="text-xs text-gray-500">{(glazingBoard.tiles_per_board * 2)} pcs per two boards</div>
+            </div>
+            <div className="rounded bg-white border border-amber-200 p-3">
+              <div className="text-xs text-gray-500 uppercase tracking-wide">Area per Board</div>
+              <div className="mt-1 text-xl font-bold text-gray-900">
+                {glazingBoard.area_per_board_m2.toFixed(4)} m²
+              </div>
+              <div className="text-xs text-gray-500">{(glazingBoard.area_per_board_m2 * 2).toFixed(4)} m² per two boards</div>
+            </div>
+            <div className="rounded bg-white border border-amber-200 p-3">
+              <div className="text-xs text-gray-500 uppercase tracking-wide">Tile Layout</div>
+              <div className="mt-1 text-lg font-bold text-gray-900">
+                {glazingBoard.tiles_across_width}×{glazingBoard.tiles_along_length}
+              </div>
+              <div className="text-xs text-gray-500">across × along</div>
+            </div>
+          </div>
+          {glazingBoard.notes && (
+            <p className="mt-3 text-xs text-amber-700 italic">{glazingBoard.notes}</p>
+          )}
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            onClick={() => navigate(-1)}
+            className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            Back to Tasks
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">

@@ -111,6 +111,9 @@ def _ensure_schema():
             ("production_orders", "change_req_decided_at TIMESTAMPTZ"),
             ("production_orders", "change_req_decided_by UUID REFERENCES users(id)"),
             ("factories", "served_locations JSONB"),
+            ("factories", "receiving_approval_mode VARCHAR(20) NOT NULL DEFAULT 'all'"),
+            ("factories", "kiln_constants_mode VARCHAR(20) NOT NULL DEFAULT 'manual'"),
+            ("factories", "rotation_rules JSONB"),
             ("batches", "firing_profile_id UUID"),
             ("batches", "target_temperature INTEGER"),
             # Position numbering — sequential per order
@@ -162,6 +165,10 @@ def _ensure_schema():
         ("split_category", "refire"),
         # Octagon shape for glaze surface area calculation
         ("shape_type", "octagon"),
+        # Glazing board task type — custom board needed for non-standard tile size
+        ("task_type", "glazing_board_needed"),
+        # Material receiving task (Stage 2)
+        ("task_type", "material_receiving"),
         # Grinding stock enum values (type created in table section above;
         # keep entries here for any future additions only).
     ]
@@ -508,6 +515,24 @@ def _ensure_schema():
                 approval_mode VARCHAR(20) NOT NULL DEFAULT 'all',
                 updated_by UUID REFERENCES users(id),
                 updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+        # Glazing board specs — board dimensions per tile size
+        # Masters measure glaze in mL per two boards; target ~0.22–0.23 m²/board
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS glazing_board_specs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                size_id UUID NOT NULL UNIQUE REFERENCES sizes(id) ON DELETE CASCADE,
+                board_length_cm NUMERIC(6,1) NOT NULL DEFAULT 122.0,
+                board_width_cm NUMERIC(6,1) NOT NULL,
+                tiles_per_board INTEGER NOT NULL,
+                area_per_board_m2 NUMERIC(8,4) NOT NULL,
+                tiles_along_length INTEGER NOT NULL,
+                tiles_across_width INTEGER NOT NULL,
+                tile_orientation_cm VARCHAR(30),
+                is_custom_board BOOLEAN NOT NULL DEFAULT FALSE,
+                notes TEXT,
+                calculated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
 

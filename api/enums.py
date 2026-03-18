@@ -77,6 +77,7 @@ class TaskType(str, Enum):
     STOCK_TRANSFER = 'stock_transfer'
     SIZE_RESOLUTION = 'size_resolution'
     MATERIAL_RECEIVING = 'material_receiving'
+    GLAZING_BOARD_NEEDED = 'glazing_board_needed'
 
 class TaskStatus(str, Enum):
     PENDING = 'pending'

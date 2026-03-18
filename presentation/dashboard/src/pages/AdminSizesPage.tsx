@@ -184,6 +184,30 @@ export default function AdminSizesPage() {
           ),
       },
       {
+        key: 'glazing_board',
+        header: 'Glazing Board (1 board)',
+        render: (s: SizeItem) => {
+          if (!s.glazing_board) return <span className="text-gray-300 text-xs">—</span>;
+          const b = s.glazing_board;
+          return (
+            <div className="text-xs space-y-0.5">
+              {b.is_custom_board ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800 border border-amber-200">
+                  ⚠ {b.board_width_cm.toFixed(1)} cm wide
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 font-medium text-green-800 border border-green-200">
+                  ✓ standard 20 cm
+                </span>
+              )}
+              <div className="text-gray-500">
+                {b.tiles_per_board} pcs · {b.area_per_board_m2.toFixed(4)} m²
+              </div>
+            </div>
+          );
+        },
+      },
+      {
         key: 'actions',
         header: '',
         render: (s: SizeItem) => (

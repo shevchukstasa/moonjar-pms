@@ -37,9 +37,10 @@ def _verify_internal_auth(request: Request) -> None:
 
     settings = get_settings()
 
-    # Check X-Internal-Key header
+    # Check X-Internal-Key header — prefer dedicated INTERNAL_API_KEY, fall back to OWNER_KEY
     internal_key = request.headers.get("X-Internal-Key")
-    if internal_key and settings.OWNER_KEY and internal_key == settings.OWNER_KEY:
+    expected_key = os.getenv("INTERNAL_API_KEY") or settings.OWNER_KEY
+    if internal_key and expected_key and internal_key == expected_key:
         return
 
     # Check IP allowlist

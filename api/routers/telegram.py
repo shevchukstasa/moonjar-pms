@@ -354,9 +354,18 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
     Telegram webhook endpoint.
     Receives Update JSON from Telegram, dispatches to bot handler.
     Must always return 200 OK (Telegram retries on non-200).
-    No authentication — Telegram sends raw POST requests.
+    Verified via X-Telegram-Bot-Api-Secret-Token header if TELEGRAM_WEBHOOK_SECRET is set.
     """
     from fastapi.responses import JSONResponse
+    import os
+
+    # Verify Telegram webhook secret token if configured
+    webhook_secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+    if webhook_secret:
+        header_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if header_secret != webhook_secret:
+            logger.warning("Telegram webhook: invalid or missing secret token")
+            return JSONResponse(status_code=403, content={"detail": "Forbidden"})
 
     try:
         body = await request.json()

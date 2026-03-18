@@ -51,7 +51,7 @@ def _decrypt_totp_secret(encrypted: str) -> str:
 
 def _generate_backup_codes(count: int = 10) -> list[str]:
     """Generate human-readable backup codes (8 hex chars each)."""
-    return [secrets.token_hex(4).upper() for _ in range(count)]
+    return [secrets.token_hex(6).upper() for _ in range(count)]
 
 
 def _hash_backup_code(code: str) -> str:
@@ -135,7 +135,13 @@ async def list_audit_log(
     if date_from:
         q = q.filter(SecurityAuditLog.created_at >= date_from)
     if date_to:
-        q = q.filter(SecurityAuditLog.created_at <= date_to + " 23:59:59")
+        try:
+            date_to_end = datetime.strptime(date_to, "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59, tzinfo=timezone.utc
+            )
+        except (ValueError, TypeError):
+            date_to_end = date_to  # fallback to raw string for backwards compat
+        q = q.filter(SecurityAuditLog.created_at <= date_to_end)
 
     total = q.count()
     items = q.offset((page - 1) * per_page).limit(per_page).all()

@@ -13,7 +13,7 @@ from api.config import get_settings
 from api.database import get_db
 from api.enums import AuditActionType
 from api.auth import (
-    verify_password, create_access_token, create_refresh_token,
+    verify_password, hash_password, create_access_token, create_refresh_token,
     decode_token, set_auth_cookies, clear_auth_cookies, generate_csrf_token,
     check_lockout, record_failed_login, reset_failed_logins, create_session,
     verify_google_token, log_security_event, get_current_user,
@@ -355,3 +355,51 @@ async def totp_login_verify(
             "name": user.name,
         },
     }
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+async def change_password(
+    data: ChangePasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Change password for the authenticated user.
+
+    Validates current password, enforces complexity on new password,
+    updates the hash, and logs the change in the security audit log.
+    """
+    # Verify current password
+    if not current_user.password_hash or not verify_password(data.current_password, current_user.password_hash):
+        raise HTTPException(400, "Current password is incorrect")
+
+    # Validate new password complexity
+    if len(data.new_password) < 10:
+        raise HTTPException(422, "New password must be at least 10 characters")
+    if not any(c.isdigit() for c in data.new_password):
+        raise HTTPException(422, "New password must contain at least one digit")
+    if not any(c.isalpha() for c in data.new_password):
+        raise HTTPException(422, "New password must contain at least one letter")
+
+    # Update password
+    current_user.password_hash = hash_password(data.new_password)
+    db.commit()
+
+    # Audit log
+    log_security_event(
+        db,
+        AuditActionType.PASSWORD_CHANGE,
+        actor_id=str(current_user.id),
+        actor_email=current_user.email,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        target_entity="user",
+        target_id=str(current_user.id),
+    )
+
+    return {"message": "Password changed successfully"}

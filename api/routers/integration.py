@@ -15,6 +15,7 @@ from sqlalchemy import func
 
 from api.database import get_db
 from api.auth import get_current_user
+from api.roles import require_admin
 from api.config import get_settings
 from api.models import (
     ProductionOrder, ProductionOrderItem, OrderPosition,
@@ -37,8 +38,8 @@ def _ev(val):
 # ---------- Diagnostics ----------
 
 @router.get("/health")
-async def integration_health():
-    """Public diagnostic: check if Sales integration keys are configured (no secrets leaked)."""
+async def integration_health(current_user=Depends(require_admin)):
+    """Admin-only diagnostic: check if Sales integration keys are configured (no secrets leaked)."""
     settings = get_settings()
     return {
         "webhook_enabled": settings.PRODUCTION_WEBHOOK_ENABLED,
@@ -52,9 +53,22 @@ async def integration_health():
 
 
 @router.get("/db-check")
-async def db_check(db: Session = Depends(get_db)):
-    """Public diagnostic: check actual database state — alembic version, key tables, row counts."""
+async def db_check(db: Session = Depends(get_db), current_user=Depends(require_admin)):
+    """Admin-only diagnostic: check actual database state — alembic version, key tables, row counts."""
     from sqlalchemy import text as sa_text
+
+    # Whitelist of allowed table and column names to prevent SQL injection
+    ALLOWED_TABLES = {
+        "factories", "colors", "sizes", "collections", "production_stages",
+        "resources", "warehouse_sections", "shifts", "kiln_constants",
+        "firing_profiles", "quality_assignment_config",
+        "production_orders", "order_positions", "tasks",
+    }
+    ALLOWED_COLUMNS = {
+        "firing_round", "quantity_sqm", "color_2", "served_locations",
+        "shipped_at", "metadata_json", "is_basic",
+    }
+
     result = {}
     try:
         # Alembic version
@@ -76,6 +90,9 @@ async def db_check(db: Session = Depends(get_db)):
         ]
         missing_cols = []
         for table, col in col_checks:
+            if table not in ALLOWED_TABLES or col not in ALLOWED_COLUMNS:
+                missing_cols.append(f"{table}.{col} (skipped: not in whitelist)")
+                continue
             try:
                 db.execute(sa_text(f"SELECT {col} FROM {table} LIMIT 0"))
             except Exception:
@@ -90,6 +107,9 @@ async def db_check(db: Session = Depends(get_db)):
                         "production_orders", "order_positions", "tasks"]
         counts = {}
         for t in count_tables:
+            if t not in ALLOWED_TABLES:
+                counts[t] = "skipped: not in whitelist"
+                continue
             try:
                 row = db.execute(sa_text(f"SELECT COUNT(*) FROM {t}")).fetchone()
                 counts[t] = row[0]

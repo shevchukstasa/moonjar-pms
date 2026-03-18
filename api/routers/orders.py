@@ -282,6 +282,9 @@ async def list_orders(
         ))
 
     total = query.count()
+    ALLOWED_SORT_COLUMNS = {"created_at", "order_number", "client", "final_deadline", "status", "priority", "updated_at"}
+    if sort_by not in ALLOWED_SORT_COLUMNS:
+        sort_by = "created_at"
     sort_col = getattr(ProductionOrder, sort_by, ProductionOrder.created_at)
     query = query.order_by(sort_col.asc() if sort_order == "asc" else sort_col.desc())
     orders = query.offset((page - 1) * per_page).limit(per_page).all()

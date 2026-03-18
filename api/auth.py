@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import APIKeyCookie
 from sqlalchemy.orm import Session
+# TODO: Migrate from python-jose to PyJWT — python-jose is unmaintained
 from jose import JWTError, jwt
 import bcrypt as _bcrypt
 

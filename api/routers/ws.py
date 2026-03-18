@@ -5,17 +5,38 @@ from jose import JWTError
 
 from api.auth import decode_token
 from api.websocket import manager
+from api.database import SessionLocal
+from api.models import ActiveSession
 
 router = APIRouter()
 
 
 def _validate_ws_token(token: str) -> str | None:
-    """Validate JWT from query param or cookie, return user_id or None."""
+    """Validate JWT from query param or cookie, return user_id or None.
+
+    Also checks that the session (JTI) has not been revoked.
+    """
     try:
         payload = decode_token(token)
         if payload.get("type") != "access":
             return None
-        return payload.get("sub")
+        jti = payload.get("jti")
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+        # Check session revocation
+        if jti:
+            db = SessionLocal()
+            try:
+                session = db.query(ActiveSession).filter(
+                    ActiveSession.token_jti == jti,
+                    ActiveSession.revoked == False,
+                ).first()
+                if not session:
+                    return None
+            finally:
+                db.close()
+        return user_id
     except (JWTError, Exception):
         return None
 

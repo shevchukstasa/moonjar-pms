@@ -135,8 +135,13 @@ async def create_user(
     if not data.password and not data.google_auth:
         raise HTTPException(422, "Either password or Google Auth must be provided")
 
-    if data.password and len(data.password) < 6:
-        raise HTTPException(422, "Password must be at least 6 characters")
+    if data.password:
+        if len(data.password) < 10:
+            raise HTTPException(422, "Password must be at least 10 characters")
+        if not any(c.isdigit() for c in data.password):
+            raise HTTPException(422, "Password must contain at least one digit")
+        if not any(c.isalpha() for c in data.password):
+            raise HTTPException(422, "Password must contain at least one letter")
 
     # Create user
     user = User(

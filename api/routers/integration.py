@@ -1006,63 +1006,50 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
             logger.info(f"Created task {task_type.value} for order {order.order_number}")
             continue  # Don't create position for service items
 
-        # --- Route: tile/product → OrderPosition ---
-        # Determine initial status
-        if is_stock_collection(item_data.get("collection")):
-            initial_status = PositionStatus.TRANSFERRED_TO_SORTING
-        elif _needs_stencil_silkscreen(item_data):
-            initial_status = PositionStatus.AWAITING_STENCIL_SILKSCREEN
-        elif _needs_color_matching(item_data):
-            initial_status = PositionStatus.AWAITING_COLOR_MATCHING
-        else:
-            initial_status = PositionStatus.PLANNED
+        # --- Route: tile/product → full intake pipeline ---
+        # Use process_order_item() for recipe lookup, defect margin, surface area,
+        # size resolution, material reservation, and blocking task creation.
+        from business.services.order_intake import process_order_item
 
-        # Compute next position_number for this order (sequential within order)
-        from sqlalchemy import func as _func
-        _max_pn = db.query(_func.max(OrderPosition.position_number)).filter(
-            OrderPosition.order_id == order.id,
-            OrderPosition.parent_position_id.is_(None),
-        ).scalar()
-        _next_pn = (_max_pn or 0) + 1
+        try:
+            position = process_order_item(db, order, item)
+            if position:
+                tile_positions.append(position)
+        except Exception as e:
+            logger.error(
+                "process_order_item failed for order %s item %s: %s",
+                order.order_number, item.id, e,
+            )
+            # Continue to next item — don't fail the entire webhook
 
-        position = OrderPosition(
-            id=uuid_mod.uuid4(),
-            order_id=order.id,
-            order_item_id=item.id,
-            factory_id=UUID(factory_id),
-            status=initial_status,
-            quantity=qty_pcs,
-            quantity_sqm=qty_sqm,
-            color=item_data.get("color", ""),
-            color_2=item_data.get("color_2"),
-            size=_size_str,
-            application=item_data.get("application"),
-            finishing=item_data.get("finishing"),
-            collection=item_data.get("collection"),
-            application_type=item_data.get("application_type"),
-            place_of_application=item_data.get("place_of_application"),
-            product_type=item_data.get("product_type", "tile"),
-            thickness_mm=thickness_mm,
-            mandatory_qc=order_data.get("mandatory_qc", False),
-            position_number=_next_pn,
-        )
-        db.add(position)
-        db.flush()
-        tile_positions.append(position)
-
-    # Link blocking tasks to their tile positions (same order)
+    # Link service tasks to their tile positions (same order)
     for task in created_tasks:
         if task.type in (TaskType.STENCIL_ORDER, TaskType.SILK_SCREEN_ORDER):
             # Find positions that need stencil/silkscreen in this order
             for pos in tile_positions:
-                if pos.status == PositionStatus.AWAITING_STENCIL_SILKSCREEN:
+                if _ev(pos.status) == PositionStatus.AWAITING_STENCIL_SILKSCREEN.value:
                     task.related_position_id = pos.id
                     break
         elif task.type == TaskType.COLOR_MATCHING:
             for pos in tile_positions:
-                if pos.status == PositionStatus.AWAITING_COLOR_MATCHING:
+                if _ev(pos.status) == PositionStatus.AWAITING_COLOR_MATCHING.value:
                     task.related_position_id = pos.id
                     break
+
+    # Update order status based on position statuses (same as order_intake pipeline)
+    if tile_positions and any(
+        pos.status in (
+            PositionStatus.INSUFFICIENT_MATERIALS,
+            PositionStatus.AWAITING_RECIPE,
+            PositionStatus.AWAITING_STENCIL_SILKSCREEN,
+            PositionStatus.AWAITING_COLOR_MATCHING,
+            PositionStatus.AWAITING_SIZE_CONFIRMATION,
+        )
+        for pos in tile_positions
+    ):
+        order.status = OrderStatus.NEW
+    elif tile_positions:
+        order.status = OrderStatus.IN_PRODUCTION
 
     return order
 

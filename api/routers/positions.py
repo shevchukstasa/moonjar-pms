@@ -485,6 +485,43 @@ async def change_position_status(
         from business.services.status_machine import route_after_firing
         route_after_firing(db, p)
 
+    # ── Material consumption on glazing start ─────────────────────
+    # When position transitions to ENGOBE_APPLIED or GLAZED (first time),
+    # consume BOM materials and release reservations.
+    if new_status in (PositionStatus.ENGOBE_APPLIED, PositionStatus.GLAZED):
+        if not p.materials_written_off_at:
+            try:
+                from business.services.material_consumption import on_glazing_start
+                on_glazing_start(db, p.id)
+            except Exception as _mc_err:
+                import logging
+                logging.getLogger("moonjar.positions").warning(
+                    "Failed to consume materials for position %s on glazing start: %s",
+                    position_id, _mc_err,
+                )
+        elif (p.firing_round or 1) > 1:
+            # Refire/reglaze cycle — consume only surface materials
+            try:
+                from business.services.material_consumption import consume_refire_materials
+                consume_refire_materials(db, p.id)
+            except Exception as _mc_err:
+                import logging
+                logging.getLogger("moonjar.positions").warning(
+                    "Failed to consume refire materials for position %s: %s",
+                    position_id, _mc_err,
+                )
+
+    # Unreserve materials when position is cancelled
+    if new_status == PositionStatus.CANCELLED:
+        try:
+            from business.services.material_reservation import unreserve_materials_for_position
+            unreserve_materials_for_position(db, p.id)
+        except Exception as _e:
+            import logging
+            logging.getLogger("moonjar.positions").warning(
+                "Failed to unreserve materials for position %s: %s", position_id, _e
+            )
+
     # Auto-recalculate parent order status
     old_order_status, new_order_status, order = _recalculate_order_status(db, p.order_id)
 
@@ -1057,6 +1094,16 @@ async def resolve_color_mismatch(
     p.status = PositionStatus.CANCELLED
     p.quantity = 0
     p.updated_at = now
+
+    # Release reserved materials for the cancelled position
+    try:
+        from business.services.material_reservation import unreserve_materials_for_position
+        unreserve_materials_for_position(db, p.id)
+    except Exception as _e:
+        import logging
+        logging.getLogger("moonjar.positions").warning(
+            "Failed to unreserve materials for color-mismatch position %s: %s", p.id, _e
+        )
 
     db.commit()
     for np in new_positions:

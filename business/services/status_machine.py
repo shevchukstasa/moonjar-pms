@@ -213,6 +213,32 @@ def transition_position_status(
     if new_ps == PositionStatus.FIRED:
         route_after_firing(db, position)
 
+    # ── Material consumption on glazing start ─────────────────────
+    # When position transitions to ENGOBE_APPLIED or GLAZED (first time),
+    # consume BOM materials and release reservations.
+    if new_ps in (PositionStatus.ENGOBE_APPLIED, PositionStatus.GLAZED):
+        if not position.materials_written_off_at:
+            try:
+                from business.services.material_consumption import on_glazing_start
+                on_glazing_start(db, position.id)
+            except Exception as _e:
+                import logging
+                logging.getLogger("moonjar.status_machine").warning(
+                    "Failed to consume materials for position %s on glazing start: %s",
+                    position_id, _e,
+                )
+        elif (position.firing_round or 1) > 1:
+            # Refire/reglaze cycle — consume only surface materials
+            try:
+                from business.services.material_consumption import consume_refire_materials
+                consume_refire_materials(db, position.id)
+            except Exception as _e:
+                import logging
+                logging.getLogger("moonjar.status_machine").warning(
+                    "Failed to consume refire materials for position %s: %s",
+                    position_id, _e,
+                )
+
     # ── Reschedule on status change ──────────────────────────────
     # When a position transitions to a status that indicates delay
     # or requires re-routing, recalculate its production schedule.
@@ -234,6 +260,18 @@ def transition_position_status(
             import logging
             logging.getLogger("moonjar.status_machine").warning(
                 "Failed to reschedule position %s after status change: %s",
+                position_id, _e,
+            )
+
+    # ── Unreserve materials on cancellation ──────────────────────
+    if new_ps == PositionStatus.CANCELLED:
+        try:
+            from business.services.material_reservation import unreserve_materials_for_position
+            unreserve_materials_for_position(db, position.id)
+        except Exception as _e:
+            import logging
+            logging.getLogger("moonjar.status_machine").warning(
+                "Failed to unreserve materials for position %s: %s",
                 position_id, _e,
             )
 

@@ -533,14 +533,29 @@ async def cancel_order(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
+    from business.services.material_reservation import unreserve_materials_for_position
+    import logging
+    _logger = logging.getLogger("moonjar.orders")
+
     order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
     if not order:
         raise HTTPException(404, "Order not found")
     order.status = OrderStatus.CANCELLED
     order.updated_at = datetime.now(timezone.utc)
-    db.query(OrderPosition).filter(OrderPosition.order_id == order_id).update(
-        {"status": PositionStatus.CANCELLED}
-    )
+
+    # Fetch positions before bulk update so we can unreserve materials
+    positions = db.query(OrderPosition).filter(
+        OrderPosition.order_id == order_id,
+        OrderPosition.status != PositionStatus.CANCELLED,
+    ).all()
+
+    for p in positions:
+        p.status = PositionStatus.CANCELLED
+        try:
+            unreserve_materials_for_position(db, p.id)
+        except Exception as e:
+            _logger.warning("Failed to unreserve materials for position %s: %s", p.id, e)
+
     _cancel_order_tasks(db, order_id)
     db.commit()
 
@@ -626,10 +641,23 @@ async def accept_cancellation(
     order.status = OrderStatus.CANCELLED
     order.updated_at = datetime.now(timezone.utc)
 
-    # Cancel all positions
-    db.query(OrderPosition).filter(OrderPosition.order_id == order_id).update(
-        {"status": PositionStatus.CANCELLED}
-    )
+    # Cancel all positions and unreserve their materials
+    from business.services.material_reservation import unreserve_materials_for_position
+    import logging
+    _logger = logging.getLogger("moonjar.orders")
+
+    positions = db.query(OrderPosition).filter(
+        OrderPosition.order_id == order_id,
+        OrderPosition.status != PositionStatus.CANCELLED,
+    ).all()
+
+    for p in positions:
+        p.status = PositionStatus.CANCELLED
+        try:
+            unreserve_materials_for_position(db, p.id)
+        except Exception as e:
+            _logger.warning("Failed to unreserve materials for position %s: %s", p.id, e)
+
     # Cancel all pending/in-progress tasks linked to this order
     # (records stay in DB — only status changes, for full audit trail)
     tasks_cancelled = _cancel_order_tasks(db, order_id)

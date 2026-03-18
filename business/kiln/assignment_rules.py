@@ -20,6 +20,9 @@ from sqlalchemy.orm import Session
 # Default max temperature spread — overridable via kiln_constants table
 _DEFAULT_COFIRING_MAX_TEMP_RANGE = 50  # °C
 
+# Gold tile standard firing temperature
+_GOLD_FIRING_TEMPERATURE = 700  # °C
+
 
 def get_loading_rules(db: Session, kiln_id: UUID) -> dict:
     """
@@ -75,8 +78,12 @@ def validate_cofiring(
     (configurable via kiln_constants table, default 50 °C).
 
     Checks:
-    1. Temperature range from glaze recipes (RecipeKilnConfig).
-    2. Two-stage firing — warns when any position requires it.
+    1. Temperature range from glaze recipes (RecipeKilnConfig) — all positions
+       must have overlapping temperature ranges within the allowed spread.
+    2. Two-stage firing — positions with two_stage_firing=True must only batch
+       with other two-stage positions of the SAME two_stage_type.
+    3. Gold tile (two_stage_type='gold', 700 °C) must be batched separately
+       or only with other gold-compatible items (temp within spread of 700 °C).
 
     Returns:
       {ok, errors, warnings, min_temperature, max_temperature}
@@ -90,14 +97,36 @@ def validate_cofiring(
     warnings: list[str] = []
     temperatures: list[int] = []
     two_stage_count = 0
+    two_stage_types: set[str] = set()
+    non_two_stage_count = 0
+    gold_count = 0
 
     for pos in positions:
-        recipe = getattr(pos, "recipe", None)
-        if recipe is None:
+        # Check two-stage firing from position-level flags
+        is_two_stage = getattr(pos, "two_stage_firing", False)
+        ts_type = getattr(pos, "two_stage_type", None)
+
+        if is_two_stage:
+            two_stage_count += 1
+            if ts_type:
+                two_stage_types.add(ts_type)
+            if ts_type == "gold":
+                gold_count += 1
+        else:
+            non_two_stage_count += 1
+
+        # Get temperature from recipe kiln config
+        recipe_id = getattr(pos, "recipe_id", None)
+        if recipe_id is None:
+            recipe = getattr(pos, "recipe", None)
+            if recipe is not None:
+                recipe_id = recipe.id
+
+        if recipe_id is None:
             continue
 
         kiln_cfg = db.query(RecipeKilnConfig).filter(
-            RecipeKilnConfig.recipe_id == recipe.id
+            RecipeKilnConfig.recipe_id == recipe_id
         ).first()
 
         if kiln_cfg is None:
@@ -105,9 +134,6 @@ def validate_cofiring(
 
         if kiln_cfg.firing_temperature:
             temperatures.append(int(kiln_cfg.firing_temperature))
-
-        if kiln_cfg.two_stage_firing:
-            two_stage_count += 1
 
     min_temp = max_temp = None
 
@@ -123,9 +149,39 @@ def validate_cofiring(
                 f"(spread {spread} °C exceeds limit of {max_range} °C)"
             )
 
-    if two_stage_count:
+    # Two-stage firing compatibility checks
+    if two_stage_count > 0 and non_two_stage_count > 0:
+        errors.append(
+            f"Cannot mix two-stage firing positions ({two_stage_count}) with "
+            f"standard firing positions ({non_two_stage_count}) in the same batch"
+        )
+
+    if len(two_stage_types) > 1:
+        errors.append(
+            f"Cannot mix different two-stage firing types in the same batch: "
+            f"{', '.join(sorted(two_stage_types))}"
+        )
+
+    # Gold tile warning: gold fires at 700 °C which is very different
+    # from standard firing temps (~1050-1200 °C)
+    if gold_count > 0 and gold_count < len(positions):
+        non_gold_temps = [
+            t for t, p in zip(temperatures, positions)
+            if getattr(p, "two_stage_type", None) != "gold"
+        ]
+        if non_gold_temps:
+            for t in non_gold_temps:
+                if abs(t - _GOLD_FIRING_TEMPERATURE) > max_range:
+                    errors.append(
+                        f"Gold tile (700 °C) is incompatible with position "
+                        f"firing at {t} °C (exceeds {max_range} °C spread)"
+                    )
+                    break
+
+    if two_stage_count and not errors:
         warnings.append(
-            f"{two_stage_count} position(s) require two-stage firing — "
+            f"{two_stage_count} position(s) require two-stage firing "
+            f"(type: {', '.join(sorted(two_stage_types)) or 'unspecified'}) — "
             "verify kiln schedule supports it"
         )
 

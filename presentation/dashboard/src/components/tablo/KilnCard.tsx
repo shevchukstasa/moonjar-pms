@@ -14,6 +14,23 @@ interface KilnResource {
   kiln_type: string | null;
 }
 
+interface LoadingPlanEntry {
+  position_id: string;
+  loading_method: 'flat' | 'edge' | 'unknown';
+  pieces_per_level: number;
+  levels_used: number;
+  total_pieces: number;
+  area_used_sqm: number;
+  is_filler?: boolean;
+}
+
+interface LoadingPlan {
+  total_area_sqm: number;
+  utilization_pct: number;
+  entries: LoadingPlanEntry[];
+  filler_ids?: string[];
+}
+
 interface BatchItem {
   id: string;
   batch_date: string | null;
@@ -21,6 +38,7 @@ interface BatchItem {
   positions_count: number;
   total_pcs: number;
   notes: string | null;
+  loading_plan?: LoadingPlan | null;
   positions?: Array<{
     id: string;
     order_number: string;
@@ -79,6 +97,30 @@ export function KilnCard({ kiln, batches }: Props) {
                   <div className="flex items-center gap-3 text-xs text-gray-500">
                     <span>{b.positions_count} pos</span>
                     <span>{b.total_pcs} pcs</span>
+                    {b.loading_plan && (
+                      <span className="flex items-center gap-1.5">
+                        <span className={`font-semibold ${
+                          b.loading_plan.utilization_pct >= 80 ? 'text-green-600' :
+                          b.loading_plan.utilization_pct >= 50 ? 'text-yellow-600' : 'text-red-600'
+                        }`}>
+                          {b.loading_plan.utilization_pct.toFixed(0)}%
+                        </span>
+                        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-gray-200">
+                          <div
+                            className={`h-full rounded-full ${
+                              b.loading_plan.utilization_pct >= 80 ? 'bg-green-500' :
+                              b.loading_plan.utilization_pct >= 50 ? 'bg-yellow-500' : 'bg-red-500'
+                            }`}
+                            style={{ width: `${Math.min(100, b.loading_plan.utilization_pct)}%` }}
+                          />
+                        </div>
+                      </span>
+                    )}
+                    {b.loading_plan?.filler_ids && b.loading_plan.filler_ids.length > 0 && (
+                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700">
+                        +{b.loading_plan.filler_ids.length} filler
+                      </span>
+                    )}
                     {b.notes && <span className="italic">{b.notes}</span>}
                   </div>
                 </button>

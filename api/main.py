@@ -68,6 +68,7 @@ from api.routers import material_groups
 from api.routers import packaging
 from api.routers import sizes
 from api.routers import consumption_rules
+from api.routers import grinding
 
 
 def _ensure_schema():
@@ -129,6 +130,10 @@ def _ensure_schema():
             ("production_order_items", "width_cm NUMERIC(7,2)"),
             ("production_order_items", "depth_cm NUMERIC(7,2)"),
             ("production_order_items", "bowl_shape VARCHAR(20)"),
+            # Grinding stock — PM decision fields
+            ("grinding_stock", "decided_by UUID REFERENCES users(id)"),
+            ("grinding_stock", "decided_at TIMESTAMPTZ"),
+            ("grinding_stock", "notes TEXT"),
         ]
         for table, col_def in add_cols:
             try:
@@ -153,6 +158,10 @@ def _ensure_schema():
         ("split_category", "refire"),
         # Octagon shape for glaze surface area calculation
         ("shape_type", "octagon"),
+        # Grinding stock — new decision statuses
+        ("grindingstatus", "pending"),
+        ("grindingstatus", "grinding"),
+        ("grindingstatus", "completed"),
     ]
     try:
         raw_conn = engine.raw_connection()
@@ -1415,5 +1424,6 @@ def setup_routers():
     app.include_router(packaging.router, prefix="/api/packaging", tags=["packaging"])
     app.include_router(sizes.router, prefix="/api/sizes", tags=["sizes"])
     app.include_router(consumption_rules.router, prefix="/api/consumption-rules", tags=["consumption-rules"])
+    app.include_router(grinding.router, prefix="/api/grinding-stock", tags=["grinding-stock"])
 
 setup_routers()

@@ -9,6 +9,8 @@ export const UserRole = {
   WAREHOUSE: 'warehouse',
   SORTER_PACKER: 'sorter_packer',
   PURCHASER: 'purchaser',
+  MASTER: 'master',
+  SENIOR_MASTER: 'senior_master',
 } as const;
 export type UserRoleType = (typeof UserRole)[keyof typeof UserRole];
 
@@ -40,6 +42,9 @@ export const PositionStatus = {
   QUALITY_CHECK_DONE: 'quality_check_done',
   READY_FOR_SHIPMENT: 'ready_for_shipment',
   BLOCKED_BY_QM: 'blocked_by_qm',
+  GRINDING: 'grinding',
+  MANA_CONFIRMATION: 'mana_confirmation',
+  READY_FOR_KILN: 'ready_for_kiln',
   CANCELLED: 'cancelled',
 } as const;
 export type PositionStatusType = (typeof PositionStatus)[keyof typeof PositionStatus];

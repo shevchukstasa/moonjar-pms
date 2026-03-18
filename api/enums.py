@@ -199,6 +199,9 @@ class SplitCategory(str, Enum):
 
 class GrindingStatus(str, Enum):
     IN_STOCK = 'in_stock'
+    PENDING = 'pending'
+    GRINDING = 'grinding'
+    COMPLETED = 'completed'
     SENT_TO_MANA = 'sent_to_mana'
     USED_IN_PRODUCTION = 'used_in_production'
 

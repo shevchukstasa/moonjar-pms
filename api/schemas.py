@@ -1395,10 +1395,18 @@ class GrindingStockResponse(BaseModel):
     source_order_id: Optional[UUID] = None
     source_position_id: Optional[UUID] = None
     status: str
+    decided_by: Optional[UUID] = None
+    decided_at: Optional[datetime] = None
+    notes: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class GrindingStockDecision(BaseModel):
+    decision: str  # 'grinding', 'pending', 'sent_to_mana'
+    notes: Optional[str] = None
 
 
 class RepairQueueCreate(BaseModel):

@@ -851,12 +851,16 @@ class GrindingStock(Base):
     source_order_id = Column(UUID(as_uuid=True), ForeignKey('production_orders.id'))
     source_position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id'))
     status = Column(PgEnum(GrindingStatus), nullable=False, default=GrindingStatus.IN_STOCK)
+    decided_by = Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    decided_at = Column(sa.DateTime(timezone=True))
+    notes = Column(sa.Text)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     factory = relationship('Factory', foreign_keys=[factory_id])
     source_order = relationship('ProductionOrder', foreign_keys=[source_order_id])
     source_position = relationship('OrderPosition', foreign_keys=[source_position_id])
+    decided_by_user = relationship('User', foreign_keys=[decided_by])
 
 
 class RepairQueue(Base):

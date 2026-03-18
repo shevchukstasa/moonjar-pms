@@ -25,6 +25,9 @@ export const statusColors: Record<string, string> = {
   sent_to_quality_check: 'bg-cyan-100 text-cyan-700',
   quality_check_done: 'bg-emerald-100 text-emerald-700',
   blocked_by_qm: 'bg-red-200 text-red-800',
+  grinding: 'bg-stone-100 text-stone-700',
+  mana_confirmation: 'bg-red-100 text-red-700',
+  ready_for_kiln: 'bg-orange-100 text-orange-700',
   // Batch statuses
   suggested: 'bg-violet-100 text-violet-700',
   in_progress: 'bg-yellow-100 text-yellow-700',
@@ -54,5 +57,7 @@ export const statusColors: Record<string, string> = {
   warehouse: 'bg-cyan-100 text-cyan-700',
   sorter_packer: 'bg-lime-100 text-lime-700',
   purchaser: 'bg-rose-100 text-rose-700',
+  master: 'bg-emerald-100 text-emerald-700',
+  senior_master: 'bg-emerald-200 text-emerald-800',
 };
 export function getStatusColor(status: string): string { return statusColors[status] || 'bg-gray-100 text-gray-700'; }

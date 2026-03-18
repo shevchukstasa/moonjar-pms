@@ -21,6 +21,7 @@ function isStockCollection(collection: string | null | undefined): boolean {
 const TABS = [
   { id: 'sorting', label: 'Sorting' },
   { id: 'packing', label: 'Packing' },
+  { id: 'grinding', label: 'Grinding' },
   { id: 'photos', label: 'Photos' },
   { id: 'tasks', label: 'Tasks' },
 ];
@@ -92,6 +93,7 @@ export default function SorterPackerDashboard() {
       {tab === 'packing' && (
         <PackingTab positions={packedPositions} isLoading={packedLoading} />
       )}
+      {tab === 'grinding' && <GrindingTab />}
       {tab === 'photos' && <PhotosTab />}
       {tab === 'tasks' && (
         <TasksTab tasks={tasks} isLoading={tasksLoading} />
@@ -414,6 +416,92 @@ function PackingTab({ positions, isLoading }: { positions: PositionItem[]; isLoa
         onConfirm={() => confirmId && handleSendToQC(confirmId)}
         title="Send to Quality Check"
         message="This position will be sent for quality inspection. Continue?"
+      />
+    </>
+  );
+}
+
+/* ============================================================
+   GRINDING TAB
+   ============================================================ */
+
+function GrindingTab() {
+  const activeFactoryId = useUiStore((s) => s.activeFactoryId);
+  const { data, isLoading } = usePositions(
+    activeFactoryId
+      ? { factory_id: activeFactoryId, status: 'grinding' }
+      : { status: 'grinding' },
+  );
+  const positions = data?.items || [];
+  const changeStatus = useChangePositionStatus();
+  const [confirmAction, setConfirmAction] = useState<{ id: string; action: 'grind' | 'mana' } | null>(null);
+
+  if (isLoading) {
+    return <div className="flex justify-center py-8"><Spinner className="h-8 w-8" /></div>;
+  }
+
+  if (positions.length === 0) {
+    return (
+      <div className="rounded-lg border-2 border-dashed border-gray-300 p-8 text-center">
+        <p className="text-gray-400">No positions in grinding stock</p>
+      </div>
+    );
+  }
+
+  const handleDecision = async (id: string, action: 'grind' | 'mana') => {
+    const newStatus = action === 'grind' ? 'awaiting_reglaze' : 'mana_confirmation';
+    await changeStatus.mutateAsync({ id, status: newStatus, notes: `Grinding decision: ${action}` });
+    setConfirmAction(null);
+  };
+
+  return (
+    <>
+      <div className="space-y-3">
+        {positions.map((p) => (
+          <div
+            key={p.id}
+            className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4"
+          >
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold">{p.order_number}</span>
+                <Badge status={p.status} />
+              </div>
+              <p className="mt-0.5 text-sm text-gray-500">
+                {p.color} · {p.size} · {p.quantity} pcs
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setConfirmAction({ id: p.id, action: 'grind' })}
+                disabled={changeStatus.isPending}
+              >
+                Grind
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={() => setConfirmAction({ id: p.id, action: 'mana' })}
+                disabled={changeStatus.isPending}
+              >
+                Mana
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <ConfirmDialog
+        open={!!confirmAction}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={() => confirmAction && handleDecision(confirmAction.id, confirmAction.action)}
+        title={confirmAction?.action === 'mana' ? 'Send to Mana' : 'Send for Grinding'}
+        message={
+          confirmAction?.action === 'mana'
+            ? 'This position will be sent to Mana (defective products destination). This cannot be undone.'
+            : 'This position will be sent for re-glazing after grinding.'
+        }
       />
     </>
   );

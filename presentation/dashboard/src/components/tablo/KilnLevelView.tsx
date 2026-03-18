@@ -9,6 +9,8 @@ interface PositionBrief {
   status: string;
   product_type: string;
   placement_level?: number | null;
+  loading_method?: 'flat' | 'edge' | null;
+  is_filler?: boolean;
 }
 
 interface Props {
@@ -46,11 +48,25 @@ export function KilnLevelView({ positions }: Props) {
             <tbody className="divide-y">
               {items.map((p) => (
                 <tr key={p.id} className="bg-white">
-                  <td className="px-4 py-1.5 text-xs">{p.order_number}</td>
+                  <td className="px-4 py-1.5 text-xs">
+                    <span className="flex items-center gap-1">
+                      {p.order_number}
+                      {p.is_filler && (
+                        <span className="rounded bg-blue-100 px-1 py-0.5 text-[10px] text-blue-700">filler</span>
+                      )}
+                    </span>
+                  </td>
                   <td className="px-4 py-1.5 text-xs">{p.color}</td>
                   <td className="px-4 py-1.5 text-xs">{p.size}</td>
                   <td className="px-4 py-1.5 text-xs text-right">{p.quantity}</td>
-                  <td className="px-4 py-1.5"><Badge status={p.status} /></td>
+                  <td className="px-4 py-1.5">
+                    <span className="flex items-center gap-1">
+                      <Badge status={p.status} />
+                      {p.loading_method === 'edge' && (
+                        <span className="rounded bg-purple-100 px-1 py-0.5 text-[10px] text-purple-700">edge</span>
+                      )}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -67,11 +83,25 @@ export function KilnLevelView({ positions }: Props) {
             <tbody className="divide-y">
               {unassigned.map((p) => (
                 <tr key={p.id} className="bg-white">
-                  <td className="px-4 py-1.5 text-xs">{p.order_number}</td>
+                  <td className="px-4 py-1.5 text-xs">
+                    <span className="flex items-center gap-1">
+                      {p.order_number}
+                      {p.is_filler && (
+                        <span className="rounded bg-blue-100 px-1 py-0.5 text-[10px] text-blue-700">filler</span>
+                      )}
+                    </span>
+                  </td>
                   <td className="px-4 py-1.5 text-xs">{p.color}</td>
                   <td className="px-4 py-1.5 text-xs">{p.size}</td>
                   <td className="px-4 py-1.5 text-xs text-right">{p.quantity}</td>
-                  <td className="px-4 py-1.5"><Badge status={p.status} /></td>
+                  <td className="px-4 py-1.5">
+                    <span className="flex items-center gap-1">
+                      <Badge status={p.status} />
+                      {p.loading_method === 'edge' && (
+                        <span className="rounded bg-purple-100 px-1 py-0.5 text-[10px] text-purple-700">edge</span>
+                      )}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>

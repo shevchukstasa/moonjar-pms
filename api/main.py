@@ -162,10 +162,8 @@ def _ensure_schema():
         ("split_category", "refire"),
         # Octagon shape for glaze surface area calculation
         ("shape_type", "octagon"),
-        # Grinding stock — new decision statuses
-        ("grindingstatus", "pending"),
-        ("grindingstatus", "grinding"),
-        ("grindingstatus", "completed"),
+        # Grinding stock enum values (type created in table section above;
+        # keep entries here for any future additions only).
     ]
     try:
         raw_conn = engine.raw_connection()
@@ -403,14 +401,25 @@ def _ensure_schema():
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
+        # Grinding status enum type
+        conn.execute(text("""
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'grindingstatus') THEN
+                    CREATE TYPE grindingstatus AS ENUM ('in_stock', 'pending', 'grinding', 'completed', 'sent_to_mana', 'used_in_production');
+                END IF;
+            END $$
+        """))
         # Grinding stock — positions awaiting PM decision
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS grinding_stock (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 factory_id UUID NOT NULL REFERENCES factories(id),
+                color VARCHAR(100) NOT NULL DEFAULT '',
+                size VARCHAR(50) NOT NULL DEFAULT '',
+                quantity INTEGER NOT NULL DEFAULT 0,
                 source_order_id UUID REFERENCES production_orders(id),
                 source_position_id UUID REFERENCES order_positions(id),
-                status VARCHAR(30) NOT NULL DEFAULT 'in_stock',
+                status grindingstatus NOT NULL DEFAULT 'in_stock',
                 decided_by UUID REFERENCES users(id),
                 decided_at TIMESTAMPTZ,
                 notes TEXT,
@@ -418,6 +427,39 @@ def _ensure_schema():
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
+        # Migrate grinding_stock: add missing columns + fix status type if needed
+        for col_def in [
+            "color VARCHAR(100) NOT NULL DEFAULT ''",
+            "size VARCHAR(50) NOT NULL DEFAULT ''",
+            "quantity INTEGER NOT NULL DEFAULT 0",
+        ]:
+            try:
+                conn.execute(text(f"""
+                    DO $$ BEGIN
+                        IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'grinding_stock') THEN
+                            ALTER TABLE grinding_stock ADD COLUMN IF NOT EXISTS {col_def};
+                        END IF;
+                    END $$
+                """))
+            except Exception as e:
+                logger.warning(f"_ensure_schema: skip grinding_stock.{col_def.split()[0]}: {e}")
+        # Migrate status column from VARCHAR to enum if needed
+        try:
+            conn.execute(text("""
+                DO $$ BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'grinding_stock' AND column_name = 'status'
+                          AND data_type = 'character varying'
+                    ) THEN
+                        ALTER TABLE grinding_stock
+                            ALTER COLUMN status TYPE grindingstatus
+                            USING status::grindingstatus;
+                    END IF;
+                END $$
+            """))
+        except Exception as e:
+            logger.warning(f"_ensure_schema: skip grinding_stock status migration: {e}")
         # System settings (key-value for Telegram owner chat, etc.)
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS system_settings (
@@ -1042,6 +1084,9 @@ def _ensure_schema():
         """))
         conn.execute(text("""
             ALTER TABLE sizes ADD COLUMN IF NOT EXISTS shape VARCHAR(20) DEFAULT 'rectangle';
+        """))
+        conn.execute(text("""
+            ALTER TABLE sizes ADD COLUMN IF NOT EXISTS is_custom BOOLEAN NOT NULL DEFAULT FALSE;
         """))
 
     _run_section("add_size_columns", _add_size_columns)

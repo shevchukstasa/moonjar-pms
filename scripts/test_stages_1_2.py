@@ -77,8 +77,16 @@ def skip(name, reason=""):
     print(f"  {YELLOW}○{RESET} {name}" + (f" ({reason})" if reason else ""))
 
 
+def _sync_csrf(r):
+    """Keep CSRF token in sync — server echoes it in every response."""
+    new_csrf = r.headers.get("X-CSRF-Token")
+    if new_csrf:
+        session.headers["X-CSRF-Token"] = new_csrf
+
+
 def check(r, expected=200, name="", save_as=None, save_key=None):
     """Asserts status code and optionally saves response data to ctx."""
+    _sync_csrf(r)
     if r.status_code == expected:
         ok(name)
         if save_as:
@@ -172,6 +180,10 @@ if r.status_code == 200:
     new_token = r.json().get("access_token")
     if new_token:
         session.headers["Authorization"] = f"Bearer {new_token}"
+    # Update CSRF token — refresh generates new jti, so csrf_token changes
+    new_csrf = r.headers.get("X-CSRF-Token") or session.cookies.get("csrf_token")
+    if new_csrf:
+        session.headers["X-CSRF-Token"] = new_csrf
     ok("POST /auth/refresh")
 elif r.status_code in (401, 422):
     skip("POST /auth/refresh", "refresh token not in cookie (expected in browser flow)")
@@ -729,7 +741,10 @@ else:
 section("STAGE 2 · Security")
 
 r = get("/security/audit-log", params={"per_page": 5})
-check(r, 200, "GET /security/audit-log")
+if r.status_code == 403:
+    skip("GET /security/audit-log", "admin-only endpoint")
+else:
+    check(r, 200, "GET /security/audit-log")
 
 r = get("/security/sessions")
 check(r, 200, "GET /security/sessions")

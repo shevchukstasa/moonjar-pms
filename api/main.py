@@ -141,6 +141,11 @@ def _ensure_schema():
             # Position photos — batch association + web URL
             ("position_photos", "batch_id UUID REFERENCES batches(id)"),
             ("position_photos", "photo_url VARCHAR(2048)"),
+            # order_positions — columns added to model but never migrated
+            ("order_positions", "application_type VARCHAR(50)"),
+            ("order_positions", "place_of_application VARCHAR(50)"),
+            ("order_positions", "two_stage_firing BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("order_positions", "two_stage_type VARCHAR(20)"),
             # Size Resolution — FK columns for size assignment
             ("order_positions", "size_id UUID REFERENCES sizes(id)"),
             ("materials", "size_id UUID REFERENCES sizes(id)"),
@@ -533,33 +538,44 @@ def _ensure_schema():
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         """))
+        # ReconciliationStatus enum type
+        conn.execute(text("""
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'reconciliationstatus') THEN
+                    CREATE TYPE reconciliationstatus AS ENUM ('scheduled', 'in_progress', 'completed', 'cancelled');
+                END IF;
+            END $$
+        """))
         # Inventory reconciliations — periodic stock count sessions
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS inventory_reconciliations (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 factory_id UUID NOT NULL REFERENCES factories(id),
-                started_by_id UUID REFERENCES users(id),
-                completed_by_id UUID REFERENCES users(id),
-                status VARCHAR(30) NOT NULL DEFAULT 'in_progress',
-                notes TEXT,
-                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                section_id UUID REFERENCES warehouse_sections(id),
+                status reconciliationstatus NOT NULL DEFAULT 'in_progress',
+                started_by UUID NOT NULL REFERENCES users(id),
                 completed_at TIMESTAMPTZ,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                notes TEXT,
+                staff_count INTEGER,
+                scheduled_date DATE,
+                approved_by UUID REFERENCES users(id),
+                approved_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS inventory_reconciliation_items (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 reconciliation_id UUID NOT NULL REFERENCES inventory_reconciliations(id) ON DELETE CASCADE,
-                material_id UUID REFERENCES materials(id),
-                warehouse_section_id UUID REFERENCES warehouse_sections(id),
-                expected_qty NUMERIC(12,3),
-                counted_qty NUMERIC(12,3),
-                variance NUMERIC(12,3),
-                unit VARCHAR(20),
-                notes TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                material_id UUID NOT NULL REFERENCES materials(id),
+                system_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+                actual_quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+                difference NUMERIC(12,3) NOT NULL DEFAULT 0,
+                adjustment_applied BOOLEAN NOT NULL DEFAULT FALSE,
+                reason VARCHAR(50),
+                explanation TEXT,
+                explained_by UUID REFERENCES users(id),
+                explained_at TIMESTAMPTZ
             )
         """))
         # Glazing board specs — board dimensions per tile size

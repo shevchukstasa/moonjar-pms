@@ -1452,3 +1452,83 @@ async def get_material_reservations(
     }
 
 
+# ────────────────────────────────────────────────────────────────
+# POST /api/positions/reorder — batch priority reorder
+# ────────────────────────────────────────────────────────────────
+
+class ReorderItem(BaseModel):
+    id: UUID
+    priority_order: int
+
+
+class ReorderRequest(BaseModel):
+    items: list[ReorderItem]
+
+
+@router.post("/reorder")
+async def reorder_positions(
+    data: ReorderRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """
+    Batch update priority_order for multiple positions.
+    Used by Tablo drag-and-drop reordering.
+    """
+    if len(data.items) > 200:
+        raise HTTPException(400, "Too many items (max 200)")
+
+    updated = 0
+    for item in data.items:
+        pos = db.query(OrderPosition).filter(OrderPosition.id == item.id).first()
+        if pos:
+            pos.priority_order = item.priority_order
+            updated += 1
+
+    db.commit()
+    return {"updated": updated, "total": len(data.items)}
+
+
+# ────────────────────────────────────────────────────────────────
+# POST /api/positions/{id}/reassign-batch — move to another batch
+# ────────────────────────────────────────────────────────────────
+
+class ReassignBatchRequest(BaseModel):
+    target_batch_id: Optional[UUID] = None  # None = remove from batch
+    notes: Optional[str] = None
+
+
+@router.post("/{position_id}/reassign-batch")
+async def reassign_position_batch(
+    position_id: UUID,
+    data: ReassignBatchRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Move a position to a different batch (or remove from batch)."""
+    from api.models import Batch
+
+    pos = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not pos:
+        raise HTTPException(404, "Position not found")
+
+    old_batch_id = pos.batch_id
+
+    if data.target_batch_id:
+        target_batch = db.query(Batch).filter(Batch.id == data.target_batch_id).first()
+        if not target_batch:
+            raise HTTPException(404, "Target batch not found")
+        if target_batch.factory_id != pos.factory_id:
+            raise HTTPException(400, "Cannot move position to batch in different factory")
+        pos.batch_id = target_batch.id
+    else:
+        pos.batch_id = None
+
+    db.commit()
+
+    return {
+        "position_id": str(pos.id),
+        "old_batch_id": str(old_batch_id) if old_batch_id else None,
+        "new_batch_id": str(pos.batch_id) if pos.batch_id else None,
+        "message": "Position reassigned",
+    }

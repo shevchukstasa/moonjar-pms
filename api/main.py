@@ -69,6 +69,7 @@ from api.routers import packaging
 from api.routers import sizes
 from api.routers import consumption_rules
 from api.routers import grinding
+from api.routers import factory_calendar
 
 
 def _ensure_schema():
@@ -424,6 +425,23 @@ def _ensure_schema():
                 key VARCHAR(100) NOT NULL UNIQUE,
                 value TEXT,
                 updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+        # Factory calendar — non-working days / holidays per factory
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS factory_calendar (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                factory_id UUID NOT NULL REFERENCES factories(id),
+                date DATE NOT NULL,
+                is_working_day BOOLEAN NOT NULL DEFAULT TRUE,
+                num_shifts INTEGER NOT NULL DEFAULT 2,
+                holiday_name VARCHAR(200),
+                holiday_source VARCHAR(50),
+                approved_by UUID REFERENCES users(id),
+                approved_at TIMESTAMPTZ,
+                notes TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                CONSTRAINT uq_factory_calendar_date UNIQUE (factory_id, date)
             )
         """))
 
@@ -1443,5 +1461,6 @@ def setup_routers():
     app.include_router(sizes.router, prefix="/api/sizes", tags=["sizes"])
     app.include_router(consumption_rules.router, prefix="/api/consumption-rules", tags=["consumption-rules"])
     app.include_router(grinding.router, prefix="/api/grinding-stock", tags=["grinding-stock"])
+    app.include_router(factory_calendar.router, prefix="/api/factory-calendar", tags=["factory-calendar"])
 
 setup_routers()

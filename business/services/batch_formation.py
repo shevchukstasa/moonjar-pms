@@ -773,6 +773,7 @@ def suggest_or_create_batches(
                 available_kilns=available_kilns,
                 batch_date=batch_date,
                 batch_status=batch_status,
+                cofiring_key=cofiring_key,
             )
             created_batches.extend(batches_from_group)
 
@@ -796,6 +797,7 @@ def _build_batches_for_group(
     available_kilns: list[Resource],
     batch_date: date,
     batch_status: BatchStatus,
+    cofiring_key: Optional[str] = None,
 ) -> list[dict]:
     """
     Build one or more batches from a temperature group's positions.
@@ -829,6 +831,7 @@ def _build_batches_for_group(
 
         kiln = _find_best_kiln_for_batch(
             db, available_kilns, batch_date, first_area, first_pos,
+            cofiring_key=cofiring_key,
         )
 
         if kiln is None:
@@ -1152,6 +1155,7 @@ def build_batch_proposals(
                 first_area = _get_position_area_sqm(first_pos)
                 kiln = _find_best_kiln_for_batch(
                     db, available_kilns, batch_date, first_area, first_pos,
+                    cofiring_key=cofiring_key,
                 )
                 if kiln is None:
                     break

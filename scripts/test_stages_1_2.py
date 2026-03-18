@@ -52,7 +52,7 @@ CYAN = "\033[96m"
 
 
 def section(title):
-    time.sleep(0.3)  # brief pause between sections to avoid rate-limiting (429)
+    time.sleep(0.5)  # pause between sections to avoid rate-limiting (429)
     print(f"\n{BOLD}{CYAN}{'─'*60}{RESET}")
     print(f"{BOLD}{CYAN}  {title}{RESET}")
     print(f"{BOLD}{CYAN}{'─'*60}{RESET}")

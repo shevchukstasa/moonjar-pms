@@ -742,6 +742,10 @@ if r.status_code in (200, 404):
 else:
     fail("GET /integration/webhooks", f"{r.status_code}")
 
+# Rate limit reset: 100 req/min limit — pause here to slide the 60s window
+print(f"\n  {YELLOW}[rate-limit guard] sleeping 20s to reset API rate limit window...{RESET}")
+time.sleep(20)
+
 section("STAGE 2 · Security")
 
 r = get("/security/audit-log", params={"per_page": 5})

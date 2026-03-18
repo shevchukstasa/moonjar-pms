@@ -527,6 +527,7 @@ class Batch(Base):
     status = Column(PgEnum(BatchStatus), nullable=False, default=BatchStatus.PLANNED)
     created_by = Column(PgEnum(BatchCreator), nullable=False, default=BatchCreator.AUTO)
     notes = Column(sa.Text)
+    metadata_json = Column(JSONB)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 

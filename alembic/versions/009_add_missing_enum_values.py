@@ -34,7 +34,7 @@ ENUM_VALUES = {
     "task_type": [
         "stencil_order", "silk_screen_order", "color_matching",
         "material_order", "quality_check", "kiln_maintenance",
-        "showroom_transfer", "photographing", "manu_confirmation",
+        "showroom_transfer", "photographing", "mana_confirmation",
         "packing_photo", "recipe_configuration", "repair_sla_alert",
         "reconciliation_alert", "stock_shortage", "stock_transfer",
         "size_resolution",
@@ -61,6 +61,7 @@ ENUM_VALUES = {
     "user_role": [
         "owner", "administrator", "ceo", "production_manager",
         "quality_manager", "warehouse", "sorter_packer", "purchaser",
+        "master", "senior_master",
     ],
     "order_source": [
         "sales_webhook", "pdf_upload", "manual",
@@ -83,7 +84,7 @@ ENUM_VALUES = {
     ],
     "defect_outcome": [
         "return_to_work", "write_off", "grinding", "repair",
-        "refire", "reglaze", "to_stock", "to_manu",
+        "refire", "reglaze", "to_stock", "to_mana",
     ],
     "qc_result": ["ok", "defect"],
     "qc_stage": ["glazing", "firing", "sorting"],
@@ -98,10 +99,10 @@ ENUM_VALUES = {
         "stock_shortage", "cancellation_request",
     ],
     "notification_channel": ["in_app", "telegram", "both"],
-    "reconciliation_status": ["in_progress", "completed", "cancelled"],
-    "grinding_status": ["in_stock", "sent_to_manu", "used_in_production"],
+    "reconciliation_status": ["in_progress", "completed", "cancelled", "scheduled"],
+    "grinding_status": ["in_stock", "sent_to_mana", "used_in_production"],
     "repair_status": ["in_repair", "repaired", "returned_to_production", "written_off"],
-    "manu_shipment_status": ["pending", "confirmed", "shipped"],
+    "mana_shipment_status": ["pending", "confirmed", "shipped"],
     "write_off_reason": ["breakage", "loss", "damage", "expired", "adjustment", "other"],
     "media_type": ["photo", "video", "audio", "document"],
     "dashboard_type": ["owner", "ceo", "manager", "quality", "warehouse", "packing", "purchaser"],
@@ -120,8 +121,8 @@ ENUM_VALUES = {
     ],
     "ip_scope": ["admin_panel", "webhook", "all"],
     "qm_block_type": ["position", "batch"],
-    "surplus_disposition_type": ["showroom", "casters", "manu"],
-    "casters_removed_reason": ["used", "shipped_to_manu", "other"],
+    "surplus_disposition_type": ["showroom", "casters", "mana"],
+    "casters_removed_reason": ["used", "shipped_to_mana", "other"],
     "tps_deviation_type": ["positive", "negative"],
     "tps_status": ["normal", "warning", "critical"],
     "buffer_health": ["green", "yellow", "red"],
@@ -131,6 +132,8 @@ ENUM_VALUES = {
     "problem_card_status": ["open", "in_progress", "closed"],
     "backup_status": ["in_progress", "success", "failed"],
     "backup_type": ["scheduled", "manual"],
+    "engobe_type": ["standard", "shelf_coating", "hole_filler"],
+    "night_alert_level": ["morning", "repeat", "call"],
 }
 
 

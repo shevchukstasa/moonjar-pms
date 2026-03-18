@@ -1220,7 +1220,7 @@ async def force_unblock_position(
     audit_task = Task(
         id=uuid_mod.uuid4(),
         factory_id=p.factory_id,
-        type=TaskType.MANU_CONFIRMATION,  # Reuse for audit log of PM overrides
+        type=TaskType.MANA_CONFIRMATION,  # Reuse for audit log of PM overrides
         status=TaskStatus.DONE,
         assigned_role=UserRole.PRODUCTION_MANAGER,
         related_order_id=p.order_id,

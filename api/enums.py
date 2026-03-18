@@ -13,6 +13,8 @@ class UserRole(str, Enum):
     WAREHOUSE = 'warehouse'
     SORTER_PACKER = 'sorter_packer'
     PURCHASER = 'purchaser'
+    MASTER = 'master'
+    SENIOR_MASTER = 'senior_master'
 
 class OrderSource(str, Enum):
     SALES_WEBHOOK = 'sales_webhook'
@@ -66,7 +68,7 @@ class TaskType(str, Enum):
     KILN_MAINTENANCE = 'kiln_maintenance'
     SHOWROOM_TRANSFER = 'showroom_transfer'
     PHOTOGRAPHING = 'photographing'
-    MANU_CONFIRMATION = 'manu_confirmation'
+    MANA_CONFIRMATION = 'mana_confirmation'
     PACKING_PHOTO = 'packing_photo'
     RECIPE_CONFIGURATION = 'recipe_configuration'
     REPAIR_SLA_ALERT = 'repair_sla_alert'
@@ -167,7 +169,7 @@ class DefectOutcome(str, Enum):
     REFIRE = 'refire'
     REGLAZE = 'reglaze'
     TO_STOCK = 'to_stock'
-    TO_MANU = 'to_manu'
+    TO_MANA = 'to_mana'
 
 class ProductType(str, Enum):
     TILE = 'tile'
@@ -196,7 +198,7 @@ class SplitCategory(str, Enum):
 
 class GrindingStatus(str, Enum):
     IN_STOCK = 'in_stock'
-    SENT_TO_MANU = 'sent_to_manu'
+    SENT_TO_MANA = 'sent_to_mana'
     USED_IN_PRODUCTION = 'used_in_production'
 
 class RepairStatus(str, Enum):
@@ -205,7 +207,7 @@ class RepairStatus(str, Enum):
     RETURNED_TO_PRODUCTION = 'returned_to_production'
     WRITTEN_OFF = 'written_off'
 
-class ManuShipmentStatus(str, Enum):
+class ManaShipmentStatus(str, Enum):
     PENDING = 'pending'
     CONFIRMED = 'confirmed'
     SHIPPED = 'shipped'
@@ -213,7 +215,7 @@ class ManuShipmentStatus(str, Enum):
 class SurplusDispositionType(str, Enum):
     SHOWROOM = 'showroom'
     CASTERS = 'casters'
-    MANU = 'manu'
+    MANA = 'mana'
 
 class MaintenanceStatus(str, Enum):
     PLANNED = 'planned'
@@ -270,7 +272,7 @@ class WebhookAuthMode(str, Enum):
 
 class CastersRemovedReason(str, Enum):
     USED = 'used'
-    SHIPPED_TO_MANU = 'shipped_to_manu'
+    SHIPPED_TO_MANA = 'shipped_to_mana'
     OTHER = 'other'
 
 class MediaType(str, Enum):
@@ -307,9 +309,14 @@ class ExpenseCategory(str, Enum):
     OTHER = 'other'
 
 class ReconciliationStatus(str, Enum):
+    SCHEDULED = 'scheduled'
     IN_PROGRESS = 'in_progress'
     COMPLETED = 'completed'
     CANCELLED = 'cancelled'
+
+class ReceivingApprovalMode(str, Enum):
+    ALL = 'all'          # PM approves every delivery
+    AUTO = 'auto'        # Auto-approve if no quality issues
 
 class ProblemCardMode(str, Enum):
     SIMPLE = 'simple'
@@ -370,6 +377,18 @@ class BackupStatus(str, Enum):
 class BackupType(str, Enum):
     SCHEDULED = 'scheduled'
     MANUAL = 'manual'
+
+
+class EngobeType(str, Enum):
+    STANDARD = 'standard'
+    SHELF_COATING = 'shelf_coating'
+    HOLE_FILLER = 'hole_filler'
+
+
+class NightAlertLevel(str, Enum):
+    MORNING = 'morning'
+    REPEAT = 'repeat'
+    CALL = 'call'
 
 
 # --- Stock Collection Detection ---

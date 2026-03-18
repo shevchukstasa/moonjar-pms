@@ -3,7 +3,7 @@ Moonjar PMS — SQLAlchemy models (auto-generated from DATABASE_SCHEMA.sql)
 """
 
 import uuid
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timezone
 
 import sqlalchemy as sa
 from sqlalchemy import Column, ForeignKey, UniqueConstraint
@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import relationship
 
 from api.database import Base
-from api.enums import AuditActionType, BackupStatus, BackupType, BatchCreator, BatchMode, BatchStatus, BufferHealth, CastersRemovedReason, ChangeRequestStatus, DashboardType, DefectOutcome, DefectStage, ExpenseCategory, ExpenseType, GrindingStatus, IpScope, KilnConstantsMode, LanguagePreference, MaintenanceStatus, ManuShipmentStatus, MaterialType, MediaType, NotificationChannel, NotificationType, OrderSource, OrderStatus, PositionStatus, ProductType, PurchaseStatus, QcResult, QcStage, QmBlockType, ReconciliationStatus, ReferenceAction, RelatedEntityType, RepairStatus, ResourceStatus, ResourceType, ScheduleSlotStatus, ShapeType, SplitCategory, SurplusDispositionType, TaskStatus, TaskType, TpsDeviationType, TpsStatus, TransactionType, UserRole, WriteOffReason
+from api.enums import AuditActionType, BackupStatus, BackupType, BatchCreator, BatchMode, BatchStatus, BufferHealth, CastersRemovedReason, ChangeRequestStatus, DashboardType, DefectOutcome, DefectStage, ExpenseCategory, ExpenseType, GrindingStatus, IpScope, KilnConstantsMode, LanguagePreference, MaintenanceStatus, ManaShipmentStatus, MaterialType, MediaType, NotificationChannel, NotificationType, OrderSource, OrderStatus, PositionStatus, ProductType, PurchaseStatus, QcResult, QcStage, QmBlockType, ReconciliationStatus, ReferenceAction, RelatedEntityType, RepairStatus, ResourceStatus, ResourceType, ScheduleSlotStatus, ShapeType, SplitCategory, SurplusDispositionType, TaskStatus, TaskType, TpsDeviationType, TpsStatus, TransactionType, UserRole, WriteOffReason
 
 
 def PgEnum(enum_class, **kwargs):
@@ -36,7 +36,7 @@ class Factory(Base):
     masters_group_chat_id = Column(sa.BigInteger)
     purchaser_chat_id = Column(sa.BigInteger)
     telegram_language = Column(sa.String(10), nullable=False, default='id')
-    require_pm_approval_receiving = Column(sa.Boolean, nullable=False, default=False)
+    receiving_approval_mode = Column(sa.String(20), nullable=False, server_default='all')  # 'all' or 'auto'
     kiln_constants_mode = Column(PgEnum(KilnConstantsMode), nullable=False, default=KilnConstantsMode.MANUAL)
     rotation_rules = Column(JSONB)
     served_locations = Column(JSONB)  # ["Bali", "Lombok"] — delivery locations served by this factory
@@ -596,6 +596,8 @@ class OrderPosition(Base):
     is_merged = Column(sa.Boolean, nullable=False, default=False)
     priority_order = Column(sa.Integer, default=0)
     firing_round = Column(sa.Integer, nullable=False, default=1)
+    two_stage_firing = Column(sa.Boolean, nullable=False, default=False, server_default='false')
+    two_stage_type = Column(sa.String(20), nullable=True)  # 'gold' or 'countertop' or null
     # ── Upfront schedule (TOC/DBR backward scheduling) ──────────────────
     planned_glazing_date = Column(sa.Date)          # when glazing should start
     planned_kiln_date = Column(sa.Date)             # when kiln firing should happen
@@ -869,13 +871,13 @@ class RepairQueue(Base):
     source_position = relationship('OrderPosition', foreign_keys=[source_position_id])
 
 
-class ManuShipment(Base):
-    __tablename__ = 'manu_shipments'
+class ManaShipment(Base):
+    __tablename__ = 'mana_shipments'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
     items_json = Column(JSONB, nullable=False)
-    status = Column(PgEnum(ManuShipmentStatus), nullable=False, default=ManuShipmentStatus.PENDING)
+    status = Column(PgEnum(ManaShipmentStatus), nullable=False, default=ManaShipmentStatus.PENDING)
     confirmed_by = Column(UUID(as_uuid=True), ForeignKey('users.id'))
     confirmed_at = Column(sa.DateTime(timezone=True))
     shipped_at = Column(sa.DateTime(timezone=True))
@@ -1384,11 +1386,16 @@ class InventoryReconciliation(Base):
     started_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
     completed_at = Column(sa.DateTime(timezone=True))
     notes = Column(sa.Text)
+    staff_count = Column(sa.Integer, nullable=True)
+    scheduled_date = Column(sa.Date, nullable=True)
+    approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    approved_at = Column(sa.DateTime(timezone=True), nullable=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     factory = relationship('Factory', foreign_keys=[factory_id])
     section = relationship('WarehouseSection', foreign_keys=[section_id])
     started_by_rel = relationship('User', foreign_keys=[started_by])
+    approved_by_rel = relationship('User', foreign_keys=[approved_by])
 
 
 class InventoryReconciliationItem(Base):
@@ -1401,9 +1408,14 @@ class InventoryReconciliationItem(Base):
     actual_quantity = Column(sa.Numeric(12, 3), nullable=False)
     difference = Column(sa.Numeric(12, 3), nullable=False)
     adjustment_applied = Column(sa.Boolean, nullable=False, default=False)
+    reason = Column(sa.String(50), nullable=True)  # 'natural_losses', 'formula_inaccuracy', 'counting_error', 'theft_damage', 'other'
+    explanation = Column(sa.Text, nullable=True)
+    explained_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    explained_at = Column(sa.DateTime(timezone=True), nullable=True)
 
     reconciliation = relationship('InventoryReconciliation', foreign_keys=[reconciliation_id])
     material = relationship('Material', foreign_keys=[material_id])
+    explained_by_rel = relationship('User', foreign_keys=[explained_by])
 
 
 # ── Packaging ──────────────────────────────────────────────
@@ -1895,3 +1907,142 @@ class ConsumptionRule(Base):
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     size = relationship('Size', foreign_keys=[size_id])
+
+
+class FactoryCalendar(Base):
+    __tablename__ = 'factory_calendar'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    date = Column(sa.Date, nullable=False)
+    is_working_day = Column(sa.Boolean, default=True, nullable=False)
+    num_shifts = Column(sa.Integer, default=2, nullable=False)
+    holiday_name = Column(sa.String(200), nullable=True)
+    holiday_source = Column(sa.String(50), nullable=True)  # 'government', 'balinese', 'manual'
+    approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    approved_at = Column(sa.DateTime(timezone=True), nullable=True)
+    notes = Column(sa.Text, nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    __table_args__ = (UniqueConstraint('factory_id', 'date'),)
+
+
+class Operation(Base):
+    __tablename__ = 'operations'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    name = Column(sa.String(100), nullable=False)
+    description = Column(sa.Text, nullable=True)
+    default_time_minutes = Column(sa.Numeric(8, 2), nullable=True)
+    is_active = Column(sa.Boolean, default=True)
+    sort_order = Column(sa.Integer, default=0)
+    created_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    factory = relationship('Factory', foreign_keys=[factory_id])
+
+
+class MasterPermission(Base):
+    __tablename__ = 'master_permissions'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    operation_id = Column(UUID(as_uuid=True), ForeignKey('operations.id'), nullable=False)
+    granted_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    granted_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    user = relationship('User', foreign_keys=[user_id])
+    operation = relationship('Operation', foreign_keys=[operation_id])
+    __table_args__ = (UniqueConstraint('user_id', 'operation_id'),)
+
+
+class OperationLog(Base):
+    __tablename__ = 'operation_logs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    operation_id = Column(UUID(as_uuid=True), ForeignKey('operations.id'), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id'), nullable=True)
+    batch_id = Column(UUID(as_uuid=True), ForeignKey('batches.id'), nullable=True)
+    shift_date = Column(sa.Date, nullable=False)
+    shift_number = Column(sa.Integer, nullable=True)
+    started_at = Column(sa.DateTime(timezone=True), nullable=True)
+    completed_at = Column(sa.DateTime(timezone=True), nullable=True)
+    duration_minutes = Column(sa.Numeric(8, 2), nullable=True)
+    quantity_processed = Column(sa.Integer, nullable=True)
+    defect_count = Column(sa.Integer, default=0)
+    notes = Column(sa.Text, nullable=True)
+    source = Column(sa.String(20), default='telegram')  # 'telegram', 'dashboard', 'auto'
+    created_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class EscalationRule(Base):
+    __tablename__ = 'escalation_rules'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    task_type = Column(sa.String(50), nullable=False)
+    pm_timeout_hours = Column(sa.Numeric(6, 2), nullable=False)
+    ceo_timeout_hours = Column(sa.Numeric(6, 2), nullable=False)
+    owner_timeout_hours = Column(sa.Numeric(6, 2), nullable=False)
+    night_level = Column(sa.Integer, default=1)  # 1=morning, 2=repeat, 3=call
+    is_active = Column(sa.Boolean, default=True)
+
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    __table_args__ = (UniqueConstraint('factory_id', 'task_type'),)
+
+
+class ReceivingSetting(Base):
+    __tablename__ = 'receiving_settings'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False, unique=True)
+    approval_mode = Column(sa.String(20), nullable=False, default='all')  # 'all' or 'auto'
+    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    updated_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    factory = relationship('Factory', foreign_keys=[factory_id])
+
+
+class MaterialDefectThreshold(Base):
+    __tablename__ = 'material_defect_thresholds'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    material_id = Column(UUID(as_uuid=True), ForeignKey('materials.id'), nullable=False, unique=True)
+    max_defect_percent = Column(sa.Numeric(5, 2), nullable=False, default=3.0)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    updated_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    material = relationship('Material', foreign_keys=[material_id])
+
+
+class EdgeHeightRule(Base):
+    __tablename__ = 'edge_height_rules'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    thickness_mm_min = Column(sa.Numeric(6, 2), nullable=False)
+    thickness_mm_max = Column(sa.Numeric(6, 2), nullable=False)
+    max_edge_height_cm = Column(sa.Numeric(6, 2), nullable=False)
+    is_tested = Column(sa.Boolean, default=False)
+    notes = Column(sa.Text, nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    factory = relationship('Factory', foreign_keys=[factory_id])
+
+
+class PurchaseConsolidationSetting(Base):
+    __tablename__ = 'purchase_consolidation_settings'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False, unique=True)
+    consolidation_window_days = Column(sa.Integer, nullable=False, default=7)
+    urgency_threshold_days = Column(sa.Integer, nullable=False, default=5)
+    planning_horizon_days = Column(sa.Integer, nullable=False, default=30)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    updated_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    factory = relationship('Factory', foreign_keys=[factory_id])

@@ -69,7 +69,7 @@ export const TaskType = {
   KILN_MAINTENANCE: 'kiln_maintenance',
   SHOWROOM_TRANSFER: 'showroom_transfer',
   PHOTOGRAPHING: 'photographing',
-  MANU_CONFIRMATION: 'manu_confirmation',
+  MANA_CONFIRMATION: 'mana_confirmation',
   PACKING_PHOTO: 'packing_photo',
   RECIPE_CONFIGURATION: 'recipe_configuration',
   REPAIR_SLA_ALERT: 'repair_sla_alert',
@@ -193,7 +193,7 @@ export const DefectOutcome = {
   REFIRE: 'refire',
   REGLAZE: 'reglaze',
   TO_STOCK: 'to_stock',
-  TO_MANU: 'to_manu',
+  TO_MANA: 'to_mana',
 } as const;
 export type DefectOutcomeType = (typeof DefectOutcome)[keyof typeof DefectOutcome];
 
@@ -223,7 +223,7 @@ export type SplitCategoryType = (typeof SplitCategory)[keyof typeof SplitCategor
 
 export const GrindingStatus = {
   IN_STOCK: 'in_stock',
-  SENT_TO_MANU: 'sent_to_manu',
+  SENT_TO_MANA: 'sent_to_mana',
   USED_IN_PRODUCTION: 'used_in_production',
 } as const;
 export type GrindingStatusType = (typeof GrindingStatus)[keyof typeof GrindingStatus];
@@ -236,17 +236,17 @@ export const RepairStatus = {
 } as const;
 export type RepairStatusType = (typeof RepairStatus)[keyof typeof RepairStatus];
 
-export const ManuShipmentStatus = {
+export const ManaShipmentStatus = {
   PENDING: 'pending',
   CONFIRMED: 'confirmed',
   SHIPPED: 'shipped',
 } as const;
-export type ManuShipmentStatusType = (typeof ManuShipmentStatus)[keyof typeof ManuShipmentStatus];
+export type ManaShipmentStatusType = (typeof ManaShipmentStatus)[keyof typeof ManaShipmentStatus];
 
 export const SurplusDispositionType = {
   SHOWROOM: 'showroom',
   CASTERS: 'casters',
-  MANU: 'manu',
+  MANA: 'mana',
 } as const;
 export type SurplusDispositionTypeType = (typeof SurplusDispositionType)[keyof typeof SurplusDispositionType];
 
@@ -321,7 +321,7 @@ export type WebhookAuthModeType = (typeof WebhookAuthMode)[keyof typeof WebhookA
 
 export const CastersRemovedReason = {
   USED: 'used',
-  SHIPPED_TO_MANU: 'shipped_to_manu',
+  SHIPPED_TO_MANA: 'shipped_to_mana',
   OTHER: 'other',
 } as const;
 export type CastersRemovedReasonType = (typeof CastersRemovedReason)[keyof typeof CastersRemovedReason];

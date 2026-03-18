@@ -14,7 +14,7 @@ from api.models import *  # noqa
 from api.schemas import *  # noqa
 from api.enums import (
     TaskType, TaskStatus, SurplusDispositionType,
-    PositionStatus, UserRole, ManuShipmentStatus,
+    PositionStatus, UserRole, ManaShipmentStatus,
 )
 
 # Threshold for creating a PM decision task for Coaster box and Mana accumulations
@@ -43,11 +43,11 @@ def _check_is_basic_color(db: Session, color_name: str) -> bool:
 
 def _create_pm_accumulation_task(db: Session, factory_id, total_qty: int, label: str) -> None:
     """Create a PM decision task when Coaster box or Mana shipment exceeds threshold.
-    Skips creation if an active MANU_CONFIRMATION task already exists for this factory.
+    Skips creation if an active MANA_CONFIRMATION task already exists for this factory.
     """
     active_task = db.query(Task).filter(
         Task.factory_id == factory_id,
-        Task.type == TaskType.MANU_CONFIRMATION,
+        Task.type == TaskType.MANA_CONFIRMATION,
         Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
     ).first()
     if active_task:
@@ -59,7 +59,7 @@ def _create_pm_accumulation_task(db: Session, factory_id, total_qty: int, label:
     task = Task(
         id=uuid_mod.uuid4(),
         factory_id=factory_id,
-        type=TaskType.MANU_CONFIRMATION,
+        type=TaskType.MANA_CONFIRMATION,
         assigned_role=UserRole.PRODUCTION_MANAGER,
         description=f"{label} accumulated {total_qty} pcs — decide next steps (ship / hold)",
         priority=2,
@@ -169,9 +169,9 @@ def handle_surplus(db: Session, position: OrderPosition, surplus_quantity: int) 
     else:
         # → Mana: accumulate items into the current PENDING Mana shipment.
         # When Mana exceeds 100 pcs, PM decides when to ship.
-        pending_shipment = db.query(ManuShipment).filter(
-            ManuShipment.factory_id == position.factory_id,
-            ManuShipment.status == ManuShipmentStatus.PENDING,
+        pending_shipment = db.query(ManaShipment).filter(
+            ManaShipment.factory_id == position.factory_id,
+            ManaShipment.status == ManaShipmentStatus.PENDING,
         ).first()
         item_entry = {
             "color": color,
@@ -186,11 +186,11 @@ def handle_surplus(db: Session, position: OrderPosition, surplus_quantity: int) 
             pending_shipment.items_json = current_items
         else:
             current_items = [item_entry]
-            new_shipment = ManuShipment(
+            new_shipment = ManaShipment(
                 id=uuid_mod.uuid4(),
                 factory_id=position.factory_id,
                 items_json=current_items,
-                status=ManuShipmentStatus.PENDING,
+                status=ManaShipmentStatus.PENDING,
             )
             db.add(new_shipment)
 
@@ -208,7 +208,7 @@ def handle_surplus(db: Session, position: OrderPosition, surplus_quantity: int) 
             order_id=position.order_id,
             position_id=position.id,
             surplus_quantity=surplus_quantity,
-            disposition_type=SurplusDispositionType.MANU,
+            disposition_type=SurplusDispositionType.MANA,
             size=size,
             color=color,
             is_base_color=is_basic,

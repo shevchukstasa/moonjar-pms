@@ -31,7 +31,7 @@ class FactoryCreate(BaseModel):
     masters_group_chat_id: Optional[int] = None
     purchaser_chat_id: Optional[int] = None
     telegram_language: Optional[str] = None
-    require_pm_approval_receiving: Optional[bool] = None
+    receiving_approval_mode: Optional[str] = None
     kiln_constants_mode: Optional[str] = None
     rotation_rules: Optional[dict] = None
     served_locations: Optional[list] = None
@@ -48,7 +48,7 @@ class FactoryUpdate(BaseModel):
     masters_group_chat_id: Optional[int] = None
     purchaser_chat_id: Optional[int] = None
     telegram_language: Optional[str] = None
-    require_pm_approval_receiving: Optional[bool] = None
+    receiving_approval_mode: Optional[str] = None
     kiln_constants_mode: Optional[str] = None
     rotation_rules: Optional[dict] = None
     served_locations: Optional[list] = None
@@ -66,7 +66,7 @@ class FactoryResponse(BaseModel):
     masters_group_chat_id: Optional[int] = None
     purchaser_chat_id: Optional[int] = None
     telegram_language: Optional[str] = "id"
-    require_pm_approval_receiving: Optional[bool] = False
+    receiving_approval_mode: Optional[str] = "all"
     kiln_constants_mode: Optional[str] = "manual"
     rotation_rules: Optional[dict] = None
     served_locations: Optional[list] = None
@@ -1442,7 +1442,7 @@ class RepairQueueResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class ManuShipmentCreate(BaseModel):
+class ManaShipmentCreate(BaseModel):
     factory_id: UUID
     items_json: dict
     status: Optional[str] = None
@@ -1452,7 +1452,7 @@ class ManuShipmentCreate(BaseModel):
     notes: Optional[str] = None
 
 
-class ManuShipmentUpdate(BaseModel):
+class ManaShipmentUpdate(BaseModel):
     factory_id: Optional[UUID] = None
     items_json: Optional[dict] = None
     status: Optional[str] = None
@@ -1462,7 +1462,7 @@ class ManuShipmentUpdate(BaseModel):
     notes: Optional[str] = None
 
 
-class ManuShipmentResponse(BaseModel):
+class ManaShipmentResponse(BaseModel):
     id: UUID
     factory_id: UUID
     items_json: dict

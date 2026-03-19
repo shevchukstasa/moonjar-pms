@@ -6,6 +6,22 @@ echo "Git commit: $(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
 echo "Python: $(python --version 2>&1)"
 echo "Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 
+# Ensure alembic_version.version_num is wide enough for long revision IDs (default VARCHAR(32))
+python - <<'PYEOF'
+import os, sys
+try:
+    import psycopg2
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("ALTER TABLE IF EXISTS alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)")
+    cur.close()
+    conn.close()
+    print("alembic_version.version_num expanded to VARCHAR(128)")
+except Exception as e:
+    print(f"Note: could not expand alembic_version column: {e}", file=sys.stderr)
+PYEOF
+
 # Run Alembic migrations
 echo ""
 echo "=== Running database migrations ==="

@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/format";
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -259,7 +260,7 @@ export default function ManagerDashboard() {
       render: (item) => item.created_at
         ? (
           <span className="text-sm text-gray-600">
-            {new Date(item.created_at).toLocaleDateString()}{' '}
+            {formatDate(item.created_at)}{' '}
             <span className="text-gray-400 text-xs">
               {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
@@ -279,7 +280,7 @@ export default function ManagerDashboard() {
           : 'text-gray-700';
         return (
           <span className={`text-sm ${color}`}>
-            {new Date(item.final_deadline).toLocaleDateString()}
+            {formatDate(item.final_deadline)}
             {daysLeft != null && (
               <span className="ml-1 text-xs font-normal text-gray-400">
                 ({daysLeft < 0 ? `${Math.abs(daysLeft)}d late` : `${daysLeft}d`})
@@ -804,7 +805,7 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
       header: 'Created',
       render: (item) => item.created_at ? (
         <span className="text-xs text-gray-500">
-          {new Date(item.created_at).toLocaleDateString()}{' '}
+          {formatDate(item.created_at)}{' '}
           {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </span>
       ) : <span className="text-gray-400">&mdash;</span>,
@@ -812,7 +813,7 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
     {
       key: 'due_at',
       header: 'Due',
-      render: (item) => item.due_at ? new Date(item.due_at).toLocaleDateString() : '\u2014',
+      render: (item) => item.due_at ? formatDate(item.due_at) : '\u2014',
     },
     // Delete column — only shown when PM cleanup is enabled
     ...(canDeleteTasks ? [{
@@ -967,12 +968,12 @@ function MaterialsTabContent({ factoryId }: { factoryId: string | null }) {
     {
       key: 'created_at',
       header: 'Created',
-      render: (item) => item.created_at ? new Date(item.created_at).toLocaleDateString() : '\u2014',
+      render: (item) => item.created_at ? formatDate(item.created_at) : '\u2014',
     },
     {
       key: 'expected_delivery_date',
       header: 'Expected Delivery',
-      render: (item) => item.expected_delivery_date ? new Date(item.expected_delivery_date).toLocaleDateString() : '\u2014',
+      render: (item) => item.expected_delivery_date ? formatDate(item.expected_delivery_date) : '\u2014',
     },
   ];
 
@@ -1091,7 +1092,7 @@ function DefectsTabContent({ factoryId }: { factoryId: string | null }) {
     {
       key: 'created_at',
       header: 'Date',
-      render: (item) => item.created_at ? new Date(item.created_at).toLocaleDateString() : '\u2014',
+      render: (item) => item.created_at ? formatDate(item.created_at) : '\u2014',
     },
   ];
 
@@ -1111,7 +1112,7 @@ function DefectsTabContent({ factoryId }: { factoryId: string | null }) {
     {
       key: 'created_at',
       header: 'Opened',
-      render: (item) => item.created_at ? new Date(item.created_at).toLocaleDateString() : '\u2014',
+      render: (item) => item.created_at ? formatDate(item.created_at) : '\u2014',
     },
   ];
 

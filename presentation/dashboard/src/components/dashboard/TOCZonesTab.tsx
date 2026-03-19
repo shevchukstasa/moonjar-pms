@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/format";
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { tocApi } from '@/api/toc';
@@ -144,7 +145,7 @@ export function TOCZonesTab({ factoryId }: TOCZonesTabProps) {
 
                       <div className="flex items-center justify-between text-xs text-gray-500">
                         <span>{order.position_count} position{order.position_count !== 1 ? 's' : ''}</span>
-                        {order.eta && <span>ETA: {new Date(order.eta).toLocaleDateString()}</span>}
+                        {order.eta && <span>ETA: {formatDate(order.eta)}</span>}
                       </div>
                     </div>
                   ))

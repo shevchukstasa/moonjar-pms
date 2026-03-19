@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/format";
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card } from '@/components/ui/Card';
@@ -258,7 +259,7 @@ function QmBlocksTab({ blocks, isLoading }: { blocks: QmBlockItem[]; isLoading: 
                   </span>
                 </div>
                 <p className="mt-0.5 text-sm text-gray-500">
-                  {b.block_type.replace(/_/g, ' ')} · {new Date(b.created_at).toLocaleDateString()}
+                  {b.block_type.replace(/_/g, ' ')} · {formatDate(b.created_at)}
                 </p>
               </div>
               {resolvingId !== b.id && (
@@ -394,7 +395,7 @@ function ProblemCardsTab({
                     </span>
                   </div>
                   <p className="mt-0.5 text-sm text-gray-500">
-                    {c.location ? `${c.location} · ` : ''}{new Date(c.created_at).toLocaleDateString()}
+                    {c.location ? `${c.location} · ` : ''}{formatDate(c.created_at)}
                   </p>
                 </div>
                 {(c.status === 'open' || c.status === 'in_progress') && (

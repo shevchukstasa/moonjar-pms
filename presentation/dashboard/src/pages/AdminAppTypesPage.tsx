@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/format";
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -85,7 +86,7 @@ export default function AdminAppTypesPage() {
       {
         key: 'created_at',
         header: 'Created',
-        render: (item: AppTypeItem) => new Date(item.created_at).toLocaleDateString(),
+        render: (item: AppTypeItem) => formatDate(item.created_at),
       },
       {
         key: 'actions',

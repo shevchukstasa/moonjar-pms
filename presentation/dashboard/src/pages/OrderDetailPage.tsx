@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/format";
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -222,7 +223,7 @@ export default function OrderDetailPage() {
         )}
         {isShipped && order.shipped_at && (
           <span className="text-sm text-gray-500">
-            Shipped {new Date(order.shipped_at).toLocaleDateString()}
+            Shipped {formatDate(order.shipped_at)}
           </span>
         )}
       </div>
@@ -263,7 +264,7 @@ export default function OrderDetailPage() {
         <Card>
           <div className="text-xs text-gray-500">Deadline</div>
           <div className="mt-1 font-medium text-gray-900">
-            {order.final_deadline ? new Date(order.final_deadline).toLocaleDateString() : '\u2014'}
+            {order.final_deadline ? formatDate(order.final_deadline) : '\u2014'}
           </div>
         </Card>
         <Card>

@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/format";
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { GitPullRequest, CheckCircle, XCircle, ExternalLink, Clock } from 'lucide-react';
@@ -140,7 +141,7 @@ export function ChangeRequestsPanel({ factoryId }: Props) {
               {item.final_deadline && (
                 <span>
                   <span className="font-medium">Deadline:</span>{' '}
-                  {new Date(item.final_deadline).toLocaleDateString()}
+                  {formatDate(item.final_deadline)}
                 </span>
               )}
             </div>

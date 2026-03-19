@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/format";
 import { useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -195,8 +196,8 @@ function ActiveRequestsTab({
             </p>
 
             <div className="mt-1 flex flex-wrap gap-3 text-xs text-gray-400">
-              {r.created_at && <span>Created: {new Date(r.created_at).toLocaleDateString()}</span>}
-              {r.expected_delivery_date && <span>Expected: {new Date(r.expected_delivery_date).toLocaleDateString()}</span>}
+              {r.created_at && <span>Created: {formatDate(r.created_at)}</span>}
+              {r.expected_delivery_date && <span>Expected: {formatDate(r.expected_delivery_date)}</span>}
               {r.approved_by_name && <span>Approved by: {r.approved_by_name}</span>}
             </div>
 
@@ -309,7 +310,7 @@ function DeliveriesTab({
             {d.actual_delivery_date && (
               <p className="mt-0.5 text-xs text-gray-400">
                 Delivered:{' '}
-                {new Date(d.actual_delivery_date).toLocaleDateString()}
+                {formatDate(d.actual_delivery_date)}
               </p>
             )}
           </div>

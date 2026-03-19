@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/format";
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -106,7 +107,7 @@ export default function AdminColorsPage() {
       {
         key: 'created_at',
         header: 'Created',
-        render: (c: ColorItem) => new Date(c.created_at).toLocaleDateString(),
+        render: (c: ColorItem) => formatDate(c.created_at),
       },
       {
         key: 'actions',

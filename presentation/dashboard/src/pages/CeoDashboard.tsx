@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/format";
 import { useState, useEffect } from 'react';
 import {
   BarChart3, Clock, AlertTriangle, Percent, Flame, Activity,
@@ -455,7 +456,7 @@ export default function CeoDashboard() {
                             </span>
                           </td>
                           <td className="px-3 py-2 text-gray-600 text-xs">
-                            {t.due_at ? new Date(t.due_at).toLocaleDateString() : '--'}
+                            {t.due_at ? formatDate(t.due_at) : '--'}
                           </td>
                         </tr>
                       ))}

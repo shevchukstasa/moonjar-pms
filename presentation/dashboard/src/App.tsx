@@ -34,6 +34,7 @@ import AdminMaterialsPage from '@/pages/AdminMaterialsPage';
 import AdminWarehousesPage from '@/pages/AdminWarehousesPage';
 import AdminPackagingPage from '@/pages/AdminPackagingPage';
 import AdminSizesPage from '@/pages/AdminSizesPage';
+import AdminFiringProfilesPage from '@/pages/AdminFiringProfilesPage';
 import ConsumptionRulesPage from '@/pages/ConsumptionRulesPage';
 import SettingsPage from '@/pages/SettingsPage';
 import AppLayout from '@/components/layout/AppLayout';
@@ -111,6 +112,7 @@ export default function App() {
           <Route path="/admin/packaging" element={<AdminPackagingPage />} />
           <Route path="/admin/sizes" element={<AdminSizesPage />} />
           <Route path="/admin/consumption-rules" element={<ConsumptionRulesPage />} />
+          <Route path="/admin/firing-profiles" element={<AdminFiringProfilesPage />} />
         </Route>
         <Route element={<RequireRole roles={['owner', 'administrator', 'ceo']} />}>
           <Route path="/users" element={<UsersPage />} />

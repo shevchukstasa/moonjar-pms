@@ -28,7 +28,7 @@ import { ProgressBar } from '@/components/ui/ProgressBar';
 import { FactorySelector } from '@/components/layout/FactorySelector';
 import { OrderCreateDialog } from '@/components/orders/OrderCreateDialog';
 import { PdfUploadDialog } from '@/components/orders/PdfUploadDialog';
-import { tpsApi } from '@/api/tps';
+import { tpsApi, type TpsParameter } from '@/api/tps';
 import { tocApi } from '@/api/toc';
 import { defectsApi } from '@/api/defects';
 import { aiChatApi } from '@/api/ai_chat';
@@ -1281,6 +1281,80 @@ function TpsTabContent({ factoryId }: { factoryId: string | null }) {
           </div>
         )}
       </div>
+
+      {/* TPS Parameters */}
+      <TpsParametersSection factoryId={factoryId} />
+    </div>
+  );
+}
+
+function TpsParametersSection({ factoryId }: { factoryId: string | null }) {
+  const params = useMemo(
+    () => (factoryId ? { factory_id: factoryId } : undefined),
+    [factoryId],
+  );
+
+  const { data: paramsData, isLoading } = useQuery<{ items: TpsParameter[]; total: number }>({
+    queryKey: ['tps-parameters', params],
+    queryFn: () => tpsApi.listParameters(params),
+  });
+
+  const parameters = paramsData?.items ?? [];
+
+  const STAGE_LABELS: Record<string, string> = {
+    engobe: 'Engobe',
+    glazing: 'Glazing',
+    firing: 'Firing',
+    sorting: 'Sorting',
+    packing: 'Packing',
+    qc: 'Quality Control',
+  };
+
+  return (
+    <div>
+      <h2 className="mb-3 text-lg font-semibold text-gray-900">TPS Parameters</h2>
+      {isLoading ? (
+        <div className="flex justify-center py-6"><Spinner className="h-6 w-6" /></div>
+      ) : parameters.length === 0 ? (
+        <Card>
+          <p className="py-4 text-center text-sm text-gray-400">No TPS parameters configured. Set them in Admin settings.</p>
+        </Card>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Stage</th>
+                <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Target Cycle (min)</th>
+                <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Batch Size</th>
+                <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Tolerance %</th>
+                <th className="px-4 py-2 text-center text-xs font-medium uppercase tracking-wider text-gray-500">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 bg-white">
+              {parameters.map((p) => (
+                <tr key={p.id} className="hover:bg-gray-50">
+                  <td className="whitespace-nowrap px-4 py-2 text-sm font-medium text-gray-900">
+                    {STAGE_LABELS[p.stage] ?? p.stage}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2 text-right font-mono text-sm text-gray-700">
+                    {p.target_cycle_time_min}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2 text-right font-mono text-sm text-gray-700">
+                    {p.standard_batch_size}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2 text-right font-mono text-sm text-gray-700">
+                    {p.tolerance_pct}%
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2 text-center">
+                    <Badge status={p.is_active ? 'active' : 'inactive'} label={p.is_active ? 'Active' : 'Inactive'} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

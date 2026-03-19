@@ -132,4 +132,7 @@ export const ordersApi = {
   // PDF confirm (reviewed parsed data -> create order)
   confirmPdf: (data: Record<string, unknown>) =>
     apiClient.post('/orders/confirm-pdf', data).then((r) => r.data),
+  // Reprocess order (re-run position/task generation)
+  reprocessOrder: (orderId: string) =>
+    apiClient.post(`/orders/${orderId}/reprocess`).then((r) => r.data),
 };

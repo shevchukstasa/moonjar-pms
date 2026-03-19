@@ -1528,6 +1528,153 @@ def _ensure_schema():
 
     _run_section("fix_recipe_firing_stages_schema", _fix_recipe_firing_stages_schema)
 
+    # --- Section: Seed colors ---
+    def _seed_colors(conn):
+        """Seed 25 product colors. is_basic=True for base/neutral colors."""
+        _COLORS = [
+            ("Burgundy", False), ("Lava Core", False), ("Raw Turmeric", False),
+            ("Wild Honey", False), ("Mocha Nude", False), ("Rose Dust", False),
+            ("Wabi Beige", False), ("Wild Olive", False), ("Basalt Green", False),
+            ("Moss Glaze", False), ("Jade Dream", False), ("Matcha Leaf", False),
+            ("Turquoise Depth", False), ("Lagoon Spark", False), ("Frost Blue", False),
+            ("Frosted White", True), ("Milk Crackle", True), ("Soft Graphite", True),
+            ("Lavender Ash", False), ("Velvet Fig", False), ("Raw Indigo", False),
+            ("Black Rock", True), ("Raku Turquoise", False), ("Raku Green", False),
+            ("Gold", False),
+        ]
+        for cname, is_basic in _COLORS:
+            conn.execute(text(
+                "INSERT INTO colors (id, name, is_basic) "
+                "VALUES (gen_random_uuid(), :name, :is_basic) "
+                "ON CONFLICT (name) DO NOTHING"
+            ), {"name": cname, "is_basic": is_basic})
+        logger.info(f"_seed_colors: upserted {len(_COLORS)} colors")
+
+    _run_section("seed_colors", _seed_colors)
+
+    # --- Section: Seed firing profiles ---
+    def _seed_firing_profiles(conn):
+        """Seed default firing profiles for common product types."""
+        _PROFILES = [
+            {
+                "name": "Standard (1050°C, 8h)",
+                "target_temperature": 1050,
+                "total_duration_hours": 8,
+                "stages": json_mod.dumps([
+                    {"phase": "ramp_up", "from_c": 20, "to_c": 600, "hours": 3},
+                    {"phase": "hold", "from_c": 600, "to_c": 600, "hours": 0.5},
+                    {"phase": "ramp_up", "from_c": 600, "to_c": 1050, "hours": 2.5},
+                    {"phase": "hold", "from_c": 1050, "to_c": 1050, "hours": 1},
+                    {"phase": "cool_down", "from_c": 1050, "to_c": 100, "hours": 1},
+                ]),
+                "match_priority": 0,
+                "is_default": True,
+            },
+            {
+                "name": "High-temp (1200°C, 10h)",
+                "target_temperature": 1200,
+                "total_duration_hours": 10,
+                "stages": json_mod.dumps([
+                    {"phase": "ramp_up", "from_c": 20, "to_c": 600, "hours": 3},
+                    {"phase": "hold", "from_c": 600, "to_c": 600, "hours": 0.5},
+                    {"phase": "ramp_up", "from_c": 600, "to_c": 1200, "hours": 3.5},
+                    {"phase": "hold", "from_c": 1200, "to_c": 1200, "hours": 1.5},
+                    {"phase": "cool_down", "from_c": 1200, "to_c": 100, "hours": 1.5},
+                ]),
+                "match_priority": 0,
+                "is_default": False,
+            },
+            {
+                "name": "Raku (900°C, 3h)",
+                "target_temperature": 900,
+                "total_duration_hours": 3,
+                "stages": json_mod.dumps([
+                    {"phase": "ramp_up", "from_c": 20, "to_c": 900, "hours": 2},
+                    {"phase": "hold", "from_c": 900, "to_c": 900, "hours": 0.5},
+                    {"phase": "cool_down", "from_c": 900, "to_c": 100, "hours": 0.5},
+                ]),
+                "match_priority": 0,
+                "is_default": False,
+            },
+            {
+                "name": "Gold second firing (800°C, 6h)",
+                "target_temperature": 800,
+                "total_duration_hours": 6,
+                "stages": json_mod.dumps([
+                    {"phase": "ramp_up", "from_c": 20, "to_c": 500, "hours": 2},
+                    {"phase": "hold", "from_c": 500, "to_c": 500, "hours": 0.5},
+                    {"phase": "ramp_up", "from_c": 500, "to_c": 800, "hours": 1.5},
+                    {"phase": "hold", "from_c": 800, "to_c": 800, "hours": 1},
+                    {"phase": "cool_down", "from_c": 800, "to_c": 100, "hours": 1},
+                ]),
+                "match_priority": 1,
+                "is_default": False,
+            },
+        ]
+        # Skip if any profiles already exist (no unique constraint on name)
+        existing = conn.execute(text("SELECT COUNT(*) FROM firing_profiles")).scalar() or 0
+        if existing > 0:
+            logger.info(f"_seed_firing_profiles: {existing} profiles already exist, skipping")
+            return
+        for p in _PROFILES:
+            conn.execute(text(
+                "INSERT INTO firing_profiles (id, name, target_temperature, total_duration_hours, "
+                "stages, match_priority, is_default, is_active) "
+                "VALUES (gen_random_uuid(), :name, :target_temperature, :total_duration_hours, "
+                "cast(:stages as JSONB), :match_priority, :is_default, TRUE)"
+            ), p)
+        logger.info(f"_seed_firing_profiles: inserted {len(_PROFILES)} profiles")
+
+    _run_section("seed_firing_profiles", _seed_firing_profiles)
+
+    # --- Section: Calculate kiln capacity_sqm from dimensions ---
+    def _calc_kiln_capacity(conn):
+        """Set capacity_sqm = (working_width * working_depth) / 10000 * levels * coefficient
+        for kilns that have working area defined but capacity_sqm is NULL."""
+        conn.execute(text("""
+            UPDATE resources
+            SET capacity_sqm = ROUND(
+                (CAST(kiln_working_area_cm->>'width_cm' AS NUMERIC)
+                 * CAST(kiln_working_area_cm->>'depth_cm' AS NUMERIC))
+                / 10000.0
+                * COALESCE(num_levels, CASE WHEN kiln_multi_level THEN 2 ELSE 1 END)
+                * COALESCE(kiln_coefficient, 1.0),
+                3
+            )
+            WHERE resource_type = 'kiln'
+              AND kiln_working_area_cm IS NOT NULL
+              AND capacity_sqm IS NULL
+        """))
+        logger.info("_calc_kiln_capacity: updated NULL capacity_sqm values")
+
+    _run_section("calc_kiln_capacity", _calc_kiln_capacity)
+
+    # --- Section: Seed TPS parameters ---
+    def _seed_tps_parameters(conn):
+        """Seed default TPS target parameters for each production stage per factory."""
+        _TPS_PARAMS = [
+            ("engobe", "time_per_piece_min", 15, 10, "min"),
+            ("glazing", "time_per_piece_min", 20, 10, "min"),
+            ("pre_kiln_check", "time_per_piece_min", 5, 10, "min"),
+            ("firing", "time_per_batch_min", 480, 10, "min"),
+            ("sorting", "time_per_piece_min", 3, 10, "min"),
+            ("packing", "time_per_piece_min", 5, 10, "min"),
+        ]
+        for fname, fid in factory_ids.items():
+            for stage, metric, target, tolerance, unit in _TPS_PARAMS:
+                conn.execute(text(
+                    "INSERT INTO tps_parameters (id, factory_id, stage, metric_name, "
+                    "target_value, tolerance_percent, unit) "
+                    "VALUES (gen_random_uuid(), :fid, :stage, :metric, :target, :tol, :unit) "
+                    "ON CONFLICT (factory_id, stage, metric_name) DO NOTHING"
+                ), {
+                    "fid": fid, "stage": stage, "metric": metric,
+                    "target": target, "tol": tolerance, "unit": unit,
+                })
+        logger.info(f"_seed_tps_parameters: upserted params for {len(factory_ids)} factories")
+
+    _run_section("seed_tps_parameters", _seed_tps_parameters)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""

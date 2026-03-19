@@ -409,6 +409,9 @@ export default function AdminPanelPage() {
           <Button variant="secondary" onClick={() => navigate('/admin/consumption-rules')}>
             Consumption Rules &rarr;
           </Button>
+          <Button variant="secondary" onClick={() => navigate('/admin/firing-profiles')}>
+            Firing Profiles &rarr;
+          </Button>
         </div>
       </Card>
 

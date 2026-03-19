@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useOrder, useShipOrder, useUpdateOrder } from '@/hooks/useOrders';
+import { ordersApi } from '@/api/orders';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -29,6 +32,19 @@ export default function OrderDetailPage() {
   const shipOrder = useShipOrder();
   const [showShipConfirm, setShowShipConfirm] = useState(false);
   const [shipSuccess, setShipSuccess] = useState(false);
+
+  // Reprocess order
+  const currentUser = useCurrentUser();
+  const queryClient = useQueryClient();
+  const canReprocess = currentUser && ['production_manager', 'administrator', 'owner'].includes(currentUser.role);
+  const [reprocessResult, setReprocessResult] = useState<{ message: string; details?: Record<string, unknown> } | null>(null);
+  const reprocessMutation = useMutation({
+    mutationFn: (id: string) => ordersApi.reprocessOrder(id),
+    onSuccess: (data) => {
+      setReprocessResult(data);
+      queryClient.invalidateQueries({ queryKey: ['orders', orderId] });
+    },
+  });
 
   // Status override
   const updateOrder = useUpdateOrder();
@@ -181,6 +197,18 @@ export default function OrderDetailPage() {
           </div>
         </div>
 
+        {/* Reprocess Order button — PM/Admin only */}
+        {canReprocess && (
+          <Button
+            variant="secondary"
+            onClick={() => orderId && reprocessMutation.mutate(orderId)}
+            disabled={reprocessMutation.isPending}
+          >
+            {reprocessMutation.isPending ? <Spinner className="h-4 w-4 mr-2" /> : null}
+            Reprocess Order
+          </Button>
+        )}
+
         {/* Ship Order button — only when ready for shipment */}
         {isReadyForShipment && !isShipped && (
           <Button
@@ -208,6 +236,21 @@ export default function OrderDetailPage() {
       {overrideSuccess && (
         <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">
           Order status overridden manually.
+        </div>
+      )}
+      {reprocessResult && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+          <p className="font-medium">{reprocessResult.message || 'Order reprocessed successfully.'}</p>
+          {reprocessResult.details && (
+            <pre className="mt-2 max-h-40 overflow-auto rounded bg-blue-100 p-2 text-xs">
+              {JSON.stringify(reprocessResult.details, null, 2)}
+            </pre>
+          )}
+        </div>
+      )}
+      {reprocessMutation.isError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          Reprocess failed: {(reprocessMutation.error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || reprocessMutation.error?.message || 'Unknown error'}
         </div>
       )}
 

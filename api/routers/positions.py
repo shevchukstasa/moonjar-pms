@@ -417,7 +417,10 @@ async def update_position(
         raise HTTPException(404, "Position not found")
 
     allowed = {"batch_id", "resource_id", "placement_position", "placement_level",
-               "delay_hours", "priority_order", "recipe_id", "mandatory_qc"}
+               "delay_hours", "priority_order", "recipe_id", "mandatory_qc",
+               "application_method_code", "application_collection_code",
+               "glazeable_sqm", "thickness_mm", "shape", "product_type",
+               "quantity_with_defect_margin", "place_of_application"}
     for k, v in data.items():
         if k in allowed:
             setattr(p, k, v)

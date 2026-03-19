@@ -247,6 +247,80 @@ async def update_constraint(
     return _serialize_constraint(config)
 
 
+# === BOTTLENECK CONFIGURATION ENDPOINTS (Decision 2026-03-19) ===
+
+class BatchModeToggle(BaseModel):
+    factory_id: UUID
+    enabled: bool  # True = auto, False = hybrid
+
+
+class BufferTargetUpdate(BaseModel):
+    factory_id: UUID
+    buffer_target_hours: float
+
+
+@router.patch("/bottleneck/batch-mode")
+async def toggle_batch_mode(
+    body: BatchModeToggle,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """
+    Toggle constraint batch processing mode.
+    enabled=True sets batch_mode to 'auto', enabled=False sets to 'hybrid'.
+    """
+    config = db.query(BottleneckConfig).filter(
+        BottleneckConfig.factory_id == body.factory_id,
+    ).first()
+
+    if not config:
+        raise HTTPException(404, "Bottleneck config not found for this factory")
+
+    from api.enums import BatchMode as BM
+    config.batch_mode = BM.AUTO if body.enabled else BM.HYBRID
+
+    db.commit()
+    db.refresh(config)
+
+    return {
+        "factory_id": str(body.factory_id),
+        "batch_mode": config.batch_mode.value,
+        "updated_by": str(current_user.id),
+    }
+
+
+@router.patch("/bottleneck/buffer-target")
+async def set_buffer_target(
+    body: BufferTargetUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """
+    Set buffer target hours for a factory's constraint.
+    Controls the target buffer time before the bottleneck (kiln).
+    """
+    if body.buffer_target_hours <= 0:
+        raise HTTPException(400, "buffer_target_hours must be positive")
+
+    config = db.query(BottleneckConfig).filter(
+        BottleneckConfig.factory_id == body.factory_id,
+    ).first()
+
+    if not config:
+        raise HTTPException(404, "Bottleneck config not found for this factory")
+
+    config.buffer_target_hours = body.buffer_target_hours
+
+    db.commit()
+    db.refresh(config)
+
+    return {
+        "factory_id": str(body.factory_id),
+        "buffer_target_hours": float(config.buffer_target_hours),
+        "updated_by": str(current_user.id),
+    }
+
+
 @router.get("/buffer-health")
 async def get_buffer_health(
     factory_id: UUID | None = None,

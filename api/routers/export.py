@@ -20,10 +20,193 @@ from api.roles import require_management, require_owner
 from api.models import (
     ProductionOrder, OrderPosition, ProductionOrderItem,
     FinancialEntry, OrderFinancial,
+    Material, MaterialStock, QualityCheck, User,
 )
 from api.enums import OrderStatus, PositionStatus, ExpenseType
 
 router = APIRouter()
+
+
+@router.get("/materials/excel")
+async def export_materials_excel(
+    factory_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Export materials data to Excel (XLSX)."""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    except ImportError:
+        raise HTTPException(500, "openpyxl not installed. Run: pip install openpyxl")
+
+    # Query materials with stock info for the given factory
+    query = db.query(Material).order_by(Material.name)
+    materials = query.limit(1000).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Materials"
+
+    # Header styling
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="2B5797", end_color="2B5797", fill_type="solid")
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+
+    headers = [
+        "Name", "Type", "Unit", "Current Balance",
+        "Min Balance", "Supplier",
+    ]
+
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = thin_border
+
+    for row, mat in enumerate(materials, 2):
+        # Get stock for the specified factory (or first available)
+        stock = None
+        if factory_id:
+            stock = (
+                db.query(MaterialStock)
+                .filter(MaterialStock.material_id == mat.id, MaterialStock.factory_id == factory_id)
+                .first()
+            )
+        else:
+            stock = (
+                db.query(MaterialStock)
+                .filter(MaterialStock.material_id == mat.id)
+                .first()
+            )
+
+        ws.cell(row=row, column=1, value=mat.name).border = thin_border
+        ws.cell(row=row, column=2, value=mat.material_type).border = thin_border
+        ws.cell(row=row, column=3, value=mat.unit).border = thin_border
+        ws.cell(row=row, column=4, value=float(stock.balance) if stock and stock.balance else 0).border = thin_border
+        ws.cell(row=row, column=5, value=float(stock.min_balance) if stock and stock.min_balance else 0).border = thin_border
+        ws.cell(row=row, column=6, value=mat.supplier.name if mat.supplier else "").border = thin_border
+
+    # Auto-width
+    for col in ws.columns:
+        max_length = max(len(str(cell.value or "")) for cell in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max_length + 2, 40)
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=materials_{date.today()}.xlsx"},
+    )
+
+
+@router.get("/quality/excel")
+async def export_quality_excel(
+    factory_id: UUID | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Export quality inspection data to Excel (XLSX)."""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    except ImportError:
+        raise HTTPException(500, "openpyxl not installed. Run: pip install openpyxl")
+
+    # Default date range: last 30 days
+    dt_to = date.fromisoformat(date_to) if date_to else date.today()
+    dt_from = date.fromisoformat(date_from) if date_from else dt_to - timedelta(days=30)
+
+    query = db.query(QualityCheck).filter(
+        sa_func.date(QualityCheck.created_at) >= dt_from,
+        sa_func.date(QualityCheck.created_at) <= dt_to,
+    )
+    if factory_id:
+        query = query.filter(QualityCheck.factory_id == factory_id)
+
+    inspections = query.order_by(QualityCheck.created_at.desc()).limit(1000).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Quality Inspections"
+
+    # Header styling
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="2B5797", end_color="2B5797", fill_type="solid")
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+
+    headers = [
+        "Position", "Inspector", "Stage", "Result",
+        "Defect Cause", "Notes", "Date",
+    ]
+
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = thin_border
+
+    for row, qc in enumerate(inspections, 2):
+        # Position info
+        pos_label = ""
+        if qc.position:
+            order = qc.position.order if hasattr(qc.position, 'order') else None
+            order_num = order.order_number if order else ""
+            pos_label = f"{order_num} / {qc.position.color} / {qc.position.size}"
+
+        # Inspector name
+        inspector_name = ""
+        if qc.checked_by:
+            user = db.query(User).filter(User.id == qc.checked_by).first()
+            inspector_name = user.name if user else ""
+
+        result_val = qc.result if isinstance(qc.result, str) else qc.result.value
+        stage_val = qc.stage if isinstance(qc.stage, str) else qc.stage.value
+
+        # Defect cause
+        defect_info = ""
+        if qc.defect_cause:
+            defect_info = qc.defect_cause.description or qc.defect_cause.code
+
+        ws.cell(row=row, column=1, value=pos_label).border = thin_border
+        ws.cell(row=row, column=2, value=inspector_name).border = thin_border
+        ws.cell(row=row, column=3, value=stage_val).border = thin_border
+        ws.cell(row=row, column=4, value=result_val).border = thin_border
+        ws.cell(row=row, column=5, value=defect_info).border = thin_border
+        ws.cell(row=row, column=6, value=qc.notes or "").border = thin_border
+        ws.cell(row=row, column=7, value=str(qc.created_at.date()) if qc.created_at else "").border = thin_border
+
+    # Auto-width
+    for col in ws.columns:
+        max_length = max(len(str(cell.value or "")) for cell in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max_length + 2, 40)
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=quality_{date.today()}.xlsx"},
+    )
 
 
 def _get_orders(db: Session, factory_id: UUID | None = None) -> list:

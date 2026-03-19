@@ -2,9 +2,11 @@
 
 from uuid import UUID
 from typing import Optional
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sa_func
 
 from api.database import get_db
 from api.auth import get_current_user
@@ -73,6 +75,68 @@ async def list_suppliers(
     total = query.count()
     items = query.offset((page - 1) * per_page).limit(per_page).all()
     return {"items": [_serialize_supplier(s, db) for s in items], "total": total, "page": page, "per_page": per_page}
+
+
+@router.get("/{item_id}/lead-times")
+async def get_supplier_lead_times(
+    item_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Get lead time history and stats for a supplier.
+
+    Calculates lead times from completed purchase requests where both
+    ordered_at and actual_delivery_date are available.
+
+    Returns:
+    - avg_lead_time_days, min, max
+    - last 5 deliveries with individual lead times
+    """
+    supplier = db.query(Supplier).filter(Supplier.id == item_id).first()
+    if not supplier:
+        raise HTTPException(404, "Supplier not found")
+
+    # Query completed purchase requests with delivery data
+    completed_requests = (
+        db.query(MaterialPurchaseRequest)
+        .filter(
+            MaterialPurchaseRequest.supplier_id == item_id,
+            MaterialPurchaseRequest.ordered_at.isnot(None),
+            MaterialPurchaseRequest.actual_delivery_date.isnot(None),
+        )
+        .order_by(MaterialPurchaseRequest.actual_delivery_date.desc())
+        .all()
+    )
+
+    # Calculate lead times
+    lead_times = []
+    for pr in completed_requests:
+        days = (pr.actual_delivery_date - pr.ordered_at).days
+        if days >= 0:
+            lead_times.append({
+                "purchase_request_id": str(pr.id),
+                "ordered_at": str(pr.ordered_at),
+                "delivered_at": str(pr.actual_delivery_date),
+                "lead_time_days": days,
+                "status": pr.status.value if hasattr(pr.status, "value") else str(pr.status),
+            })
+
+    # Summary stats
+    all_days = [lt["lead_time_days"] for lt in lead_times]
+    summary = {
+        "supplier_id": str(item_id),
+        "supplier_name": supplier.name,
+        "default_lead_time_days": supplier.default_lead_time_days,
+        "total_deliveries": len(all_days),
+        "avg_lead_time_days": round(sum(all_days) / len(all_days), 1) if all_days else None,
+        "min_lead_time_days": min(all_days) if all_days else None,
+        "max_lead_time_days": max(all_days) if all_days else None,
+    }
+
+    return {
+        "summary": summary,
+        "last_deliveries": lead_times[:5],
+    }
 
 
 @router.get("/{item_id}")

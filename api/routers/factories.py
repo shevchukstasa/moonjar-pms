@@ -1,14 +1,17 @@
 """CRUD router for factories (auto-generated)."""
 
+from datetime import date, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
 from api.roles import require_admin
-from api.models import Factory
+from api.models import Factory, OrderPosition, Resource
+from api.enums import KilnConstantsMode, PositionStatus, ResourceType
 from api.schemas import FactoryCreate, FactoryUpdate, FactoryResponse
 
 router = APIRouter()
@@ -29,6 +32,134 @@ async def list_factories(
         "total": total,
         "page": page,
         "per_page": per_page,
+    }
+
+
+@router.patch("/{item_id}/kiln-mode")
+async def switch_kiln_mode(
+    item_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Toggle factory kiln constants mode between 'manual' and 'production'."""
+    item = db.query(Factory).filter(Factory.id == item_id).first()
+    if not item:
+        raise HTTPException(404, "Factory not found")
+
+    # Toggle mode
+    current_mode = item.kiln_constants_mode
+    if current_mode == KilnConstantsMode.MANUAL:
+        item.kiln_constants_mode = KilnConstantsMode.PRODUCTION
+    else:
+        item.kiln_constants_mode = KilnConstantsMode.MANUAL
+
+    db.commit()
+    db.refresh(item)
+
+    new_mode = item.kiln_constants_mode
+    return {
+        "id": str(item.id),
+        "name": item.name,
+        "kiln_constants_mode": new_mode.value if hasattr(new_mode, "value") else str(new_mode),
+    }
+
+
+# === FACTORY WORKLOAD ESTIMATE (Decision 2026-03-19) ===
+
+# Terminal statuses excluded from active workload
+_TERMINAL_STATUSES = {
+    PositionStatus.SHIPPED,
+    PositionStatus.CANCELLED,
+    PositionStatus.MERGED,
+}
+
+# Map position statuses to logical stages for grouping
+_STAGE_MAP = {
+    PositionStatus.PLANNED: "planning",
+    PositionStatus.INSUFFICIENT_MATERIALS: "planning",
+    PositionStatus.AWAITING_RECIPE: "planning",
+    PositionStatus.AWAITING_STENCIL_SILKSCREEN: "planning",
+    PositionStatus.AWAITING_COLOR_MATCHING: "planning",
+    PositionStatus.AWAITING_SIZE_CONFIRMATION: "planning",
+    PositionStatus.ENGOBE_APPLIED: "glazing",
+    PositionStatus.ENGOBE_CHECK: "glazing",
+    PositionStatus.SENT_TO_GLAZING: "glazing",
+    PositionStatus.GLAZED: "glazing",
+    PositionStatus.PRE_KILN_CHECK: "pre_kiln",
+    PositionStatus.LOADED_IN_KILN: "firing",
+    PositionStatus.FIRED: "post_firing",
+    PositionStatus.TRANSFERRED_TO_SORTING: "sorting",
+    PositionStatus.REFIRE: "firing",
+    PositionStatus.AWAITING_REGLAZE: "glazing",
+    PositionStatus.SENT_TO_QUALITY_CHECK: "quality",
+    PositionStatus.QUALITY_CHECK_DONE: "quality",
+    PositionStatus.BLOCKED_BY_QM: "quality",
+    PositionStatus.PACKED: "packing",
+    PositionStatus.READY_FOR_SHIPMENT: "ready",
+}
+
+
+@router.get("/{factory_id}/estimate")
+async def get_factory_estimate(
+    factory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Estimate factory workload: count open positions by stage,
+    calculate estimated completion dates based on kiln capacity,
+    and return utilization percentage.
+    """
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory:
+        raise HTTPException(404, "Factory not found")
+
+    # Get all active (non-terminal) positions for this factory
+    positions = db.query(OrderPosition).filter(
+        OrderPosition.factory_id == factory_id,
+        OrderPosition.status.notin_(_TERMINAL_STATUSES),
+    ).all()
+
+    total_positions = len(positions)
+
+    # Group by stage
+    by_stage: dict[str, int] = {}
+    for pos in positions:
+        stage = _STAGE_MAP.get(pos.status, "other")
+        by_stage[stage] = by_stage.get(stage, 0) + 1
+
+    # Kiln capacity estimate
+    kilns = db.query(Resource).filter(
+        Resource.factory_id == factory_id,
+        Resource.resource_type == ResourceType.KILN,
+        Resource.status == "active",
+    ).all()
+
+    kiln_count = len(kilns)
+    # Estimate: each kiln can fire ~1 batch/day, ~20 positions/batch (rough default)
+    daily_capacity = kiln_count * 20 if kiln_count > 0 else 1
+
+    # Positions awaiting firing or earlier
+    positions_before_done = sum(
+        count for stage, count in by_stage.items()
+        if stage not in ("ready", "packing")
+    )
+
+    estimated_days = max(1, (positions_before_done + daily_capacity - 1) // daily_capacity)
+    estimated_completion_date = (date.today() + timedelta(days=estimated_days)).isoformat()
+
+    # Utilization: active positions / daily_capacity gives days of work queued
+    utilization_pct = round(min(positions_before_done / daily_capacity * 100, 100), 1) if daily_capacity > 0 else 0.0
+
+    return {
+        "factory_id": str(factory_id),
+        "factory_name": factory.name,
+        "total_positions": total_positions,
+        "by_stage": by_stage,
+        "kiln_count": kiln_count,
+        "daily_capacity_estimate": daily_capacity,
+        "estimated_completion_date": estimated_completion_date,
+        "utilization_pct": utilization_pct,
     }
 
 

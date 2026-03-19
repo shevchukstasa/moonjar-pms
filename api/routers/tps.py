@@ -233,6 +233,106 @@ async def create_shift_metric(
     return _serialize_metric(metric)
 
 
+# ── TPS Dashboard Summary ──────────────────────────────────────────────
+
+@router.get("/dashboard-summary")
+async def get_dashboard_summary(
+    factory_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Aggregated TPS dashboard summary.
+
+    Returns:
+    - Current throughput per stage (last 7 days)
+    - Deviation counts (last 24h, last 7d)
+    - Top 3 bottleneck stages (highest avg cycle time)
+    - Average cycle time per stage
+    """
+    now = datetime.now(timezone.utc)
+    last_24h = now - timedelta(hours=24)
+    last_7d = now - timedelta(days=7)
+
+    # ── Throughput per stage (last 7 days from shift metrics) ──
+    throughput_q = db.query(
+        TpsShiftMetric.stage,
+        sa_func.sum(TpsShiftMetric.actual_output).label("total_output"),
+        sa_func.sum(TpsShiftMetric.planned_output).label("total_planned"),
+        sa_func.avg(TpsShiftMetric.oee_percent).label("avg_oee"),
+    ).filter(
+        TpsShiftMetric.date >= last_7d.date(),
+    )
+    if factory_id:
+        throughput_q = throughput_q.filter(TpsShiftMetric.factory_id == factory_id)
+    else:
+        throughput_q = apply_factory_filter(throughput_q, TpsShiftMetric, current_user, db)
+    throughput_q = throughput_q.group_by(TpsShiftMetric.stage)
+    throughput_rows = throughput_q.all()
+
+    throughput_per_stage = []
+    for row in throughput_rows:
+        total_output = float(row.total_output or 0)
+        total_planned = float(row.total_planned or 0)
+        throughput_per_stage.append({
+            "stage": row.stage,
+            "total_output": round(total_output, 2),
+            "total_planned": round(total_planned, 2),
+            "fulfillment_percent": round(total_output / total_planned * 100, 1) if total_planned > 0 else 0,
+            "avg_oee_percent": round(float(row.avg_oee or 0), 1),
+        })
+
+    # ── Deviation counts ──
+    dev_base = db.query(TpsDeviation)
+    if factory_id:
+        dev_base = dev_base.filter(TpsDeviation.factory_id == factory_id)
+    else:
+        dev_base = apply_factory_filter(dev_base, TpsDeviation, current_user, db)
+
+    deviations_24h = dev_base.filter(TpsDeviation.created_at >= last_24h).count()
+    deviations_7d = dev_base.filter(TpsDeviation.created_at >= last_7d).count()
+    unresolved_deviations = dev_base.filter(TpsDeviation.resolved == False).count()
+
+    # ── Average cycle time per stage (from shift metrics, last 7d) ──
+    cycle_q = db.query(
+        TpsShiftMetric.stage,
+        sa_func.avg(TpsShiftMetric.cycle_time_minutes).label("avg_cycle_time"),
+        sa_func.avg(TpsShiftMetric.takt_time_minutes).label("avg_takt_time"),
+        sa_func.avg(TpsShiftMetric.downtime_minutes).label("avg_downtime"),
+    ).filter(
+        TpsShiftMetric.date >= last_7d.date(),
+        TpsShiftMetric.cycle_time_minutes > 0,
+    )
+    if factory_id:
+        cycle_q = cycle_q.filter(TpsShiftMetric.factory_id == factory_id)
+    else:
+        cycle_q = apply_factory_filter(cycle_q, TpsShiftMetric, current_user, db)
+    cycle_q = cycle_q.group_by(TpsShiftMetric.stage)
+    cycle_rows = cycle_q.all()
+
+    cycle_times = []
+    for row in cycle_rows:
+        cycle_times.append({
+            "stage": row.stage,
+            "avg_cycle_time_minutes": round(float(row.avg_cycle_time or 0), 2),
+            "avg_takt_time_minutes": round(float(row.avg_takt_time or 0), 2),
+            "avg_downtime_minutes": round(float(row.avg_downtime or 0), 2),
+        })
+
+    # ── Top 3 bottleneck stages (highest avg cycle time) ──
+    bottlenecks = sorted(cycle_times, key=lambda x: x["avg_cycle_time_minutes"], reverse=True)[:3]
+
+    return {
+        "throughput_per_stage": throughput_per_stage,
+        "deviations": {
+            "last_24h": deviations_24h,
+            "last_7d": deviations_7d,
+            "unresolved": unresolved_deviations,
+        },
+        "bottleneck_stages": bottlenecks,
+        "cycle_times_per_stage": cycle_times,
+    }
+
+
 # ── TPS Deviations ──────────────────────────────────────────────────────
 
 class DeviationCreate(BaseModel):

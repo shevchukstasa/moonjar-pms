@@ -174,6 +174,96 @@ async def list_deliveries(
     }
 
 
+@router.get("/deficits")
+async def get_material_deficits(
+    factory_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Material deficits — materials where current balance < min_balance."""
+    from sqlalchemy import and_
+
+    query = db.query(MaterialStock, Material).join(
+        Material, MaterialStock.material_id == Material.id
+    ).filter(MaterialStock.balance < MaterialStock.min_balance)
+
+    if factory_id:
+        query = query.filter(MaterialStock.factory_id == factory_id)
+
+    rows = query.order_by(
+        (MaterialStock.min_balance - MaterialStock.balance).desc()
+    ).all()
+
+    items = []
+    for stock, mat in rows:
+        deficit = float(stock.min_balance - stock.balance)
+        # Count open orders that use this material type (approximate)
+        open_orders_count = 0
+        items.append({
+            "material_id": str(mat.id),
+            "material_code": mat.material_code,
+            "material_name": mat.name,
+            "material_type": mat.material_type,
+            "unit": mat.unit,
+            "factory_id": str(stock.factory_id),
+            "current_balance": float(stock.balance),
+            "min_balance": float(stock.min_balance),
+            "deficit": round(deficit, 3),
+            "avg_daily_consumption": float(stock.avg_daily_consumption or 0),
+            "days_until_stockout": (
+                round(float(stock.balance) / float(stock.avg_daily_consumption), 1)
+                if stock.avg_daily_consumption and float(stock.avg_daily_consumption) > 0
+                else None
+            ),
+        })
+
+    return {
+        "items": items,
+        "total": len(items),
+    }
+
+
+@router.get("/lead-times")
+async def get_lead_times(
+    supplier_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Supplier lead times from supplier_lead_times table."""
+    from api.models import SupplierLeadTime, Supplier
+
+    query = db.query(SupplierLeadTime, Supplier).join(
+        Supplier, SupplierLeadTime.supplier_id == Supplier.id
+    )
+    if supplier_id:
+        query = query.filter(SupplierLeadTime.supplier_id == supplier_id)
+
+    rows = query.order_by(Supplier.name, SupplierLeadTime.material_type).all()
+
+    items = []
+    for lt, sup in rows:
+        items.append({
+            "id": str(lt.id),
+            "supplier_id": str(sup.id),
+            "supplier_name": sup.name,
+            "material_type": lt.material_type,
+            "default_lead_time_days": lt.default_lead_time_days,
+            "avg_actual_lead_time_days": float(lt.avg_actual_lead_time_days) if lt.avg_actual_lead_time_days else None,
+            "sample_count": lt.sample_count,
+            "last_updated": lt.last_updated.isoformat() if lt.last_updated else None,
+            "reliability_pct": (
+                round(100.0 * min(lt.default_lead_time_days / float(lt.avg_actual_lead_time_days), 1.0), 1)
+                if lt.avg_actual_lead_time_days and float(lt.avg_actual_lead_time_days) > 0
+                else None
+            ),
+        })
+
+    return {
+        "items": items,
+        "total": len(items),
+    }
+
+
 @router.get("/{item_id}")
 async def get_purchaser_item(
     item_id: UUID,

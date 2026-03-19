@@ -3,11 +3,12 @@
 from uuid import UUID
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
+from api.roles import require_admin
 from api.models import (
     Recipe, RecipeFiringStage, RecipeMaterial, Material,
     FiringTemperatureGroup, FiringTemperatureGroupRecipe,
@@ -247,6 +248,108 @@ async def lookup_recipe(
         "fields_matched": fields_matched,
         "alternatives": alternatives[:10],
         "total_candidates": len(all_candidates),
+    }
+
+
+@router.post("/import-csv", status_code=201)
+async def import_recipes_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Import recipes from a CSV file.
+
+    Expected CSV columns: name, color_collection, type, temperature, duration
+    - name: Recipe name (required)
+    - color_collection: Color collection name
+    - type: Recipe type (product, glaze, engobe). Defaults to 'product'.
+    - temperature: Firing temperature (stored in glaze_settings)
+    - duration: Firing duration in minutes (stored in glaze_settings)
+
+    Skips rows where a recipe with the same name + color_collection already exists.
+    """
+    import csv
+    import io
+    from sqlalchemy.exc import IntegrityError
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")  # handle BOM
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
+
+    reader = csv.DictReader(io.StringIO(text))
+
+    created_count = 0
+    skipped_count = 0
+    errors = []
+
+    for row_num, row in enumerate(reader, start=2):  # row 1 is header
+        # Normalize keys (strip whitespace, lowercase)
+        row = {k.strip().lower(): (v.strip() if v else "") for k, v in row.items() if k}
+
+        name = row.get("name", "").strip()
+        if not name:
+            errors.append({"row": row_num, "error": "Missing required field: name"})
+            continue
+
+        color_collection = row.get("color_collection", "").strip() or None
+        recipe_type = row.get("type", "").strip() or "product"
+        if recipe_type not in ("product", "glaze", "engobe"):
+            errors.append({"row": row_num, "error": f"Invalid type: {recipe_type}"})
+            continue
+
+        # Check for existing recipe with same name + collection
+        existing = db.query(Recipe).filter(
+            Recipe.name == name,
+            Recipe.color_collection == color_collection,
+        ).first()
+        if existing:
+            skipped_count += 1
+            continue
+
+        # Parse optional numeric fields
+        temperature = None
+        duration = None
+        try:
+            if row.get("temperature"):
+                temperature = float(row["temperature"])
+        except ValueError:
+            errors.append({"row": row_num, "error": f"Invalid temperature: {row.get('temperature')}"})
+            continue
+        try:
+            if row.get("duration"):
+                duration = float(row["duration"])
+        except ValueError:
+            errors.append({"row": row_num, "error": f"Invalid duration: {row.get('duration')}"})
+            continue
+
+        glaze_settings = {}
+        if temperature is not None:
+            glaze_settings["temperature"] = temperature
+        if duration is not None:
+            glaze_settings["duration_minutes"] = duration
+
+        recipe = Recipe(
+            name=name,
+            color_collection=color_collection,
+            recipe_type=recipe_type,
+            glaze_settings=glaze_settings,
+        )
+        db.add(recipe)
+        try:
+            db.flush()
+            created_count += 1
+        except IntegrityError:
+            db.rollback()
+            skipped_count += 1
+
+    db.commit()
+
+    return {
+        "created_count": created_count,
+        "skipped_count": skipped_count,
+        "errors": errors,
     }
 
 

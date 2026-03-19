@@ -11,11 +11,14 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
+from api.roles import require_role
 from api.models import (
     QualityCheck, OrderPosition, ProductionOrder, QmBlock, ProblemCard,
     DefectCause, User,
 )
 from api.enums import QcResult, QcStage, PositionStatus, QmBlockType
+
+require_qm_or_admin = require_role("administrator", "quality_manager")
 
 router = APIRouter()
 
@@ -87,6 +90,12 @@ def _serialize_position_for_qc(pos, db) -> dict:
 
 # ── Pydantic models ─────────────────────────────────────────────────────
 
+class DefectCauseCreateInput(BaseModel):
+    code: str
+    category: str
+    description: Optional[str] = None
+
+
 class InspectionInput(BaseModel):
     position_id: UUID
     factory_id: UUID
@@ -102,7 +111,132 @@ class InspectionUpdateInput(BaseModel):
     defect_cause_id: Optional[UUID] = None
 
 
+# === QC CALENDAR MATRIX (Decision 2026-03-19) ===
+
+@router.get("/calendar-matrix")
+async def get_calendar_matrix(
+    date_from: date = Query(..., description="Start date (inclusive)"),
+    date_to: date = Query(..., description="End date (inclusive)"),
+    factory_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    QC calendar matrix -- for each day in a date range, returns:
+    inspections_count, pass_count, fail_count, and inspectors list.
+    """
+    from datetime import timedelta
+
+    if date_from > date_to:
+        raise HTTPException(400, "date_from must be <= date_to")
+
+    if (date_to - date_from).days > 90:
+        raise HTTPException(400, "Date range must not exceed 90 days")
+
+    query = db.query(QualityCheck).filter(
+        func.date(QualityCheck.created_at) >= date_from,
+        func.date(QualityCheck.created_at) <= date_to,
+    )
+    query = apply_factory_filter(query, current_user, factory_id, QualityCheck)
+
+    inspections = query.all()
+
+    # Group by date
+    by_date: dict[date, list] = {}
+    for qc in inspections:
+        d = qc.created_at.date() if qc.created_at else None
+        if d is None:
+            continue
+        by_date.setdefault(d, []).append(qc)
+
+    # Build calendar array for every day in range
+    result = []
+    current = date_from
+    while current <= date_to:
+        day_inspections = by_date.get(current, [])
+        pass_count = sum(1 for qc in day_inspections if _ev(qc.result) == "ok")
+        fail_count = sum(1 for qc in day_inspections if _ev(qc.result) == "defect")
+
+        # Unique inspectors for the day
+        inspector_ids: set = set()
+        inspectors = []
+        for qc in day_inspections:
+            if qc.checked_by and qc.checked_by not in inspector_ids:
+                inspector_ids.add(qc.checked_by)
+                user = db.query(User).filter(User.id == qc.checked_by).first()
+                inspectors.append({
+                    "id": str(qc.checked_by),
+                    "name": user.name if user else None,
+                })
+
+        result.append({
+            "date": current.isoformat(),
+            "inspections_count": len(day_inspections),
+            "pass_count": pass_count,
+            "fail_count": fail_count,
+            "inspectors": inspectors,
+        })
+        current = current + timedelta(days=1)
+
+    return {"items": result, "total": len(result)}
+
+
 # ── endpoints ────────────────────────────────────────────────────────────
+
+@router.get("/defect-causes")
+async def list_defect_causes(
+    category: str | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List all defect causes, optional filter by category."""
+    query = db.query(DefectCause).filter(DefectCause.is_active.is_(True))
+    if category:
+        query = query.filter(DefectCause.category == category)
+    items = query.order_by(DefectCause.code).all()
+    return {
+        "items": [
+            {
+                "id": str(c.id),
+                "code": c.code,
+                "category": c.category,
+                "description": c.description,
+                "is_active": c.is_active,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in items
+        ],
+        "total": len(items),
+    }
+
+
+@router.post("/defect-causes", status_code=201)
+async def create_defect_cause(
+    data: DefectCauseCreateInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_qm_or_admin),
+):
+    """Create a new defect cause (admin or quality_manager only)."""
+    existing = db.query(DefectCause).filter(DefectCause.code == data.code).first()
+    if existing:
+        raise HTTPException(409, f"Defect cause with code '{data.code}' already exists")
+    item = DefectCause(
+        code=data.code,
+        category=data.category,
+        description=data.description,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {
+        "id": str(item.id),
+        "code": item.code,
+        "category": item.category,
+        "description": item.description,
+        "is_active": item.is_active,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+    }
+
 
 @router.get("/inspections")
 async def list_inspections(

@@ -32,6 +32,42 @@ async def list_dashboard_access(
     }
 
 
+@router.get("/my")
+async def get_my_dashboard_access(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return current user's accessible dashboards."""
+    items = db.query(UserDashboardAccess).filter(
+        UserDashboardAccess.user_id == current_user.id
+    ).all()
+
+    # Always include the user's default role-based dashboard
+    role_dashboard = getattr(current_user, "role", None)
+    role_str = role_dashboard.value if hasattr(role_dashboard, "value") else str(role_dashboard) if role_dashboard else None
+
+    dashboards = []
+    if role_str:
+        dashboards.append({
+            "dashboard_type": role_str,
+            "source": "role",
+            "granted_at": None,
+        })
+
+    for item in items:
+        dt = item.dashboard_type
+        dashboards.append({
+            "dashboard_type": dt.value if hasattr(dt, "value") else str(dt),
+            "source": "granted",
+            "granted_at": item.granted_at.isoformat() if item.granted_at else None,
+        })
+
+    return {
+        "dashboards": dashboards,
+        "total": len(dashboards),
+    }
+
+
 @router.get("/{item_id}", response_model=UserDashboardAccessResponse)
 async def get_dashboard_access_item(
     item_id: UUID,

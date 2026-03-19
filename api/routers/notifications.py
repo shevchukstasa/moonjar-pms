@@ -14,6 +14,23 @@ from api.schemas import NotificationResponse
 router = APIRouter()
 
 
+@router.get("/unread-count")
+async def get_unread_count(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return count of unread notifications for current user."""
+    count = (
+        db.query(Notification)
+        .filter(
+            Notification.user_id == current_user.id,
+            Notification.is_read.is_(False),
+        )
+        .count()
+    )
+    return {"count": count}
+
+
 @router.get("", response_model=dict)
 async def list_notifications(
     page: int = Query(1, ge=1),

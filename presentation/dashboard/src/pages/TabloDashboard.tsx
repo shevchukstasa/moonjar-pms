@@ -55,20 +55,22 @@ export default function TabloDashboard() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Production Tablo</h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900">Production Tablo</h1>
+          <p className="mt-0.5 md:mt-1 text-xs md:text-sm text-gray-500">
             Drag to reorder priorities, change statuses inline
           </p>
         </div>
-        <FactorySelector />
+        <div className="w-full sm:w-auto">
+          <FactorySelector />
+        </div>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         <Card>
           <div className="text-sm text-gray-500">Glazing</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">

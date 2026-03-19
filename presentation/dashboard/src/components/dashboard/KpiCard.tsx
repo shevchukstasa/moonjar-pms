@@ -21,13 +21,13 @@ const colorMap = {
 
 export function KpiCard({ title, value, subtitle, trend, icon, className, color = 'blue' }: KpiCardProps) {
   return (
-    <div className={cn('rounded-lg border p-4 shadow-sm', colorMap[color], className)}>
+    <div className={cn('rounded-lg border p-3 md:p-4 shadow-sm', colorMap[color], className)}>
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{title}</p>
+        <p className="text-[10px] md:text-xs font-medium text-gray-500 uppercase tracking-wide">{title}</p>
         {icon && <div className="text-gray-400">{icon}</div>}
       </div>
-      <div className="mt-2 flex items-baseline gap-2">
-        <p className="text-2xl font-bold text-gray-900">{value}</p>
+      <div className="mt-1 md:mt-2 flex items-baseline gap-2">
+        <p className="text-xl md:text-2xl font-bold text-gray-900">{value}</p>
         {trend !== undefined && (
           <span className={cn(
             'inline-flex items-center gap-0.5 text-xs font-medium',

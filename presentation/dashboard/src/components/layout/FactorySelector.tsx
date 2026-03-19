@@ -30,7 +30,7 @@ export function FactorySelector() {
     <select
       value={activeFactoryId || ''}
       onChange={(e) => setActiveFactory(e.target.value || null)}
-      className="rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+      className="w-full sm:w-auto rounded-md border border-gray-300 px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
     >
       <option value="">All Factories</option>
       {factories.map((f) => (

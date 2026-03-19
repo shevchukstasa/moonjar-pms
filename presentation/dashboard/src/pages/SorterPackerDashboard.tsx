@@ -53,33 +53,33 @@ export default function SorterPackerDashboard() {
   const hasError = sortingError || packedError || tasksError;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Sorting & Packing</h1>
-        <p className="mt-1 text-sm text-gray-500">Sort fired tiles, pack, upload photos</p>
+        <h1 className="text-xl md:text-2xl font-bold text-gray-900">Sorting & Packing</h1>
+        <p className="mt-0.5 text-xs md:text-sm text-gray-500">Sort fired tiles, pack, upload photos</p>
       </div>
 
       {/* API Error */}
       {hasError && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-          <p className="text-sm font-medium text-red-800">⚠ Error loading data. Try refreshing.</p>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 md:p-4">
+          <p className="text-sm font-medium text-red-800">Error loading data. Try refreshing.</p>
         </div>
       )}
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-3 gap-4">
-        <Card className="text-center">
-          <p className="text-2xl font-bold text-orange-600">{sortingPositions.length}</p>
-          <p className="text-xs text-gray-500">Awaiting Sorting</p>
+      {/* KPI Cards — 3 columns, compact on phone */}
+      <div className="grid grid-cols-3 gap-2 md:gap-4">
+        <Card className="text-center p-2 md:p-4">
+          <p className="text-xl md:text-2xl font-bold text-orange-600">{sortingPositions.length}</p>
+          <p className="text-[10px] md:text-xs text-gray-500">Awaiting Sorting</p>
         </Card>
-        <Card className="text-center">
-          <p className="text-2xl font-bold text-green-600">{packedPositions.length}</p>
-          <p className="text-xs text-gray-500">Packed</p>
+        <Card className="text-center p-2 md:p-4">
+          <p className="text-xl md:text-2xl font-bold text-green-600">{packedPositions.length}</p>
+          <p className="text-[10px] md:text-xs text-gray-500">Packed</p>
         </Card>
-        <Card className="text-center">
-          <p className="text-2xl font-bold text-blue-600">{tasks.length}</p>
-          <p className="text-xs text-gray-500">Open Tasks</p>
+        <Card className="text-center p-2 md:p-4">
+          <p className="text-xl md:text-2xl font-bold text-blue-600">{tasks.length}</p>
+          <p className="text-[10px] md:text-xs text-gray-500">Open Tasks</p>
         </Card>
       </div>
 
@@ -124,20 +124,20 @@ function SortingTab({ positions, isLoading }: { positions: PositionItem[]; isLoa
 
   return (
     <div className="space-y-4">
-      {/* Position list */}
+      {/* Position list — single column on phone for large tap targets */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {positions.map((p) => (
           <button
             key={p.id}
             onClick={() => setSelectedId(p.id === selectedId ? null : p.id)}
-            className={`w-full rounded-lg border p-3 text-left transition-all ${
+            className={`w-full rounded-lg border p-4 text-left transition-all min-h-[72px] ${
               p.id === selectedId
                 ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500'
                 : 'border-gray-200 bg-white hover:border-gray-300'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold">{p.order_number}</span>
+              <span className="text-base md:text-sm font-semibold">{p.order_number}</span>
               <div className="flex items-center gap-1.5">
                 {isStockCollection(p.collection) && (
                   <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
@@ -150,7 +150,7 @@ function SortingTab({ positions, isLoading }: { positions: PositionItem[]; isLoa
             <p className="mt-1 text-sm text-gray-600">
               {p.color} · {p.size}
             </p>
-            <p className="mt-0.5 text-lg font-bold text-gray-900">{p.quantity} pcs</p>
+            <p className="mt-0.5 text-xl md:text-lg font-bold text-gray-900">{p.quantity} pcs</p>
           </button>
         ))}
       </div>
@@ -345,15 +345,15 @@ function QtyInput({
   color: string;
 }) {
   return (
-    <div className="flex items-center gap-3">
-      <span className={`w-32 text-sm font-medium ${color}`}>{label}</span>
+    <div className="flex items-center gap-2 md:gap-3">
+      <span className={`w-28 md:w-32 text-sm font-medium ${color}`}>{label}</span>
       <input
         type="number"
         inputMode="numeric"
         min={0}
         value={value}
         onChange={(e) => onChange(Math.max(0, parseInt(e.target.value) || 0))}
-        className="min-h-[44px] flex-1 rounded-md border border-gray-300 px-3 py-2 text-center text-lg font-semibold focus:border-primary-500 focus:outline-none"
+        className="min-h-[48px] flex-1 rounded-md border border-gray-300 px-3 py-2 text-center text-lg font-semibold focus:border-primary-500 focus:outline-none"
       />
     </div>
   );
@@ -389,11 +389,11 @@ function PackingTab({ positions, isLoading }: { positions: PositionItem[]; isLoa
         {positions.map((p) => (
           <div
             key={p.id}
-            className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4"
+            className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-gray-200 bg-white p-4"
           >
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="font-semibold">{p.order_number}</span>
+                <span className="font-semibold text-base md:text-sm">{p.order_number}</span>
                 <Badge status={p.status} />
               </div>
               <p className="mt-0.5 text-sm text-gray-500">
@@ -401,6 +401,7 @@ function PackingTab({ positions, isLoading }: { positions: PositionItem[]; isLoa
               </p>
             </div>
             <Button
+              className="w-full sm:w-auto min-h-[48px] md:min-h-0"
               size="sm"
               onClick={() => setConfirmId(p.id)}
               disabled={changeStatus.isPending}
@@ -460,11 +461,11 @@ function GrindingTab() {
         {positions.map((p) => (
           <div
             key={p.id}
-            className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4"
+            className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-gray-200 bg-white p-4"
           >
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="font-semibold">{p.order_number}</span>
+                <span className="font-semibold text-base md:text-sm">{p.order_number}</span>
                 <Badge status={p.status} />
               </div>
               <p className="mt-0.5 text-sm text-gray-500">
@@ -473,6 +474,7 @@ function GrindingTab() {
             </div>
             <div className="flex items-center gap-2">
               <Button
+                className="flex-1 sm:flex-none min-h-[48px] md:min-h-0"
                 size="sm"
                 variant="secondary"
                 onClick={() => setConfirmAction({ id: p.id, action: 'grind' })}
@@ -481,6 +483,7 @@ function GrindingTab() {
                 Grind
               </Button>
               <Button
+                className="flex-1 sm:flex-none min-h-[48px] md:min-h-0"
                 size="sm"
                 variant="danger"
                 onClick={() => setConfirmAction({ id: p.id, action: 'mana' })}
@@ -651,7 +654,7 @@ function PhotosTab() {
                     onClick={() => {
                       if (confirm('Delete this photo?')) deleteMutation.mutate(photo.id);
                     }}
-                    className="absolute right-1 top-1 hidden rounded bg-red-500 px-2 py-0.5 text-xs text-white group-hover:block"
+                    className="absolute right-1 top-1 rounded bg-red-500 px-2 py-1 text-xs text-white md:hidden md:group-hover:block min-h-[32px]"
                     disabled={deleteMutation.isPending}
                   >
                     Delete
@@ -720,10 +723,10 @@ function TasksTab({ tasks, isLoading }: { tasks: TaskItem[]; isLoading: boolean 
         {tasks.map((t) => (
           <div
             key={t.id}
-            className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4"
+            className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-gray-200 bg-white p-4"
           >
-            <div>
-              <div className="flex items-center gap-2">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <Badge status={t.type} label={TASK_TYPE_LABELS[t.type] || t.type.replace(/_/g, ' ')} />
                 {t.blocking && (
                   <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700">
@@ -737,6 +740,7 @@ function TasksTab({ tasks, isLoading }: { tasks: TaskItem[]; isLoading: boolean 
               )}
             </div>
             <Button
+              className="w-full sm:w-auto min-h-[48px] md:min-h-0"
               size="sm"
               onClick={() => setConfirmId(t.id)}
               disabled={completeMutation.isPending}

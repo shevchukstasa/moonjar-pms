@@ -325,50 +325,52 @@ export default function ManagerDashboard() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Production Dashboard</h1>
-          <p className="mt-1 text-sm text-gray-500">Manage orders, positions, and production schedule</p>
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900">Production Dashboard</h1>
+          <p className="mt-0.5 md:mt-1 text-xs md:text-sm text-gray-500">Manage orders, positions, and production schedule</p>
         </div>
         <div className="flex items-center gap-3">
           <NotificationsBell />
-          <FactorySelector />
+          <div className="flex-1 sm:flex-none">
+            <FactorySelector />
+          </div>
         </div>
       </div>
 
       {/* KPI Cards — dashboard-wide, shown above all tabs */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2 md:gap-4 sm:grid-cols-3 lg:grid-cols-6">
         <Card>
-          <div className="text-xs text-gray-500">Active Orders</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900">{orderTab === 'current' ? activeOrders : '\u2014'}</div>
+          <div className="text-[10px] md:text-xs text-gray-500">Active Orders</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">{orderTab === 'current' ? activeOrders : '\u2014'}</div>
         </Card>
         <Card>
-          <div className="text-xs text-gray-500">Total Positions</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900">{positionsTotal}</div>
+          <div className="text-[10px] md:text-xs text-gray-500">Total Positions</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">{positionsTotal}</div>
         </Card>
         <Card>
-          <div className="text-xs text-gray-500">On-Time Rate</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900">
+          <div className="text-[10px] md:text-xs text-gray-500">On-Time Rate</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">
             {dashboardSummary?.on_time_rate != null ? `${Math.round(dashboardSummary.on_time_rate)}%` : '\u2014'}
           </div>
         </Card>
         <Card>
-          <div className="text-xs text-gray-500">Defect Rate</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900">
+          <div className="text-[10px] md:text-xs text-gray-500">Defect Rate</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">
             {dashboardSummary?.defect_rate != null ? `${dashboardSummary.defect_rate.toFixed(1)}%` : '\u2014'}
           </div>
         </Card>
         <Card>
-          <div className="text-xs text-gray-500">Kiln Utilization</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900">
+          <div className="text-[10px] md:text-xs text-gray-500">Kiln Utilization</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">
             {dashboardSummary?.kiln_utilization != null ? `${Math.round(dashboardSummary.kiln_utilization)}%` : '\u2014'}
           </div>
         </Card>
         <Card>
-          <div className="text-xs text-gray-500">OEE</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900">
+          <div className="text-[10px] md:text-xs text-gray-500">OEE</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">
             {dashboardSummary?.oee != null ? `${Math.round(dashboardSummary.oee)}%` : '\u2014'}
           </div>
         </Card>
@@ -384,7 +386,7 @@ export default function ManagerDashboard() {
       {/* Blocking alert banner — shown when positions are blocked */}
       {totalBlocked > 0 && activeTab !== 'blocking' && (
         <div
-          className="cursor-pointer rounded-lg border border-red-300 bg-red-50 px-4 py-3 flex items-center justify-between gap-3 hover:bg-red-100 transition-colors"
+          className="cursor-pointer rounded-lg border border-red-300 bg-red-50 px-3 md:px-4 py-3 flex items-center justify-between gap-2 md:gap-3 hover:bg-red-100 transition-colors min-h-[48px]"
           onClick={() => setActiveTab('blocking')}
         >
           <div className="flex items-center gap-2">
@@ -587,30 +589,33 @@ function OrdersTabContent({
       />
 
       {/* Filters */}
-      <div className="flex items-center gap-3">
-        <SearchInput
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-          placeholder="Search orders..."
-          className="w-64"
-        />
-        <select
-          value={statusFilter}
-          onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-        >
-          {ORDER_STATUS_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-        <div className="flex-1" />
-        <Button onClick={() => setCreateOpen(true)}>+ Create Order</Button>
-        <Button variant="secondary" onClick={() => setPdfUploadOpen(true)}>
-          Upload PDF
-        </Button>
-        <Button variant="secondary" onClick={() => navigate('/tablo')}>
-          Tablo
-        </Button>
+      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-1">
+          <SearchInput
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            placeholder="Search orders..."
+            className="w-full sm:w-64"
+          />
+          <select
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm min-h-[44px] md:min-h-0"
+          >
+            {ORDER_STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2 overflow-x-auto">
+          <Button className="whitespace-nowrap min-h-[44px] md:min-h-0" onClick={() => setCreateOpen(true)}>+ Create Order</Button>
+          <Button className="whitespace-nowrap min-h-[44px] md:min-h-0" variant="secondary" onClick={() => setPdfUploadOpen(true)}>
+            Upload PDF
+          </Button>
+          <Button className="whitespace-nowrap min-h-[44px] md:min-h-0" variant="secondary" onClick={() => navigate('/tablo')}>
+            Tablo
+          </Button>
+        </div>
       </div>
 
       {/* Stock Shortage Tasks */}
@@ -1212,8 +1217,8 @@ function TpsTabContent({ factoryId }: { factoryId: string | null }) {
           </div>
         </Card>
         <Card>
-          <div className="text-xs text-gray-500">OEE</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900">
+          <div className="text-[10px] md:text-xs text-gray-500">OEE</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">
             {dashboardSummary?.oee != null ? `${Math.round(dashboardSummary.oee)}%` : '\u2014'}
           </div>
         </Card>

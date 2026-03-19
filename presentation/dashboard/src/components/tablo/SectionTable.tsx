@@ -91,55 +91,85 @@ export function SectionTable({ positions, section, onSplitPosition }: Props) {
   const totalPcs = filtered.reduce((sum, p) => sum + (p.quantity || 0), 0);
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200">
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-      >
-        <SortableContext items={filtered.map((p) => p.id)} strategy={verticalListSortingStrategy}>
-          <table className="w-full text-left text-sm">
-            <thead className="border-b bg-gray-50 text-xs font-medium uppercase text-gray-500">
-              <tr>
-                <th className="w-8 px-2 py-2" />
-                <th className="px-3 py-2">Order</th>
-                <th className="px-3 py-2">#</th>
-                <th className="px-3 py-2">Color</th>
-                <th className="px-3 py-2">Size</th>
-                <th className="px-3 py-2">Application</th>
-                <th className="px-3 py-2">Collection</th>
-                <th className="px-3 py-2 text-right">Qty</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Type</th>
-                <th className="px-3 py-2 text-right">Delay</th>
-                {onSplitPosition && <th className="w-10 px-2 py-2" />}
-              </tr>
-            </thead>
-            <tbody className="divide-y bg-white">
-              {filtered.map((p, idx) => (
-                <PositionRow
-                  key={p.id}
-                  position={p}
-                  index={idx}
-                  section={section}
-                  onSplit={onSplitPosition}
-                />
-              ))}
-            </tbody>
-            <tfoot className="border-t bg-gray-50">
-              <tr>
-                <td colSpan={7} className="px-3 py-2 text-xs font-semibold text-gray-600">
-                  Total: {filtered.length} positions
-                </td>
-                <td className="px-3 py-2 text-right text-xs font-semibold text-gray-600">
-                  {totalPcs} pcs
-                </td>
-                <td colSpan={onSplitPosition ? 4 : 3} />
-              </tr>
-            </tfoot>
-          </table>
-        </SortableContext>
-      </DndContext>
+    <div>
+      {/* Desktop: table layout */}
+      <div className="hidden md:block overflow-x-auto rounded-lg border border-gray-200">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={filtered.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+            <table className="w-full text-left text-sm">
+              <thead className="border-b bg-gray-50 text-xs font-medium uppercase text-gray-500">
+                <tr>
+                  <th className="w-8 px-2 py-2" />
+                  <th className="px-3 py-2">Order</th>
+                  <th className="px-3 py-2">#</th>
+                  <th className="px-3 py-2">Color</th>
+                  <th className="px-3 py-2">Size</th>
+                  <th className="px-3 py-2">Application</th>
+                  <th className="px-3 py-2">Collection</th>
+                  <th className="px-3 py-2 text-right">Qty</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">Type</th>
+                  <th className="px-3 py-2 text-right">Delay</th>
+                  {onSplitPosition && <th className="w-10 px-2 py-2" />}
+                </tr>
+              </thead>
+              <tbody className="divide-y bg-white">
+                {filtered.map((p, idx) => (
+                  <PositionRow
+                    key={p.id}
+                    position={p}
+                    index={idx}
+                    section={section}
+                    onSplit={onSplitPosition}
+                  />
+                ))}
+              </tbody>
+              <tfoot className="border-t bg-gray-50">
+                <tr>
+                  <td colSpan={7} className="px-3 py-2 text-xs font-semibold text-gray-600">
+                    Total: {filtered.length} positions
+                  </td>
+                  <td className="px-3 py-2 text-right text-xs font-semibold text-gray-600">
+                    {totalPcs} pcs
+                  </td>
+                  <td colSpan={onSplitPosition ? 4 : 3} />
+                </tr>
+              </tfoot>
+            </table>
+          </SortableContext>
+        </DndContext>
+      </div>
+
+      {/* Mobile: card layout */}
+      <div className="md:hidden space-y-3">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={filtered.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+            {filtered.map((p, idx) => (
+              <PositionRow
+                key={p.id}
+                position={p}
+                index={idx}
+                section={section}
+                onSplit={onSplitPosition}
+                mobileCard
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
+        {/* Total summary */}
+        <div className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-600">
+          <span>{filtered.length} positions</span>
+          <span>{totalPcs} pcs</span>
+        </div>
+      </div>
     </div>
   );
 }

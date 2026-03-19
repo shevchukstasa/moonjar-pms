@@ -42,6 +42,7 @@ import { TOCZonesTab } from '@/components/dashboard/TOCZonesTab';
 import { BottleneckVisualization } from '@/components/dashboard/BottleneckVisualization';
 import { StoneReservationTab } from '@/components/dashboard/StoneReservationTab';
 import { DefectAlertBanner } from '@/components/dashboard/DefectAlertBanner';
+import { AnomalyAlertBanner } from '@/components/dashboard/AnomalyAlertBanner';
 import { ConsumptionAdjustmentsPanel } from '@/components/materials/ConsumptionAdjustmentsPanel';
 
 // ---------------------------------------------------------------------------
@@ -436,6 +437,9 @@ export default function ManagerDashboard() {
         factoryId={activeFactoryId ?? undefined}
         onNavigateToTasks={() => setActiveTab('tasks')}
       />
+
+      {/* Anomaly detection alert banner */}
+      <AnomalyAlertBanner factoryId={activeFactoryId ?? undefined} />
 
       {/* Change request alert banner — shown when requests are pending */}
       {pendingChangeRequests > 0 && activeTab !== 'change_requests' && (

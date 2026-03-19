@@ -121,10 +121,18 @@ export function useShipOrder() {
   });
 }
 
-// --- PDF Upload ---
+// --- PDF Upload & Confirm ---
 
 export function useUploadPdf() {
   return useMutation<PdfParseResult, Error, { file: File; factoryId: string }>({
     mutationFn: ({ file, factoryId }) => ordersApi.uploadPdf(file, factoryId),
+  });
+}
+
+export function useConfirmPdf() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => ordersApi.confirmPdf(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['orders'] }),
   });
 }

@@ -22,6 +22,9 @@ from business.services.daily_kpi import (
     get_activity_feed,
 )
 from business.services.buffer_health import calculate_buffer_health
+from business.services.anomaly_detection import (
+    run_all_anomaly_checks, anomaly_to_dict,
+)
 from api.models import Factory, BottleneckConfig, Resource, MaterialTransaction, Material, User
 from api.enums import ResourceType
 
@@ -268,4 +271,62 @@ async def inventory_report(
             "total_positive_adjustments": round(total_pos, 3),
             "total_negative_adjustments": round(total_neg, 3),
         },
+    }
+
+
+@router.get("/anomalies")
+async def get_anomalies(
+    factory_id: UUID | None = None,
+    severity: str | None = Query(None, pattern="^(warning|critical)$"),
+    type: str | None = Query(
+        None,
+        alias="anomaly_type",
+        pattern="^(defect_spike|throughput_drop|cycle_time|material_excess|kiln_anomaly)$",
+    ),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Get detected anomalies for a factory (or all factories).
+
+    Runs anomaly detection in real-time and returns results.
+    Filters by severity and anomaly type are optional.
+    """
+    # Scope to user's factory if not owner/admin
+    if current_user.role not in ("owner", "administrator") and not factory_id:
+        from api.models import UserFactory
+        uf = db.query(UserFactory).filter(
+            UserFactory.user_id == current_user.id
+        ).first()
+        if uf:
+            factory_id = uf.factory_id
+
+    # Determine which factories to check
+    if factory_id:
+        factory_ids = [factory_id]
+    else:
+        factories = db.query(Factory).filter(Factory.is_active.is_(True)).all()
+        factory_ids = [f.id for f in factories]
+
+    all_anomalies = []
+    for fid in factory_ids:
+        try:
+            anomalies = run_all_anomaly_checks(db, fid)
+            all_anomalies.extend(anomalies)
+        except Exception:
+            pass  # Logged inside run_all_anomaly_checks
+
+    # Apply filters
+    if severity:
+        all_anomalies = [a for a in all_anomalies if a.severity == severity]
+    if type:
+        all_anomalies = [a for a in all_anomalies if a.type == type]
+
+    # Sort: critical first, then by z-score descending
+    all_anomalies.sort(key=lambda a: (0 if a.severity == "critical" else 1, -abs(a.z_score)))
+
+    return {
+        "items": [anomaly_to_dict(a) for a in all_anomalies],
+        "total": len(all_anomalies),
+        "critical_count": sum(1 for a in all_anomalies if a.severity == "critical"),
+        "warning_count": sum(1 for a in all_anomalies if a.severity == "warning"),
     }

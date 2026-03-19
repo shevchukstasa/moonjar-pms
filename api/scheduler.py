@@ -791,6 +791,43 @@ async def check_pending_service_blocks_job():
         db.close()
 
 
+async def anomaly_detection_job():
+    """Every 2 hours: run anomaly detection for all factories."""
+    logger.info("Running anomaly detection")
+    db = _get_db_session()
+    try:
+        from business.services.anomaly_detection import run_all_anomaly_checks, create_anomaly_alerts
+
+        factory_ids = _get_all_factory_ids(db)
+        total_anomalies = 0
+        total_alerts = 0
+
+        for fid in factory_ids:
+            try:
+                anomalies = run_all_anomaly_checks(db, fid)
+                if anomalies:
+                    total_anomalies += len(anomalies)
+                    # Only create alerts for critical anomalies to avoid spam
+                    critical = [a for a in anomalies if a.severity == "critical"]
+                    if critical:
+                        alerts = create_anomaly_alerts(db, critical)
+                        total_alerts += alerts
+                db.commit()
+            except Exception as e:
+                logger.error("Anomaly detection failed for factory %s: %s", fid, e)
+                db.rollback()
+
+        logger.info(
+            "Anomaly detection complete: %d anomalies, %d alerts across %d factories",
+            total_anomalies, total_alerts, len(factory_ids),
+        )
+    except Exception as e:
+        logger.error("Anomaly detection job failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 async def repair_sla_monitor():
     """Every 30 min: check repair positions for SLA breaches (24h limit)."""
     logger.info("Running repair SLA monitor")
@@ -855,6 +892,9 @@ def setup_scheduler():
 
     # Every 30 min — repair SLA monitor
     scheduler.add_job(repair_sla_monitor, IntervalTrigger(minutes=30), id="repair_sla_monitor")
+
+    # Every 2 hours — anomaly detection
+    scheduler.add_job(anomaly_detection_job, IntervalTrigger(hours=2), id="anomaly_detection")
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

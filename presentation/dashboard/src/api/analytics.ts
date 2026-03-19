@@ -92,6 +92,25 @@ export interface ActivityFeedItem {
   related_entity_id: string | null;
 }
 
+export interface AnomalyItem {
+  type: string;
+  severity: 'warning' | 'critical';
+  metric_name: string;
+  current_value: number;
+  expected_range: { lower: number; upper: number };
+  z_score: number;
+  factory_id: string;
+  related_entity_id: string | null;
+  description: string;
+}
+
+export interface AnomalyResponse {
+  items: AnomalyItem[];
+  total: number;
+  critical_count: number;
+  warning_count: number;
+}
+
 // --- API Functions ---
 
 export const analyticsApi = {
@@ -115,4 +134,7 @@ export const analyticsApi = {
 
   getActivityFeed: (params?: { factory_id?: string; limit?: number }) =>
     apiClient.get<ActivityFeedItem[]>('/analytics/activity-feed', { params }).then((r) => r.data),
+
+  getAnomalies: (params?: { factory_id?: string; severity?: string; anomaly_type?: string }) =>
+    apiClient.get<AnomalyResponse>('/analytics/anomalies', { params }).then((r) => r.data),
 };

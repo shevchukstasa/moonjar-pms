@@ -49,6 +49,11 @@ export interface ChangeRequestItem {
 }
 
 // --- PDF Upload types ---
+export interface FieldConfidence {
+  value: number;
+  source: string; // "regex" | "table" | "positional" | "fallback" | "not_found"
+}
+
 export interface PdfParsedItem {
   color: string;
   size: string;
@@ -61,6 +66,7 @@ export interface PdfParsedItem {
   application_type: string | null;
   place_of_application: string | null;
   thickness: number;
+  field_confidence?: Record<string, FieldConfidence>;
 }
 
 export interface PdfParsedOrder {
@@ -75,12 +81,17 @@ export interface PdfParsedOrder {
   mandatory_qc: boolean;
   notes: string | null;
   items: PdfParsedItem[];
+  field_confidence?: Record<string, FieldConfidence>;
 }
 
 export interface PdfParseResult {
   parsed_order: PdfParsedOrder;
   confidence: number;
   warnings: string[];
+  template_id: string;
+  template_name: string;
+  template_match_score: number;
+  validation_errors: string[];
 }
 
 export const ordersApi = {
@@ -118,4 +129,7 @@ export const ordersApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((r) => r.data);
   },
+  // PDF confirm (reviewed parsed data -> create order)
+  confirmPdf: (data: Record<string, unknown>) =>
+    apiClient.post('/orders/confirm-pdf', data).then((r) => r.data),
 };

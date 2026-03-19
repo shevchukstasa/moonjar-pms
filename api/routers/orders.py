@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 from uuid import UUID
 from typing import Optional, Union, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
@@ -429,6 +429,98 @@ async def upload_pdf(
     parsed["parsed_order"]["factory_id"] = factory_id
 
     return parsed
+
+
+# --- PDF Confirm (reviewed parsed data → create order) ---
+
+class PdfConfirmItemInput(BaseModel):
+    color: str
+    size: str
+    quantity_pcs: int
+    quantity_sqm: Optional[float] = None
+    application: Optional[str] = None
+    finishing: Optional[str] = None
+    collection: Optional[str] = None
+    product_type: str = "tile"
+    application_type: Optional[str] = None
+    place_of_application: Optional[str] = None
+    thickness: float = 11.0
+
+
+class PdfConfirmInput(BaseModel):
+    order_number: str
+    client: str
+    client_location: Optional[str] = None
+    sales_manager_name: Optional[str] = None
+    factory_id: str
+    document_date: Optional[date] = None
+    final_deadline: Optional[date] = None
+    desired_delivery_date: Optional[date] = None
+    mandatory_qc: bool = False
+    notes: Optional[str] = None
+    items: list[PdfConfirmItemInput]
+
+
+@router.post("/confirm-pdf", status_code=201)
+async def confirm_pdf_order(
+    data: PdfConfirmInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Confirm a parsed PDF order — creates the actual order and positions.
+
+    The PM has reviewed and optionally edited the parsed data from upload-pdf.
+    This endpoint creates the order using the same pipeline as manual creation.
+    """
+    if not data.items:
+        raise HTTPException(400, "Order must have at least one item")
+
+    order = ProductionOrder(
+        order_number=data.order_number,
+        client=data.client,
+        client_location=data.client_location,
+        sales_manager_name=data.sales_manager_name,
+        factory_id=UUID(data.factory_id),
+        document_date=data.document_date,
+        production_received_date=date.today(),
+        final_deadline=data.final_deadline,
+        desired_delivery_date=data.desired_delivery_date,
+        mandatory_qc=data.mandatory_qc,
+        notes=data.notes,
+        status=OrderStatus.NEW,
+        source=OrderSource.PDF_UPLOAD,
+    )
+    db.add(order)
+    db.flush()
+
+    from business.services.order_intake import process_order_item
+
+    for item_data in data.items:
+        item = ProductionOrderItem(
+            order_id=order.id,
+            color=item_data.color,
+            size=item_data.size,
+            application=item_data.application,
+            finishing=item_data.finishing,
+            thickness=item_data.thickness,
+            quantity_pcs=item_data.quantity_pcs,
+            quantity_sqm=item_data.quantity_sqm,
+            collection=item_data.collection,
+            application_type=item_data.application_type,
+            place_of_application=item_data.place_of_application,
+            product_type=item_data.product_type,
+        )
+        db.add(item)
+        db.flush()
+
+        position = process_order_item(db, order, item)
+
+        if position and is_stock_collection(item_data.collection):
+            _distribute_stock_position(db, position, item_data.quantity_pcs)
+
+    db.commit()
+    db.refresh(order)
+    return _order_detail(order, db)
 
 
 @router.get("/{order_id}")

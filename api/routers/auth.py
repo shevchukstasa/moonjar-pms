@@ -1,11 +1,12 @@
 """Auth router — login, Google OAuth, refresh, logout, TOTP login verification."""
 
+import hmac
 import uuid as _uuid
 import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from jose import JWTError
+from jwt.exceptions import PyJWTError as JWTError
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -38,7 +39,7 @@ def _create_totp_pending_token(user_id: str) -> str:
     but still needs to complete 2FA. This token cannot be used as an access
     token because its ``type`` is ``totp_pending``.
     """
-    from jose import jwt
+    import jwt
     settings = get_settings()
     expire = datetime.now(timezone.utc) + timedelta(minutes=_TOTP_PENDING_EXPIRE_MINUTES)
     payload = {
@@ -51,7 +52,7 @@ def _create_totp_pending_token(user_id: str) -> str:
 
 def _decode_totp_pending_token(token: str) -> dict:
     """Decode and validate a totp_pending token."""
-    from jose import jwt
+    import jwt
     settings = get_settings()
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
@@ -113,6 +114,10 @@ async def login(data: LoginRequest, request: Request, response: Response,
         log_security_event(db, AuditActionType.LOGIN_SUCCESS,
                            actor_id=str(user.id), actor_email=user.email,
                            ip_address=request.client.host if request.client else None)
+        # NOTE: access_token is returned in both HttpOnly cookies AND the JSON body.
+        # This is intentional — the SPA reads access_token from the response for
+        # in-memory storage (e.g. WebSocket auth query param). Cookies provide the
+        # primary auth mechanism; the body token is a convenience for non-cookie flows.
         return {"access_token": access, "token_type": "bearer",
                 "user": {"id": str(user.id), "email": user.email,
                          "role": role_val, "name": user.name}}
@@ -280,7 +285,7 @@ async def verify_owner_key(data: OwnerKeyRequest, db: Session = Depends(get_db))
     settings = get_settings()
     if not settings.OWNER_KEY or settings.OWNER_KEY in ("change-me", ""):
         raise HTTPException(503, "Owner key not configured. Contact system administrator.")
-    if data.key != settings.OWNER_KEY:
+    if not hmac.compare_digest(data.key, settings.OWNER_KEY):
         raise HTTPException(403, "Invalid owner key")
     # Check if owner already exists
     owner = db.query(User).filter(User.role == "owner").first()

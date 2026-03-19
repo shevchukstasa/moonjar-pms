@@ -22,13 +22,16 @@ export interface PositionItem {
   position_label?: string | null;
 }
 
+const NON_SPLITTABLE_STATUSES = ['in_kiln', 'fired'];
+
 interface Props {
   position: PositionItem;
   index: number;
   section: string;
+  onSplit?: (position: PositionItem) => void;
 }
 
-export function PositionRow({ position, index, section }: Props) {
+export function PositionRow({ position, index, section, onSplit }: Props) {
   const delayUnit = useTabloStore((s) => s.delayUnit);
   const {
     attributes,
@@ -94,6 +97,23 @@ export function PositionRow({ position, index, section }: Props) {
       <td className={`px-3 py-2 text-xs text-right ${delay > 72 ? 'font-semibold text-red-600' : delay > 24 ? 'text-yellow-600' : 'text-gray-500'}`}>
         {delay > 0 ? delayDisplay : '\u2014'}
       </td>
+      {onSplit && (
+        <td className="w-10 px-2 py-2 text-center">
+          {NON_SPLITTABLE_STATUSES.includes(position.status) ? (
+            <span className="text-gray-300 cursor-not-allowed" title="Cannot split during firing">
+              &#9986;
+            </span>
+          ) : (
+            <button
+              onClick={() => onSplit(position)}
+              className="rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-600"
+              title="Split production"
+            >
+              &#9986;
+            </button>
+          )}
+        </td>
+      )}
     </tr>
   );
 }

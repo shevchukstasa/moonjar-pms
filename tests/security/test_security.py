@@ -49,7 +49,7 @@ from api.middleware import CSRFMiddleware, RateLimitMiddleware
 from api.models import User, Factory, UserFactory, ActiveSession
 from api.enums import UserRole
 
-from jose import jwt as jose_jwt
+import jwt as jose_jwt
 
 settings = get_settings()
 

@@ -21,9 +21,10 @@ import { useTabloStore } from '@/stores/tabloStore';
 interface Props {
   positions: PositionItem[];
   section: string;
+  onSplitPosition?: (position: PositionItem) => void;
 }
 
-export function SectionTable({ positions, section }: Props) {
+export function SectionTable({ positions, section, onSplitPosition }: Props) {
   const reorder = useReorderPositions();
   const filters = useTabloStore((s) => s.filters);
   const [items, setItems] = useState<PositionItem[]>([]);
@@ -111,6 +112,7 @@ export function SectionTable({ positions, section }: Props) {
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Type</th>
                 <th className="px-3 py-2 text-right">Delay</th>
+                {onSplitPosition && <th className="w-10 px-2 py-2" />}
               </tr>
             </thead>
             <tbody className="divide-y bg-white">
@@ -120,6 +122,7 @@ export function SectionTable({ positions, section }: Props) {
                   position={p}
                   index={idx}
                   section={section}
+                  onSplit={onSplitPosition}
                 />
               ))}
             </tbody>
@@ -131,7 +134,7 @@ export function SectionTable({ positions, section }: Props) {
                 <td className="px-3 py-2 text-right text-xs font-semibold text-gray-600">
                   {totalPcs} pcs
                 </td>
-                <td colSpan={3} />
+                <td colSpan={onSplitPosition ? 4 : 3} />
               </tr>
             </tfoot>
           </table>

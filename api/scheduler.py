@@ -725,6 +725,95 @@ async def daily_task_distribution_dispatcher():
         db.close()
 
 
+async def stone_waste_weekly_report():
+    """Weekly stone waste report — Monday 09:00 Bali (01:00 UTC)."""
+    logger.info("Running weekly stone waste report")
+    db = _get_db_session()
+    try:
+        from api.models import Factory, User
+        from api.enums import UserRole
+        from business.services.stone_reservation import get_weekly_stone_waste_report
+        from business.services.notifications import create_notification
+
+        factories = db.query(Factory).filter(Factory.is_active.is_(True)).all()
+        for factory in factories:
+            try:
+                report = get_weekly_stone_waste_report(db, factory.id)
+                if report and report.get("total_waste_sqm", 0) > 0:
+                    pms = db.query(User).filter(
+                        User.role == UserRole.PRODUCTION_MANAGER.value,
+                        User.is_active.is_(True),
+                    ).all()
+                    for pm in pms:
+                        create_notification(
+                            db,
+                            user_id=pm.id,
+                            type="stone_waste",
+                            title=f"Weekly Stone Waste Report — {factory.name}",
+                            message=(
+                                f"Total waste: {report['total_waste_sqm']:.2f} sqm, "
+                                f"compensation: {report.get('total_compensation_idr', 0):,.0f} IDR"
+                            ),
+                            factory_id=factory.id,
+                        )
+                    db.commit()
+            except Exception as e:
+                logger.warning("Stone waste report failed for factory %s: %s", factory.id, e)
+                db.rollback()
+    except Exception as e:
+        logger.error("Stone waste weekly report failed: %s", e)
+    finally:
+        db.close()
+
+
+async def check_pending_service_blocks_job():
+    """Daily check: re-evaluate service blocking for positions that now have glazing dates."""
+    logger.info("Running pending service blocks check")
+    db = _get_db_session()
+    try:
+        from api.models import Factory
+        from business.services.service_blocking import check_pending_service_blocks
+
+        factories = db.query(Factory).filter(Factory.is_active.is_(True)).all()
+        for factory in factories:
+            try:
+                result = check_pending_service_blocks(db, factory.id)
+                blocked_count = result.get("blocked", 0) if isinstance(result, dict) else 0
+                if blocked_count > 0:
+                    logger.info("Service blocking: %d positions blocked for factory %s", blocked_count, factory.id)
+                db.commit()
+            except Exception as e:
+                logger.warning("Service blocking check failed for factory %s: %s", factory.id, e)
+                db.rollback()
+    except Exception as e:
+        logger.error("Pending service blocks check failed: %s", e)
+    finally:
+        db.close()
+
+
+async def repair_sla_monitor():
+    """Every 30 min: check repair positions for SLA breaches (24h limit)."""
+    logger.info("Running repair SLA monitor")
+    db = _get_db_session()
+    try:
+        from business.services.repair_monitoring import check_repair_sla
+
+        factory_ids = _get_all_factory_ids(db)
+        for fid in factory_ids:
+            try:
+                escalated = check_repair_sla(db, fid)
+                if escalated:
+                    logger.info("Repair SLA: %d positions escalated for factory %s", len(escalated), fid)
+                db.commit()
+            except Exception as e:
+                logger.warning("Repair SLA check failed for factory %s: %s", fid, e)
+                db.rollback()
+    except Exception as e:
+        logger.error("Repair SLA monitor failed: %s", e)
+    finally:
+        db.close()
+
+
 # --- Scheduler setup ---
 
 def setup_scheduler():
@@ -757,6 +846,15 @@ def setup_scheduler():
         CronTrigger(minute=0),  # Every hour at :00
         id="daily_distribution_dispatcher",
     )
+
+    # Weekly Monday 01:00 UTC (09:00 Bali) — stone waste report
+    scheduler.add_job(stone_waste_weekly_report, CronTrigger(day_of_week="mon", hour=1, minute=0), id="stone_waste_weekly")
+
+    # Daily 21:35 UTC — check pending service blocks
+    scheduler.add_job(check_pending_service_blocks_job, CronTrigger(hour=21, minute=35), id="service_blocks_check")
+
+    # Every 30 min — repair SLA monitor
+    scheduler.add_job(repair_sla_monitor, IntervalTrigger(minutes=30), id="repair_sla_monitor")
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

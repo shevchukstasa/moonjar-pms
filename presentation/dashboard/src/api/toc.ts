@@ -27,4 +27,6 @@ export const tocApi = {
     apiClient.patch(`/toc/constraints/${id}`, data).then((r) => r.data),
   getBufferHealth: (params?: { factory_id?: string }) =>
     apiClient.get<{ items: BufferHealth[] }>('/toc/buffer-health', { params }).then((r) => r.data),
+  getBufferZones: (params?: { factory_id?: string }) =>
+    apiClient.get('/toc/buffer-zones', { params }).then((r) => r.data),
 };

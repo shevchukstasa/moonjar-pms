@@ -177,6 +177,7 @@ def _ensure_schema():
         ]
         for table, col_def in add_cols:
             try:
+                # SAFETY: All values in this f-string are hardcoded constants, not user input
                 conn.execute(text(f"""
                     DO $$ BEGIN
                         IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = '{table}') THEN
@@ -477,6 +478,7 @@ def _ensure_schema():
             "quantity INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
+                # SAFETY: All values in this f-string are hardcoded constants, not user input
                 conn.execute(text(f"""
                     DO $$ BEGIN
                         IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'grinding_stock') THEN
@@ -631,6 +633,7 @@ def _ensure_schema():
         ]
         for table, col_def in maint_cols:
             try:
+                # SAFETY: All values in this f-string are hardcoded constants, not user input
                 conn.execute(text(f"""
                     DO $$ BEGIN
                         IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = '{table}') THEN
@@ -652,6 +655,7 @@ def _ensure_schema():
         ]
         for table, col_def in cols:
             try:
+                # SAFETY: All values in this f-string are hardcoded constants, not user input
                 conn.execute(text(f"""
                     DO $$ BEGIN
                         IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = '{table}') THEN
@@ -673,6 +677,7 @@ def _ensure_schema():
         ]
         for table, col_def in cols:
             try:
+                # SAFETY: All values in this f-string are hardcoded constants, not user input
                 conn.execute(text(f"""
                     ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col_def}
                 """))
@@ -1033,6 +1038,7 @@ def _ensure_schema():
         ]
         for col_def in cols:
             col_name = col_def.split()[0]
+            # SAFETY: All values in this f-string are hardcoded constants, not user input
             conn.execute(text(f"""
                 DO $$ BEGIN
                     ALTER TABLE warehouse_sections ADD COLUMN {col_def};
@@ -1507,6 +1513,7 @@ def _ensure_schema():
         ]
         for tbl, col_def in add_cols:
             col_name = col_def.split()[0]
+            # SAFETY: All values in this f-string are hardcoded constants, not user input
             conn.execute(text(f"""
                 DO $$ BEGIN
                     ALTER TABLE {tbl} ADD COLUMN {col_def};

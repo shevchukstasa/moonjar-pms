@@ -33,6 +33,13 @@ def _get_fernet() -> Fernet:
 
     The config value is a passphrase-style string. We pad/truncate it to
     exactly 32 bytes then base64-encode, which is what Fernet expects.
+
+    TODO(security): Replace pad/truncate with a proper KDF (e.g. PBKDF2 or
+    HKDF from cryptography.hazmat.primitives.kdf) to derive the Fernet key
+    from the passphrase. The current approach loses entropy from passphrases
+    longer than 32 bytes and has weak key material for shorter ones.
+    Migration: re-encrypt all existing totp_secret_encrypted values with the
+    new derived key, or support dual-decryption during a transition period.
     """
     import base64
     key_bytes = get_settings().TOTP_ENCRYPTION_KEY.encode("utf-8")

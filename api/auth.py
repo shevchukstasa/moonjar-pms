@@ -12,8 +12,8 @@ from datetime import datetime, timedelta, timezone
 from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import APIKeyCookie
 from sqlalchemy.orm import Session
-# TODO: Migrate from python-jose to PyJWT — python-jose is unmaintained
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError as JWTError
 import bcrypt as _bcrypt
 
 from api.config import get_settings
@@ -83,6 +83,12 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str, 
     Uses SameSite=None + Secure for cross-origin Railway deployment
     (frontend and API on separate *.up.railway.app subdomains).
     Path=/ so cookies are sent on all API requests regardless of prefix.
+
+    SECURITY NOTE: SameSite=Lax would be preferable, but the frontend and API
+    are on different subdomains (cross-origin). SameSite=Lax would prevent
+    cookies from being sent on cross-origin requests, breaking auth entirely.
+    To switch to SameSite=Lax, deploy frontend and API on the same origin
+    (e.g. via reverse proxy or custom domain).
     """
     response.set_cookie(
         key="access_token",

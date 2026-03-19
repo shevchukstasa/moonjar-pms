@@ -38,13 +38,16 @@ import { ChangeRequestsPanel } from '@/components/dashboard/ChangeRequestsPanel'
 import { NotificationsBell } from '@/components/dashboard/NotificationsBell';
 import { ColorMismatchDecisionDialog } from '@/components/positions/ColorMismatchDecisionDialog';
 import { BlockingTasksTab } from '@/components/dashboard/BlockingTasksTab';
+import { TOCZonesTab } from '@/components/dashboard/TOCZonesTab';
+import { StoneReservationTab } from '@/components/dashboard/StoneReservationTab';
+import { DefectAlertBanner } from '@/components/dashboard/DefectAlertBanner';
 import { ConsumptionAdjustmentsPanel } from '@/components/materials/ConsumptionAdjustmentsPanel';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-type DashboardTab = 'orders' | 'tasks' | 'materials' | 'defects' | 'tps' | 'toc' | 'kilns' | 'ai_chat' | 'blocking' | 'cancellations' | 'change_requests' | 'mismatch';
+type DashboardTab = 'orders' | 'tasks' | 'materials' | 'defects' | 'tps' | 'toc' | 'stone' | 'kilns' | 'ai_chat' | 'blocking' | 'cancellations' | 'change_requests' | 'mismatch';
 
 const DASHBOARD_TABS_BASE: { id: DashboardTab; label: string }[] = [
   { id: 'orders', label: 'Orders' },
@@ -53,6 +56,7 @@ const DASHBOARD_TABS_BASE: { id: DashboardTab; label: string }[] = [
   { id: 'defects', label: 'Defects' },
   { id: 'tps', label: 'TPS' },
   { id: 'toc', label: 'TOC' },
+  { id: 'stone', label: 'Stone' },
   { id: 'kilns', label: 'Kilns' },
   { id: 'ai_chat', label: 'AI Chat' },
 ];
@@ -424,6 +428,12 @@ export default function ManagerDashboard() {
         </div>
       )}
 
+      {/* Defect alert banner — quality checks pending */}
+      <DefectAlertBanner
+        factoryId={activeFactoryId ?? undefined}
+        onNavigateToTasks={() => setActiveTab('tasks')}
+      />
+
       {/* Change request alert banner — shown when requests are pending */}
       {pendingChangeRequests > 0 && activeTab !== 'change_requests' && (
         <div
@@ -475,7 +485,13 @@ export default function ManagerDashboard() {
       {activeTab === 'materials' && <MaterialsTabContent factoryId={activeFactoryId} />}
       {activeTab === 'defects' && <DefectsTabContent factoryId={activeFactoryId} />}
       {activeTab === 'tps' && <TpsTabContent factoryId={activeFactoryId} />}
-      {activeTab === 'toc' && <TocTabContent factoryId={activeFactoryId} />}
+      {activeTab === 'toc' && (
+        <div className="space-y-6">
+          <TOCZonesTab factoryId={activeFactoryId ?? undefined} />
+          <TocTabContent factoryId={activeFactoryId} />
+        </div>
+      )}
+      {activeTab === 'stone' && <StoneReservationTab factoryId={activeFactoryId ?? undefined} />}
       {activeTab === 'kilns' && <KilnsTabContent factoryId={activeFactoryId} navigate={navigate} />}
       {activeTab === 'ai_chat' && <AiChatTabContent factoryId={activeFactoryId} />}
       {activeTab === 'blocking' && <BlockingTasksTab factoryId={activeFactoryId ?? undefined} />}

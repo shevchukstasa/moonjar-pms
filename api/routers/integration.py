@@ -171,13 +171,13 @@ async def get_production_status(
     # Sales uses PMS_WEBHOOK_TOKEN (Bearer) for polling,
     # and PMS_API_KEY (X-API-Key) for sending orders
     authenticated = False
-    if x_api_key and settings.SALES_APP_API_KEY and x_api_key == settings.SALES_APP_API_KEY:
+    if x_api_key and settings.SALES_APP_API_KEY and hmac_mod.compare_digest(x_api_key, settings.SALES_APP_API_KEY):
         authenticated = True
     elif authorization and authorization.startswith("Bearer "):
         bearer = authorization[7:]
         if bearer and (
-            (settings.SALES_APP_API_KEY and bearer == settings.SALES_APP_API_KEY)
-            or (settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and bearer == settings.PRODUCTION_WEBHOOK_BEARER_TOKEN)
+            (settings.SALES_APP_API_KEY and hmac_mod.compare_digest(bearer, settings.SALES_APP_API_KEY))
+            or (settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and hmac_mod.compare_digest(bearer, settings.PRODUCTION_WEBHOOK_BEARER_TOKEN))
         ):
             authenticated = True
 
@@ -287,13 +287,13 @@ async def get_all_production_statuses(
 
     # Authenticate (same as single-order endpoint)
     authenticated = False
-    if x_api_key and settings.SALES_APP_API_KEY and x_api_key == settings.SALES_APP_API_KEY:
+    if x_api_key and settings.SALES_APP_API_KEY and hmac_mod.compare_digest(x_api_key, settings.SALES_APP_API_KEY):
         authenticated = True
     elif authorization and authorization.startswith("Bearer "):
         bearer = authorization[7:]
         if bearer and (
-            (settings.SALES_APP_API_KEY and bearer == settings.SALES_APP_API_KEY)
-            or (settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and bearer == settings.PRODUCTION_WEBHOOK_BEARER_TOKEN)
+            (settings.SALES_APP_API_KEY and hmac_mod.compare_digest(bearer, settings.SALES_APP_API_KEY))
+            or (settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and hmac_mod.compare_digest(bearer, settings.PRODUCTION_WEBHOOK_BEARER_TOKEN))
         ):
             authenticated = True
 
@@ -395,13 +395,13 @@ async def request_cancellation(
 
     # --- Auth ---
     authenticated = False
-    if x_api_key and settings.SALES_APP_API_KEY and x_api_key == settings.SALES_APP_API_KEY:
+    if x_api_key and settings.SALES_APP_API_KEY and hmac_mod.compare_digest(x_api_key, settings.SALES_APP_API_KEY):
         authenticated = True
     elif authorization and authorization.startswith("Bearer "):
         bearer = authorization[7:]
         if bearer and (
-            (settings.SALES_APP_API_KEY and bearer == settings.SALES_APP_API_KEY)
-            or (settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and bearer == settings.PRODUCTION_WEBHOOK_BEARER_TOKEN)
+            (settings.SALES_APP_API_KEY and hmac_mod.compare_digest(bearer, settings.SALES_APP_API_KEY))
+            or (settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and hmac_mod.compare_digest(bearer, settings.PRODUCTION_WEBHOOK_BEARER_TOKEN))
         ):
             authenticated = True
     if not authenticated:
@@ -515,9 +515,9 @@ async def receive_sales_order(
     bearer_token = auth_header[7:] if auth_header.startswith("Bearer ") else None
 
     authenticated = False
-    if x_api_key and settings.SALES_APP_API_KEY and x_api_key == settings.SALES_APP_API_KEY:
+    if x_api_key and settings.SALES_APP_API_KEY and hmac_mod.compare_digest(x_api_key, settings.SALES_APP_API_KEY):
         authenticated = True
-    elif bearer_token and settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and bearer_token == settings.PRODUCTION_WEBHOOK_BEARER_TOKEN:
+    elif bearer_token and settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and hmac_mod.compare_digest(bearer_token, settings.PRODUCTION_WEBHOOK_BEARER_TOKEN):
         authenticated = True
 
     if not authenticated:
@@ -533,7 +533,7 @@ async def receive_sales_order(
             bool(settings.SALES_APP_API_KEY), len(settings.SALES_APP_API_KEY or ""),
             bool(bearer_token),
             bool(settings.PRODUCTION_WEBHOOK_BEARER_TOKEN),
-            x_api_key == settings.SALES_APP_API_KEY if (x_api_key and settings.SALES_APP_API_KEY) else "N/A",
+            hmac_mod.compare_digest(x_api_key, settings.SALES_APP_API_KEY) if (x_api_key and settings.SALES_APP_API_KEY) else "N/A",
         )
         raise HTTPException(401, "Invalid API key or bearer token")
 

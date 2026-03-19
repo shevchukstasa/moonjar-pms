@@ -1,7 +1,7 @@
 """WebSocket router — authenticated real-time notifications."""
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
-from jose import JWTError
+from jwt.exceptions import PyJWTError as JWTError
 
 from api.auth import decode_token
 from api.websocket import manager

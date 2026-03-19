@@ -95,6 +95,8 @@ export const positionsApi = {
     apiClient.post(`/positions/${id}/resolve-color-mismatch`, data).then((r) => r.data),
   allowedTransitions: (id: string) =>
     apiClient.get(`/positions/${id}/allowed-transitions`).then((r) => r.data as { current_status: string; allowed: string[] }),
+  splitProduction: (id: string, data: { parts: { quantity: number; reason: string }[] }) =>
+    apiClient.post(`/positions/${id}/split-production`, data).then((r) => r.data),
 
   // --- Blocking & Reservations ---
   blockingSummary: (factoryId?: string) =>

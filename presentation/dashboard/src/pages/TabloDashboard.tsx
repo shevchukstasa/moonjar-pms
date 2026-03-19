@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useUiStore } from '@/stores/uiStore';
 import { useTabloStore } from '@/stores/tabloStore';
 import {
@@ -13,6 +14,7 @@ import { FactorySelector } from '@/components/layout/FactorySelector';
 import { SectionTable } from '@/components/tablo/SectionTable';
 import { TabloFilters } from '@/components/tablo/TabloFilters';
 import { KilnCard } from '@/components/tablo/KilnCard';
+import { ProductionSplitModal } from '@/components/tablo/ProductionSplitModal';
 import type { PositionItem } from '@/components/tablo/PositionRow';
 
 const TABLO_TABS = [
@@ -25,6 +27,7 @@ const TABLO_TABS = [
 export default function TabloDashboard() {
   const activeFactoryId = useUiStore((s) => s.activeFactoryId);
   const { activeTab, setActiveTab } = useTabloStore();
+  const [splitModalPosition, setSplitModalPosition] = useState<PositionItem | null>(null);
 
   // Fetch data for all sections
   const { data: glazingData, isLoading: glazingLoading, isError: glazingError } = useGlazingSchedule(activeFactoryId);
@@ -129,8 +132,17 @@ export default function TabloDashboard() {
           <SectionTable
             positions={sectionPositions[activeTab]}
             section={activeTab}
+            onSplitPosition={setSplitModalPosition}
           />
         )
+      )}
+
+      {/* Production Split Modal */}
+      {splitModalPosition && (
+        <ProductionSplitModal
+          position={splitModalPosition}
+          onClose={() => setSplitModalPosition(null)}
+        />
       )}
     </div>
   );

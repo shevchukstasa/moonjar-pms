@@ -466,10 +466,24 @@ def process_order_item(
         position.glazeable_sqm = _glazeable
 
     # Store application collection and method from Sales webhook.
-    # The "collection" from Sales (Authentic/Exclusive/TopTable/WashBasin/Stock)
-    # is the APPLICATION collection, not the recipe's color_collection.
+    # Sales sends: application="SS"/"BS"/"Stencil"/etc. → this IS the application method.
+    # Sales sends: collection="Authentic"/"Exclusive"/etc. → this IS the application collection.
     _app_collection = getattr(item, 'application_collection', None) or getattr(item, 'collection', None)
-    _app_method = getattr(item, 'application_method', None) or getattr(item, 'application_type', None)
+
+    # Map Sales "application" field → application_method_code
+    # Sales uses: SS, S, BS, SB, Splashing, Stencil, Silkscreen, Gold, Raku
+    _raw_app = getattr(item, 'application', None) or ''
+    APPLICATION_METHOD_MAP = {
+        'ss': 'ss', 's': 's', 'bs': 'bs', 'sb': 'sb',
+        'splashing': 'splashing', 'stencil': 'stencil',
+        'silkscreen': 'silk_screen', 'silk_screen': 'silk_screen',
+        'gold': 'gold', 'raku': 'raku',
+    }
+    _app_method = (
+        getattr(item, 'application_method', None)
+        or APPLICATION_METHOD_MAP.get(_raw_app.strip().lower())
+        or getattr(item, 'application_type', None)
+    )
 
     if hasattr(position, 'application_collection_code') and _app_collection:
         position.application_collection_code = _app_collection.strip().lower()

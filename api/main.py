@@ -1616,11 +1616,17 @@ def _ensure_schema():
         if existing > 0:
             logger.info(f"_seed_firing_profiles: {existing} profiles already exist, skipping")
             return
+        # Get first factory_id (firing_profiles.factory_id is NOT NULL)
+        fid = conn.execute(text("SELECT id FROM factories WHERE is_active = TRUE LIMIT 1")).scalar()
+        if not fid:
+            logger.warning("_seed_firing_profiles: no active factories, skipping")
+            return
         for p in _PROFILES:
+            p["factory_id"] = str(fid)
             conn.execute(text(
-                "INSERT INTO firing_profiles (id, name, target_temperature, total_duration_hours, "
+                "INSERT INTO firing_profiles (id, factory_id, name, target_temperature, total_duration_hours, "
                 "stages, match_priority, is_default, is_active) "
-                "VALUES (gen_random_uuid(), :name, :target_temperature, :total_duration_hours, "
+                "VALUES (gen_random_uuid(), :factory_id, :name, :target_temperature, :total_duration_hours, "
                 "cast(:stages as JSONB), :match_priority, :is_default, TRUE)"
             ), p)
         logger.info(f"_seed_firing_profiles: inserted {len(_PROFILES)} profiles")

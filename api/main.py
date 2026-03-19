@@ -207,6 +207,8 @@ def _ensure_schema():
         # keep entries here for any future additions only).
         # Size Resolution (MUST be in AUTOCOMMIT block — not in DO $$ transactions)
         ("positionstatus", "awaiting_size_confirmation"),
+        # Merged status for child positions merged back into parent
+        ("positionstatus", "merged"),
         ("tasktype", "size_resolution"),
     ]
     try:

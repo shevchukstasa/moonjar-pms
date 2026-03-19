@@ -20,18 +20,22 @@ export interface PositionItem {
   position_number?: number | null;
   split_index?: number | null;
   position_label?: string | null;
+  parent_position_id?: string | null;
+  is_merged?: boolean;
 }
 
 const NON_SPLITTABLE_STATUSES = ['in_kiln', 'fired'];
+const MERGEABLE_STATUSES = ['packed', 'quality_check_done', 'ready_for_shipment'];
 
 interface Props {
   position: PositionItem;
   index: number;
   section: string;
   onSplit?: (position: PositionItem) => void;
+  onMerge?: (position: PositionItem) => void;
 }
 
-export function PositionRow({ position, index, section, onSplit }: Props) {
+export function PositionRow({ position, index, section, onSplit, onMerge }: Props) {
   const delayUnit = useTabloStore((s) => s.delayUnit);
   const {
     attributes,
@@ -112,6 +116,17 @@ export function PositionRow({ position, index, section, onSplit }: Props) {
               &#9986;
             </button>
           )}
+        </td>
+      )}
+      {onMerge && position.parent_position_id && !position.is_merged && MERGEABLE_STATUSES.includes(position.status) && (
+        <td className="w-10 px-2 py-2 text-center">
+          <button
+            onClick={() => onMerge(position)}
+            className="rounded p-1 text-gray-400 hover:bg-green-50 hover:text-green-600"
+            title="Merge back into parent"
+          >
+            &#x2934;
+          </button>
         </td>
       )}
     </tr>

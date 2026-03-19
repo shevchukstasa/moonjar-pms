@@ -7,7 +7,7 @@ from decimal import Decimal
 from uuid import UUID
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
@@ -1636,3 +1636,66 @@ def get_position_split_tree(
     if not tree:
         raise HTTPException(status_code=404, detail="Position not found")
     return tree
+
+
+# ---------- Position Merge ----------
+
+@router.get("/{position_id}/mergeable-children")
+def get_mergeable_children_endpoint(
+    position_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Get list of children that can be merged back into this parent."""
+    from business.services.sorting_split import get_mergeable_children
+
+    parent = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent position not found")
+
+    children = get_mergeable_children(db, position_id)
+    return {
+        "parent_id": str(position_id),
+        "mergeable_children": [
+            {
+                "id": str(c.id),
+                "status": _ev(c.status),
+                "quantity": c.quantity,
+                "split_category": _ev(c.split_category),
+                "split_index": c.split_index,
+                "position_label": position_label(c),
+            }
+            for c in children
+        ],
+    }
+
+
+@router.post("/{position_id}/merge")
+def merge_child_position(
+    position_id: UUID,
+    child_position_id: UUID = Body(..., embed=True, description="ID of child position to merge back"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Merge a child sub-position back into parent position."""
+    from business.services.sorting_split import merge_position_back
+
+    parent = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent position not found")
+
+    child = db.query(OrderPosition).filter(OrderPosition.id == child_position_id).first()
+    if not child:
+        raise HTTPException(status_code=404, detail="Child position not found")
+
+    try:
+        result = merge_position_back(
+            db=db,
+            parent_position=parent,
+            child_position=child,
+            merged_by_id=current_user.id,
+        )
+        db.commit()
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

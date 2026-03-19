@@ -80,18 +80,22 @@ _TRANSITIONS: dict[PositionStatus, set[PositionStatus]] = {
     PositionStatus.PACKED: {
         PositionStatus.SENT_TO_QUALITY_CHECK,
         PositionStatus.READY_FOR_SHIPMENT,
+        PositionStatus.MERGED,              # child merged back into parent
     },
     PositionStatus.SENT_TO_QUALITY_CHECK: {
         PositionStatus.QUALITY_CHECK_DONE,
     },
     PositionStatus.QUALITY_CHECK_DONE: {
         PositionStatus.READY_FOR_SHIPMENT,
+        PositionStatus.MERGED,              # child merged back into parent
     },
     PositionStatus.READY_FOR_SHIPMENT: {
         PositionStatus.SHIPPED,
+        PositionStatus.MERGED,              # child merged back into parent
     },
     PositionStatus.BLOCKED_BY_QM: set(),  # dynamically returns to previous status
     PositionStatus.SHIPPED: set(),
+    PositionStatus.MERGED: set(),   # terminal: child merged back into parent
     PositionStatus.CANCELLED: set(),
 }
 

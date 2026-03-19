@@ -3,14 +3,16 @@ Stone Reservations router.
 Stone is tracked separately from BOM materials (Decision 2026-03-19).
 """
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func, case
 
 from api.database import get_db
+from api.models import StoneReservation, StoneReservationAdjustment, StoneDefectRate
 from api.roles import require_management
 from business.services.stone_reservation import (
     get_stone_defect_rate,
@@ -41,88 +43,57 @@ def list_stone_reservations(
     Returns paginated list of stone_reservations rows enriched with
     total adjustment sums.
     """
-    conditions = []
-    params: dict = {}
+    query = db.query(StoneReservation)
 
     if factory_id:
-        conditions.append("r.factory_id = :factory_id")
-        params["factory_id"] = str(factory_id)
-
+        query = query.filter(StoneReservation.factory_id == factory_id)
     if position_id:
-        conditions.append("r.position_id = :position_id")
-        params["position_id"] = str(position_id)
-
+        query = query.filter(StoneReservation.position_id == position_id)
     if status:
-        conditions.append("r.status = :status")
-        params["status"] = status
+        query = query.filter(StoneReservation.status == status)
 
-    where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-
-    count_sql = text(f"""
-        SELECT COUNT(*) FROM stone_reservations r
-        {where_clause}
-    """)
-    total = db.execute(count_sql, params).scalar() or 0
-
+    total = query.count()
     offset = (page - 1) * per_page
-    params["limit"] = per_page
-    params["offset"] = offset
-
-    rows_sql = text(f"""
-        SELECT
-            r.id,
-            r.position_id,
-            r.factory_id,
-            r.size_category,
-            r.product_type,
-            r.reserved_qty,
-            r.reserved_sqm,
-            r.stone_defect_pct,
-            r.status,
-            r.created_at,
-            r.reconciled_at,
-            COALESCE(wo.writeoff_sqm, 0)  AS total_writeoff_sqm,
-            COALESCE(ret.return_sqm,  0)  AS total_return_sqm
-        FROM stone_reservations r
-        LEFT JOIN LATERAL (
-            SELECT COALESCE(SUM(qty_sqm), 0) AS writeoff_sqm
-            FROM stone_reservation_adjustments
-            WHERE reservation_id = r.id AND type = 'writeoff'
-        ) wo ON true
-        LEFT JOIN LATERAL (
-            SELECT COALESCE(SUM(qty_sqm), 0) AS return_sqm
-            FROM stone_reservation_adjustments
-            WHERE reservation_id = r.id AND type = 'return'
-        ) ret ON true
-        {where_clause}
-        ORDER BY r.created_at DESC
-        LIMIT :limit OFFSET :offset
-    """)
 
     try:
-        results = db.execute(rows_sql, params).fetchall()
+        reservations = (
+            query
+            .order_by(StoneReservation.created_at.desc())
+            .offset(offset)
+            .limit(per_page)
+            .all()
+        )
     except Exception as e:
         logger.error("list_stone_reservations query failed: %s", e)
         raise HTTPException(status_code=500, detail="Database error listing stone reservations")
 
-    items = [
-        {
-            "id": str(row[0]),
-            "position_id": str(row[1]),
-            "factory_id": str(row[2]),
-            "size_category": row[3],
-            "product_type": row[4],
-            "reserved_qty": row[5],
-            "reserved_sqm": float(row[6]),
-            "stone_defect_pct": float(row[7]),
-            "status": row[8],
-            "created_at": row[9].isoformat() if row[9] else None,
-            "reconciled_at": row[10].isoformat() if row[10] else None,
-            "total_writeoff_sqm": float(row[11]),
-            "total_return_sqm": float(row[12]),
-        }
-        for row in results
-    ]
+    items = []
+    for r in reservations:
+        # Calculate adjustment totals from loaded relationship
+        writeoff_sqm = 0.0
+        return_sqm = 0.0
+        for adj in (r.adjustments or []):
+            val = float(adj.qty_sqm) if adj.qty_sqm else 0.0
+            if adj.type == 'writeoff':
+                writeoff_sqm += val
+            elif adj.type == 'return':
+                return_sqm += val
+
+        items.append({
+            "id": str(r.id),
+            "position_id": str(r.position_id),
+            "factory_id": str(r.factory_id),
+            "size_category": r.size_category,
+            "product_type": r.product_type,
+            "reserved_qty": r.reserved_qty,
+            "reserved_sqm": float(r.reserved_sqm),
+            "stone_defect_pct": float(r.stone_defect_pct),
+            "status": r.status,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "reconciled_at": r.reconciled_at.isoformat() if r.reconciled_at else None,
+            "total_writeoff_sqm": round(writeoff_sqm, 3),
+            "total_return_sqm": round(return_sqm, 3),
+        })
 
     return {
         "total": total,
@@ -144,52 +115,35 @@ def get_stone_reservation(
     current_user=Depends(require_management),
 ):
     """Get a single stone reservation with its adjustment log."""
-    rid = str(reservation_id)
+    r = db.query(StoneReservation).filter(StoneReservation.id == reservation_id).first()
 
-    row = db.execute(text("""
-        SELECT
-            r.id, r.position_id, r.factory_id, r.size_category, r.product_type,
-            r.reserved_qty, r.reserved_sqm, r.stone_defect_pct,
-            r.status, r.created_at, r.reconciled_at
-        FROM stone_reservations r
-        WHERE r.id = :rid
-        LIMIT 1
-    """), {"rid": rid}).fetchone()
-
-    if not row:
+    if not r:
         raise HTTPException(status_code=404, detail="Stone reservation not found")
-
-    adjustments = db.execute(text("""
-        SELECT id, type, qty_sqm, reason, created_at, created_by
-        FROM stone_reservation_adjustments
-        WHERE reservation_id = :rid
-        ORDER BY created_at ASC
-    """), {"rid": rid}).fetchall()
 
     adj_list = [
         {
-            "id": str(a[0]),
-            "type": a[1],
-            "qty_sqm": float(a[2]),
-            "reason": a[3],
-            "created_at": a[4].isoformat() if a[4] else None,
-            "created_by": str(a[5]) if a[5] else None,
+            "id": str(a.id),
+            "type": a.type,
+            "qty_sqm": float(a.qty_sqm),
+            "reason": a.reason,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+            "created_by": str(a.created_by) if a.created_by else None,
         }
-        for a in adjustments
+        for a in sorted(r.adjustments or [], key=lambda x: x.created_at or datetime.min.replace(tzinfo=timezone.utc))
     ]
 
     return {
-        "id": str(row[0]),
-        "position_id": str(row[1]),
-        "factory_id": str(row[2]),
-        "size_category": row[3],
-        "product_type": row[4],
-        "reserved_qty": row[5],
-        "reserved_sqm": float(row[6]),
-        "stone_defect_pct": float(row[7]),
-        "status": row[8],
-        "created_at": row[9].isoformat() if row[9] else None,
-        "reconciled_at": row[10].isoformat() if row[10] else None,
+        "id": str(r.id),
+        "position_id": str(r.position_id),
+        "factory_id": str(r.factory_id),
+        "size_category": r.size_category,
+        "product_type": r.product_type,
+        "reserved_qty": r.reserved_qty,
+        "reserved_sqm": float(r.reserved_sqm),
+        "stone_defect_pct": float(r.stone_defect_pct),
+        "status": r.status,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "reconciled_at": r.reconciled_at.isoformat() if r.reconciled_at else None,
         "adjustments": adj_list,
     }
 
@@ -232,35 +186,36 @@ def get_defect_rates(
     Factory-specific rows take precedence over global in the service layer.
     """
     try:
+        query = db.query(StoneDefectRate)
         if factory_id:
-            rows = db.execute(text("""
-                SELECT id, factory_id, size_category, product_type, defect_pct, updated_at, updated_by
-                FROM stone_defect_rates
-                WHERE factory_id = :fid OR factory_id IS NULL
-                ORDER BY
-                    CASE WHEN factory_id IS NOT NULL THEN 0 ELSE 1 END,
-                    size_category, product_type
-            """), {"fid": str(factory_id)}).fetchall()
+            query = query.filter(
+                (StoneDefectRate.factory_id == factory_id) | (StoneDefectRate.factory_id.is_(None))
+            ).order_by(
+                case((StoneDefectRate.factory_id.isnot(None), 0), else_=1),
+                StoneDefectRate.size_category,
+                StoneDefectRate.product_type,
+            )
         else:
-            rows = db.execute(text("""
-                SELECT id, factory_id, size_category, product_type, defect_pct, updated_at, updated_by
-                FROM stone_defect_rates
-                WHERE factory_id IS NULL
-                ORDER BY size_category, product_type
-            """)).fetchall()
+            query = query.filter(
+                StoneDefectRate.factory_id.is_(None)
+            ).order_by(
+                StoneDefectRate.size_category,
+                StoneDefectRate.product_type,
+            )
+        rows = query.all()
     except Exception as e:
         logger.error("get_defect_rates failed: %s", e)
         raise HTTPException(status_code=500, detail="Database error fetching defect rates")
 
     return [
         {
-            "id": str(r[0]),
-            "factory_id": str(r[1]) if r[1] else None,
-            "size_category": r[2],
-            "product_type": r[3],
-            "defect_pct": float(r[4]),
-            "updated_at": r[5].isoformat() if r[5] else None,
-            "updated_by": str(r[6]) if r[6] else None,
+            "id": str(r.id),
+            "factory_id": str(r.factory_id) if r.factory_id else None,
+            "size_category": r.size_category,
+            "product_type": r.product_type,
+            "defect_pct": float(r.defect_pct),
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            "updated_by": str(r.updated_by) if r.updated_by else None,
         }
         for r in rows
     ]
@@ -298,43 +253,49 @@ def update_defect_rate(
             detail=f"product_type must be one of {sorted(valid_product_types)}",
         )
 
-    fid = str(factory_id) if factory_id else None
-    by_id = str(current_user.id) if hasattr(current_user, "id") else None
+    by_id = current_user.id if hasattr(current_user, "id") else None
 
     try:
-        if fid:
-            # Factory-specific upsert
-            db.execute(text("""
-                INSERT INTO stone_defect_rates
-                    (factory_id, size_category, product_type, defect_pct, updated_at, updated_by)
-                VALUES (:fid, :sc, :pt, :pct, NOW(), :by_id)
-                ON CONFLICT (factory_id, size_category, product_type)
-                DO UPDATE SET
-                    defect_pct = EXCLUDED.defect_pct,
-                    updated_at = NOW(),
-                    updated_by = EXCLUDED.updated_by
-            """), {"fid": fid, "sc": size_category, "pt": product_type, "pct": defect_pct, "by_id": by_id})
-        else:
-            # Global row — unique constraint on (factory_id IS NULL, sc, pt)
-            # PostgreSQL UNIQUE treats NULLs as distinct, so use manual approach:
-            existing = db.execute(text("""
-                SELECT id FROM stone_defect_rates
-                WHERE factory_id IS NULL AND size_category = :sc AND product_type = :pt
-                LIMIT 1
-            """), {"sc": size_category, "pt": product_type}).fetchone()
+        if factory_id:
+            # Factory-specific: use ORM upsert approach
+            existing = db.query(StoneDefectRate).filter(
+                StoneDefectRate.factory_id == factory_id,
+                StoneDefectRate.size_category == size_category,
+                StoneDefectRate.product_type == product_type,
+            ).first()
 
             if existing:
-                db.execute(text("""
-                    UPDATE stone_defect_rates
-                    SET defect_pct = :pct, updated_at = NOW(), updated_by = :by_id
-                    WHERE id = :rid
-                """), {"pct": defect_pct, "by_id": by_id, "rid": str(existing[0])})
+                existing.defect_pct = defect_pct
+                existing.updated_at = datetime.now(timezone.utc)
+                existing.updated_by = by_id
             else:
-                db.execute(text("""
-                    INSERT INTO stone_defect_rates
-                        (factory_id, size_category, product_type, defect_pct, updated_at, updated_by)
-                    VALUES (NULL, :sc, :pt, :pct, NOW(), :by_id)
-                """), {"sc": size_category, "pt": product_type, "pct": defect_pct, "by_id": by_id})
+                db.add(StoneDefectRate(
+                    factory_id=factory_id,
+                    size_category=size_category,
+                    product_type=product_type,
+                    defect_pct=defect_pct,
+                    updated_by=by_id,
+                ))
+        else:
+            # Global row — factory_id IS NULL (PostgreSQL UNIQUE treats NULLs as distinct)
+            existing = db.query(StoneDefectRate).filter(
+                StoneDefectRate.factory_id.is_(None),
+                StoneDefectRate.size_category == size_category,
+                StoneDefectRate.product_type == product_type,
+            ).first()
+
+            if existing:
+                existing.defect_pct = defect_pct
+                existing.updated_at = datetime.now(timezone.utc)
+                existing.updated_by = by_id
+            else:
+                db.add(StoneDefectRate(
+                    factory_id=None,
+                    size_category=size_category,
+                    product_type=product_type,
+                    defect_pct=defect_pct,
+                    updated_by=by_id,
+                ))
 
         db.commit()
     except Exception as e:
@@ -342,14 +303,17 @@ def update_defect_rate(
         logger.error("update_defect_rate failed: %s", e)
         raise HTTPException(status_code=500, detail="Database error updating defect rate")
 
+    fid_str = str(factory_id) if factory_id else None
+    by_id_str = str(by_id) if by_id else None
+
     logger.info(
         "DEFECT_RATE_UPDATED | factory=%s | %s/%s | pct=%.4f | by=%s",
-        fid, size_category, product_type, defect_pct, by_id,
+        fid_str, size_category, product_type, defect_pct, by_id_str,
     )
 
     return {
         "ok": True,
-        "factory_id": fid,
+        "factory_id": fid_str,
         "size_category": size_category,
         "product_type": product_type,
         "defect_pct": defect_pct,

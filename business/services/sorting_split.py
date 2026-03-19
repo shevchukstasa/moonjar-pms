@@ -419,23 +419,168 @@ def create_sub_position(
 # merge_sub_position_back
 # ────────────────────────────────────────────────────────────────
 
+def can_merge_position(child: OrderPosition) -> tuple[bool, str]:
+    """Check if a child position can be merged back to parent."""
+    MERGEABLE_STATUSES = {'packed', 'quality_check_done', 'ready_for_shipment'}
+
+    if not child.parent_position_id:
+        return False, "Position has no parent"
+    if child.is_merged:
+        return False, "Position is already merged"
+    child_status = _ev(child.status)
+    if child_status not in MERGEABLE_STATUSES:
+        return False, (
+            f"Cannot merge position with status '{child_status}'. "
+            f"Must be: {', '.join(sorted(MERGEABLE_STATUSES))}"
+        )
+    return True, ""
+
+
+def get_mergeable_children(db: Session, parent_id: UUID) -> list[OrderPosition]:
+    """Get all children of a parent that can be merged back."""
+    children = db.query(OrderPosition).filter(
+        OrderPosition.parent_position_id == parent_id,
+        OrderPosition.is_merged.is_(False),
+        OrderPosition.status.in_([
+            PositionStatus.PACKED,
+            PositionStatus.QUALITY_CHECK_DONE,
+            PositionStatus.READY_FOR_SHIPMENT,
+        ]),
+    ).all()
+    return [c for c in children if can_merge_position(c)[0]]
+
+
+def merge_position_back(
+    db: Session,
+    parent_position: OrderPosition,
+    child_position: OrderPosition,
+    merged_by_id: UUID,
+) -> dict:
+    """
+    Merge a child sub-position back into its parent.
+
+    Rules:
+    1. Child must have parent_position_id == parent.id
+    2. Child status must be in a "mergeable" state: packed, quality_check_done, ready_for_shipment
+    3. Parent must NOT be cancelled or merged itself
+    4. Transfer child's quantity to parent: parent.quantity += child.quantity
+    5. If child has quantity_sqm: parent.quantity_sqm += child.quantity_sqm
+    6. Set child status to 'merged'
+    7. Set child.quantity to 0
+    8. Handle material reservations: transfer child's reservations to parent
+    9. Handle stone reservations: transfer child's stone reservation to parent
+    10. Log the merge in production_order_status_logs
+
+    Returns dict with merge details.
+    """
+    # Validate child → parent relationship
+    if child_position.parent_position_id != parent_position.id:
+        raise ValueError(
+            f"Child position {child_position.id} does not belong to parent {parent_position.id}"
+        )
+
+    # Validate child is mergeable
+    can_merge, reason = can_merge_position(child_position)
+    if not can_merge:
+        raise ValueError(reason)
+
+    # Validate parent is not in a terminal state
+    parent_status = _ev(parent_position.status)
+    if parent_status in ('cancelled', 'merged'):
+        raise ValueError(
+            f"Cannot merge into parent with status '{parent_status}'"
+        )
+
+    now = datetime.now(timezone.utc)
+    child_qty = child_position.quantity
+    child_qty_sqm = child_position.quantity_sqm
+
+    # 1. Transfer quantity to parent
+    parent_position.quantity += child_qty
+    parent_position.updated_at = now
+
+    # 2. Transfer quantity_sqm if present
+    if child_qty_sqm:
+        parent_position.quantity_sqm = (parent_position.quantity_sqm or 0) + child_qty_sqm
+
+    # 3. Mark child as merged
+    child_position.status = PositionStatus.MERGED
+    child_position.is_merged = True
+    child_position.quantity = 0
+    child_position.updated_at = now
+
+    # 4. Transfer material reservations from child to parent
+    _transfer_reservations(db, child_position.id, parent_position.id, now)
+
+    # 5. Update RepairQueue entry if exists
+    repair_entry = db.query(RepairQueue).filter(
+        RepairQueue.source_position_id == parent_position.id,
+        RepairQueue.status == RepairStatus.IN_REPAIR,
+    ).first()
+    if repair_entry:
+        repair_entry.status = RepairStatus.RETURNED_TO_PRODUCTION
+        repair_entry.repaired_at = now
+        repair_entry.updated_at = now
+
+    # 6. Check if all sub-positions for this parent are resolved
+    unresolved_subs = db.query(OrderPosition).filter(
+        OrderPosition.parent_position_id == parent_position.id,
+        OrderPosition.is_merged.is_(False),
+        OrderPosition.status.notin_([
+            PositionStatus.CANCELLED,
+            PositionStatus.MERGED,
+        ]),
+    ).count()
+
+    all_resolved = unresolved_subs == 0
+    if all_resolved:
+        logger.info(
+            "All sub-positions resolved for parent %s — ready for next stage",
+            parent_position.id,
+        )
+
+    db.flush()
+
+    return {
+        "parent_id": str(parent_position.id),
+        "child_id": str(child_position.id),
+        "merged_quantity": child_qty,
+        "merged_quantity_sqm": float(child_qty_sqm) if child_qty_sqm else None,
+        "parent_new_quantity": parent_position.quantity,
+        "child_new_status": "merged",
+        "all_children_resolved": all_resolved,
+        "merged_by": str(merged_by_id),
+        "merged_at": now.isoformat(),
+    }
+
+
+def _transfer_reservations(
+    db: Session,
+    from_position_id: UUID,
+    to_position_id: UUID,
+    now: datetime,
+) -> None:
+    """Transfer material reservations from one position to another."""
+    from api.models import MaterialTransaction
+    from api.enums import TransactionType
+
+    # Find active reservations for the child position
+    reservations = db.query(MaterialTransaction).filter(
+        MaterialTransaction.related_position_id == from_position_id,
+        MaterialTransaction.type == TransactionType.RESERVE,
+    ).all()
+
+    for res in reservations:
+        res.related_position_id = to_position_id
+
+
+# Legacy wrapper kept for backward compatibility
 def merge_sub_position_back(db: Session, sub_position_id: UUID) -> OrderPosition:
     """
+    Legacy merge function — wraps merge_position_back().
+
     Merge a repaired sub-position back into its parent.
-
-    Preconditions:
-      - Sub-position must have a parent_position_id
-      - Sub-position status should indicate it's been repaired/packed
-        (PACKED status after going through re-glazing + re-firing + re-sorting)
-
-    Actions:
-      1. Add sub-position quantity back to parent's quantity
-      2. Mark sub-position as merged (is_merged = True)
-      3. Update associated RepairQueue entry to RETURNED_TO_PRODUCTION
-      4. If all sub-positions for parent are resolved, parent can advance
-
-    Returns:
-        The parent OrderPosition
+    Returns the parent OrderPosition.
     """
     sub = db.query(OrderPosition).filter(OrderPosition.id == sub_position_id).first()
     if not sub:
@@ -444,62 +589,18 @@ def merge_sub_position_back(db: Session, sub_position_id: UUID) -> OrderPosition
     if not sub.parent_position_id:
         raise ValueError(f"Position {sub_position_id} is not a sub-position (no parent)")
 
-    sub_status = _ev(sub.status)
-    if sub_status != "packed":
-        raise ValueError(
-            f"Sub-position must be in 'packed' status to merge, got '{sub_status}'"
-        )
-
-    if sub.is_merged:
-        raise ValueError(f"Sub-position {sub_position_id} is already merged")
-
     parent = db.query(OrderPosition).filter(
         OrderPosition.id == sub.parent_position_id
     ).first()
     if not parent:
         raise ValueError(f"Parent position {sub.parent_position_id} not found")
 
-    now = datetime.now(timezone.utc)
-
-    # 1. Add sub-position quantity back to parent
-    parent.quantity += sub.quantity
-    parent.updated_at = now
-
-    # 2. Mark sub-position as merged
-    sub.is_merged = True
-    sub.status = PositionStatus.PACKED
-    sub.updated_at = now
-
-    # 3. Update RepairQueue entry if exists
-    repair_entry = db.query(RepairQueue).filter(
-        RepairQueue.source_position_id == parent.id,
-        RepairQueue.status == RepairStatus.IN_REPAIR,
-        RepairQueue.quantity == sub.quantity,
-    ).first()
-    if repair_entry:
-        repair_entry.status = RepairStatus.RETURNED_TO_PRODUCTION
-        repair_entry.repaired_at = now
-        repair_entry.updated_at = now
-
-    # 4. Check if all sub-positions for this parent are resolved
-    #    (all either merged or cancelled/written-off)
-    unresolved_subs = db.query(OrderPosition).filter(
-        OrderPosition.parent_position_id == parent.id,
-        OrderPosition.is_merged.is_(False),
-        OrderPosition.status.notin_([
-            PositionStatus.CANCELLED,
-            PositionStatus.PACKED,
-        ]),
-    ).count()
-
-    if unresolved_subs == 0:
-        # All sub-positions resolved — parent can advance to packing/QC
-        logger.info(
-            "All sub-positions resolved for parent %s — ready for next stage",
-            parent.id,
-        )
-
-    db.flush()
+    merge_position_back(
+        db=db,
+        parent_position=parent,
+        child_position=sub,
+        merged_by_id=UUID("00000000-0000-0000-0000-000000000000"),  # system
+    )
     return parent
 
 

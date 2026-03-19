@@ -98,6 +98,12 @@ export const positionsApi = {
   splitProduction: (id: string, data: { parts: { quantity: number; reason: string }[] }) =>
     apiClient.post(`/positions/${id}/split-production`, data).then((r) => r.data),
 
+  // --- Merge ---
+  mergeChild: (parentId: string, childId: string) =>
+    apiClient.post(`/positions/${parentId}/merge`, { child_position_id: childId }).then((r) => r.data),
+  getMergeableChildren: (parentId: string) =>
+    apiClient.get(`/positions/${parentId}/mergeable-children`).then((r) => r.data),
+
   // --- Blocking & Reservations ---
   blockingSummary: (factoryId?: string) =>
     apiClient.get<BlockingSummaryResponse>('/positions/blocking-summary', {

@@ -50,14 +50,14 @@ def get_service_lead_time(db: Session, factory_id: UUID, service_type: str) -> i
 
     Returns number of days (integer >= 0).
     """
+    from api.models import ServiceLeadTime
     try:
-        row = db.execute(text("""
-            SELECT lead_time_days FROM service_lead_times
-            WHERE factory_id = :fid AND service_type = :stype
-            LIMIT 1
-        """), {'fid': str(factory_id), 'stype': service_type}).fetchone()
+        row = db.query(ServiceLeadTime).filter(
+            ServiceLeadTime.factory_id == factory_id,
+            ServiceLeadTime.service_type == service_type,
+        ).first()
         if row:
-            return int(row[0])
+            return int(row.lead_time_days)
     except Exception as exc:
         logger.debug("get_service_lead_time fallback to default: %s", exc)
     return DEFAULT_LEAD_TIMES.get(service_type, 3)

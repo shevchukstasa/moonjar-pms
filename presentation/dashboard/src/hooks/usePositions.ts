@@ -108,6 +108,20 @@ export function useResolveColorMismatch() {
 }
 
 
+// ─── Position Merge ───────────────────────────────────────────
+
+export function useMergePosition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ parentId, childId }: { parentId: string; childId: string }) =>
+      positionsApi.mergeChild(parentId, childId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+    },
+  });
+}
+
 // ─── Blocking & Material Reservations ─────────────────────────
 
 export function useBlockingSummary(factoryId?: string) {

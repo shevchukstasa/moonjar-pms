@@ -44,6 +44,7 @@ class PositionStatus(str, Enum):
     READY_FOR_SHIPMENT = 'ready_for_shipment'
     BLOCKED_BY_QM = 'blocked_by_qm'
     SHIPPED = 'shipped'
+    MERGED = 'merged'
     CANCELLED = 'cancelled'
 
 class OrderStatus(str, Enum):

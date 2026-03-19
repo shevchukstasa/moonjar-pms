@@ -2077,6 +2077,99 @@ class EdgeHeightRule(Base):
     factory = relationship('Factory', foreign_keys=[factory_id])
 
 
+# ──────────────────────────────────────────────────────────────────
+# Stone Reservation tables (previously raw SQL only)
+# ──────────────────────────────────────────────────────────────────
+
+class StoneDefectRate(Base):
+    __tablename__ = 'stone_defect_rates'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=True)
+    size_category = Column(sa.String(20), nullable=False)
+    product_type = Column(sa.String(50), nullable=False)
+    defect_pct = Column(sa.Numeric(5, 4), nullable=False)
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('factory_id', 'size_category', 'product_type'),
+    )
+
+
+class StoneReservation(Base):
+    __tablename__ = 'stone_reservations'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id', ondelete='CASCADE'), nullable=False)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    size_category = Column(sa.String(20), nullable=False)
+    product_type = Column(sa.String(50), nullable=False)
+    reserved_qty = Column(sa.Integer, nullable=False)
+    reserved_sqm = Column(sa.Numeric(10, 3), nullable=False)
+    stone_defect_pct = Column(sa.Numeric(5, 4), nullable=False)
+    status = Column(sa.String(20), nullable=False, server_default='active')
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    reconciled_at = Column(sa.DateTime(timezone=True), nullable=True)
+
+    position = relationship('OrderPosition', foreign_keys=[position_id])
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    adjustments = relationship('StoneReservationAdjustment', back_populates='reservation')
+
+
+class StoneReservationAdjustment(Base):
+    __tablename__ = 'stone_reservation_adjustments'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    reservation_id = Column(UUID(as_uuid=True), ForeignKey('stone_reservations.id', ondelete='CASCADE'), nullable=False)
+    type = Column(sa.String(20), nullable=False)
+    qty_sqm = Column(sa.Numeric(10, 3), nullable=False)
+    reason = Column(sa.Text, nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    created_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+
+    reservation = relationship('StoneReservation', back_populates='adjustments')
+    user = relationship('User', foreign_keys=[created_by])
+
+
+# ──────────────────────────────────────────────────────────────────
+# Production Defects (defect coefficient system)
+# ──────────────────────────────────────────────────────────────────
+
+class ProductionDefect(Base):
+    __tablename__ = 'production_defects'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id'), nullable=True)
+    glaze_type = Column(sa.String(50), nullable=True)
+    product_type = Column(sa.String(50), nullable=True)
+    total_quantity = Column(sa.Integer, nullable=False)
+    defect_quantity = Column(sa.Integer, nullable=False)
+    defect_pct = Column(sa.Numeric(5, 4), nullable=True)
+    fired_at = Column(sa.Date, nullable=False, server_default=sa.text("CURRENT_DATE"))
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+
+# ──────────────────────────────────────────────────────────────────
+# Service Lead Times (service blocking timing)
+# ──────────────────────────────────────────────────────────────────
+
+class ServiceLeadTime(Base):
+    __tablename__ = 'service_lead_times'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    service_type = Column(sa.String(50), nullable=False)
+    lead_time_days = Column(sa.Integer, nullable=False, server_default=sa.text("3"))
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('factory_id', 'service_type'),
+    )
+
+
 class PurchaseConsolidationSetting(Base):
     __tablename__ = 'purchase_consolidation_settings'
 

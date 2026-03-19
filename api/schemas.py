@@ -2874,3 +2874,71 @@ class RecipeFiringStagesBulkUpdate(BaseModel):
     """Replace all firing stages for a recipe."""
     stages: list[RecipeFiringStageCreate]
 
+
+# --- Stone Reservations ---
+
+class StoneReservationResponse(BaseModel):
+    id: str
+    position_id: str
+    factory_id: str
+    size_category: str
+    product_type: str
+    reserved_qty: int
+    reserved_sqm: float
+    stone_defect_pct: float
+    status: str
+    created_at: Optional[datetime] = None
+    reconciled_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StoneReservationAdjustmentResponse(BaseModel):
+    id: str
+    reservation_id: str
+    type: str
+    qty_sqm: float
+    reason: Optional[str] = None
+    created_at: Optional[datetime] = None
+    created_by: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StoneDefectRateResponse(BaseModel):
+    id: str
+    factory_id: Optional[str] = None
+    size_category: str
+    product_type: str
+    defect_pct: float
+    updated_at: Optional[datetime] = None
+    updated_by: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProductionDefectResponse(BaseModel):
+    id: str
+    factory_id: str
+    position_id: Optional[str] = None
+    glaze_type: Optional[str] = None
+    product_type: Optional[str] = None
+    total_quantity: int
+    defect_quantity: int
+    defect_pct: Optional[float] = None
+    fired_at: Optional[date] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ServiceLeadTimeResponse(BaseModel):
+    id: str
+    factory_id: str
+    service_type: str
+    lead_time_days: int
+    updated_at: Optional[datetime] = None
+    updated_by: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+

@@ -6,6 +6,8 @@ Endpoints:
 - PUT  /settings/service-lead-times/{factory_id}      — update lead times (admin)
 - POST /settings/service-lead-times/{factory_id}/reset-defaults  — reset to defaults (admin)
 """
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query, Body, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -14,6 +16,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from api.database import get_db
+from api.models import ServiceLeadTime
 from api.roles import require_management, require_admin
 
 router = APIRouter(tags=["settings"])
@@ -55,14 +58,11 @@ def get_service_lead_times(
     """
     from business.services.service_blocking import DEFAULT_LEAD_TIMES
 
-    rows = db.execute(text("""
-        SELECT service_type, lead_time_days
-        FROM service_lead_times
-        WHERE factory_id = :fid
-        ORDER BY service_type
-    """), {'fid': str(factory_id)}).fetchall()
+    rows = db.query(ServiceLeadTime).filter(
+        ServiceLeadTime.factory_id == factory_id
+    ).order_by(ServiceLeadTime.service_type).all()
 
-    db_values = {r[0]: r[1] for r in rows}
+    db_values = {r.service_type: r.lead_time_days for r in rows}
     lead_times = []
     for stype, default_days in DEFAULT_LEAD_TIMES.items():
         lead_times.append(ServiceLeadTimeDetail(
@@ -106,20 +106,22 @@ def update_service_lead_times(
         )
 
     for item in items:
-        db.execute(text("""
-            INSERT INTO service_lead_times (factory_id, service_type, lead_time_days, updated_by)
-            VALUES (:fid, :stype, :days, :uid)
-            ON CONFLICT (factory_id, service_type)
-            DO UPDATE SET
-                lead_time_days = EXCLUDED.lead_time_days,
-                updated_at = NOW(),
-                updated_by = EXCLUDED.updated_by
-        """), {
-            'fid': str(factory_id),
-            'stype': item.service_type,
-            'days': item.lead_time_days,
-            'uid': str(current_user.id),
-        })
+        existing = db.query(ServiceLeadTime).filter(
+            ServiceLeadTime.factory_id == factory_id,
+            ServiceLeadTime.service_type == item.service_type,
+        ).first()
+
+        if existing:
+            existing.lead_time_days = item.lead_time_days
+            existing.updated_at = datetime.now(timezone.utc)
+            existing.updated_by = current_user.id
+        else:
+            db.add(ServiceLeadTime(
+                factory_id=factory_id,
+                service_type=item.service_type,
+                lead_time_days=item.lead_time_days,
+                updated_by=current_user.id,
+            ))
 
     db.commit()
 
@@ -139,12 +141,10 @@ def reset_service_lead_times_to_defaults(
     """
     Delete all custom lead times for the factory, reverting to system defaults.
     """
-    result = db.execute(
-        text("DELETE FROM service_lead_times WHERE factory_id = :fid"),
-        {'fid': str(factory_id)},
-    )
+    deleted_count = db.query(ServiceLeadTime).filter(
+        ServiceLeadTime.factory_id == factory_id
+    ).delete()
     db.commit()
-    deleted_count = result.rowcount if hasattr(result, 'rowcount') else 0
     return {
         "status": "reset",
         "factory_id": str(factory_id),

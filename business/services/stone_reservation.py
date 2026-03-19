@@ -111,46 +111,47 @@ def get_stone_defect_rate(
 
     Returns defect rate as a fraction (e.g. 0.05 = 5%).
     """
-    fid = str(factory_id)
+    from api.models import StoneDefectRate
+
     pt = product_type.lower().strip()
     sc = size_category.lower().strip()
 
     try:
         # 1. Factory-specific exact
-        row = db.execute(text("""
-            SELECT defect_pct FROM stone_defect_rates
-            WHERE factory_id = :fid AND size_category = :sc AND product_type = :pt
-            LIMIT 1
-        """), {"fid": fid, "sc": sc, "pt": pt}).fetchone()
+        row = db.query(StoneDefectRate).filter(
+            StoneDefectRate.factory_id == factory_id,
+            StoneDefectRate.size_category == sc,
+            StoneDefectRate.product_type == pt,
+        ).first()
         if row:
-            return float(row[0])
+            return float(row.defect_pct)
 
         # 2. Factory-specific 'any' size_category
-        row = db.execute(text("""
-            SELECT defect_pct FROM stone_defect_rates
-            WHERE factory_id = :fid AND size_category = 'any' AND product_type = :pt
-            LIMIT 1
-        """), {"fid": fid, "pt": pt}).fetchone()
+        row = db.query(StoneDefectRate).filter(
+            StoneDefectRate.factory_id == factory_id,
+            StoneDefectRate.size_category == 'any',
+            StoneDefectRate.product_type == pt,
+        ).first()
         if row:
-            return float(row[0])
+            return float(row.defect_pct)
 
         # 3. Global (factory_id IS NULL) exact
-        row = db.execute(text("""
-            SELECT defect_pct FROM stone_defect_rates
-            WHERE factory_id IS NULL AND size_category = :sc AND product_type = :pt
-            LIMIT 1
-        """), {"sc": sc, "pt": pt}).fetchone()
+        row = db.query(StoneDefectRate).filter(
+            StoneDefectRate.factory_id.is_(None),
+            StoneDefectRate.size_category == sc,
+            StoneDefectRate.product_type == pt,
+        ).first()
         if row:
-            return float(row[0])
+            return float(row.defect_pct)
 
         # 4. Global 'any' size_category
-        row = db.execute(text("""
-            SELECT defect_pct FROM stone_defect_rates
-            WHERE factory_id IS NULL AND size_category = 'any' AND product_type = :pt
-            LIMIT 1
-        """), {"pt": pt}).fetchone()
+        row = db.query(StoneDefectRate).filter(
+            StoneDefectRate.factory_id.is_(None),
+            StoneDefectRate.size_category == 'any',
+            StoneDefectRate.product_type == pt,
+        ).first()
         if row:
-            return float(row[0])
+            return float(row.defect_pct)
 
     except Exception as e:
         logger.warning("stone_defect_rate DB lookup failed: %s", e)

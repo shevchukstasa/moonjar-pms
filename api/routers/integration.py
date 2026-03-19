@@ -1035,6 +1035,7 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
             width_cm=item_data.get("width_cm"),
             depth_cm=item_data.get("depth_cm"),
             bowl_shape=item_data.get("bowl_shape"),
+            shape_dimensions=item_data.get("shape_dimensions"),
             # Application method system (from Sales app v2)
             application_collection=item_data.get("application_collection"),
             application_method=item_data.get("application_method"),

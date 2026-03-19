@@ -12,15 +12,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { SizeItem } from '@/api/sizes';
 import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
 import { CSV_CONFIGS } from '@/config/csvImportConfigs';
-
-const SHAPES = [
-  { value: 'rectangle', label: 'Rectangle' },
-  { value: 'square', label: 'Square' },
-  { value: 'round', label: 'Round' },
-  { value: 'freeform', label: 'Freeform' },
-  { value: 'triangle', label: 'Triangle' },
-  { value: 'octagon', label: 'Octagon' },
-];
+import {
+  ShapeDimensionEditor,
+  SHAPE_DEFINITIONS,
+  getShapeDefinition,
+} from '@/components/shared/ShapeDimensionEditor';
 
 interface SizeForm {
   name: string;
@@ -28,6 +24,8 @@ interface SizeForm {
   height_mm: string;
   thickness_mm: string;
   shape: string;
+  shape_dimensions: Record<string, number>;
+  calculated_area_cm2: number;
   is_custom: boolean;
 }
 
@@ -37,6 +35,8 @@ const emptyForm: SizeForm = {
   height_mm: '',
   thickness_mm: '',
   shape: 'rectangle',
+  shape_dimensions: {},
+  calculated_area_cm2: 0,
   is_custom: false,
 };
 
@@ -73,12 +73,30 @@ export default function AdminSizesPage() {
 
   const openEdit = useCallback((item: SizeItem) => {
     setEditItem(item);
+    // Reconstruct shape_dimensions from width_mm/height_mm if not stored separately
+    const shape = item.shape || 'rectangle';
+    const shapeDef = getShapeDefinition(shape);
+    const dims: Record<string, number> = (item as unknown as Record<string, unknown>).shape_dimensions as Record<string, number> ?? {};
+    // If no shape_dimensions stored, build from width/height (legacy sizes)
+    if (Object.keys(dims).length === 0 && shapeDef) {
+      if (shape === 'rectangle') {
+        dims.width = item.width_mm / 10;
+        dims.height = item.height_mm / 10;
+      } else if (shape === 'square') {
+        dims.side = item.width_mm / 10;
+      } else if (shape === 'circle' || shape === 'semicircle') {
+        dims.diameter = item.width_mm / 10;
+      }
+    }
+    const area = shapeDef?.area(dims) ?? 0;
     setForm({
       name: item.name,
       width_mm: String(item.width_mm),
       height_mm: String(item.height_mm),
       thickness_mm: item.thickness_mm != null ? String(item.thickness_mm) : '',
-      shape: item.shape || 'rectangle',
+      shape,
+      shape_dimensions: dims,
+      calculated_area_cm2: area ?? 0,
       is_custom: item.is_custom,
     });
     setErrorMsg('');
@@ -102,6 +120,8 @@ export default function AdminSizesPage() {
       height_mm: h,
       thickness_mm: t ?? null,
       shape: form.shape,
+      shape_dimensions: Object.keys(form.shape_dimensions).length > 0 ? form.shape_dimensions : undefined,
+      calculated_area_cm2: form.calculated_area_cm2 > 0 ? form.calculated_area_cm2 : undefined,
       is_custom: form.is_custom,
     };
 
@@ -169,7 +189,8 @@ export default function AdminSizesPage() {
         key: 'shape',
         header: 'Shape',
         render: (s: SizeItem) => {
-          const label = SHAPES.find((sh) => sh.value === s.shape)?.label || s.shape || '—';
+          const def = s.shape ? getShapeDefinition(s.shape) : null;
+          const label = def ? `${def.icon} ${def.label}` : s.shape || '\u2014';
           return <Badge status="active" label={label} />;
         },
       },
@@ -300,20 +321,13 @@ export default function AdminSizesPage() {
               placeholder="—"
             />
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Shape</label>
-            <select
-              value={form.shape}
-              onChange={(e) => setForm({ ...form, shape: e.target.value })}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-            >
-              {SHAPES.map((sh) => (
-                <option key={sh.value} value={sh.value}>
-                  {sh.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <ShapeDimensionEditor
+            shape={form.shape}
+            dimensions={form.shape_dimensions}
+            onChange={(newShape, newDims, newArea) =>
+              setForm({ ...form, shape: newShape, shape_dimensions: newDims, calculated_area_cm2: newArea })
+            }
+          />
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"

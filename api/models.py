@@ -312,6 +312,7 @@ class ProductionOrderItem(Base):
     width_cm = Column(sa.Numeric(7, 2))
     depth_cm = Column(sa.Numeric(7, 2))  # sinks only
     bowl_shape = Column(sa.String(20))   # sinks only: parallelepiped, half_oval, other
+    shape_dimensions = Column(sa.JSON, nullable=True)  # Shape-specific measurements (JSONB)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     order = relationship('ProductionOrder', foreign_keys=[order_id])
@@ -620,6 +621,11 @@ class OrderPosition(Base):
     width_cm = Column(sa.Numeric(7, 2))              # Width in cm
     depth_cm = Column(sa.Numeric(7, 2))              # Depth in cm (sinks only)
     bowl_shape = Column(sa.String(20))               # Bowl shape: parallelepiped/half_oval/other (sinks)
+    shape_dimensions = Column(sa.JSON, nullable=True)  # Shape-specific measurements (JSONB), e.g.:
+    # triangle: {"side_a_cm": 10, "side_b_cm": 10, "side_c_cm": 14.14}
+    # octagon: {"width_cm": 15, "height_cm": 15, "cut_cm": 2.5}
+    # circle: {"diameter_cm": 20}
+    # freeform: {"manual_area_cm2": 150.5}
     glazeable_sqm = Column(sa.Numeric(10, 4))        # Glazeable surface area per piece (m²)
     thickness_mm = Column(sa.Numeric(5, 1), nullable=False, default=11.0)
     recipe_id = Column(UUID(as_uuid=True), ForeignKey('recipes.id'))

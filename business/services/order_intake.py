@@ -450,6 +450,7 @@ def process_order_item(
         width_cm=getattr(item, "width_cm", None),
         depth_cm=getattr(item, "depth_cm", None),
         bowl_shape=getattr(item, "bowl_shape", None),
+        shape_dimensions=getattr(item, "shape_dimensions", None),
         thickness_mm=item.thickness or Decimal("11.0"),
         recipe_id=recipe.id if recipe else None,
         mandatory_qc=order.mandatory_qc,

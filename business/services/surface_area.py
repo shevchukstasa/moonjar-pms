@@ -130,6 +130,102 @@ def _calculate_bowl_surface(
         return L * W * 0.8
 
 
+def calculate_area_from_dimensions(shape: str, dimensions: dict) -> Optional[float]:
+    """Calculate area in cm² from shape type and dimensions dict.
+
+    All dimension values are in centimeters.
+    Returns area in cm² or None if insufficient data.
+
+    Supported shapes and their required dimension keys:
+        rectangle:            width_cm (or w), height_cm (or h)
+        square:               width_cm (or side_cm or w)
+        triangle:             side_a_cm (or a), side_b_cm (or b), side_c_cm (or c)  — Heron's formula
+        circle / round:       diameter_cm (or d)
+        oval:                 diameter1_cm (or d1), diameter2_cm (or d2)
+        octagon:              width_cm (or w), height_cm (or h), cut_cm (or cut)
+        trapezoid:            side_a_cm (or a), side_b_cm (or b), height_cm (or h)
+        trapezoid_truncated:  side_a_cm (or a), side_b_cm (or b), height_cm (or h)
+        rhombus:              diagonal1_cm (or d1), diagonal2_cm (or d2)
+        parallelogram:        base_cm (or b), height_cm (or h)
+        semicircle:           diameter_cm (or d)
+        freeform:             manual_area_cm2 (or area)
+    """
+    if not dimensions or not isinstance(dimensions, dict):
+        return None
+
+    shape = shape.lower()
+
+    if shape in ('rectangle',):
+        w = dimensions.get('width_cm') or dimensions.get('w')
+        h = dimensions.get('height_cm') or dimensions.get('h')
+        if w and h:
+            return float(w) * float(h)
+
+    elif shape in ('square',):
+        w = dimensions.get('width_cm') or dimensions.get('side_cm') or dimensions.get('w')
+        if w:
+            return float(w) * float(w)
+
+    elif shape in ('triangle',):
+        a = dimensions.get('side_a_cm') or dimensions.get('a')
+        b = dimensions.get('side_b_cm') or dimensions.get('b')
+        c = dimensions.get('side_c_cm') or dimensions.get('c')
+        if a and b and c:
+            a, b, c = float(a), float(b), float(c)
+            p = (a + b + c) / 2
+            area_sq = p * (p - a) * (p - b) * (p - c)
+            return sqrt(max(area_sq, 0))
+
+    elif shape in ('circle', 'round'):
+        d = dimensions.get('diameter_cm') or dimensions.get('d')
+        if d:
+            return pi * (float(d) / 2) ** 2
+
+    elif shape in ('oval',):
+        d1 = dimensions.get('diameter1_cm') or dimensions.get('d1')
+        d2 = dimensions.get('diameter2_cm') or dimensions.get('d2')
+        if d1 and d2:
+            return pi * (float(d1) / 2) * (float(d2) / 2)
+
+    elif shape in ('octagon',):
+        w = dimensions.get('width_cm') or dimensions.get('w')
+        h = dimensions.get('height_cm') or dimensions.get('h')
+        cut = dimensions.get('cut_cm') or dimensions.get('cut')
+        if w and h and cut:
+            return float(w) * float(h) - 4 * (0.5 * float(cut) ** 2)
+
+    elif shape in ('trapezoid', 'trapezoid_truncated'):
+        a = dimensions.get('side_a_cm') or dimensions.get('a')  # parallel side 1
+        b = dimensions.get('side_b_cm') or dimensions.get('b')  # parallel side 2
+        h = dimensions.get('height_cm') or dimensions.get('h')
+        if a and b and h:
+            return (float(a) + float(b)) / 2 * float(h)
+
+    elif shape in ('rhombus',):
+        d1 = dimensions.get('diagonal1_cm') or dimensions.get('d1')
+        d2 = dimensions.get('diagonal2_cm') or dimensions.get('d2')
+        if d1 and d2:
+            return (float(d1) * float(d2)) / 2
+
+    elif shape in ('parallelogram',):
+        b = dimensions.get('base_cm') or dimensions.get('b')
+        h = dimensions.get('height_cm') or dimensions.get('h')
+        if b and h:
+            return float(b) * float(h)
+
+    elif shape in ('semicircle',):
+        d = dimensions.get('diameter_cm') or dimensions.get('d')
+        if d:
+            return pi * (float(d) / 2) ** 2 / 2
+
+    elif shape in ('freeform',):
+        manual = dimensions.get('manual_area_cm2') or dimensions.get('area')
+        if manual:
+            return float(manual)
+
+    return None
+
+
 def get_shape_coefficient(
     db,
     shape: str,
@@ -188,12 +284,30 @@ def calculate_glazeable_sqm_for_position(db, position) -> Optional[Decimal]:
     product_type = getattr(position, "product_type", None)
     pt_str = product_type.value if hasattr(product_type, "value") else str(product_type or "tile")
 
+    # 0. Precise calculation from shape_dimensions JSONB (universal shape system)
+    dims = getattr(position, "shape_dimensions", None)
+    if dims and isinstance(dims, dict):
+        area_cm2 = calculate_area_from_dimensions(shape_str, dims)
+        if area_cm2 is not None:
+            area_sqm = area_cm2 / 10000.0
+            # For sinks, add bowl surface if depth is available
+            depth_for_sink = getattr(position, "depth_cm", None)
+            bowl_for_sink = getattr(position, "bowl_shape", None)
+            if pt_str == "sink" and depth_for_sink and float(depth_for_sink) > 0:
+                # Use bounding dimensions for bowl calculation
+                L = dims.get("width_cm") or dims.get("w") or dims.get("diameter_cm") or dims.get("d") or 0
+                W = dims.get("height_cm") or dims.get("h") or dims.get("diameter_cm") or dims.get("d") or 0
+                if L and W:
+                    bowl_cm2 = _calculate_bowl_surface(float(L), float(W), float(depth_for_sink), bowl_for_sink)
+                    area_sqm += bowl_cm2 / 10000.0
+            return Decimal(str(round(area_sqm, 4)))
+
     length = getattr(position, "length_cm", None)
     width = getattr(position, "width_cm", None)
     depth = getattr(position, "depth_cm", None)
     bowl = getattr(position, "bowl_shape", None)
 
-    # 1. Exact dimensions available
+    # 1. Exact dimensions available (legacy: length_cm / width_cm)
     if length and width and float(length) > 0 and float(width) > 0:
         area = calculate_glazeable_surface(
             shape=shape_str,

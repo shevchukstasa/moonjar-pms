@@ -2,6 +2,8 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { StatusDropdown } from './StatusDropdown';
 import { useTabloStore } from '@/stores/tabloStore';
+import { Tooltip } from '@/components/ui/Tooltip';
+import { formatShapeBadge, getShapeDefinition } from '@/components/shared/ShapeDimensionEditor';
 
 export interface PositionItem {
   id: string;
@@ -23,6 +25,9 @@ export interface PositionItem {
   position_label?: string | null;
   parent_position_id?: string | null;
   is_merged?: boolean;
+  shape?: string | null;
+  shape_dimensions?: Record<string, number> | null;
+  calculated_area_cm2?: number | null;
 }
 
 const NON_SPLITTABLE_STATUSES = ['in_kiln', 'fired'];
@@ -82,6 +87,11 @@ export function PositionRow({ position, index, section, onSplit, onMerge, mobile
         : `#${position.position_number}`)
       : `#${index + 1}`);
 
+  // Shape badge with dimensions tooltip
+  const shapeDef = position.shape ? getShapeDefinition(position.shape) : null;
+  const shapeBadgeText = formatShapeBadge(position.shape, position.shape_dimensions);
+  const shapeIcon = shapeDef?.icon ?? '';
+
   /* ---- Mobile card layout ---- */
   if (mobileCard) {
     return (
@@ -106,7 +116,15 @@ export function PositionRow({ position, index, section, onSplit, onMerge, mobile
               <span className="text-xs font-mono font-semibold text-gray-500">{posLabel}</span>
             </div>
             <p className="text-sm text-gray-600 truncate">
-              {position.color} · {position.size} · {position.quantity} pcs
+              {position.color} · {position.size}
+              {shapeIcon && (
+                <Tooltip text={shapeBadgeText}>
+                  <span className="ml-1 inline-flex items-center rounded bg-indigo-50 px-1 py-0.5 text-[10px] font-medium text-indigo-700 cursor-default">
+                    {shapeIcon}
+                  </span>
+                </Tooltip>
+              )}
+              {' '} · {position.quantity} pcs
               {position.application_method && (
                 <span className={`ml-1.5 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${METHOD_BADGE_COLORS[position.application_method.toLowerCase()] || 'bg-gray-100 text-gray-600'}`}>
                   {position.application_method}
@@ -172,7 +190,16 @@ export function PositionRow({ position, index, section, onSplit, onMerge, mobile
         {posLabel}
       </td>
       <td className="px-3 py-2 text-sm">{position.color}</td>
-      <td className="px-3 py-2 text-sm">{position.size}</td>
+      <td className="px-3 py-2 text-sm">
+        {position.size}
+        {shapeIcon && (
+          <Tooltip text={shapeBadgeText}>
+            <span className="ml-1.5 inline-flex items-center rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 cursor-default">
+              {shapeIcon}
+            </span>
+          </Tooltip>
+        )}
+      </td>
       <td className="px-3 py-2 text-sm">
         {position.application ?? '\u2014'}
         {position.application_method && (

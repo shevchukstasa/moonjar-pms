@@ -185,10 +185,17 @@ class ProductType(str, Enum):
 class ShapeType(str, Enum):
     RECTANGLE = 'rectangle'
     SQUARE = 'square'
-    ROUND = 'round'
-    FREEFORM = 'freeform'
+    ROUND = 'round'          # keep for backward compat, same as circle
+    CIRCLE = 'circle'
+    OVAL = 'oval'
     TRIANGLE = 'triangle'
     OCTAGON = 'octagon'
+    TRAPEZOID = 'trapezoid'
+    TRAPEZOID_TRUNCATED = 'trapezoid_truncated'
+    RHOMBUS = 'rhombus'
+    PARALLELOGRAM = 'parallelogram'
+    SEMICIRCLE = 'semicircle'
+    FREEFORM = 'freeform'
 
 class BowlShape(str, Enum):
     PARALLELEPIPED = 'parallelepiped'   # Rectangular bowl

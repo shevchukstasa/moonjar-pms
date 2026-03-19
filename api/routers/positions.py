@@ -185,6 +185,7 @@ def _serialize_position(p) -> dict:
         "place_of_application": p.place_of_application,
         "product_type": _ev(p.product_type),
         "shape": _ev(p.shape),
+        "shape_dimensions": p.shape_dimensions if getattr(p, 'shape_dimensions', None) else None,
         "thickness_mm": float(p.thickness_mm) if p.thickness_mm else 11.0,
         "recipe_id": str(p.recipe_id) if p.recipe_id else None,
         "mandatory_qc": p.mandatory_qc,
@@ -430,11 +431,19 @@ async def update_position(
     allowed = {"batch_id", "resource_id", "placement_position", "placement_level",
                "delay_hours", "priority_order", "recipe_id", "mandatory_qc",
                "application_method_code", "application_collection_code",
-               "glazeable_sqm", "thickness_mm", "shape", "product_type",
-               "quantity_with_defect_margin", "place_of_application"}
+               "glazeable_sqm", "thickness_mm", "shape", "shape_dimensions",
+               "product_type", "quantity_with_defect_margin", "place_of_application"}
     for k, v in data.items():
         if k in allowed:
             setattr(p, k, v)
+
+    # Recalculate glazeable_sqm if shape or shape_dimensions changed
+    if "shape" in data or "shape_dimensions" in data:
+        from business.services.surface_area import calculate_glazeable_sqm_for_position
+        _glazeable = calculate_glazeable_sqm_for_position(db, p)
+        if _glazeable is not None:
+            p.glazeable_sqm = _glazeable
+
     p.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(p)

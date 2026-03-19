@@ -219,6 +219,29 @@ def resolve_size_for_position(
         db.add(new_size)
         db.flush()
 
+        # Auto-calculate glazing board spec for the new size
+        try:
+            from business.services.glazing_board import calculate_glazing_board
+            from api.models import GlazingBoardSpec
+            board = calculate_glazing_board(w_mm, h_mm)
+            spec = GlazingBoardSpec(
+                size_id=new_size.id,
+                board_length_cm=board.board_length_cm,
+                board_width_cm=board.board_width_cm,
+                tiles_per_board=board.tiles_per_board,
+                area_per_board_m2=board.area_per_board_m2,
+                is_custom_board=not board.is_standard_board,
+            )
+            db.add(spec)
+            logger.info(
+                "SIZE_AUTO_BOARD | size=%s | %d pcs/board, %.4f m²/board, %s",
+                auto_name, board.tiles_per_board, board.area_per_board_m2,
+                "standard" if board.is_standard_board else f"custom {board.board_width_cm}cm",
+            )
+        except Exception as e:
+            logger.warning("SIZE_AUTO_BOARD_FAIL | size=%s | %s", auto_name, e)
+        db.flush()
+
         logger.info(
             "SIZE_AUTO_CREATED | position=%s | auto-created size '%s' (%dx%d mm), pending PM approval",
             position.id, auto_name, w_mm, h_mm,

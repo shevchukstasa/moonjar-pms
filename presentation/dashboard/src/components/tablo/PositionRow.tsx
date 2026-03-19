@@ -11,6 +11,7 @@ export interface PositionItem {
   color: string;
   size: string;
   application?: string | null;
+  application_method?: string | null;
   collection?: string | null;
   quantity: number;
   product_type: string;
@@ -26,6 +27,16 @@ export interface PositionItem {
 
 const NON_SPLITTABLE_STATUSES = ['in_kiln', 'fired'];
 const MERGEABLE_STATUSES = ['packed', 'quality_check_done', 'ready_for_shipment'];
+
+/** Color map for application method badges */
+const METHOD_BADGE_COLORS: Record<string, string> = {
+  ss: 'bg-purple-100 text-purple-700',
+  s:  'bg-blue-100 text-blue-700',
+  bs: 'bg-green-100 text-green-700',
+  sb: 'bg-teal-100 text-teal-700',
+  b:  'bg-amber-100 text-amber-700',
+  sp: 'bg-pink-100 text-pink-700',
+};
 
 interface Props {
   position: PositionItem;
@@ -96,6 +107,11 @@ export function PositionRow({ position, index, section, onSplit, onMerge, mobile
             </div>
             <p className="text-sm text-gray-600 truncate">
               {position.color} · {position.size} · {position.quantity} pcs
+              {position.application_method && (
+                <span className={`ml-1.5 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${METHOD_BADGE_COLORS[position.application_method.toLowerCase()] || 'bg-gray-100 text-gray-600'}`}>
+                  {position.application_method}
+                </span>
+              )}
             </p>
           </div>
           {delay > 0 && (
@@ -157,7 +173,14 @@ export function PositionRow({ position, index, section, onSplit, onMerge, mobile
       </td>
       <td className="px-3 py-2 text-sm">{position.color}</td>
       <td className="px-3 py-2 text-sm">{position.size}</td>
-      <td className="px-3 py-2 text-sm">{position.application ?? '\u2014'}</td>
+      <td className="px-3 py-2 text-sm">
+        {position.application ?? '\u2014'}
+        {position.application_method && (
+          <span className={`ml-1.5 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${METHOD_BADGE_COLORS[position.application_method.toLowerCase()] || 'bg-gray-100 text-gray-600'}`}>
+            {position.application_method}
+          </span>
+        )}
+      </td>
       <td className="px-3 py-2 text-sm">{position.collection ?? '\u2014'}</td>
       <td className="px-3 py-2 text-sm text-right">{position.quantity}</td>
       <td className="px-3 py-2">

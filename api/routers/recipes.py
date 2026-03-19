@@ -34,7 +34,7 @@ router = APIRouter()
 
 def _serialize_recipe_material(rm) -> dict:
     """Serialize a RecipeMaterial row + joined Material fields."""
-    return {
+    result = {
         "id": str(rm.id),
         "recipe_id": str(rm.recipe_id),
         "material_id": str(rm.material_id),
@@ -43,7 +43,13 @@ def _serialize_recipe_material(rm) -> dict:
         "quantity_per_unit": float(rm.quantity_per_unit),
         "unit": rm.unit,
         "notes": rm.notes,
+        # Per-method application rates (set by models agent; safe getattr for migration period)
+        "spray_rate": float(rm.spray_rate) if getattr(rm, 'spray_rate', None) else None,
+        "brush_rate": float(rm.brush_rate) if getattr(rm, 'brush_rate', None) else None,
+        "splash_rate": float(rm.splash_rate) if getattr(rm, 'splash_rate', None) else None,
+        "silk_screen_rate": float(rm.silk_screen_rate) if getattr(rm, 'silk_screen_rate', None) else None,
     }
+    return result
 
 
 def _get_temperature_groups_for_recipe(db: Session, recipe_id: UUID) -> list[dict]:
@@ -568,6 +574,15 @@ async def bulk_update_recipe_materials(
             unit=mat_data.unit,
             notes=mat_data.notes,
         )
+        # Per-method application rates (safe setattr for migration period)
+        if mat_data.spray_rate is not None and hasattr(rm, 'spray_rate'):
+            rm.spray_rate = mat_data.spray_rate
+        if mat_data.brush_rate is not None and hasattr(rm, 'brush_rate'):
+            rm.brush_rate = mat_data.brush_rate
+        if mat_data.splash_rate is not None and hasattr(rm, 'splash_rate'):
+            rm.splash_rate = mat_data.splash_rate
+        if mat_data.silk_screen_rate is not None and hasattr(rm, 'silk_screen_rate'):
+            rm.silk_screen_rate = mat_data.silk_screen_rate
         db.add(rm)
         new_items.append(rm)
 

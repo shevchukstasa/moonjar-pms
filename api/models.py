@@ -493,6 +493,11 @@ class RecipeMaterial(Base):
     quantity_per_unit = Column(sa.Numeric(10, 4), nullable=False)
     unit = Column(sa.String(20), nullable=False, default='per_piece')
     notes = Column(sa.Text)
+    # Per-method consumption rates (ml/m²)
+    spray_rate = Column(sa.Numeric(10, 4), nullable=True)
+    brush_rate = Column(sa.Numeric(10, 4), nullable=True)
+    splash_rate = Column(sa.Numeric(10, 4), nullable=True)
+    silk_screen_rate = Column(sa.Numeric(10, 4), nullable=True)
 
     __table_args__ = (
         UniqueConstraint('recipe_id', 'material_id'),
@@ -626,6 +631,8 @@ class OrderPosition(Base):
     firing_round = Column(sa.Integer, nullable=False, default=1)
     two_stage_firing = Column(sa.Boolean, nullable=False, default=False, server_default='false')
     two_stage_type = Column(sa.String(20), nullable=True)  # 'gold' or 'countertop' or null
+    application_collection_code = Column(sa.String(30), nullable=True)  # 'exclusive', 'authentic', etc.
+    application_method_code = Column(sa.String(20), nullable=True)      # 'ss', 'bs', 'sb', etc.
     # ── Upfront schedule (TOC/DBR backward scheduling) ──────────────────
     planned_glazing_date = Column(sa.Date)          # when glazing should start
     planned_kiln_date = Column(sa.Date)             # when kiln firing should happen
@@ -2208,3 +2215,38 @@ class KilnRotationRule(Base):
 
     factory = relationship('Factory', foreign_keys=[factory_id])
     kiln = relationship('Resource', foreign_keys=[kiln_id])
+
+
+class ApplicationMethod(Base):
+    __tablename__ = 'application_methods'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code = Column(sa.String(20), unique=True, nullable=False)
+    name = Column(sa.String(100), nullable=False)
+    engobe_method = Column(sa.String(20))                  # 'spray', 'brush', NULL
+    glaze_method = Column(sa.String(20), nullable=False)   # 'spray', 'brush', 'splash', 'spray_stencil', 'silk_screen'
+    needs_engobe = Column(sa.Boolean, nullable=False, default=True)
+    two_stage_firing = Column(sa.Boolean, nullable=False, default=False)
+    special_kiln = Column(sa.String(20))                   # 'raku' or NULL
+    consumption_group_engobe = Column(sa.String(20))       # 'spray', 'brush', NULL
+    consumption_group_glaze = Column(sa.String(20), nullable=False)  # 'spray', 'brush', 'silk_screen', 'splash'
+    blocking_task_type = Column(sa.String(50))             # 'stencil_order', 'silk_screen_order', NULL
+    sort_order = Column(sa.Integer, nullable=False, default=0)
+    is_active = Column(sa.Boolean, nullable=False, default=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+
+class ApplicationCollection(Base):
+    __tablename__ = 'application_collections'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code = Column(sa.String(30), unique=True, nullable=False)
+    name = Column(sa.String(100), nullable=False)
+    allowed_methods = Column(JSONB, nullable=False, default=[])   # ['ss', 's'] for Authentic
+    any_method = Column(sa.Boolean, nullable=False, default=False)  # TRUE for Exclusive, TopTable, WashBasin
+    no_base_colors = Column(sa.Boolean, nullable=False, default=False)  # TRUE for Exclusive
+    no_base_sizes = Column(sa.Boolean, nullable=False, default=False)   # TRUE for Exclusive
+    product_type_restriction = Column(sa.String(50))       # 'countertop', 'sink', NULL
+    sort_order = Column(sa.Integer, nullable=False, default=0)
+    is_active = Column(sa.Boolean, nullable=False, default=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())

@@ -40,6 +40,10 @@ interface RecipeForm {
 interface IngredientRow {
   material_id: string;
   quantity: string;
+  spray_rate: string;
+  brush_rate: string;
+  splash_rate: string;
+  silk_screen_rate: string;
 }
 
 const RECIPE_TYPE_OPTIONS = [
@@ -120,7 +124,12 @@ export default function AdminRecipesPage() {
     for (const row of ingredients) {
       const qty = parseFloat(row.quantity);
       if (row.material_id && qty > 0) {
-        mats.push({ material_id: row.material_id, quantity_per_unit: qty, unit: 'g_per_100g' });
+        const item: RecipeMaterialBulkItem = { material_id: row.material_id, quantity_per_unit: qty, unit: 'g_per_100g' };
+        if (row.spray_rate) item.spray_rate = parseFloat(row.spray_rate);
+        if (row.brush_rate) item.brush_rate = parseFloat(row.brush_rate);
+        if (row.splash_rate) item.splash_rate = parseFloat(row.splash_rate);
+        if (row.silk_screen_rate) item.silk_screen_rate = parseFloat(row.silk_screen_rate);
+        mats.push(item);
       }
     }
     const waterQty = parseFloat(waterGrams);
@@ -243,7 +252,7 @@ export default function AdminRecipesPage() {
       let water = '';
       for (const m of mats) {
         if (m.material_name?.toLowerCase() === 'water') { water = String(m.quantity_per_unit); }
-        else { rows.push({ material_id: m.material_id, quantity: String(m.quantity_per_unit) }); }
+        else { rows.push({ material_id: m.material_id, quantity: String(m.quantity_per_unit), spray_rate: m.spray_rate != null ? String(m.spray_rate) : '', brush_rate: m.brush_rate != null ? String(m.brush_rate) : '', splash_rate: m.splash_rate != null ? String(m.splash_rate) : '', silk_screen_rate: m.silk_screen_rate != null ? String(m.silk_screen_rate) : '' }); }
       }
       setIngredients(rows);
       setWaterGrams(water);
@@ -278,7 +287,7 @@ export default function AdminRecipesPage() {
       let water = '';
       for (const m of mats) {
         if (m.material_name?.toLowerCase() === 'water') { water = String(m.quantity_per_unit); }
-        else { rows.push({ material_id: m.material_id, quantity: String(m.quantity_per_unit) }); }
+        else { rows.push({ material_id: m.material_id, quantity: String(m.quantity_per_unit), spray_rate: m.spray_rate != null ? String(m.spray_rate) : '', brush_rate: m.brush_rate != null ? String(m.brush_rate) : '', splash_rate: m.splash_rate != null ? String(m.splash_rate) : '', silk_screen_rate: m.silk_screen_rate != null ? String(m.silk_screen_rate) : '' }); }
       }
       setIngredients(rows);
       setWaterGrams(water);
@@ -329,7 +338,7 @@ export default function AdminRecipesPage() {
   }, [form, editItem, cloneFromId, createMutation, updateMutation]);
 
   const addIngredient = useCallback(() => {
-    setIngredients((prev) => [...prev, { material_id: '', quantity: '' }]);
+    setIngredients((prev) => [...prev, { material_id: '', quantity: '', spray_rate: '', brush_rate: '', splash_rate: '', silk_screen_rate: '' }]);
   }, []);
 
   const removeIngredient = useCallback((idx: number) => {
@@ -337,7 +346,7 @@ export default function AdminRecipesPage() {
   }, []);
 
   const updateIngredient = useCallback(
-    (idx: number, field: 'material_id' | 'quantity', value: string) => {
+    (idx: number, field: keyof IngredientRow, value: string) => {
       setIngredients((prev) => prev.map((row, i) => (i === idx ? { ...row, [field]: value } : row)));
     }, []
   );
@@ -649,32 +658,58 @@ function IngredientRowEditor({ row, materials, allMaterials, onChange, onRemove 
   row: IngredientRow;
   materials: MaterialItem[];
   allMaterials: MaterialItem[];
-  onChange: (field: 'material_id' | 'quantity', value: string) => void;
+  onChange: (field: keyof IngredientRow, value: string) => void;
   onRemove: () => void;
 }) {
+  const [showRates, setShowRates] = useState(false);
   return (
-    <div className="mb-1.5 flex items-center gap-2">
-      <select
-        value={row.material_id}
-        onChange={(e) => onChange('material_id', e.target.value)}
-        className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-      >
-        <option value="">Select material...</option>
-        {materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-        {row.material_id && !materials.find((m) => m.id === row.material_id) && (
-          <option value={row.material_id}>{allMaterials.find((m) => m.id === row.material_id)?.name ?? row.material_id}</option>
-        )}
-      </select>
-      <input
-        type="number" step="0.0001" placeholder="g"
-        value={row.quantity}
-        onChange={(e) => onChange('quantity', e.target.value)}
-        className="w-24 rounded-md border border-gray-300 px-2 py-1.5 text-right text-sm"
-      />
-      <span className="text-xs text-gray-400">g</span>
-      <button type="button" onClick={onRemove} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600">
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
+    <div className="mb-1.5">
+      <div className="flex items-center gap-2">
+        <select
+          value={row.material_id}
+          onChange={(e) => onChange('material_id', e.target.value)}
+          className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+        >
+          <option value="">Select material...</option>
+          {materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          {row.material_id && !materials.find((m) => m.id === row.material_id) && (
+            <option value={row.material_id}>{allMaterials.find((m) => m.id === row.material_id)?.name ?? row.material_id}</option>
+          )}
+        </select>
+        <input
+          type="number" step="0.0001" placeholder="g"
+          value={row.quantity}
+          onChange={(e) => onChange('quantity', e.target.value)}
+          className="w-24 rounded-md border border-gray-300 px-2 py-1.5 text-right text-sm"
+        />
+        <span className="text-xs text-gray-400">g</span>
+        <button type="button" onClick={() => setShowRates(!showRates)} className="rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-600" title="Per-method rates">
+          {showRates ? '\u25B2' : '\u25BC'}
+        </button>
+        <button type="button" onClick={onRemove} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {showRates && (
+        <div className="mt-1 ml-4 flex flex-wrap gap-2">
+          <div className="flex items-center gap-1">
+            <label className="text-xs text-gray-500 w-12">Spray</label>
+            <input type="number" step="0.01" placeholder="ml/m\u00B2" value={row.spray_rate} onChange={(e) => onChange('spray_rate', e.target.value)} className="w-20 rounded border border-gray-200 px-1.5 py-1 text-xs text-right" />
+          </div>
+          <div className="flex items-center gap-1">
+            <label className="text-xs text-gray-500 w-12">Brush</label>
+            <input type="number" step="0.01" placeholder="ml/m\u00B2" value={row.brush_rate} onChange={(e) => onChange('brush_rate', e.target.value)} className="w-20 rounded border border-gray-200 px-1.5 py-1 text-xs text-right" />
+          </div>
+          <div className="flex items-center gap-1">
+            <label className="text-xs text-gray-500 w-12">Splash</label>
+            <input type="number" step="0.01" placeholder="ml/m\u00B2" value={row.splash_rate} onChange={(e) => onChange('splash_rate', e.target.value)} className="w-20 rounded border border-gray-200 px-1.5 py-1 text-xs text-right" />
+          </div>
+          <div className="flex items-center gap-1">
+            <label className="text-xs text-gray-500 w-16">Silkscreen</label>
+            <input type="number" step="0.01" placeholder="ml/m\u00B2" value={row.silk_screen_rate} onChange={(e) => onChange('silk_screen_rate', e.target.value)} className="w-20 rounded border border-gray-200 px-1.5 py-1 text-xs text-right" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

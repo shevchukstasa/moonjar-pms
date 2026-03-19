@@ -705,6 +705,11 @@ class RecipeMaterialBulkItem(BaseModel):
     quantity_per_unit: float      # grams
     unit: str = 'g_per_100g'
     notes: Optional[str] = None
+    # Per-method application rates (optional, set from admin UI)
+    spray_rate: Optional[float] = None
+    brush_rate: Optional[float] = None
+    splash_rate: Optional[float] = None
+    silk_screen_rate: Optional[float] = None
 
 
 class RecipeMaterialsBulkUpdate(BaseModel):

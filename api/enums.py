@@ -387,6 +387,37 @@ class BackupType(str, Enum):
     MANUAL = 'manual'
 
 
+class ApplicationMethodCode(str, Enum):
+    SS = 'ss'                    # Spray engobe + Spray glaze
+    S = 's'                      # No engobe, Spray glaze only
+    BS = 'bs'                    # Brush engobe + Spray glaze
+    SB = 'sb'                    # Spray engobe + Brush glaze
+    SPLASHING = 'splashing'      # Spray engobe + Splash glaze (multi-color)
+    STENCIL = 'stencil'          # Spray engobe + Spray through stencil
+    SILK_SCREEN = 'silk_screen'  # Spray engobe + Silk screen
+    GOLD = 'gold'                # 1st firing: SS, 2nd firing: Brush gold
+    RAKU = 'raku'                # SS method but Raku kiln
+
+
+class ApplicationCollectionCode(str, Enum):
+    AUTHENTIC = 'authentic'
+    CREATIVE = 'creative'
+    SILK_SCREEN = 'silk_screen'
+    STENCIL = 'stencil'
+    GOLD = 'gold'
+    RAKU = 'raku'
+    EXCLUSIVE = 'exclusive'
+    TOP_TABLE = 'top_table'
+    WASH_BASIN = 'wash_basin'
+
+
+class ConsumptionGroup(str, Enum):
+    SPRAY = 'spray'
+    BRUSH = 'brush'
+    SILK_SCREEN = 'silk_screen'
+    SPLASH = 'splash'
+
+
 class EngobeType(str, Enum):
     STANDARD = 'standard'
     SHELF_COATING = 'shelf_coating'

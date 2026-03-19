@@ -68,11 +68,14 @@ def _calculate_required(rm, position, recipe=None) -> Decimal:
     """Calculate required material quantity based on recipe-material unit.
 
     Units:
-    - per_sqm:    qty_per_unit × total_glazeable_area (m²)
+    - per_sqm:    rate × total_glazeable_area (m²)
+                  Rate may come from method-specific columns on RecipeMaterial
+                  (spray_rate, brush_rate, splash_rate, silk_screen_rate) if the
+                  position has application_method_code set. Falls back to qty_per_unit.
     - g_per_100g: qty_per_unit is grams per 100g of dry glaze batch.
                   Formula: area × rate_ml_per_sqm → total_ml × SG → total_grams
                   Then: (qty_per_100g / 100) × total_grams
-                  Rate is chosen by position.application_type (spray/brush).
+                  Rate is chosen by position.application_method_code (spray/brush).
     - per_piece:  qty_per_unit × quantity (default)
 
     Args:
@@ -82,9 +85,74 @@ def _calculate_required(rm, position, recipe=None) -> Decimal:
     """
     qty = Decimal(str(rm.quantity_per_unit))
 
+    # ── Resolve method-specific rate if available ──
+    # Application method codes mapped to consumption groups:
+    #   SPRAY methods: ss, s, bs(glaze part), stencil, raku, gold
+    #   BRUSH methods: sb(glaze part), splashing
+    #   SILK_SCREEN methods: silk_screen
+    SPRAY_METHODS = {'ss', 's', 'bs', 'stencil', 'raku', 'gold'}
+    BRUSH_METHODS = {'sb', 'splashing'}
+    SILK_SCREEN_METHODS = {'silk_screen'}
+
+    method_code = (
+        getattr(position, 'application_method_code', None) or ''
+    ).lower().strip()
+
+    def _get_method_rate() -> Optional[Decimal]:
+        """Try to get a method-specific rate from RecipeMaterial columns.
+
+        Returns the rate if a method-specific column exists and is set,
+        or None to fall back to the default qty_per_unit.
+
+        Special rules:
+        - Engobe + method 's': return 0 (S method has no engobe)
+        - Engobe + method 'bs': use brush_rate (BS uses brush for engobe)
+        """
+        if not method_code:
+            return None
+
+        # Check if RecipeMaterial has the method-specific columns
+        # (Agent 1 adds these — gracefully degrade if not yet present)
+        has_method_rates = hasattr(rm, 'spray_rate')
+        if not has_method_rates:
+            return None
+
+        # Determine material type from the linked material
+        mat_type = ''
+        if hasattr(rm, 'material') and rm.material:
+            mat_type = (getattr(rm.material, 'material_type', '') or '').lower()
+        elif hasattr(rm, 'material_type'):
+            mat_type = (rm.material_type or '').lower()
+
+        # ── Engobe special rules ──
+        if mat_type == 'engobe':
+            if method_code == 's':
+                return Decimal('0')  # S method has no engobe
+            if method_code == 'bs' and rm.brush_rate:
+                return Decimal(str(rm.brush_rate))
+            if rm.spray_rate:
+                return Decimal(str(rm.spray_rate))
+            return None  # fall back to default
+
+        # ── Glaze / pigment / oxide materials ──
+        if mat_type in ('glaze', 'pigment', 'oxide', 'oxide_carbonate', 'frit'):
+            if method_code in SPRAY_METHODS and rm.spray_rate:
+                return Decimal(str(rm.spray_rate))
+            elif method_code in BRUSH_METHODS and rm.brush_rate:
+                return Decimal(str(rm.brush_rate))
+            elif method_code == 'splashing' and getattr(rm, 'splash_rate', None):
+                return Decimal(str(rm.splash_rate))
+            elif method_code in SILK_SCREEN_METHODS and getattr(rm, 'silk_screen_rate', None):
+                return Decimal(str(rm.silk_screen_rate))
+
+        return None  # no method-specific rate → use default
+
+    method_rate = _get_method_rate()
+
     if rm.unit == "per_sqm":
         area = _get_area_for_position(position)
-        return qty * area
+        rate = method_rate if method_rate is not None else qty
+        return rate * area
 
     if rm.unit == "g_per_100g":
         area = _get_area_for_position(position)
@@ -98,13 +166,19 @@ def _calculate_required(rm, position, recipe=None) -> Decimal:
             except Exception:
                 pass
 
-        # Determine consumption rate (ml/m²) based on application type
+        # Determine consumption rate (ml/m²) based on application method
         rate_ml_per_sqm = Decimal("500")  # default fallback
         if r:
-            app_type = (getattr(position, 'application_type', None) or "").lower().strip()
-            if app_type == "spray" and r.consumption_spray_ml_per_sqm:
+            # Prefer new method_code-based lookup, fall back to legacy application_type
+            app_method = method_code or (getattr(position, 'application_type', None) or "").lower().strip()
+
+            if app_method in SPRAY_METHODS and r.consumption_spray_ml_per_sqm:
                 rate_ml_per_sqm = Decimal(str(r.consumption_spray_ml_per_sqm))
-            elif app_type == "brush" and r.consumption_brush_ml_per_sqm:
+            elif app_method in BRUSH_METHODS and r.consumption_brush_ml_per_sqm:
+                rate_ml_per_sqm = Decimal(str(r.consumption_brush_ml_per_sqm))
+            elif app_method == "spray" and r.consumption_spray_ml_per_sqm:
+                rate_ml_per_sqm = Decimal(str(r.consumption_spray_ml_per_sqm))
+            elif app_method == "brush" and r.consumption_brush_ml_per_sqm:
                 rate_ml_per_sqm = Decimal(str(r.consumption_brush_ml_per_sqm))
             elif r.consumption_spray_ml_per_sqm:
                 # Default to spray rate if no specific match
@@ -122,10 +196,13 @@ def _calculate_required(rm, position, recipe=None) -> Decimal:
         if r and r.specific_gravity and float(r.specific_gravity) > 0:
             sg = Decimal(str(r.specific_gravity))
 
+        # For g_per_100g, also apply method-specific component ratio if available
+        effective_qty = method_rate if method_rate is not None else qty
+
         # Formula: area × rate_ml → total_ml × SG → total_grams
         total_ml = area * rate_ml_per_sqm
         total_grams = total_ml * sg
-        return (qty / Decimal("100")) * total_grams
+        return (effective_qty / Decimal("100")) * total_grams
 
     # Default: per_piece
     return qty * Decimal(str(position.quantity))

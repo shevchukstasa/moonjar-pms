@@ -16,6 +16,30 @@ export interface AllReferenceData {
   collections: ReferenceItem[];
 }
 
+export interface ApplicationMethodItem {
+  id: string;
+  code: string;
+  name: string;
+  engobe_method: string | null;
+  glaze_method: string | null;
+  needs_engobe: boolean;
+  two_stage_firing: boolean;
+  special_kiln: string | null;
+  consumption_group_glaze: string | null;
+  blocking_task_type: string | null;
+}
+
+export interface ApplicationCollectionItem {
+  id: string;
+  code: string;
+  name: string;
+  allowed_methods: string[] | null;
+  any_method: boolean;
+  no_base_colors: boolean;
+  no_base_sizes: boolean;
+  product_type_restriction: string | null;
+}
+
 export const referenceApi = {
   getAll: () =>
     apiClient.get<AllReferenceData>('/reference/all').then((r) => r.data),
@@ -35,4 +59,8 @@ export const referenceApi = {
     apiClient.get<ReferenceItem[]>('/reference/position-statuses').then((r) => r.data),
   getCollections: () =>
     apiClient.get<ReferenceItem[]>('/reference/collections').then((r) => r.data),
+  getApplicationMethods: () =>
+    apiClient.get<ApplicationMethodItem[]>('/reference/application-methods').then((r) => r.data),
+  getApplicationCollections: () =>
+    apiClient.get<ApplicationCollectionItem[]>('/reference/application-collections').then((r) => r.data),
 };

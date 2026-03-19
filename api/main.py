@@ -1561,12 +1561,14 @@ async def lifespan(app: FastAPI):
             from api.schema_patches.production_split_patch import apply_patch as ps_patch
             from api.schema_patches.service_blocking_patch import apply_patch as sb_patch
             from api.schema_patches.rotation_rules_patch import apply_patch as rr_patch
+            from api.schema_patches.application_methods_patch import apply_patch as am_patch
             cr_patch(conn)
             dc_patch(conn)
             sr_patch(conn)
             ps_patch(conn)
             sb_patch(conn)
             rr_patch(conn)
+            am_patch(conn)
             logger.info("Schema patches applied successfully")
     except Exception as e:
         logger.warning(f"Schema patches warning (non-fatal): {e}")

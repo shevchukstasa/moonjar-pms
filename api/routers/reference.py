@@ -15,6 +15,7 @@ from api.models import (
     FiringTemperatureGroup, FiringTemperatureGroupRecipe,
     Collection, ColorCollection, Color, ApplicationType, PlacesOfApplication, FinishingType,
     Supplier, Size, WarehouseSection,
+    ApplicationMethod, ApplicationCollection,
 )
 from api.enums import (
     ProductType,
@@ -147,6 +148,47 @@ async def list_collections(
     ]
 
 
+@router.get("/application-methods")
+async def list_application_methods(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List all application methods (SS, S, BS, etc.)."""
+    methods = db.query(ApplicationMethod).filter(
+        ApplicationMethod.is_active == True
+    ).order_by(ApplicationMethod.sort_order).all()
+    return [
+        {
+            "id": str(m.id), "code": m.code, "name": m.name,
+            "engobe_method": m.engobe_method, "glaze_method": m.glaze_method,
+            "needs_engobe": m.needs_engobe, "two_stage_firing": m.two_stage_firing,
+            "special_kiln": m.special_kiln, "consumption_group_glaze": m.consumption_group_glaze,
+            "blocking_task_type": m.blocking_task_type,
+        }
+        for m in methods
+    ]
+
+
+@router.get("/application-collections")
+async def list_application_collections(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List all application collections (Authentic, Creative, Exclusive, etc.)."""
+    collections = db.query(ApplicationCollection).filter(
+        ApplicationCollection.is_active == True
+    ).order_by(ApplicationCollection.sort_order).all()
+    return [
+        {
+            "id": str(c.id), "code": c.code, "name": c.name,
+            "allowed_methods": c.allowed_methods, "any_method": c.any_method,
+            "no_base_colors": c.no_base_colors, "no_base_sizes": c.no_base_sizes,
+            "product_type_restriction": c.product_type_restriction,
+        }
+        for c in collections
+    ]
+
+
 @router.get("/all")
 async def list_all_reference_data(
     db: Session = Depends(get_db),
@@ -252,6 +294,34 @@ async def list_all_reference_data(
         for c in coeff_rows
     ]
     result["bowl_shapes"] = _enum_to_list(BowlShape)
+
+    # Application methods & collections
+    app_methods = db.query(ApplicationMethod).filter(
+        ApplicationMethod.is_active == True
+    ).order_by(ApplicationMethod.sort_order).all()
+    result["application_methods"] = [
+        {
+            "id": str(m.id), "code": m.code, "name": m.name,
+            "engobe_method": m.engobe_method, "glaze_method": m.glaze_method,
+            "needs_engobe": m.needs_engobe, "two_stage_firing": m.two_stage_firing,
+            "special_kiln": m.special_kiln, "consumption_group_glaze": m.consumption_group_glaze,
+            "blocking_task_type": m.blocking_task_type,
+        }
+        for m in app_methods
+    ]
+
+    app_collections = db.query(ApplicationCollection).filter(
+        ApplicationCollection.is_active == True
+    ).order_by(ApplicationCollection.sort_order).all()
+    result["application_collections"] = [
+        {
+            "id": str(c.id), "code": c.code, "name": c.name,
+            "allowed_methods": c.allowed_methods, "any_method": c.any_method,
+            "no_base_colors": c.no_base_colors, "no_base_sizes": c.no_base_sizes,
+            "product_type_restriction": c.product_type_restriction,
+        }
+        for c in app_collections
+    ]
 
     return result
 

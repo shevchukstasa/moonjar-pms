@@ -40,6 +40,10 @@ export interface RecipeMaterialItem {
   quantity_per_unit: number;
   unit: string;
   notes: string | null;
+  spray_rate: number | null;
+  brush_rate: number | null;
+  splash_rate: number | null;
+  silk_screen_rate: number | null;
 }
 
 export interface RecipeMaterialBulkItem {
@@ -47,6 +51,10 @@ export interface RecipeMaterialBulkItem {
   quantity_per_unit: number;
   unit?: string;
   notes?: string;
+  spray_rate?: number;
+  brush_rate?: number;
+  splash_rate?: number;
+  silk_screen_rate?: number;
 }
 
 export interface RecipeLookupParams {

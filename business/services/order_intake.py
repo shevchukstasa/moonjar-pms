@@ -465,6 +465,37 @@ def process_order_item(
     if _glazeable is not None:
         position.glazeable_sqm = _glazeable
 
+    # Store application collection and method from Sales webhook.
+    # The "collection" from Sales (Authentic/Exclusive/TopTable/WashBasin/Stock)
+    # is the APPLICATION collection, not the recipe's color_collection.
+    _app_collection = getattr(item, 'application_collection', None) or getattr(item, 'collection', None)
+    _app_method = getattr(item, 'application_method', None) or getattr(item, 'application_type', None)
+
+    if hasattr(position, 'application_collection_code') and _app_collection:
+        position.application_collection_code = _app_collection.strip().lower()
+    if hasattr(position, 'application_method_code') and _app_method:
+        position.application_method_code = _app_method.strip().lower()
+
+    # Auto-detect Exclusive collection if not explicitly set
+    if not _app_collection or _app_collection.strip().lower() == 'authentic':
+        if _auto_detect_exclusive(db, position, item):
+            if hasattr(position, 'application_collection_code'):
+                position.application_collection_code = 'exclusive'
+            logger.info(
+                "AUTO_EXCLUSIVE | order=%s position=%s | auto-detected as Exclusive "
+                "(non-base color or non-base size)",
+                order.order_number, position.id,
+            )
+
+    # Validate application method against collection rules
+    _final_collection = getattr(position, 'application_collection_code', None)
+    _final_method = getattr(position, 'application_method_code', None)
+    if not _validate_application_method(db, _final_collection, _final_method):
+        logger.warning(
+            "INVALID_METHOD | order=%s position=%s | method='%s' not allowed for collection='%s'",
+            order.order_number, position.id, _final_method, _final_collection,
+        )
+
     # Calculate defect margin
     from math import ceil
     defect_coeff = _get_defect_coefficient(db, order.factory_id, item.size or '')
@@ -773,26 +804,42 @@ def check_blocking_tasks(
 
 def _find_recipe(db: Session, item: ProductionOrderItem) -> Optional[Recipe]:
     """
-    Find matching recipe with progressive relaxation (up to 7 fields).
+    Find recipe by color name (case-insensitive).
 
-    Priority fields (strict match on Recipe columns):
-      1. color_collection  (= item.collection)
-      2. name              (= item.color)
+    The 'collection' from Sales (Authentic/Exclusive/etc.) is the APPLICATION
+    collection, NOT the recipe's color_collection. Recipes are stored with
+    color_collection like "Collection 2025/2026", so we match by color NAME.
 
-    Optional JSONB fields stored in Recipe.glaze_settings:
-      3. place_of_application
-      4. finishing_type     (= item.finishing)
-      5. size
-      6. shape
-      7. thickness
-
-    Strategy: start with all available fields, remove least-specific
-    optional fields one-by-one until a match is found.
+    Strategy:
+    1. Primary: exact name match on Recipe.name == item.color (case-insensitive)
+    2. Fallback with optional JSONB filters (progressive relaxation)
+    3. Fuzzy fallback: normalize both sides and retry
     """
     log = logging.getLogger(__name__)
 
-    # Build list of (field_label, filter_fn) pairs — most-specific first.
-    # Each filter_fn accepts a query and returns a narrowed query.
+    color = getattr(item, 'color', None)
+    if not color:
+        log.warning("No color on item id=%s — cannot find recipe", item.id)
+        return None
+
+    color_stripped = color.strip()
+
+    # ── Primary: exact name match (case-insensitive), active recipes only ──
+    recipe = db.query(Recipe).filter(
+        Recipe.is_active.is_(True),
+        func.lower(Recipe.name) == func.lower(color_stripped),
+    ).first()
+
+    if recipe:
+        log.info(
+            "Recipe matched (color name exact): '%s' → recipe '%s' (id=%s)",
+            color_stripped, recipe.name, recipe.id,
+        )
+        return recipe
+
+    # ── Secondary: try with optional JSONB filters for disambiguation ──
+    # This handles cases where multiple recipes share a color name but differ
+    # in finishing, size, shape, etc.
     optional_filters: list[tuple[str, object]] = []
 
     if item.thickness:
@@ -831,47 +878,138 @@ def _find_recipe(db: Session, item: ProductionOrderItem) -> Optional[Recipe]:
             ),
         ))
 
-    # Progressive relaxation: try with all optional filters, then drop
-    # the least-specific (first in list = most specific, last = least).
-    for drop_count in range(len(optional_filters) + 1):
-        active = optional_filters[drop_count:]  # drop from the front (most-specific first)
-        active_labels = [label for label, _ in active]
+    # Progressive relaxation: try all optional filters, then drop least-specific
+    if optional_filters:
+        for drop_count in range(len(optional_filters) + 1):
+            active = optional_filters[drop_count:]
+            active_labels = [label for label, _ in active]
 
-        base = db.query(Recipe).filter(Recipe.is_active.is_(True))
-        if item.collection:
-            base = base.filter(Recipe.color_collection == item.collection)
-        if item.color:
-            base = base.filter(Recipe.name == item.color)
-
-        q = base
-        for _, apply_filter in active:
-            q = apply_filter(q)
-
-        results = q.all()
-        if len(results) == 1:
-            matched = ["collection", "color"] + active_labels
-            log.info(
-                "Recipe matched (exact): %s — fields: %s",
-                results[0].name,
-                ", ".join(matched),
+            base = db.query(Recipe).filter(
+                Recipe.is_active.is_(True),
+                func.lower(Recipe.name) == func.lower(color_stripped),
             )
-            return results[0]
-        if len(results) > 1:
-            matched = ["collection", "color"] + active_labels
+            q = base
+            for _, apply_filter in active:
+                q = apply_filter(q)
+
+            results = q.all()
+            if len(results) == 1:
+                log.info(
+                    "Recipe matched (color + JSONB): '%s' → '%s' — fields: %s",
+                    color_stripped, results[0].name,
+                    ", ".join(["color"] + active_labels),
+                )
+                return results[0]
+            if len(results) > 1:
+                log.info(
+                    "Recipe matched (first of %d, color + JSONB): '%s' → '%s' — fields: %s",
+                    len(results), color_stripped, results[0].name,
+                    ", ".join(["color"] + active_labels),
+                )
+                return results[0]
+
+    # ── Fuzzy fallback: normalize (strip "glaze"/"crackle" suffixes, trim) ──
+    import re
+    normalized = re.sub(r'\s+(glaze|crackle|matt|matte|glossy)$', '', color_stripped, flags=re.IGNORECASE).strip()
+    if normalized.lower() != color_stripped.lower():
+        recipe = db.query(Recipe).filter(
+            Recipe.is_active.is_(True),
+            func.lower(Recipe.name) == normalized.lower(),
+        ).first()
+        if recipe:
             log.info(
-                "Recipe matched (first of %d): %s — fields: %s",
-                len(results),
-                results[0].name,
-                ", ".join(matched),
+                "Recipe matched (fuzzy normalized): '%s' → '%s' (id=%s)",
+                color_stripped, recipe.name, recipe.id,
             )
-            return results[0]
+            return recipe
+
+    # ── Also try if recipe name contains the color (partial match) ──
+    recipe = db.query(Recipe).filter(
+        Recipe.is_active.is_(True),
+        func.lower(Recipe.name).contains(color_stripped.lower()),
+    ).first()
+    if recipe:
+        log.info(
+            "Recipe matched (partial contains): '%s' → '%s' (id=%s)",
+            color_stripped, recipe.name, recipe.id,
+        )
+        return recipe
 
     log.warning(
-        "No recipe found for item collection=%s color=%s",
-        item.collection,
-        item.color,
+        "No recipe found for item color='%s' (collection='%s')",
+        color_stripped, item.collection,
     )
     return None
+
+
+def _auto_detect_exclusive(db: Session, position, item) -> bool:
+    """
+    Auto-detect if position should be in Exclusive collection.
+
+    Rule: if tile + (non-base color OR non-base size) → Exclusive
+
+    Base sizes: is_custom=False in sizes table (5x20, 10x10, 10x20, 10x40, 20x20, 20x40)
+    Base colors: is_basic=True in colors table
+    """
+    # Only tiles can be auto-Exclusive
+    _pt = getattr(position, 'product_type', None)
+    _pt_val = _pt.value if hasattr(_pt, 'value') else str(_pt or '')
+    if _pt_val and _pt_val != 'tile':
+        return False
+
+    # Check if color is base
+    color_name = getattr(item, 'color', '') or ''
+    if color_name:
+        from api.models import Color
+        color_record = db.query(Color).filter(
+            func.lower(Color.name) == func.lower(color_name.strip())
+        ).first()
+        is_base_color = color_record.is_basic if color_record else False
+    else:
+        is_base_color = False
+
+    # Check if size is base (standard)
+    from api.models import Size
+    size_str = getattr(item, 'size', '') or ''
+    if size_str:
+        size_record = db.query(Size).filter(Size.name == size_str).first()
+        is_base_size = (size_record is not None and not size_record.is_custom)
+    else:
+        is_base_size = False
+
+    # Non-base color OR non-base size → Exclusive
+    if not is_base_color or not is_base_size:
+        return True
+
+    return False
+
+
+def _validate_application_method(db, collection_code, method_code) -> bool:
+    """Validate that the application method is allowed for the collection.
+
+    Returns True if valid or if validation cannot be performed (missing data,
+    unknown collection, or ApplicationCollection table not yet available).
+    """
+    if not collection_code or not method_code:
+        return True  # Skip validation if not provided
+
+    try:
+        from api.models import ApplicationCollection
+    except ImportError:
+        return True  # Model not yet created by Agent 1
+
+    coll = db.query(ApplicationCollection).filter(
+        ApplicationCollection.code == collection_code.strip().lower()
+    ).first()
+
+    if not coll:
+        return True  # Unknown collection, allow
+
+    if getattr(coll, 'any_method', False):
+        return True  # Exclusive/TopTable/WashBasin allow any method
+
+    allowed = getattr(coll, 'allowed_methods', None) or []
+    return method_code.strip().lower() in allowed
 
 
 def _generate_order_number(db: Session) -> str:

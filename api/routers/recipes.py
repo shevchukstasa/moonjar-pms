@@ -24,6 +24,8 @@ from api.schemas import (
     RecipeMaterialResponse,
 )
 
+import logging
+
 router = APIRouter()
 
 
@@ -104,6 +106,147 @@ async def list_recipes(
         "total": total,
         "page": page,
         "per_page": per_page,
+    }
+
+
+@router.get("/lookup")
+async def lookup_recipe(
+    collection: str = Query(None),
+    color: str = Query(None),
+    size: str = Query(None),
+    shape: str = Query(None),
+    finish: str = Query(None),
+    thickness: float = Query(None),
+    application_type: str = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Look up recipe by up to 7 fields.  Returns best match + alternatives.
+
+    Priority fields (match on Recipe columns):
+      - collection  → Recipe.color_collection
+      - color       → Recipe.name
+
+    Optional fields (match via Recipe.glaze_settings JSONB):
+      - finish      → glaze_settings.finishing_type
+      - application_type → glaze_settings.place_of_application
+      - size        → glaze_settings.size
+      - shape       → glaze_settings.shape
+      - thickness   → glaze_settings.thickness
+    """
+    log = logging.getLogger(__name__)
+
+    # ── optional JSONB filters (least-specific → most-specific ordering) ──
+    optional_filters: list[tuple[str, object]] = []
+
+    if thickness is not None:
+        optional_filters.append((
+            "thickness",
+            lambda q, v=str(thickness): q.filter(
+                Recipe.glaze_settings["thickness"].astext == v
+            ),
+        ))
+    if shape:
+        optional_filters.append((
+            "shape",
+            lambda q, v=shape: q.filter(
+                Recipe.glaze_settings["shape"].astext == v
+            ),
+        ))
+    if size:
+        optional_filters.append((
+            "size",
+            lambda q, v=size: q.filter(
+                Recipe.glaze_settings["size"].astext == v
+            ),
+        ))
+    if finish:
+        optional_filters.append((
+            "finish",
+            lambda q, v=finish: q.filter(
+                Recipe.glaze_settings["finishing_type"].astext == v
+            ),
+        ))
+    if application_type:
+        optional_filters.append((
+            "application_type",
+            lambda q, v=application_type: q.filter(
+                Recipe.glaze_settings["place_of_application"].astext == v
+            ),
+        ))
+
+    best_match = None
+    match_type = "none"
+    fields_matched: list[str] = []
+
+    for drop_count in range(len(optional_filters) + 1):
+        active = optional_filters[drop_count:]
+        active_labels = [label for label, _ in active]
+
+        base = db.query(Recipe).filter(Recipe.is_active.is_(True))
+        if collection:
+            base = base.filter(Recipe.color_collection == collection)
+        if color:
+            base = base.filter(Recipe.name == color)
+
+        q = base
+        for _, apply_filter in active:
+            q = apply_filter(q)
+
+        results = q.all()
+        if results:
+            best_match = results[0]
+            matched = []
+            if collection:
+                matched.append("collection")
+            if color:
+                matched.append("color")
+            matched.extend(active_labels)
+            fields_matched = matched
+
+            total_optional = len(optional_filters)
+            used_optional = len(active)
+            if used_optional == total_optional and total_optional >= 5:
+                match_type = "exact_7"
+            elif used_optional == total_optional and total_optional >= 2:
+                match_type = "exact_4"
+            elif used_optional > 0:
+                match_type = "partial"
+            else:
+                match_type = "partial"
+            break
+
+    # Collect alternatives: all active recipes matching collection+color
+    alt_query = db.query(Recipe).filter(Recipe.is_active.is_(True))
+    if collection:
+        alt_query = alt_query.filter(Recipe.color_collection == collection)
+    if color:
+        alt_query = alt_query.filter(Recipe.name == color)
+    all_candidates = alt_query.all()
+
+    alternatives = []
+    for r in all_candidates:
+        if best_match and str(r.id) == str(best_match.id):
+            continue
+        if r.glaze_settings is None:
+            r.glaze_settings = {}
+        alternatives.append(
+            RecipeResponse.model_validate(r).model_dump(mode="json")
+        )
+
+    match_data = None
+    if best_match:
+        if best_match.glaze_settings is None:
+            best_match.glaze_settings = {}
+        match_data = RecipeResponse.model_validate(best_match).model_dump(mode="json")
+
+    return {
+        "match": match_data,
+        "match_type": match_type,
+        "fields_matched": fields_matched,
+        "alternatives": alternatives[:10],
+        "total_candidates": len(all_candidates),
     }
 
 

@@ -210,6 +210,9 @@ def _ensure_schema():
         # Merged status for child positions merged back into parent
         ("positionstatus", "merged"),
         ("tasktype", "size_resolution"),
+        # Purchaser lifecycle — expanded status values
+        ("purchase_status", "in_transit"),
+        ("purchase_status", "closed"),
     ]
     try:
         raw_conn = engine.raw_connection()

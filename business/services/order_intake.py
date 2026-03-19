@@ -773,22 +773,105 @@ def check_blocking_tasks(
 
 def _find_recipe(db: Session, item: ProductionOrderItem) -> Optional[Recipe]:
     """
-    Find matching recipe by color_collection + name + place_of_application + finishing.
+    Find matching recipe with progressive relaxation (up to 7 fields).
 
-    Note: application_type removed from Recipe (spray/brush rates are on the recipe itself).
+    Priority fields (strict match on Recipe columns):
+      1. color_collection  (= item.collection)
+      2. name              (= item.color)
+
+    Optional JSONB fields stored in Recipe.glaze_settings:
+      3. place_of_application
+      4. finishing_type     (= item.finishing)
+      5. size
+      6. shape
+      7. thickness
+
+    Strategy: start with all available fields, remove least-specific
+    optional fields one-by-one until a match is found.
     """
-    query = db.query(Recipe).filter(Recipe.is_active.is_(True))
+    log = logging.getLogger(__name__)
 
-    if item.collection:
-        query = query.filter(Recipe.color_collection == item.collection)
-    if item.color:
-        query = query.filter(Recipe.name == item.color)
-    if item.place_of_application:
-        query = query.filter(Recipe.place_of_application == item.place_of_application)
+    # Build list of (field_label, filter_fn) pairs — most-specific first.
+    # Each filter_fn accepts a query and returns a narrowed query.
+    optional_filters: list[tuple[str, object]] = []
+
+    if item.thickness:
+        optional_filters.append((
+            "thickness",
+            lambda q, v=str(item.thickness): q.filter(
+                Recipe.glaze_settings["thickness"].astext == v
+            ),
+        ))
+    if getattr(item, "shape", None):
+        optional_filters.append((
+            "shape",
+            lambda q, v=str(item.shape): q.filter(
+                Recipe.glaze_settings["shape"].astext == v
+            ),
+        ))
+    if getattr(item, "size", None):
+        optional_filters.append((
+            "size",
+            lambda q, v=item.size: q.filter(
+                Recipe.glaze_settings["size"].astext == v
+            ),
+        ))
     if item.finishing:
-        query = query.filter(Recipe.finishing_type == item.finishing)
+        optional_filters.append((
+            "finishing_type",
+            lambda q, v=item.finishing: q.filter(
+                Recipe.glaze_settings["finishing_type"].astext == v
+            ),
+        ))
+    if item.place_of_application:
+        optional_filters.append((
+            "place_of_application",
+            lambda q, v=item.place_of_application: q.filter(
+                Recipe.glaze_settings["place_of_application"].astext == v
+            ),
+        ))
 
-    return query.first()
+    # Progressive relaxation: try with all optional filters, then drop
+    # the least-specific (first in list = most specific, last = least).
+    for drop_count in range(len(optional_filters) + 1):
+        active = optional_filters[drop_count:]  # drop from the front (most-specific first)
+        active_labels = [label for label, _ in active]
+
+        base = db.query(Recipe).filter(Recipe.is_active.is_(True))
+        if item.collection:
+            base = base.filter(Recipe.color_collection == item.collection)
+        if item.color:
+            base = base.filter(Recipe.name == item.color)
+
+        q = base
+        for _, apply_filter in active:
+            q = apply_filter(q)
+
+        results = q.all()
+        if len(results) == 1:
+            matched = ["collection", "color"] + active_labels
+            log.info(
+                "Recipe matched (exact): %s — fields: %s",
+                results[0].name,
+                ", ".join(matched),
+            )
+            return results[0]
+        if len(results) > 1:
+            matched = ["collection", "color"] + active_labels
+            log.info(
+                "Recipe matched (first of %d): %s — fields: %s",
+                len(results),
+                results[0].name,
+                ", ".join(matched),
+            )
+            return results[0]
+
+    log.warning(
+        "No recipe found for item collection=%s color=%s",
+        item.collection,
+        item.color,
+    )
+    return None
 
 
 def _generate_order_number(db: Session) -> str:

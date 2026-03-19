@@ -216,6 +216,7 @@ class TransactionInput(BaseModel):
     quantity: float
     reason: Optional[str] = None
     notes: Optional[str] = None
+    supplier_id: Optional[UUID] = None  # for receive: auto-match purchase requests
 
 
 class PurchaseRequestInput(BaseModel):
@@ -1316,6 +1317,23 @@ async def create_transaction(
     db.add(t)
     db.commit()
     db.refresh(t)
+
+    # Auto-update purchase requests on material receive
+    if data.type == "receive":
+        try:
+            from business.services.purchaser_lifecycle import on_material_received
+            on_material_received(
+                db=db,
+                material_id=data.material_id,
+                supplier_id=data.supplier_id,
+                factory_id=data.factory_id,
+                quantity=qty,
+            )
+            db.commit()
+        except Exception as e:
+            import logging
+            logging.getLogger("moonjar").warning(f"purchaser_lifecycle hook failed: {e}")
+
     return _serialize_transaction(t, db)
 
 

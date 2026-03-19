@@ -49,11 +49,31 @@ export interface RecipeMaterialBulkItem {
   notes?: string;
 }
 
+export interface RecipeLookupParams {
+  collection?: string;
+  color?: string;
+  size?: string;
+  shape?: string;
+  finish?: string;
+  thickness?: number;
+  application_type?: string;
+}
+
+export interface RecipeLookupResult {
+  match: RecipeItem | null;
+  match_type: 'exact_7' | 'exact_4' | 'partial' | 'none';
+  fields_matched: string[];
+  alternatives: RecipeItem[];
+  total_candidates: number;
+}
+
 export const recipesApi = {
   list: (params?: Record<string, unknown>) =>
     apiClient.get('/recipes', { params }).then((r) => r.data),
   get: (id: string) =>
     apiClient.get(`/recipes/${id}`).then((r) => r.data),
+  lookupRecipe: (params: RecipeLookupParams): Promise<RecipeLookupResult> =>
+    apiClient.get('/recipes/lookup', { params }).then((r) => r.data),
   create: (data: Record<string, unknown>) =>
     apiClient.post('/recipes', data).then((r) => r.data),
   update: (id: string, data: Record<string, unknown>) =>

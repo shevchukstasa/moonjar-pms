@@ -60,7 +60,7 @@ def _serialize_request(pr, db) -> dict:
 # ── Pydantic models ─────────────────────────────────────────────────────
 
 class StatusChangeInput(BaseModel):
-    status: str  # "approved" | "sent" | "received"
+    status: str  # "approved" | "sent" | "in_transit" | "received" | "closed"
     notes: Optional[str] = None
     expected_delivery_date: Optional[str] = None  # ISO date
     actual_delivery_date: Optional[str] = None  # ISO date
@@ -107,29 +107,41 @@ async def get_purchaser_stats(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Dashboard KPI stats."""
+    """Dashboard KPI stats with lead-time analytics."""
+    from business.services.purchaser_lifecycle import compute_enhanced_stats
+
     base = db.query(MaterialPurchaseRequest)
     if factory_id:
         base = base.filter(MaterialPurchaseRequest.factory_id == factory_id)
 
     active = base.filter(
-        MaterialPurchaseRequest.status.in_(["pending", "approved", "sent"])
+        MaterialPurchaseRequest.status.in_(["pending", "approved", "sent", "in_transit"])
     ).count()
 
     pending = base.filter(MaterialPurchaseRequest.status == "pending").count()
-    awaiting = base.filter(MaterialPurchaseRequest.status == "sent").count()
+    awaiting = base.filter(
+        MaterialPurchaseRequest.status.in_(["sent", "in_transit"])
+    ).count()
 
     today = date.today()
     overdue = base.filter(
-        MaterialPurchaseRequest.status == "sent",
+        MaterialPurchaseRequest.status.in_(["sent", "in_transit"]),
         MaterialPurchaseRequest.expected_delivery_date < today,
     ).count()
+
+    # Enhanced stats: lead time, on-time %
+    enhanced = compute_enhanced_stats(db, factory_id)
 
     return {
         "active_requests": active,
         "pending_approval": pending,
         "awaiting_delivery": awaiting,
         "overdue_deliveries": overdue,
+        # Enhanced metrics
+        "overdue_count": enhanced["overdue_count"],
+        "avg_lead_time_days": enhanced["avg_lead_time_days"],
+        "on_time_pct": enhanced["on_time_pct"],
+        "completed_this_month": enhanced["completed_this_month"],
     }
 
 
@@ -143,7 +155,7 @@ async def list_deliveries(
 ):
     """Completed or partially received deliveries."""
     query = db.query(MaterialPurchaseRequest).filter(
-        MaterialPurchaseRequest.status.in_(["partially_received", "received"])
+        MaterialPurchaseRequest.status.in_(["partially_received", "received", "closed"])
     )
     if factory_id:
         query = query.filter(MaterialPurchaseRequest.factory_id == factory_id)
@@ -220,7 +232,20 @@ async def change_request_status(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Status workflow: pending → approved → sent → received."""
+    """
+    Full status workflow:
+      pending → approved → sent → in_transit → received → closed
+                                  └→ partially_received → received
+    """
+    from business.services.purchaser_lifecycle import (
+        _notify_on_approved,
+        _notify_on_sent,
+        _notify_on_in_transit,
+        _notify_on_received,
+        _calculate_lead_time,
+        update_supplier_lead_time,
+    )
+
     pr = db.query(MaterialPurchaseRequest).filter(
         MaterialPurchaseRequest.id == item_id
     ).first()
@@ -234,7 +259,10 @@ async def change_request_status(
     valid_transitions = {
         "pending": ["approved"],
         "approved": ["sent"],
-        "sent": ["partially_received", "received"],
+        "sent": ["in_transit", "partially_received", "received"],
+        "in_transit": ["partially_received", "received"],
+        "partially_received": ["received"],
+        "received": ["closed"],
     }
 
     if current_status not in valid_transitions:
@@ -254,16 +282,34 @@ async def change_request_status(
 
     if new_status == "approved":
         pr.approved_by = current_user.id
+        _notify_on_approved(db, pr)
 
     elif new_status == "sent":
         pr.ordered_at = date.today()
         if data.expected_delivery_date:
             pr.expected_delivery_date = date.fromisoformat(data.expected_delivery_date)
+        _notify_on_sent(db, pr)
+
+    elif new_status == "in_transit":
+        if data.expected_delivery_date:
+            pr.expected_delivery_date = date.fromisoformat(data.expected_delivery_date)
+        _notify_on_in_transit(db, pr)
 
     elif new_status == "received":
         pr.actual_delivery_date = date.today()
         if data.actual_delivery_date:
             pr.actual_delivery_date = date.fromisoformat(data.actual_delivery_date)
+
+        # Calculate lead time
+        lead_time_info = _calculate_lead_time(pr, pr.actual_delivery_date)
+        _notify_on_received(db, pr, lead_time_info)
+
+        # Update supplier lead time stats
+        if pr.supplier_id and lead_time_info.get("actual_days") is not None:
+            # Use first material_id from PR for lead time tracking
+            first_mat_id = _get_first_material_id(pr)
+            if first_mat_id:
+                update_supplier_lead_time(db, pr.supplier_id, first_mat_id, lead_time_info["actual_days"])
 
         # Auto-receive: update material stock balances
         if pr.materials_json and isinstance(pr.materials_json, list):
@@ -288,9 +334,38 @@ async def change_request_status(
                         )
                         db.add(t)
 
+    elif new_status == "closed":
+        pass  # Final state, no side effects
+
     db.commit()
     db.refresh(pr)
     return _serialize_request(pr, db)
+
+
+def _get_first_material_id(pr: MaterialPurchaseRequest) -> Optional[UUID]:
+    """Extract first material_id from PR's materials_json."""
+    mats = pr.materials_json
+    if isinstance(mats, list) and mats:
+        mid = mats[0].get("material_id")
+        if mid:
+            try:
+                from uuid import UUID as _UUID
+                return _UUID(str(mid))
+            except (ValueError, TypeError):
+                return None
+    if isinstance(mats, dict):
+        items = mats.get("items", [])
+        if items:
+            mid = items[0].get("material_id")
+        else:
+            mid = mats.get("material_id")
+        if mid:
+            try:
+                from uuid import UUID as _UUID
+                return _UUID(str(mid))
+            except (ValueError, TypeError):
+                return None
+    return None
 
 
 @router.delete("/{item_id}", status_code=204)

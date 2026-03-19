@@ -116,9 +116,11 @@ class WriteOffReason(str, Enum):
 class PurchaseStatus(str, Enum):
     PENDING = 'pending'
     APPROVED = 'approved'
-    SENT = 'sent'
+    SENT = 'sent'                           # ordered / sent to supplier
+    IN_TRANSIT = 'in_transit'               # supplier confirmed dispatch
     PARTIALLY_RECEIVED = 'partially_received'
-    RECEIVED = 'received'
+    RECEIVED = 'received'                   # warehouse confirmed receipt
+    CLOSED = 'closed'                       # reconciled & archived
 
 class ResourceType(str, Enum):
     KILN = 'kiln'

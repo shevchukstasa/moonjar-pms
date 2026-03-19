@@ -1125,6 +1125,38 @@ async def notify_sales_status_change_stub(order, position, old_status: str, new_
     await send_webhook(payload, event_type="status_change", external_id=order.external_id)
 
 
+@router.get("/webhooks")
+async def list_webhook_events(
+    processed: Optional[bool] = None,
+    limit: int = Query(50, le=200),
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Admin-only: list Sales webhook events history (for diagnostics)."""
+    from sqlalchemy import desc
+    query = db.query(SalesWebhookEvent)
+    if processed is not None:
+        query = query.filter(SalesWebhookEvent.processed == processed)
+    total = query.count()
+    events = query.order_by(desc(SalesWebhookEvent.created_at)).offset(offset).limit(limit).all()
+    return {
+        "items": [
+            {
+                "id": str(e.id),
+                "event_id": e.event_id,
+                "processed": e.processed,
+                "error_message": e.error_message,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in events
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
 @router.get("/stubs")
 async def get_stubs_state(
     db: Session = Depends(get_db),

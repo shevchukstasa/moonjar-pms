@@ -251,9 +251,8 @@ check(r, 200, "GET /reference/colors")
 r = get("/reference/collections")
 check(r, 200, "GET /reference/collections")
 
-r = get("/finishing-types")
-if r.status_code in (200, 404):
-    ok("GET /finishing-types") if r.status_code == 200 else skip("GET /finishing-types", "endpoint not mounted")
+r = get("/reference/finishing-types")
+check(r, 200, "GET /reference/finishing-types")
 
 section("STAGE 1 · Sizes & Glazing Boards")
 
@@ -736,15 +735,33 @@ check(r, 200, "GET /material-groups/groups")
 
 section("STAGE 2 · Webhook / Integration")
 
-r = get("/integration/webhooks", params={"factory_id": ctx.get("factory_id", "")})
-if r.status_code in (200, 404):
-    ok("GET /integration/webhooks") if r.status_code == 200 else skip("GET /integration/webhooks", "endpoint not found")
+# GET /integration/webhooks — admin-only, PM gets 403 (expected)
+r = get("/integration/webhooks")
+if r.status_code == 403:
+    skip("GET /integration/webhooks", "admin-only endpoint")
 else:
-    fail("GET /integration/webhooks", f"{r.status_code}")
+    check(r, 200, "GET /integration/webhooks")
 
-# Rate limit reset: 100 req/min limit — pause here to slide the 60s window
-print(f"\n  {YELLOW}[rate-limit guard] sleeping 20s to reset API rate limit window...{RESET}")
-time.sleep(20)
+# POST /integration/webhook/sales-order — requires X-API-Key from Sales app
+# Without the key we expect 401 (not 404) — confirms endpoint exists and is active
+r = session.post(f"{BASE}/integration/webhook/sales-order", json={
+    "event_id": "test-probe-001",
+    "event_type": "new_order",
+    "order_data": {},
+})
+_sync_csrf(r)
+if r.status_code == 503:
+    skip("POST /integration/webhook/sales-order", "webhook disabled (PRODUCTION_WEBHOOK_ENABLED=false)")
+elif r.status_code in (401, 403):
+    ok("POST /integration/webhook/sales-order (endpoint active, no Sales API key — expected 401)")
+elif r.status_code == 200:
+    ok("POST /integration/webhook/sales-order (processed)")
+else:
+    fail("POST /integration/webhook/sales-order", f"{r.status_code}: {r.text[:120]}")
+
+# Rate limit reset: 100 req/min limit — pause 65s to guarantee the 60s window fully resets
+print(f"\n  {YELLOW}[rate-limit guard] sleeping 65s to reset API rate limit window (100 req/min limit)...{RESET}")
+time.sleep(65)
 
 section("STAGE 2 · Security")
 

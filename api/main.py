@@ -206,10 +206,11 @@ def _ensure_schema():
         # Grinding stock enum values (type created in table section above;
         # keep entries here for any future additions only).
         # Size Resolution (MUST be in AUTOCOMMIT block — not in DO $$ transactions)
-        ("positionstatus", "awaiting_size_confirmation"),
+        # NOTE: PostgreSQL enum names use underscores (position_status, not positionstatus)
+        ("position_status", "awaiting_size_confirmation"),
         # Merged status for child positions merged back into parent
-        ("positionstatus", "merged"),
-        ("tasktype", "size_resolution"),
+        ("position_status", "merged"),
+        ("task_type", "size_resolution"),
         # Purchaser lifecycle — expanded status values
         ("purchase_status", "in_transit"),
         ("purchase_status", "closed"),
@@ -1301,16 +1302,16 @@ def _ensure_schema():
         # Add enum values (only if enum types exist — they're created by SQLAlchemy table creation)
         conn.execute(text("""
             DO $$ BEGIN
-                IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'positionstatus') THEN
-                    EXECUTE 'ALTER TYPE positionstatus ADD VALUE IF NOT EXISTS ''awaiting_size_confirmation''';
+                IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'position_status') THEN
+                    EXECUTE 'ALTER TYPE position_status ADD VALUE IF NOT EXISTS ''awaiting_size_confirmation''';
                 END IF;
             EXCEPTION WHEN duplicate_object THEN NULL;
             END $$;
         """))
         conn.execute(text("""
             DO $$ BEGIN
-                IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tasktype') THEN
-                    EXECUTE 'ALTER TYPE tasktype ADD VALUE IF NOT EXISTS ''size_resolution''';
+                IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'task_type') THEN
+                    EXECUTE 'ALTER TYPE task_type ADD VALUE IF NOT EXISTS ''size_resolution''';
                 END IF;
             EXCEPTION WHEN duplicate_object THEN NULL;
             END $$;

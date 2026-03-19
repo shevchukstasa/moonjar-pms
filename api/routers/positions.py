@@ -193,6 +193,17 @@ def _serialize_position(p) -> dict:
         "priority_order": p.priority_order,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+        # Application method system
+        "application_method_code": getattr(p, 'application_method_code', None),
+        "application_collection_code": getattr(p, 'application_collection_code', None),
+        # Production data
+        "glazeable_sqm": float(p.glazeable_sqm) if getattr(p, 'glazeable_sqm', None) else None,
+        "size_id": str(p.size_id) if getattr(p, 'size_id', None) else None,
+        "recipe_name": p.recipe.name if getattr(p, 'recipe', None) and p.recipe else None,
+        # Schedule
+        "planned_glazing_date": p.planned_glazing_date.isoformat() if getattr(p, 'planned_glazing_date', None) else None,
+        "planned_kiln_date": p.planned_kiln_date.isoformat() if getattr(p, 'planned_kiln_date', None) else None,
+        "planned_sorting_date": p.planned_sorting_date.isoformat() if getattr(p, 'planned_sorting_date', None) else None,
         # Include order_number via relationship
         "order_number": p.order.order_number if p.order else "",
     }

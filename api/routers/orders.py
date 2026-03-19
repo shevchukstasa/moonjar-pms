@@ -523,6 +523,121 @@ async def confirm_pdf_order(
     return _order_detail(order, db)
 
 
+@router.post("/{order_id}/reprocess")
+async def reprocess_order(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Re-run the intake pipeline for all positions of an existing order.
+
+    Useful when positions were created before recipe lookup or material
+    reservation was working correctly. For each position this will:
+    1. Re-run recipe lookup (if recipe_id is None)
+    2. Recalculate glazeable_sqm from shape_dimensions
+    3. Recalculate quantity_with_defect_margin
+    4. Run size resolution
+    5. Reserve materials (if recipe exists)
+    6. Create blocking tasks (stencil, silkscreen, color matching, service)
+    7. Schedule production dates
+    """
+    from math import ceil
+    from business.services.order_intake import (
+        _find_recipe, _get_defect_coefficient, _auto_detect_exclusive,
+    )
+    from business.services.surface_area import calculate_glazeable_sqm_for_position
+    from business.services.size_resolution import resolve_size_for_position, create_size_resolution_task
+    from business.services.material_reservation import reserve_materials_for_position
+
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+
+    positions = (
+        db.query(OrderPosition)
+        .filter(OrderPosition.order_id == order_id)
+        .all()
+    )
+
+    results = []
+    for p in positions:
+        pos_result = {"position_number": p.position_number, "actions": []}
+
+        # 1. Recipe lookup (if missing)
+        if not p.recipe_id:
+            item = db.query(ProductionOrderItem).filter(
+                ProductionOrderItem.id == p.order_item_id
+            ).first()
+            if item:
+                recipe = _find_recipe(db, item)
+                if recipe:
+                    p.recipe_id = recipe.id
+                    pos_result["actions"].append(f"recipe_bound={recipe.name}")
+                else:
+                    pos_result["actions"].append("recipe_not_found")
+
+        # 2. Recalculate glazeable_sqm
+        new_area = calculate_glazeable_sqm_for_position(db, p)
+        if new_area is not None:
+            p.glazeable_sqm = new_area
+            pos_result["actions"].append(f"area={float(new_area):.4f}")
+
+        # 3. Recalculate defect margin
+        if p.quantity and not p.quantity_with_defect_margin:
+            coeff = _get_defect_coefficient(db, order.factory_id, p.size or '')
+            p.quantity_with_defect_margin = ceil(p.quantity * (1 + coeff))
+            pos_result["actions"].append(f"margin={p.quantity_with_defect_margin}")
+
+        # 4. Size resolution (if no size_id)
+        if not p.size_id:
+            sr = resolve_size_for_position(db, p)
+            if sr.resolved and sr.size_id:
+                p.size_id = sr.size_id
+                pos_result["actions"].append(f"size_resolved={sr.reason}")
+            elif not sr.resolved and sr.reason != "missing_dimensions":
+                create_size_resolution_task(db, p, order.id, order.factory_id, sr.reason, sr.candidates)
+                pos_result["actions"].append(f"size_task_created={sr.reason}")
+
+        # 5. Reserve materials (if recipe exists and status is planned)
+        if p.recipe_id and _ev(p.status) == "planned":
+            try:
+                res = reserve_materials_for_position(db, p)
+                pos_result["actions"].append(f"materials={'reserved' if res else 'insufficient'}")
+            except Exception as e:
+                pos_result["actions"].append(f"materials_error={str(e)[:50]}")
+
+        # 6. Auto-detect exclusive
+        if hasattr(p, 'application_collection_code'):
+            item = db.query(ProductionOrderItem).filter(
+                ProductionOrderItem.id == p.order_item_id
+            ).first()
+            if item and _auto_detect_exclusive(db, p, item):
+                p.application_collection_code = 'exclusive'
+                pos_result["actions"].append("auto_exclusive")
+
+        p.updated_at = datetime.now(timezone.utc)
+        results.append(pos_result)
+
+    # 7. Schedule
+    try:
+        from business.services.production_scheduler import schedule_order
+        schedule_order(db, order)
+        for r in results:
+            r["actions"].append("scheduled")
+    except Exception as e:
+        for r in results:
+            r["actions"].append(f"schedule_error={str(e)[:50]}")
+
+    db.commit()
+
+    return {
+        "ok": True,
+        "order_id": str(order_id),
+        "positions_reprocessed": len(results),
+        "results": results,
+    }
+
+
 @router.get("/{order_id}")
 async def get_order(
     order_id: UUID,

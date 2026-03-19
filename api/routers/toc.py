@@ -2,6 +2,7 @@
 See API_CONTRACTS.md for full specification.
 """
 
+from datetime import date
 from uuid import UUID
 from typing import Optional
 
@@ -13,9 +14,94 @@ from api.database import get_db
 from api.auth import get_current_user
 from api.roles import require_management
 
-from api.models import BottleneckConfig, BufferStatus, Resource, Factory
-from api.enums import ResourceType, BufferHealth
+from api.models import BottleneckConfig, BufferStatus, Resource, Factory, ProductionOrder, OrderPosition
+from api.enums import ResourceType, BufferHealth, OrderStatus, PositionStatus
 from business.services.buffer_health import calculate_buffer_health
+
+
+# Statuses that count as "work done" for buffer penetration
+_DONE_STATUSES = {
+    PositionStatus.PACKED,
+    PositionStatus.QUALITY_CHECK_DONE,
+    PositionStatus.READY_FOR_SHIPMENT,
+    PositionStatus.SHIPPED,
+}
+
+# Statuses that mean the position is cancelled/excluded from count
+_EXCLUDED_STATUSES = {
+    PositionStatus.CANCELLED,
+}
+
+
+def _compute_buffer_zone(order: ProductionOrder, positions: list) -> dict:
+    """
+    Compute TOC buffer zone for a single order.
+
+    Buffer penetration = time elapsed / total time window  (how much of the clock has ticked)
+    Work completion    = done positions / total positions   (how much work is actually done)
+    delta              = work_pct - time_pct
+      >= -5%  → green   (work keeps up with time)
+      >= -20% → yellow  (buffer eroding)
+      <  -20% → red     (critical)
+    Deadline today or past → always red.
+    """
+    today = date.today()
+
+    # Filter out cancelled/split sub-positions
+    active = [p for p in positions if p.status not in _EXCLUDED_STATUSES and p.split_category is None]
+    total = len(active)
+    done = sum(1 for p in active if p.status in _DONE_STATUSES)
+    in_progress = total - done
+
+    work_pct = round(done / total * 100, 1) if total else 0.0
+
+    # Time window
+    start = order.production_received_date or order.document_date
+    deadline = order.final_deadline or order.schedule_deadline
+
+    if deadline is None:
+        # No deadline set → treat as green with no time data
+        return {
+            "time_penetration_pct": None,
+            "work_completion_pct": work_pct,
+            "buffer_delta": None,
+            "zone": "green",
+            "days_remaining": None,
+            "positions_total": total,
+            "positions_done": done,
+            "positions_in_progress": in_progress,
+        }
+
+    days_remaining = (deadline - today).days
+
+    if start and (deadline - start).days > 0:
+        total_window = (deadline - start).days
+        elapsed = (today - start).days
+        time_pct = round(min(max(elapsed / total_window * 100, 0), 100), 1)
+    else:
+        time_pct = 100.0 if days_remaining <= 0 else 0.0
+
+    delta = work_pct - time_pct
+
+    if days_remaining <= 0:
+        zone = "red"
+    elif delta >= -5:
+        zone = "green"
+    elif delta >= -20:
+        zone = "yellow"
+    else:
+        zone = "red"
+
+    return {
+        "time_penetration_pct": time_pct,
+        "work_completion_pct": work_pct,
+        "buffer_delta": round(delta, 1),
+        "zone": zone,
+        "days_remaining": days_remaining,
+        "positions_total": total,
+        "positions_done": done,
+        "positions_in_progress": in_progress,
+    }
 
 router = APIRouter()
 
@@ -200,3 +286,79 @@ async def get_buffer_health(
                 results.append(result)
 
     return {"items": results, "total": len(results)}
+
+
+@router.get("/buffer-zones")
+async def get_buffer_zones(
+    factory_id: Optional[UUID] = None,
+    zone: Optional[str] = Query(None, description="Filter by zone: green | yellow | red"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    TOC buffer zones for active orders.
+
+    Returns per-order buffer status based on:
+    - time penetration: elapsed / total time window to deadline
+    - work completion: done positions / total positions
+    - delta = work_pct - time_pct → determines green / yellow / red zone
+
+    Accessible by all authenticated users (scoped to their factory).
+    """
+    # Scope to user's factory if not owner/admin
+    if current_user.role not in ("owner", "administrator", "ceo") and not factory_id:
+        from api.models import UserFactory
+        uf = db.query(UserFactory).filter(
+            UserFactory.user_id == current_user.id
+        ).first()
+        if uf:
+            factory_id = uf.factory_id
+
+    # Query active orders (exclude cancelled/shipped)
+    query = db.query(ProductionOrder).filter(
+        ProductionOrder.status.notin_([
+            OrderStatus.CANCELLED,
+            OrderStatus.SHIPPED,
+        ])
+    )
+    if factory_id:
+        query = query.filter(ProductionOrder.factory_id == factory_id)
+
+    orders = query.order_by(ProductionOrder.final_deadline.asc().nullslast()).all()
+
+    # Build per-order buffer data
+    items = []
+    for order in orders:
+        positions = db.query(OrderPosition).filter(
+            OrderPosition.order_id == order.id,
+        ).all()
+
+        buf = _compute_buffer_zone(order, positions)
+
+        # Apply zone filter
+        if zone and buf["zone"] != zone:
+            continue
+
+        factory = db.query(Factory).filter(Factory.id == order.factory_id).first()
+
+        items.append({
+            "order_id": str(order.id),
+            "order_number": order.order_number,
+            "client": order.client,
+            "factory_id": str(order.factory_id),
+            "factory_name": factory.name if factory else None,
+            "deadline": str(order.final_deadline) if order.final_deadline else None,
+            "order_status": order.status.value if order.status else None,
+            **buf,
+        })
+
+    # Summary counters
+    summary = {"green": 0, "yellow": 0, "red": 0}
+    for item in items:
+        summary[item["zone"]] = summary.get(item["zone"], 0) + 1
+
+    return {
+        "items": items,
+        "total": len(items),
+        "summary": summary,
+    }

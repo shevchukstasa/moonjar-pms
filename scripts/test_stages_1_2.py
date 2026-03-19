@@ -723,10 +723,11 @@ check(r, 200, "GET /reconciliations")
 section("STAGE 2 · TOC / Buffer Health")
 
 r = get("/toc/buffer-zones", params={"factory_id": ctx.get("factory_id", "")})
-if r.status_code == 200:
-    check(r, 200, "GET /toc/buffer-zones")
-else:
-    skip("GET /toc/buffer-zones", f"HTTP {r.status_code}")
+if check(r, 200, "GET /toc/buffer-zones"):
+    data = r.json()
+    summary = data.get("summary", {})
+    total = data.get("total", 0)
+    ok(f"  → {total} orders: green={summary.get('green',0)} yellow={summary.get('yellow',0)} red={summary.get('red',0)}")
 
 section("STAGE 2 · Material Groups")
 
@@ -737,8 +738,8 @@ section("STAGE 2 · Webhook / Integration")
 
 # GET /integration/webhooks — admin-only, PM gets 403 (expected)
 r = get("/integration/webhooks")
-if r.status_code == 403:
-    skip("GET /integration/webhooks", "admin-only endpoint")
+if r.status_code in (403, 429):
+    skip("GET /integration/webhooks", "admin-only endpoint" if r.status_code == 403 else "rate limited")
 else:
     check(r, 200, "GET /integration/webhooks")
 

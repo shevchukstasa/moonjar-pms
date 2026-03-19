@@ -662,7 +662,19 @@ def check_blocking_tasks(
     - collection contains "stencil" → STENCIL_ORDER task
     - collection contains "silkscreen"/"silk screen" → SILK_SCREEN_ORDER task
     - collection contains "custom" or color_2 is set → COLOR_MATCHING task
+
+    Service Blocking Timing (2026-03-19):
+    Tasks are always created so the PM knows what's needed. However, the
+    position is only blocked (status changed) when the service lead time is
+    urgent relative to the planned glazing date.
+
+    If planned_glazing_date is not yet assigned (position just created,
+    scheduling runs after), the service is registered as a pending task
+    but blocking is deferred. APScheduler's check_pending_service_blocks
+    will re-evaluate daily once glazing dates are assigned.
     """
+    from business.services.service_blocking import should_block_for_service
+
     collection_lower = (item.collection or "").lower()
     app_type_lower = (item.application_type or "").lower()
     created_blocking = False
@@ -680,8 +692,21 @@ def check_blocking_tasks(
             description=f"Order stencil for: {item.collection} / {item.color}",
         )
         db.add(task)
-        position.status = PositionStatus.AWAITING_STENCIL_SILKSCREEN
-        created_blocking = True
+        # Timing check: only block position if lead time is urgent now
+        _should_block, _days_left = should_block_for_service(db, position, 'stencil')
+        if _should_block:
+            position.status = PositionStatus.AWAITING_STENCIL_SILKSCREEN
+            created_blocking = True
+            logger.info(
+                "SERVICE_BLOCK_NOW | order=%s position=%s service=stencil days_left=%d",
+                order.order_number, position.id, _days_left,
+            )
+        else:
+            logger.info(
+                "SERVICE_BLOCK_DEFERRED | order=%s position=%s service=stencil "
+                "(no glazing date yet or not urgent)",
+                order.order_number, position.id,
+            )
 
     # Silkscreen check
     elif "silkscreen" in collection_lower or "silk screen" in collection_lower or "silkscreen" in app_type_lower:
@@ -696,8 +721,21 @@ def check_blocking_tasks(
             description=f"Order silkscreen for: {item.collection} / {item.color}",
         )
         db.add(task)
-        position.status = PositionStatus.AWAITING_STENCIL_SILKSCREEN
-        created_blocking = True
+        # Timing check
+        _should_block, _days_left = should_block_for_service(db, position, 'silkscreen')
+        if _should_block:
+            position.status = PositionStatus.AWAITING_STENCIL_SILKSCREEN
+            created_blocking = True
+            logger.info(
+                "SERVICE_BLOCK_NOW | order=%s position=%s service=silkscreen days_left=%d",
+                order.order_number, position.id, _days_left,
+            )
+        else:
+            logger.info(
+                "SERVICE_BLOCK_DEFERRED | order=%s position=%s service=silkscreen "
+                "(no glazing date yet or not urgent)",
+                order.order_number, position.id,
+            )
 
     # Color matching check
     if "custom" in collection_lower or item.color_2:
@@ -713,7 +751,20 @@ def check_blocking_tasks(
         )
         db.add(task)
         if not created_blocking:
-            position.status = PositionStatus.AWAITING_COLOR_MATCHING
+            # Timing check
+            _should_block_cm, _days_left_cm = should_block_for_service(db, position, 'color_matching')
+            if _should_block_cm:
+                position.status = PositionStatus.AWAITING_COLOR_MATCHING
+                logger.info(
+                    "SERVICE_BLOCK_NOW | order=%s position=%s service=color_matching days_left=%d",
+                    order.order_number, position.id, _days_left_cm,
+                )
+            else:
+                logger.info(
+                    "SERVICE_BLOCK_DEFERRED | order=%s position=%s service=color_matching "
+                    "(no glazing date yet or not urgent)",
+                    order.order_number, position.id,
+                )
 
 
 # ────────────────────────────────────────────────────────────────

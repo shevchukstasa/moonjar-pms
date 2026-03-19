@@ -696,6 +696,72 @@ async def receive_sales_order(
             db.commit()
             raise HTTPException(422, f"Failed to process order: {e}")
 
+    elif event_type == "order_update":
+        # Sales app sends updated order data → create Change Request, PM must review.
+        # Does NOT auto-apply. Order is not modified until PM approves.
+        ext_id = order_data.get("external_id")
+        order = db.query(ProductionOrder).filter(
+            ProductionOrder.external_id == ext_id,
+            ProductionOrder.source == OrderSource.SALES_WEBHOOK,
+        ).first()
+
+        if not order:
+            event.error_message = f"Order not found: {ext_id}"
+            db.commit()
+            logger.warning("order_update webhook: order not found for external_id=%s", ext_id)
+            return {"status": "error", "message": f"Order not found: {ext_id}"}
+
+        if _ev(order.status) == "cancelled":
+            event.processed = True
+            db.commit()
+            return {
+                "status": "error",
+                "message": "Order is cancelled, cannot apply change request",
+                "order_id": str(order.id),
+            }
+
+        # Idempotency: if identical payload already pending, return existing
+        if order.change_req_status == "pending" and order.change_req_payload == order_data:
+            event.processed = True
+            db.commit()
+            logger.info(
+                "order_update webhook: identical change request already pending for order %s",
+                order.order_number,
+            )
+            return {
+                "status": "already_pending",
+                "order_id": str(order.id),
+                "message": "Identical change request already pending PM review",
+            }
+
+        try:
+            from business.services.change_request_service import create_change_request_from_webhook
+            cr = create_change_request_from_webhook(
+                db=db,
+                order=order,
+                new_order_data=order_data,
+                source="sales_webhook",
+            )
+            event.processed = True
+            db.commit()
+            logger.info(
+                "order_update webhook: change request %s created for order %s (external_id=%s)",
+                cr.id, order.order_number, ext_id,
+            )
+            return {
+                "status": "received",
+                "change_request_id": str(cr.id),
+                "order_id": str(order.id),
+                "message": "Change request created, pending PM review",
+            }
+        except Exception as e:
+            db.rollback()
+            logger.error("order_update webhook: failed to create CR for %s: %s", ext_id, e)
+            event.error_message = str(e)
+            db.add(event)
+            db.commit()
+            raise HTTPException(422, f"Failed to create change request: {e}")
+
     elif event_type == "order_cancel":
         # Sales requests cancellation — route through PM review (same as /request-cancellation).
         # We do NOT auto-cancel: PM must approve or reject.

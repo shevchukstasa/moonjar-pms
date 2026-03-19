@@ -3,7 +3,7 @@
 import uuid as uuid_mod
 from datetime import date, datetime, timezone
 from uuid import UUID
-from typing import Optional
+from typing import Optional, Union, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
@@ -14,7 +14,7 @@ from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
 from api.models import ProductionOrder, ProductionOrderItem, OrderPosition, Factory, FinishedGoodsStock, Task
-from api.enums import OrderStatus, OrderSource, PositionStatus, TaskStatus, is_stock_collection
+from api.enums import OrderStatus, OrderSource, PositionStatus, TaskStatus, is_stock_collection, ChangeRequestStatus
 
 router = APIRouter()
 
@@ -735,40 +735,120 @@ async def reject_cancellation(
 # Note: GET /change-requests is declared earlier (before /{order_id}) to avoid route shadowing.
 
 
-@router.post("/{order_id}/approve-change")
-async def approve_change_request(
+class ChangeRequestApproveRequest(BaseModel):
+    apply_to_positions: Union[str, List[str]] = "all"  # "all" or list of position UUIDs
+    notes: Optional[str] = None
+
+
+class ChangeRequestRejectRequest(BaseModel):
+    reason: str
+
+
+@router.get("/{order_id}/change-requests")
+async def list_order_change_requests(
     order_id: UUID,
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
+    """List all change requests for a specific order (history + pending)."""
+    from api.models import ProductionOrderChangeRequest
+
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+
+    crs = (
+        db.query(ProductionOrderChangeRequest)
+        .filter(ProductionOrderChangeRequest.order_id == order_id)
+        .order_by(ProductionOrderChangeRequest.created_at.desc())
+        .all()
+    )
+
+    return {
+        "order_id": str(order_id),
+        "order_number": order.order_number,
+        "items": [
+            {
+                "id": str(cr.id),
+                "change_type": cr.change_type,
+                "status": _ev(cr.status),
+                "diff": cr.diff_json.get("diff") if cr.diff_json else None,
+                "new_data": cr.diff_json.get("new_data") if cr.diff_json else None,
+                "old_data": cr.diff_json.get("old_data") if cr.diff_json else None,
+                "source": (cr.diff_json or {}).get("source"),
+                "notes": cr.notes,
+                "reviewed_by": str(cr.reviewed_by) if cr.reviewed_by else None,
+                "created_at": cr.created_at.isoformat() if cr.created_at else None,
+                "reviewed_at": cr.reviewed_at.isoformat() if cr.reviewed_at else None,
+            }
+            for cr in crs
+        ],
+        "total": len(crs),
+    }
+
+
+@router.post("/{order_id}/approve-change")
+async def approve_change_request(
+    order_id: UUID,
+    body: ChangeRequestApproveRequest = ChangeRequestApproveRequest(),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
     """PM approves the change request → apply stored payload changes to the order."""
+    from api.models import ProductionOrderChangeRequest
+    from business.services.change_request_service import approve_change_request as svc_approve
+
     order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
     if not order:
         raise HTTPException(404, "Order not found")
     if order.change_req_status != "pending":
         raise HTTPException(400, "No pending change request for this order")
 
-    payload = order.change_req_payload or {}
+    # Find the latest pending CR record
+    cr = (
+        db.query(ProductionOrderChangeRequest)
+        .filter(
+            ProductionOrderChangeRequest.order_id == order_id,
+            ProductionOrderChangeRequest.status == ChangeRequestStatus.PENDING,
+        )
+        .order_by(ProductionOrderChangeRequest.created_at.desc())
+        .first()
+    )
 
-    # Apply updatable fields from payload
-    updatable_fields = ("client", "client_location", "final_deadline", "desired_delivery_date",
-                        "notes", "sales_manager_name", "sales_manager_contact", "mandatory_qc")
-    for field in updatable_fields:
-        if field in payload:
-            val = payload[field]
-            if field in ("final_deadline", "desired_delivery_date") and isinstance(val, str):
-                try:
-                    from datetime import date as date_type
-                    val = date_type.fromisoformat(val)
-                except (ValueError, TypeError):
-                    val = None
-            setattr(order, field, val)
+    if cr:
+        # Use service for full flow (sets cr.status, order fields, logs)
+        result = svc_approve(
+            db=db,
+            order=order,
+            cr=cr,
+            apply_to_positions=body.apply_to_positions,
+            notes=body.notes,
+            approved_by_id=current_user.id,
+        )
+    else:
+        # Fallback: no CR record (legacy path — only change_req_* fields on order)
+        payload = order.change_req_payload or {}
+        updatable_fields = ("client", "client_location", "final_deadline", "desired_delivery_date",
+                            "notes", "sales_manager_name", "sales_manager_contact", "mandatory_qc")
+        applied_fields = []
+        for field in updatable_fields:
+            if field in payload:
+                val = payload[field]
+                if field in ("final_deadline", "desired_delivery_date") and isinstance(val, str):
+                    try:
+                        from datetime import date as date_type
+                        val = date_type.fromisoformat(val)
+                    except (ValueError, TypeError):
+                        val = None
+                setattr(order, field, val)
+                applied_fields.append(field)
+        order.change_req_status = "approved"
+        order.change_req_decided_at = datetime.now(timezone.utc)
+        order.change_req_decided_by = current_user.id
+        order.change_req_payload = None
+        order.updated_at = datetime.now(timezone.utc)
+        result = {"applied_fields": applied_fields}
 
-    order.change_req_status = "approved"
-    order.change_req_decided_at = datetime.now(timezone.utc)
-    order.change_req_decided_by = current_user.id
-    order.change_req_payload = None
-    order.updated_at = datetime.now(timezone.utc)
     db.commit()
 
     # Notify Sales App (fire-and-forget)
@@ -780,7 +860,9 @@ async def approve_change_request(
                 "external_id": order.external_id,
                 "order_number": order.order_number,
                 "decided_by": current_user.name,
-                "decided_at": order.change_req_decided_at.isoformat(),
+                "decided_at": order.change_req_decided_at.isoformat() if order.change_req_decided_at else None,
+                "applied_fields": result.get("applied_fields", []),
+                "notes": body.notes,
             },
             event_type="change_request_approved",
             external_id=order.external_id,
@@ -791,27 +873,55 @@ async def approve_change_request(
         "order_id": str(order_id),
         "order_number": order.order_number,
         "decided_by": current_user.name,
+        "applied_fields": result.get("applied_fields", []),
+        "notes": body.notes,
     }
 
 
 @router.post("/{order_id}/reject-change")
 async def reject_change_request(
     order_id: UUID,
+    body: ChangeRequestRejectRequest = ChangeRequestRejectRequest(reason=""),
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
     """PM rejects the change request → discard stored changes."""
+    from api.models import ProductionOrderChangeRequest
+    from business.services.change_request_service import reject_change_request as svc_reject
+
     order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
     if not order:
         raise HTTPException(404, "Order not found")
     if order.change_req_status != "pending":
         raise HTTPException(400, "No pending change request for this order")
 
-    order.change_req_status = "rejected"
-    order.change_req_decided_at = datetime.now(timezone.utc)
-    order.change_req_decided_by = current_user.id
-    order.change_req_payload = None
-    order.updated_at = datetime.now(timezone.utc)
+    # Find the latest pending CR record
+    cr = (
+        db.query(ProductionOrderChangeRequest)
+        .filter(
+            ProductionOrderChangeRequest.order_id == order_id,
+            ProductionOrderChangeRequest.status == ChangeRequestStatus.PENDING,
+        )
+        .order_by(ProductionOrderChangeRequest.created_at.desc())
+        .first()
+    )
+
+    if cr:
+        svc_reject(
+            db=db,
+            order=order,
+            cr=cr,
+            reason=body.reason,
+            rejected_by_id=current_user.id,
+        )
+    else:
+        # Fallback: no CR record (legacy path)
+        order.change_req_status = "rejected"
+        order.change_req_decided_at = datetime.now(timezone.utc)
+        order.change_req_decided_by = current_user.id
+        order.change_req_payload = None
+        order.updated_at = datetime.now(timezone.utc)
+
     db.commit()
 
     # Notify Sales App (with retry)
@@ -824,7 +934,8 @@ async def reject_change_request(
                 "order_number": order.order_number,
                 "status": _ev(order.status),
                 "decided_by": current_user.name,
-                "decided_at": order.change_req_decided_at.isoformat(),
+                "decided_at": order.change_req_decided_at.isoformat() if order.change_req_decided_at else None,
+                "reason": body.reason,
             },
             event_type="change_request_rejected",
             external_id=order.external_id,
@@ -835,6 +946,7 @@ async def reject_change_request(
         "order_id": str(order_id),
         "order_number": order.order_number,
         "decided_by": current_user.name,
+        "reason": body.reason,
     }
 
 

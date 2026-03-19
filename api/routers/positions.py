@@ -1532,3 +1532,107 @@ async def reassign_position_batch(
         "new_batch_id": str(pos.batch_id) if pos.batch_id else None,
         "message": "Position reassigned",
     }
+
+
+# ====================================================================
+# PM MID-PRODUCTION SPLIT (Decision 2026-03-19)
+# ====================================================================
+from typing import List  # noqa: E402
+from pydantic import Field  # noqa: E402
+
+
+class ProductionSplitPart(BaseModel):
+    quantity: int = Field(..., gt=0)
+    quantity_sqm: Optional[float] = None
+    priority_order: Optional[int] = None
+    note: Optional[str] = None
+
+
+class ProductionSplitRequest(BaseModel):
+    splits: List[ProductionSplitPart] = Field(..., min_length=2)
+    reason: str = Field(..., min_length=1)
+
+
+@router.post("/{position_id}/split-production")
+def split_position_production(
+    position_id: UUID,
+    body: ProductionSplitRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """
+    PM splits a position during production.
+    Parent is frozen (is_parent=True), children start from same stage.
+    Cannot split while status=loaded_in_kiln.
+    """
+    from business.services.production_split import (
+        split_position_mid_production,
+        can_split_position,
+    )
+
+    position = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not position:
+        raise HTTPException(status_code=404, detail="Position not found")
+
+    can_split, reason_err = can_split_position(position)
+    if not can_split:
+        raise HTTPException(status_code=400, detail=reason_err)
+
+    splits_data = [
+        {
+            'quantity': part.quantity,
+            'quantity_sqm': part.quantity_sqm,
+            'priority_order': part.priority_order,
+            'note': part.note,
+        }
+        for part in body.splits
+    ]
+
+    try:
+        children = split_position_mid_production(
+            db=db,
+            position=position,
+            splits=splits_data,
+            reason=body.reason,
+            created_by_id=current_user.id,
+        )
+        db.commit()
+        for c in children:
+            db.refresh(c)
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Split failed: {str(e)}")
+
+    return {
+        "parent_position_id": str(position_id),
+        "parent_is_parent": True,
+        "children_count": len(children),
+        "children": [
+            {
+                "id": str(c.id),
+                "split_index": c.split_index,
+                "quantity": c.quantity,
+                "quantity_sqm": float(c.quantity_sqm) if c.quantity_sqm else None,
+                "status": _ev(c.status),
+            }
+            for c in children
+        ],
+    }
+
+
+@router.get("/{position_id}/split-tree")
+def get_position_split_tree(
+    position_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Get full split tree (parent + all descendants) for a position."""
+    from business.services.production_split import get_split_tree
+
+    tree = get_split_tree(db, position_id)
+    if not tree:
+        raise HTTPException(status_code=404, detail="Position not found")
+    return tree

@@ -69,6 +69,8 @@ from api.routers import packaging
 from api.routers import sizes
 from api.routers import consumption_rules
 from api.routers import grinding
+from api.routers import stone_reservations
+from api.routers import settings as settings_router
 from api.routers import factory_calendar
 
 
@@ -1536,6 +1538,24 @@ async def lifespan(app: FastAPI):
     # Ensure schema is complete (handles cases where Alembic migrations fail)
     _ensure_schema()
 
+    # Apply new feature schema patches (idempotent, safe to run every startup)
+    try:
+        from api.database import engine
+        with engine.begin() as conn:
+            from api.schema_patches.change_request_patch import apply_patch as cr_patch
+            from api.schema_patches.defect_coefficients_patch import apply_patch as dc_patch
+            from api.schema_patches.stone_reservation_patch import apply_patch as sr_patch
+            from api.schema_patches.production_split_patch import apply_patch as ps_patch
+            from api.schema_patches.service_blocking_patch import apply_patch as sb_patch
+            cr_patch(conn)
+            dc_patch(conn)
+            sr_patch(conn)
+            ps_patch(conn)
+            sb_patch(conn)
+            logger.info("Schema patches applied successfully")
+    except Exception as e:
+        logger.warning(f"Schema patches warning (non-fatal): {e}")
+
     # Start background scheduler
     from api.scheduler import setup_scheduler
     sched = setup_scheduler()
@@ -1673,5 +1693,7 @@ def setup_routers():
     app.include_router(consumption_rules.router, prefix="/api/consumption-rules", tags=["consumption-rules"])
     app.include_router(grinding.router, prefix="/api/grinding-stock", tags=["grinding-stock"])
     app.include_router(factory_calendar.router, prefix="/api/factory-calendar", tags=["factory-calendar"])
+    app.include_router(stone_reservations.router, prefix="/api/stone-reservations", tags=["stone-reservations"])
+    app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 
 setup_routers()

@@ -601,7 +601,9 @@ async def reprocess_order(
         # 5. Reserve materials (if recipe exists and status is planned)
         if p.recipe_id and _ev(p.status) == "planned":
             try:
-                res = reserve_materials_for_position(db, p)
+                from api.models import Recipe
+                recipe_obj = db.query(Recipe).filter(Recipe.id == p.recipe_id).first()
+                res = reserve_materials_for_position(db, p, recipe_obj, order.factory_id)
                 pos_result["actions"].append(f"materials={'reserved' if res else 'insufficient'}")
             except Exception as e:
                 pos_result["actions"].append(f"materials_error={str(e)[:50]}")

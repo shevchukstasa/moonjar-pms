@@ -360,10 +360,11 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
     import os
 
     # Verify Telegram webhook secret token if configured
+    import hmac as hmac_mod
     webhook_secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
     if webhook_secret:
         header_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-        if header_secret != webhook_secret:
+        if not hmac_mod.compare_digest(header_secret, webhook_secret):
             logger.warning("Telegram webhook: invalid or missing secret token")
             return JSONResponse(status_code=403, content={"detail": "Forbidden"})
 

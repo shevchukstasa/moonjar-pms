@@ -182,6 +182,17 @@ def _save_locally(
     return {"url": local_url, "path": rel_path, "storage": "local"}
 
 
+def _validate_path(path: str) -> Path:
+    """
+    Validate that a path stays within LOCAL_UPLOADS_DIR.
+    Prevents path traversal attacks (e.g., ../../etc/passwd).
+    """
+    resolved = (LOCAL_UPLOADS_DIR / path).resolve()
+    if not str(resolved).startswith(str(LOCAL_UPLOADS_DIR.resolve())):
+        raise ValueError(f"Path traversal detected: {path}")
+    return resolved
+
+
 def get_public_url(path: str) -> str:
     """
     Get public URL for a stored photo.
@@ -192,6 +203,7 @@ def get_public_url(path: str) -> str:
     Returns:
         Full public URL for the photo
     """
+    _validate_path(path)  # Prevent path traversal
     if SUPABASE_URL:
         return f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{path}"
     else:
@@ -237,7 +249,7 @@ async def _delete_from_supabase(path: str) -> bool:
 
 def _delete_locally(path: str) -> bool:
     """Delete a file from local storage."""
-    local_path = LOCAL_UPLOADS_DIR / path
+    local_path = _validate_path(path)  # Prevent path traversal
 
     try:
         if local_path.exists():

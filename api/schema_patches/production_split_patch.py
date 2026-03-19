@@ -16,3 +16,13 @@ PRODUCTION_SPLIT_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_positions_is_parent ON order_positions(is_parent) WHERE is_parent = TRUE",
     "CREATE INDEX IF NOT EXISTS idx_positions_split_type ON order_positions(split_type) WHERE split_type IS NOT NULL",
 ]
+
+
+def apply_patch(db_connection):
+    """Apply production split schema patches. Idempotent — safe to run multiple times."""
+    import sqlalchemy as sa
+    for sql in PRODUCTION_SPLIT_SQL:
+        try:
+            db_connection.execute(sa.text(sql))
+        except Exception:
+            pass  # column/index already exists — ignore

@@ -35,63 +35,9 @@ async def list_defects(
     }
 
 
-@router.get("/{item_id}", response_model=DefectCauseResponse)
-async def get_defects_item(
-    item_id: UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    item = db.query(DefectCause).filter(DefectCause.id == item_id).first()
-    if not item:
-        raise HTTPException(404, "DefectCause not found")
-    return item
-
-
-@router.post("", response_model=DefectCauseResponse, status_code=201)
-async def create_defects_item(
-    data: DefectCauseCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    item = DefectCause(**data.model_dump())
-    db.add(item)
-    db.commit()
-    db.refresh(item)
-    return item
-
-
-@router.patch("/{item_id}", response_model=DefectCauseResponse)
-async def update_defects_item(
-    item_id: UUID,
-    data: DefectCauseUpdate,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    item = db.query(DefectCause).filter(DefectCause.id == item_id).first()
-    if not item:
-        raise HTTPException(404, "DefectCause not found")
-    for k, v in data.model_dump(exclude_unset=True).items():
-        setattr(item, k, v)
-    db.commit()
-    db.refresh(item)
-    return item
-
-
-@router.delete("/{item_id}", status_code=204)
-async def delete_defects_item(
-    item_id: UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    item = db.query(DefectCause).filter(DefectCause.id == item_id).first()
-    if not item:
-        raise HTTPException(404, "DefectCause not found")
-    db.delete(item)
-    db.commit()
-
-
 # === DEFECT COEFFICIENTS ENDPOINTS (Decision 2026-03-19) ===
-
+# IMPORTANT: These specific routes MUST be declared BEFORE /{item_id} to avoid
+# FastAPI matching "coefficients" as a UUID item_id parameter.
 
 @router.get("/coefficients")
 def get_defect_coefficients(
@@ -210,3 +156,60 @@ def record_defect(
         **result,
         "recorded_by": str(current_user.id),
     }
+
+
+# --- Standard CRUD (after specific routes) ---
+
+@router.get("/{item_id}", response_model=DefectCauseResponse)
+async def get_defects_item(
+    item_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    item = db.query(DefectCause).filter(DefectCause.id == item_id).first()
+    if not item:
+        raise HTTPException(404, "DefectCause not found")
+    return item
+
+
+@router.post("", response_model=DefectCauseResponse, status_code=201)
+async def create_defects_item(
+    data: DefectCauseCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    item = DefectCause(**data.model_dump())
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.patch("/{item_id}", response_model=DefectCauseResponse)
+async def update_defects_item(
+    item_id: UUID,
+    data: DefectCauseUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    item = db.query(DefectCause).filter(DefectCause.id == item_id).first()
+    if not item:
+        raise HTTPException(404, "DefectCause not found")
+    for k, v in data.model_dump(exclude_unset=True).items():
+        setattr(item, k, v)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.delete("/{item_id}", status_code=204)
+async def delete_defects_item(
+    item_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    item = db.query(DefectCause).filter(DefectCause.id == item_id).first()
+    if not item:
+        raise HTTPException(404, "DefectCause not found")
+    db.delete(item)
+    db.commit()

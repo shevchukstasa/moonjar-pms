@@ -59,12 +59,14 @@ STONE_RESERVATION_SQL = [
 
 
 def apply_patch(db_connection):
-    """Apply stone reservation schema patch. Safe to run multiple times (IF NOT EXISTS)."""
+    """Apply stone reservation schema patch. Safe to run multiple times (IF NOT EXISTS).
+
+    Accepts a SQLAlchemy Connection from engine.begin() — caller manages transaction.
+    Do NOT call commit/rollback here.
+    """
     import sqlalchemy as sa
     for sql in STONE_RESERVATION_SQL:
         try:
             db_connection.execute(sa.text(sql))
-            db_connection.commit()
         except Exception:
-            db_connection.rollback()
-            pass
+            pass  # table/index already exists — ignore

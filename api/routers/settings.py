@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from api.database import get_db
 from api.roles import require_management, require_admin
 
-router = APIRouter(prefix="/settings", tags=["settings"])
+router = APIRouter(tags=["settings"])
 
 
 # ==================== Pydantic schemas ====================

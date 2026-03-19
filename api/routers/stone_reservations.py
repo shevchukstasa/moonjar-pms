@@ -19,7 +19,7 @@ from business.services.stone_reservation import (
 
 logger = logging.getLogger("moonjar.routers.stone_reservations")
 
-router = APIRouter(prefix="/stone-reservations", tags=["stone-reservations"])
+router = APIRouter(tags=["stone-reservations"])
 
 
 # ──────────────────────────────────────────────────────────────────

@@ -205,6 +205,31 @@ async def handle_photo(db: Session, message: dict) -> None:
         + (f", position={position_id}" if position_id else "")
     )
 
+    # Upload to Supabase Storage (async, non-blocking for the user)
+    try:
+        image_bytes = await download_telegram_photo(file_id)
+        if image_bytes:
+            from business.services.photo_storage import upload_photo as storage_upload
+
+            related_id = str(position_id) if position_id else str(photo.id)
+            storage_result = await storage_upload(
+                image_bytes=image_bytes,
+                category="telegram",
+                factory_id=factory.id,
+                related_id=related_id,
+                filename=f"{file_id[:20]}.jpg",
+            )
+            # Update photo record with Supabase URL
+            if storage_result.get("url"):
+                photo.photo_url = storage_result["url"]
+                db.commit()
+                logger.info(
+                    f"Telegram photo uploaded to {storage_result['storage']}: "
+                    f"{storage_result['path']}"
+                )
+    except Exception as e:
+        logger.warning(f"Supabase upload for telegram photo failed (non-fatal): {e}")
+
     # Acknowledge receipt
     type_label = photo_type.replace("_", " ").title() if photo_type else "Photo"
     ack_msg = f"Foto diterima ({type_label})."
@@ -212,6 +237,49 @@ async def handle_photo(db: Session, message: dict) -> None:
         pos_label = _format_position_label(linked_position)
         ack_msg += f" Terhubung ke posisi {pos_label}."
     await _send_message(chat_id, ack_msg)
+
+    # ── LLM Photo Analysis ───────────────────────────────────────
+    # Determine if this photo type warrants LLM analysis
+    analysis_type_map = {
+        "scale": "scale",
+        "defect": "quality",
+        "quality": "quality",
+        "packing": "packing",
+    }
+    llm_analysis_type = analysis_type_map.get(photo_type)
+
+    if llm_analysis_type:
+        try:
+            from business.services.photo_analysis import analyze_photo, format_analysis_message
+
+            # Download the photo bytes from Telegram
+            image_bytes = await download_telegram_photo(file_id)
+            if image_bytes:
+                # Build context for the analysis
+                analysis_context = {}
+                if linked_position:
+                    analysis_context["position"] = _format_position_label(linked_position)
+                    if hasattr(linked_position, "color") and linked_position.color:
+                        analysis_context["expected_color"] = linked_position.color
+
+                analysis_result = await analyze_photo(
+                    image_bytes=image_bytes,
+                    analysis_type=llm_analysis_type,
+                    context=analysis_context if analysis_context else None,
+                )
+
+                if analysis_result:
+                    pos_ref = _format_position_label(linked_position) if linked_position else None
+                    analysis_msg = format_analysis_message(analysis_result, pos_ref)
+                    await _send_message(chat_id, analysis_msg, parse_mode="")
+                    logger.info(f"Photo analysis sent for photo {photo.id}")
+                else:
+                    logger.debug(f"Photo analysis returned None for photo {photo.id}")
+            else:
+                logger.warning(f"Could not download photo {file_id[:20]}... for analysis")
+        except Exception as e:
+            logger.error(f"LLM photo analysis failed: {e}", exc_info=True)
+            # Analysis failure should not affect the main photo-saving flow
 
 
 async def handle_callback_query(db: Session, callback_query: dict) -> None:
@@ -1249,6 +1317,8 @@ def _detect_photo_type(caption: str) -> str:
         return "other"
     caption_lower = caption.lower()
 
+    if any(kw in caption_lower for kw in ("scale", "timbang", "berat", "weight")):
+        return "scale"
     if any(kw in caption_lower for kw in ("glaz", "glasir", "engobe")):
         return "glazing"
     if any(kw in caption_lower for kw in ("fir", "bakar", "kiln", "oven")):
@@ -1257,6 +1327,8 @@ def _detect_photo_type(caption: str) -> str:
         return "defect"
     if any(kw in caption_lower for kw in ("pack", "kemas", "box")):
         return "packing"
+    if any(kw in caption_lower for kw in ("quality", "qc", "kualitas")):
+        return "quality"
     return "other"
 
 

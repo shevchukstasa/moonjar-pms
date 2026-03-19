@@ -2182,3 +2182,29 @@ class PurchaseConsolidationSetting(Base):
     updated_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     factory = relationship('Factory', foreign_keys=[factory_id])
+
+
+# ──────────────────────────────────────────────────────────────────
+# Kiln Rotation Rules (glaze sequencing per factory/kiln)
+# ──────────────────────────────────────────────────────────────────
+
+class KilnRotationRule(Base):
+    __tablename__ = 'kiln_rotation_rules'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    kiln_id = Column(UUID(as_uuid=True), ForeignKey('resources.id'), nullable=True)  # NULL = factory-wide default
+    rule_name = Column(sa.String(100), nullable=False)
+    glaze_sequence = Column(JSONB, nullable=False)  # ordered array of glaze types
+    cooldown_minutes = Column(sa.Integer, default=0)  # cooldown between incompatible glazes
+    incompatible_pairs = Column(JSONB, default=[])  # pairs that cannot follow each other
+    is_active = Column(sa.Boolean, default=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('factory_id', 'kiln_id', 'rule_name'),
+    )
+
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    kiln = relationship('Resource', foreign_keys=[kiln_id])

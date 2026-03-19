@@ -475,3 +475,74 @@ async def get_quality_stats(
         "open_problem_cards": open_cards,
         "inspections_today": inspections_today,
     }
+
+
+# ── LLM Photo Analysis ───────────────────────────────────────────────────
+
+@router.post("/analyze-photo")
+async def analyze_production_photo(
+    file: UploadFile = File(...),
+    analysis_type: str = Query("quality", description="scale | quality | packing"),
+    position_id: UUID | None = Query(None, description="Optional position to link analysis to"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Analyze a production photo using LLM vision (Claude).
+
+    Accepts an image file and returns structured analysis:
+    - scale: reads weight, identifies pigment color
+    - quality: detects defects, cracks, color issues
+    - packing: reads label data (order number, quantity, size)
+    """
+    from business.services.photo_analysis import analyze_photo, format_analysis_message
+
+    # Validate analysis_type
+    if analysis_type not in ("scale", "quality", "packing"):
+        raise HTTPException(400, "analysis_type must be 'scale', 'quality', or 'packing'")
+
+    # Validate file type
+    content_type = file.content_type or "image/jpeg"
+    if not content_type.startswith("image/"):
+        raise HTTPException(400, "Only image files are allowed")
+
+    # Read image (max 10MB for analysis)
+    image_bytes = await file.read()
+    if len(image_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 10MB)")
+
+    if not image_bytes:
+        raise HTTPException(400, "Empty file")
+
+    # Build context
+    context = {}
+    if position_id:
+        pos = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+        if pos:
+            order = db.query(ProductionOrder).filter(ProductionOrder.id == pos.order_id).first()
+            context["position"] = order.order_number if order else str(position_id)
+            if pos.color:
+                context["expected_color"] = pos.color
+
+    # Call LLM analysis
+    result = await analyze_photo(
+        image_bytes=image_bytes,
+        analysis_type=analysis_type,
+        context=context if context else None,
+    )
+
+    if result is None:
+        raise HTTPException(
+            503,
+            "Photo analysis unavailable. ANTHROPIC_API_KEY may not be configured or the API call failed.",
+        )
+
+    return {
+        "analysis_type": result["analysis_type"],
+        "readings": result["readings"],
+        "confidence": result["confidence"],
+        "issues": result["issues"],
+        "raw_description": result["raw_description"],
+        "position_id": str(position_id) if position_id else None,
+        "message": format_analysis_message(result),
+    }

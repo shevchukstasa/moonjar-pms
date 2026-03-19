@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { kilnsApi, kilnConstantsApi, kilnLoadingRulesApi, type KilnListParams, type KilnCreateData, type KilnUpdateData } from '@/api/kilns';
+import { kilnsApi, kilnConstantsApi, kilnLoadingRulesApi, type KilnListParams, type KilnCreateData, type KilnUpdateData, type KilnBreakdownData, type KilnRestoreData } from '@/api/kilns';
 
 export interface KilnItem {
   id: string;
@@ -127,5 +127,30 @@ export function useCreateLoadingRules() {
     mutationFn: (data: { kiln_id: string; rules: Record<string, unknown> }) =>
       kilnLoadingRulesApi.create(data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['kilns'] }); },
+  });
+}
+
+export function useReportBreakdown() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: KilnBreakdownData }) =>
+      kilnsApi.reportBreakdown(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['kilns'] });
+      qc.invalidateQueries({ queryKey: ['schedule'] });
+      qc.invalidateQueries({ queryKey: ['batches'] });
+    },
+  });
+}
+
+export function useRestoreKiln() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data?: KilnRestoreData }) =>
+      kilnsApi.restore(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['kilns'] });
+      qc.invalidateQueries({ queryKey: ['schedule'] });
+    },
   });
 }

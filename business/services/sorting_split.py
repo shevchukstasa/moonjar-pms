@@ -748,6 +748,17 @@ def handle_surplus(db: Session, position: OrderPosition, surplus_quantity: int) 
       - 10x10 + non-basic    → Coaster box (PM decides when > 100 pcs)
       - All other sizes      → Mana shipment (PM decides when > 100 pcs)
     """
+    # Log auto-disposition decision via surplus_handling service
+    try:
+        from business.services.surplus_handling import auto_assign_surplus_disposition
+        decision = auto_assign_surplus_disposition(db, position, surplus_quantity)
+        logger.info(
+            f"Surplus auto-disposition for position {position.id}: "
+            f"{decision['disposition']} — {decision['reason']}"
+        )
+    except Exception as e:
+        logger.warning(f"Surplus auto-disposition logging failed (non-fatal): {e}")
+
     size = position.size
     color = position.color
     is_basic = _check_is_basic_color(db, color)

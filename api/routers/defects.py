@@ -234,6 +234,45 @@ async def list_surplus_dispositions(
     }
 
 
+@router.get("/surplus-summary")
+async def get_surplus_summary_endpoint(
+    factory_id: UUID = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Surplus summary for a factory: total quantities, breakdown by disposition type,
+    pending PM decisions, casters box totals, and recent entries.
+    """
+    from business.services.surplus_handling import get_surplus_summary
+
+    return get_surplus_summary(db, factory_id)
+
+
+@router.post("/surplus-dispositions/auto-assign")
+async def auto_assign_surplus(
+    position_id: UUID = Body(...),
+    surplus_quantity: int = Body(None, description="Override quantity (defaults to position.quantity)"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """
+    Preview or execute auto-disposition for a surplus position.
+    Returns the recommended disposition without creating records (dry run).
+    """
+    position = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not position:
+        raise HTTPException(404, "OrderPosition not found")
+
+    from business.services.surplus_handling import auto_assign_surplus_disposition
+
+    result = auto_assign_surplus_disposition(db, position, surplus_quantity)
+    result["position_id"] = str(position_id)
+    result["color"] = position.color
+    result["size"] = position.size
+    return result
+
+
 # === SUPPLIER DEFECT REPORTS (Decision 2026-03-19) ===
 
 class SupplierReportGenerate(BaseModel):

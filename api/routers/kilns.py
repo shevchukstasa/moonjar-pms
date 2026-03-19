@@ -4,7 +4,7 @@ from uuid import UUID
 from typing import Optional
 from datetime import datetime, date, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,7 @@ from api.database import get_db
 from api.auth import get_current_user
 from api.roles import require_management
 from api.models import Resource, KilnLoadingRule, Factory, Collection, KilnMaintenanceSchedule, KilnMaintenanceType
-from api.enums import ResourceType, MaintenanceStatus
+from api.enums import ResourceType, ResourceStatus, MaintenanceStatus
 
 router = APIRouter()
 
@@ -698,3 +698,229 @@ async def delete_kiln_maintenance(
     db.commit()
 
 
+# ────────────────────────────────────────────────────────────────
+# Kiln Breakdown / Restore — emergency management
+# ────────────────────────────────────────────────────────────────
+
+class BreakdownInput(BaseModel):
+    reason: str
+    estimated_repair_hours: Optional[int] = None
+
+
+class RestoreInput(BaseModel):
+    notes: Optional[str] = None
+
+
+@router.post("/{kiln_id}/breakdown")
+async def report_kiln_breakdown(
+    kiln_id: UUID,
+    data: BreakdownInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """
+    Report kiln breakdown — triggers emergency reschedule.
+
+    Marks kiln as MAINTENANCE_EMERGENCY, reassigns batches to other kilns,
+    creates maintenance record, and notifies PM + CEO.
+    """
+    kiln = db.query(Resource).filter(
+        Resource.id == kiln_id,
+        Resource.resource_type == ResourceType.KILN,
+    ).first()
+    if not kiln:
+        raise HTTPException(404, "Kiln not found")
+
+    # Prevent double-breakdown
+    kiln_status = kiln.status.value if hasattr(kiln.status, "value") else str(kiln.status)
+    if kiln_status == ResourceStatus.MAINTENANCE_EMERGENCY.value:
+        raise HTTPException(409, "Kiln is already in emergency maintenance")
+
+    try:
+        from business.services.kiln_breakdown import handle_kiln_breakdown
+        result = await handle_kiln_breakdown(
+            db=db,
+            kiln_id=kiln_id,
+            reason=data.reason,
+            estimated_repair_hours=data.estimated_repair_hours,
+            reported_by_id=current_user.id,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        import logging
+        logging.getLogger("moonjar.kilns").error(
+            "Kiln breakdown handler failed: %s", e, exc_info=True,
+        )
+        db.rollback()
+        raise HTTPException(500, f"Breakdown handling failed: {str(e)}")
+
+
+@router.post("/{kiln_id}/restore")
+async def restore_kiln(
+    kiln_id: UUID,
+    data: RestoreInput = Body(RestoreInput()),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """
+    Mark kiln as operational again after repair.
+
+    Sets kiln status back to ACTIVE, completes open maintenance records,
+    and notifies PM.
+    """
+    kiln = db.query(Resource).filter(
+        Resource.id == kiln_id,
+        Resource.resource_type == ResourceType.KILN,
+    ).first()
+    if not kiln:
+        raise HTTPException(404, "Kiln not found")
+
+    kiln_status = kiln.status.value if hasattr(kiln.status, "value") else str(kiln.status)
+    if kiln_status == ResourceStatus.ACTIVE.value:
+        raise HTTPException(409, "Kiln is already active")
+
+    try:
+        from business.services.kiln_breakdown import handle_kiln_restore
+        result = await handle_kiln_restore(
+            db=db,
+            kiln_id=kiln_id,
+            restored_by_id=current_user.id,
+            notes=data.notes,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        import logging
+        logging.getLogger("moonjar.kilns").error(
+            "Kiln restore handler failed: %s", e, exc_info=True,
+        )
+        db.rollback()
+        raise HTTPException(500, f"Restore handling failed: {str(e)}")
+
+
+# ────────────────────────────────────────────────────────────────
+# Kiln Rotation Rules
+# ────────────────────────────────────────────────────────────────
+
+class RotationRuleInput(BaseModel):
+    rule_name: str
+    glaze_sequence: list[str]  # ordered array of glaze types
+    cooldown_minutes: int = 0
+    incompatible_pairs: list[list[str]] = []
+    is_active: bool = True
+
+
+def _serialize_rotation_rule(rule) -> dict:
+    return {
+        "id": str(rule.id),
+        "factory_id": str(rule.factory_id),
+        "kiln_id": str(rule.kiln_id) if rule.kiln_id else None,
+        "rule_name": rule.rule_name,
+        "glaze_sequence": rule.glaze_sequence or [],
+        "cooldown_minutes": rule.cooldown_minutes or 0,
+        "incompatible_pairs": rule.incompatible_pairs or [],
+        "is_active": rule.is_active,
+        "created_at": rule.created_at.isoformat() if rule.created_at else None,
+        "updated_at": rule.updated_at.isoformat() if rule.updated_at else None,
+    }
+
+
+@router.get("/{kiln_id}/rotation-rules")
+async def get_kiln_rotation_rules(
+    kiln_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Get rotation rules for a specific kiln (falls back to factory default)."""
+    from api.models import KilnRotationRule
+
+    kiln = db.query(Resource).filter(
+        Resource.id == kiln_id,
+        Resource.resource_type == ResourceType.KILN,
+    ).first()
+    if not kiln:
+        raise HTTPException(404, "Kiln not found")
+
+    from business.services.rotation_rules import get_rotation_rule
+    rule = get_rotation_rule(db, kiln.factory_id, kiln_id)
+
+    if not rule:
+        return {"rule": None, "source": "none"}
+
+    source = "kiln" if rule.kiln_id else "factory_default"
+    return {"rule": _serialize_rotation_rule(rule), "source": source}
+
+
+@router.put("/{kiln_id}/rotation-rules")
+async def upsert_kiln_rotation_rule(
+    kiln_id: UUID,
+    data: RotationRuleInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Create or update rotation rule for a specific kiln."""
+    from api.models import KilnRotationRule
+
+    kiln = db.query(Resource).filter(
+        Resource.id == kiln_id,
+        Resource.resource_type == ResourceType.KILN,
+    ).first()
+    if not kiln:
+        raise HTTPException(404, "Kiln not found")
+
+    # Check if rule with this name already exists for this kiln
+    existing = db.query(KilnRotationRule).filter(
+        KilnRotationRule.factory_id == kiln.factory_id,
+        KilnRotationRule.kiln_id == kiln_id,
+        KilnRotationRule.rule_name == data.rule_name,
+    ).first()
+
+    if existing:
+        existing.glaze_sequence = data.glaze_sequence
+        existing.cooldown_minutes = data.cooldown_minutes
+        existing.incompatible_pairs = data.incompatible_pairs
+        existing.is_active = data.is_active
+        existing.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(existing)
+        return _serialize_rotation_rule(existing)
+
+    rule = KilnRotationRule(
+        factory_id=kiln.factory_id,
+        kiln_id=kiln_id,
+        rule_name=data.rule_name,
+        glaze_sequence=data.glaze_sequence,
+        cooldown_minutes=data.cooldown_minutes,
+        incompatible_pairs=data.incompatible_pairs,
+        is_active=data.is_active,
+    )
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return _serialize_rotation_rule(rule)
+
+
+@router.get("/{kiln_id}/rotation-check")
+async def check_kiln_rotation(
+    kiln_id: UUID,
+    proposed_glaze: str = Query(..., description="Proposed glaze type to check"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Check if proposed glaze type complies with rotation rules for this kiln."""
+    kiln = db.query(Resource).filter(
+        Resource.id == kiln_id,
+        Resource.resource_type == ResourceType.KILN,
+    ).first()
+    if not kiln:
+        raise HTTPException(404, "Kiln not found")
+
+    from business.services.rotation_rules import check_rotation_compliance, get_next_recommended_glaze
+    result = check_rotation_compliance(db, kiln_id, proposed_glaze, kiln.factory_id)
+    result["kiln_id"] = str(kiln_id)
+    result["kiln_name"] = kiln.name
+    result["recommended_next"] = get_next_recommended_glaze(db, kiln_id, kiln.factory_id)
+    return result

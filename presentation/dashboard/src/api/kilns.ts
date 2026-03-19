@@ -34,6 +34,15 @@ export interface KilnUpdateData {
   control_device?: string | null;
 }
 
+export interface KilnBreakdownData {
+  reason: string;
+  estimated_repair_hours?: number | null;
+}
+
+export interface KilnRestoreData {
+  notes?: string | null;
+}
+
 export const kilnsApi = {
   list: (params?: KilnListParams) =>
     apiClient.get('/kilns', { params }).then((r) => r.data),
@@ -49,6 +58,10 @@ export const kilnsApi = {
     apiClient.delete(`/kilns/${id}`).then((r) => r.data),
   collections: () =>
     apiClient.get('/kilns/collections').then((r) => r.data),
+  reportBreakdown: (id: string, data: KilnBreakdownData) =>
+    apiClient.post(`/kilns/${id}/breakdown`, data).then((r) => r.data),
+  restore: (id: string, data?: KilnRestoreData) =>
+    apiClient.post(`/kilns/${id}/restore`, data || {}).then((r) => r.data),
 };
 
 export const kilnConstantsApi = {

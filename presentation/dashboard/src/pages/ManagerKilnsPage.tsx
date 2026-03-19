@@ -9,6 +9,7 @@ import { KilnCreateDialog } from '@/components/kilns/KilnCreateDialog';
 import { KilnEditDialog } from '@/components/kilns/KilnEditDialog';
 import { LoadingRulesDialog } from '@/components/kilns/LoadingRulesDialog';
 import { KilnConstantsTable } from '@/components/kilns/KilnConstantsTable';
+import { KilnBreakdownDialog, KilnRestoreDialog } from '@/components/kilns/KilnBreakdownDialog';
 
 const KILN_TYPE_LABELS: Record<string, string> = { big: 'Large', small: 'Small', raku: 'Raku' };
 
@@ -41,6 +42,8 @@ export default function ManagerKilnsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editKiln, setEditKiln] = useState<KilnItem | null>(null);
   const [rulesKiln, setRulesKiln] = useState<KilnItem | null>(null);
+  const [breakdownKiln, setBreakdownKiln] = useState<KilnItem | null>(null);
+  const [restoreKiln, setRestoreKiln] = useState<KilnItem | null>(null);
 
   const factoryOptions = [
     ...(factories.length > 1 ? [{ value: '', label: 'All Factories' }] : []),
@@ -104,6 +107,8 @@ export default function ManagerKilnsPage() {
               showFactory={!factoryId}
               onEdit={() => setEditKiln(kiln)}
               onRules={() => setRulesKiln(kiln)}
+              onBreakdown={() => setBreakdownKiln(kiln)}
+              onRestore={() => setRestoreKiln(kiln)}
             />
           ))}
         </div>
@@ -131,6 +136,16 @@ export default function ManagerKilnsPage() {
         onClose={() => setRulesKiln(null)}
         kiln={rulesKiln}
       />
+      <KilnBreakdownDialog
+        open={!!breakdownKiln}
+        onClose={() => setBreakdownKiln(null)}
+        kiln={breakdownKiln}
+      />
+      <KilnRestoreDialog
+        open={!!restoreKiln}
+        onClose={() => setRestoreKiln(null)}
+        kiln={restoreKiln}
+      />
     </div>
   );
 }
@@ -142,11 +157,15 @@ function KilnCard({
   showFactory,
   onEdit,
   onRules,
+  onBreakdown,
+  onRestore,
 }: {
   kiln: KilnItem;
   showFactory: boolean;
   onEdit: () => void;
   onRules: () => void;
+  onBreakdown: () => void;
+  onRestore: () => void;
 }) {
   const hasRules = !!kiln.loading_rules;
   const rules = kiln.loading_rules as Record<string, unknown> | null;
@@ -236,13 +255,32 @@ function KilnCard({
       </div>
 
       {/* Actions */}
-      <div className="mt-4 flex gap-2 border-t pt-3">
+      <div className="mt-4 flex flex-wrap gap-2 border-t pt-3">
         <Button size="sm" variant="ghost" onClick={onEdit}>
           Edit
         </Button>
         <Button size="sm" variant="ghost" onClick={onRules}>
           Rules
         </Button>
+        {kiln.status !== 'maintenance_emergency' && kiln.status !== 'inactive' ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onBreakdown}
+            className="ml-auto text-red-600 hover:bg-red-50 hover:text-red-700"
+          >
+            Report Breakdown
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onRestore}
+            className="ml-auto text-green-600 hover:bg-green-50 hover:text-green-700"
+          >
+            Restore Kiln
+          </Button>
+        )}
       </div>
     </div>
   );

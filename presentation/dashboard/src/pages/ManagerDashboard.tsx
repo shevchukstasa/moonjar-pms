@@ -39,6 +39,7 @@ import { NotificationsBell } from '@/components/dashboard/NotificationsBell';
 import { ColorMismatchDecisionDialog } from '@/components/positions/ColorMismatchDecisionDialog';
 import { BlockingTasksTab } from '@/components/dashboard/BlockingTasksTab';
 import { TOCZonesTab } from '@/components/dashboard/TOCZonesTab';
+import { BottleneckVisualization } from '@/components/dashboard/BottleneckVisualization';
 import { StoneReservationTab } from '@/components/dashboard/StoneReservationTab';
 import { DefectAlertBanner } from '@/components/dashboard/DefectAlertBanner';
 import { ConsumptionAdjustmentsPanel } from '@/components/materials/ConsumptionAdjustmentsPanel';
@@ -487,6 +488,7 @@ export default function ManagerDashboard() {
       {activeTab === 'tps' && <TpsTabContent factoryId={activeFactoryId} />}
       {activeTab === 'toc' && (
         <div className="space-y-6">
+          <BottleneckVisualization factoryId={activeFactoryId ?? undefined} />
           <TOCZonesTab factoryId={activeFactoryId ?? undefined} />
           <TocTabContent factoryId={activeFactoryId} />
         </div>

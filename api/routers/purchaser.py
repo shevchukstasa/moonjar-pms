@@ -223,6 +223,46 @@ async def get_material_deficits(
     }
 
 
+@router.get("/consolidation-suggestions")
+async def get_consolidation_suggestions(
+    factory_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return suggestions for consolidating approved PRs by supplier."""
+    from business.services.purchase_consolidation import get_consolidation_suggestions as _get_suggestions
+
+    if not factory_id:
+        raise HTTPException(400, "factory_id is required for consolidation suggestions")
+
+    suggestions = _get_suggestions(db, factory_id)
+    return {
+        "items": suggestions,
+        "total": len(suggestions),
+    }
+
+
+class ConsolidateInput(BaseModel):
+    pr_ids: list[UUID]
+
+
+@router.post("/consolidate")
+async def consolidate_requests(
+    data: ConsolidateInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Execute consolidation of specified PR IDs into a single PR."""
+    from business.services.purchase_consolidation import consolidate_purchase_requests
+
+    try:
+        result = consolidate_purchase_requests(db, data.pr_ids, current_user.id)
+        db.commit()
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.get("/lead-times")
 async def get_lead_times(
     supplier_id: UUID | None = None,

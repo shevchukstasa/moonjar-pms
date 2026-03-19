@@ -592,12 +592,13 @@ def _find_best_kiln_for_batch(
 
     Strategy:
     1. If position has an estimated_kiln_id and it's available, prefer it
-    2. Raku-specific rules:
+    2. Rotation rules: skip kilns where proposed glaze is non-compliant
+    3. Raku-specific rules:
        - Gold firings (700°C / two_stage_type='gold'): prefer Raku kiln
        - Standard-temperature firings: avoid Raku if other kilns are available
        - Raku can be used as overflow for any temperature if all others are full
-    3. Otherwise, pick the least loaded kiln that has enough capacity
-    4. Among equally loaded kilns, prefer the one with smallest excess capacity
+    4. Otherwise, pick the least loaded kiln that has enough capacity
+    5. Among equally loaded kilns, prefer the one with smallest excess capacity
        (tightest fit) to save larger kilns for bigger batches
     """
     # If a specific kiln is pre-assigned, check if it's in the available list
@@ -630,10 +631,31 @@ def _find_best_kiln_for_batch(
     window_start = batch_date - timedelta(days=3)
     window_end = batch_date + timedelta(days=3)
 
+    # Determine proposed glaze type for rotation check
+    proposed_glaze = cofiring_key or "standard"
+
     for kiln in kiln_order:
         cap = _get_kiln_capacity_sqm(kiln)
         if cap < required_area_sqm:
             continue  # too small
+
+        # Rotation rules: check if proposed glaze can follow last fired glaze
+        try:
+            from business.services.rotation_rules import check_rotation_compliance
+            rotation_result = check_rotation_compliance(
+                db, kiln.id, proposed_glaze, kiln.factory_id,
+            )
+            if not rotation_result["compliant"]:
+                logger.info(
+                    "ROTATION_SKIP | kiln=%s | %s",
+                    kiln.name, rotation_result["reason"],
+                )
+                continue  # skip this kiln, try next one
+        except Exception as e:
+            # Rotation check failure should not block batch formation
+            logger.warning(
+                "ROTATION_CHECK_ERROR | kiln=%s | %s", kiln.name, e,
+            )
 
         is_raku = _is_raku_kiln(kiln)
         # A kiln is "preferred" if it matches the firing type:
@@ -683,6 +705,12 @@ def _find_best_kiln_for_batch(
                 "(all other kilns full or unavailable)",
                 best_kiln.name,
             )
+
+        # Log rotation decision
+        logger.info(
+            "ROTATION_OK | kiln=%s | glaze=%s assigned",
+            best_kiln.name, proposed_glaze,
+        )
 
     return best_kiln
 

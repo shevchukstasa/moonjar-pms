@@ -216,3 +216,104 @@ async def delete_factories_item(
         raise HTTPException(404, "Factory not found")
     db.delete(item)
     db.commit()
+
+
+# ────────────────────────────────────────────────────────────────
+# Factory-level Rotation Rules (defaults for all kilns)
+# ────────────────────────────────────────────────────────────────
+
+from pydantic import BaseModel as PydanticBaseModel
+from datetime import datetime, timezone
+
+
+class FactoryRotationRuleInput(PydanticBaseModel):
+    rule_name: str
+    glaze_sequence: list[str]
+    cooldown_minutes: int = 0
+    incompatible_pairs: list[list[str]] = []
+    is_active: bool = True
+
+
+def _serialize_rotation_rule(rule) -> dict:
+    return {
+        "id": str(rule.id),
+        "factory_id": str(rule.factory_id),
+        "kiln_id": str(rule.kiln_id) if rule.kiln_id else None,
+        "rule_name": rule.rule_name,
+        "glaze_sequence": rule.glaze_sequence or [],
+        "cooldown_minutes": rule.cooldown_minutes or 0,
+        "incompatible_pairs": rule.incompatible_pairs or [],
+        "is_active": rule.is_active,
+        "created_at": rule.created_at.isoformat() if rule.created_at else None,
+        "updated_at": rule.updated_at.isoformat() if rule.updated_at else None,
+    }
+
+
+@router.get("/{factory_id}/rotation-rules")
+async def get_factory_rotation_rules(
+    factory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Get factory-wide default rotation rules (kiln_id IS NULL)."""
+    from api.models import KilnRotationRule
+
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory:
+        raise HTTPException(404, "Factory not found")
+
+    rules = db.query(KilnRotationRule).filter(
+        KilnRotationRule.factory_id == factory_id,
+        KilnRotationRule.kiln_id.is_(None),
+    ).all()
+
+    return {
+        "items": [_serialize_rotation_rule(r) for r in rules],
+        "total": len(rules),
+    }
+
+
+@router.put("/{factory_id}/rotation-rules")
+async def upsert_factory_rotation_rule(
+    factory_id: UUID,
+    data: FactoryRotationRuleInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Create or update factory-wide default rotation rule."""
+    from api.models import KilnRotationRule
+
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory:
+        raise HTTPException(404, "Factory not found")
+
+    # Check if rule with this name already exists for factory default
+    existing = db.query(KilnRotationRule).filter(
+        KilnRotationRule.factory_id == factory_id,
+        KilnRotationRule.kiln_id.is_(None),
+        KilnRotationRule.rule_name == data.rule_name,
+    ).first()
+
+    if existing:
+        existing.glaze_sequence = data.glaze_sequence
+        existing.cooldown_minutes = data.cooldown_minutes
+        existing.incompatible_pairs = data.incompatible_pairs
+        existing.is_active = data.is_active
+        existing.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(existing)
+        return _serialize_rotation_rule(existing)
+
+    rule = KilnRotationRule(
+        factory_id=factory_id,
+        kiln_id=None,  # factory-wide default
+        rule_name=data.rule_name,
+        glaze_sequence=data.glaze_sequence,
+        cooldown_minutes=data.cooldown_minutes,
+        incompatible_pairs=data.incompatible_pairs,
+        is_active=data.is_active,
+    )
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return _serialize_rotation_rule(rule)

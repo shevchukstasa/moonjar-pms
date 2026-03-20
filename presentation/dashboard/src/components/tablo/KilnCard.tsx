@@ -56,7 +56,8 @@ interface Props {
   batches: BatchItem[];
 }
 
-export function KilnCard({ kiln, batches }: Props) {
+export function KilnCard({ kiln, batches: rawBatches }: Props) {
+  const batches = rawBatches ?? [];
   const { expandedBatches, toggleBatch } = useTabloStore();
 
   return (

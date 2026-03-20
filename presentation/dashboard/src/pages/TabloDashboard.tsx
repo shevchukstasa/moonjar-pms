@@ -120,7 +120,7 @@ export default function TabloDashboard() {
         ) : (
           <div className="space-y-4">
             {kilns.map((k) => (
-              <KilnCard key={k.kiln.id} kiln={k.kiln} batches={k.batches} />
+              <KilnCard key={k.kiln?.id ?? k.id} kiln={k.kiln ?? k} batches={k.batches ?? []} />
             ))}
           </div>
         )

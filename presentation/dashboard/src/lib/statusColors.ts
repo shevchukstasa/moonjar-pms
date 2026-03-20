@@ -34,7 +34,7 @@ export const statusColors: Record<string, string> = {
   in_progress: 'bg-yellow-100 text-yellow-700',
   done: 'bg-green-100 text-green-700',
   // Resource statuses
-  active: 'bg-green-100 text-green-700',
+  active: 'bg-green-500 text-white',
   inactive: 'bg-gray-100 text-gray-500',
   maintenance_planned: 'bg-yellow-100 text-yellow-700',
   maintenance_emergency: 'bg-red-100 text-red-700',

@@ -5,11 +5,14 @@ import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 import { useKilns, type KilnItem } from '@/hooks/useKilns';
 import { useFactories } from '@/hooks/useFactories';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { KilnCreateDialog } from '@/components/kilns/KilnCreateDialog';
 import { KilnEditDialog } from '@/components/kilns/KilnEditDialog';
 import { LoadingRulesDialog } from '@/components/kilns/LoadingRulesDialog';
 import { KilnConstantsTable } from '@/components/kilns/KilnConstantsTable';
 import { KilnBreakdownDialog, KilnRestoreDialog } from '@/components/kilns/KilnBreakdownDialog';
+
+const GLOBAL_ROLES = new Set(['owner', 'administrator', 'ceo']);
 
 const KILN_TYPE_LABELS: Record<string, string> = { big: 'Large', small: 'Small', raku: 'Raku' };
 
@@ -26,10 +29,18 @@ function formatDims(d: { width: number; depth: number; height: number } | null) 
 }
 
 export default function ManagerKilnsPage() {
+  const currentUser = useCurrentUser();
   const { data: factoriesData, isLoading: factoriesLoading, isError: factoriesError } = useFactories();
-  const factories = factoriesData?.items || [];
+  const allFactories = factoriesData?.items || [];
 
-  // Default to first factory
+  // Filter factories by user's assigned factories (PM only sees their factories)
+  const isGlobalRole = GLOBAL_ROLES.has(currentUser?.role || '');
+  const userFactoryIds: string[] = (currentUser as any)?.factories?.map((f: any) => f.id || f.factory_id) || [];
+  const factories = isGlobalRole
+    ? allFactories
+    : allFactories.filter((f) => userFactoryIds.includes(f.id));
+
+  // Default to first factory (PM auto-selects their single factory)
   const [factoryId, setFactoryId] = useState('');
   const selectedFactory = factoryId || (factories.length > 0 ? factories[0].id : '');
 
@@ -46,7 +57,7 @@ export default function ManagerKilnsPage() {
   const [restoreKiln, setRestoreKiln] = useState<KilnItem | null>(null);
 
   const factoryOptions = [
-    ...(factories.length > 1 ? [{ value: '', label: 'All Factories' }] : []),
+    ...(isGlobalRole && factories.length > 1 ? [{ value: '', label: 'All Factories' }] : []),
     ...factories.map((f) => ({ value: f.id, label: f.name })),
   ];
 
@@ -65,8 +76,8 @@ export default function ManagerKilnsPage() {
         </Button>
       </div>
 
-      {/* Factory filter */}
-      {factories.length > 1 && (
+      {/* Factory filter — hidden for PM with single factory */}
+      {(isGlobalRole || factories.length > 1) && factories.length > 1 && (
         <div className="max-w-xs">
           <Select
             label="Factory"

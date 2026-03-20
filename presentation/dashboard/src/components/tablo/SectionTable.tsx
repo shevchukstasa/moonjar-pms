@@ -24,7 +24,8 @@ interface Props {
   onSplitPosition?: (position: PositionItem) => void;
 }
 
-export function SectionTable({ positions, section, onSplitPosition }: Props) {
+export function SectionTable({ positions: rawPositions, section, onSplitPosition }: Props) {
+  const positions = rawPositions ?? [];
   const reorder = useReorderPositions();
   const filters = useTabloStore((s) => s.filters);
   const [items, setItems] = useState<PositionItem[]>([]);

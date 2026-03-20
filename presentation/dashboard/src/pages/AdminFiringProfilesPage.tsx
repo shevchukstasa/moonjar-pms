@@ -88,6 +88,17 @@ function calcMaxTemp(heating: TempStage[], cooling: TempStage[]): number {
   return max;
 }
 
+/** Calculate total duration from stages (hours) */
+function calcTotalDuration(heating: TempStage[], cooling: TempStage[]): number {
+  let total = 0;
+  for (const s of [...heating, ...cooling]) {
+    if (s.rate > 0) {
+      total += Math.abs(s.end_temp - s.start_temp) / s.rate;
+    }
+  }
+  return Math.round(total * 10) / 10; // round to 1 decimal
+}
+
 /* ── StageEditor sub-component ─────────────────────────────────────── */
 function StageEditor({
   label,
@@ -103,7 +114,7 @@ function StageEditor({
   const borderColor = color === 'red' ? 'border-red-200' : 'border-blue-200';
   const bgColor = color === 'red' ? 'bg-red-50' : 'bg-blue-50';
   const textColor = color === 'red' ? 'text-red-700' : 'text-blue-700';
-  const arrowIcon = color === 'red' ? '\u2191' : '\u2193'; // ↑ heating, ↓ cooling
+  const arrowIcon = color === 'red' ? '↑' : '↓';
 
   const updateStage = (idx: number, field: keyof TempStage, value: number) => {
     const next = [...stages];
@@ -161,17 +172,17 @@ function StageEditor({
               className={`w-20 rounded border px-2 py-1 text-center text-sm font-mono ${
                 idx > 0 ? 'bg-gray-100 text-gray-500' : 'bg-white'
               }`}
-              title="Start \u00B0C"
+              title="Start °C"
             />
-            <span className="text-gray-400">\u2192</span>
+            <span className="text-gray-400">→</span>
             <input
               type="number"
               value={stage.end_temp}
               onChange={(e) => updateStage(idx, 'end_temp', parseFloat(e.target.value) || 0)}
               className="w-20 rounded border bg-white px-2 py-1 text-center text-sm font-mono"
-              title="End \u00B0C"
+              title="End °C"
             />
-            <span className="text-xs text-gray-400">\u00B0C</span>
+            <span className="text-xs text-gray-400">°C</span>
           </div>
           <div className="flex items-center gap-1">
             <span className="text-xs text-gray-500">@</span>
@@ -180,14 +191,14 @@ function StageEditor({
               value={stage.rate}
               onChange={(e) => updateStage(idx, 'rate', parseFloat(e.target.value) || 0)}
               className="w-20 rounded border bg-white px-2 py-1 text-center text-sm font-mono"
-              title="Rate \u00B0C/h"
+              title="Rate °C/h"
             />
-            <span className="text-xs text-gray-400">\u00B0C/h</span>
+            <span className="text-xs text-gray-400">°C/h</span>
           </div>
           {/* Calculated duration */}
           <span className="ml-1 text-xs text-gray-400">
             {stage.rate > 0
-              ? `\u2248${(Math.abs(stage.end_temp - stage.start_temp) / stage.rate).toFixed(1)}h`
+              ? `≈${(Math.abs(stage.end_temp - stage.start_temp) / stage.rate).toFixed(1)}h`
               : ''}
           </span>
           {stages.length > 1 && (
@@ -197,7 +208,7 @@ function StageEditor({
               className="ml-auto text-sm text-red-400 hover:text-red-600"
               title="Remove interval"
             >
-              \u2715
+              ✕
             </button>
           )}
         </div>
@@ -222,13 +233,16 @@ export default function AdminFiringProfilesPage() {
     queryFn: () => firingProfilesApi.list(),
   });
 
-  const { data: tempGroupsData } = useQuery<{ items: TemperatureGroup[] }>({
+  const { data: tempGroupsRaw } = useQuery<TemperatureGroup[]>({
     queryKey: ['temperature-groups'],
-    queryFn: () => apiClient.get('/reference/temperature-groups').then((r) => r.data),
+    queryFn: () => apiClient.get('/reference/temperature-groups').then((r) => {
+      const d = r.data;
+      return Array.isArray(d) ? d : (d?.items ?? []);
+    }),
   });
 
   const items = data?.items ?? [];
-  const tempGroups = tempGroupsData?.items ?? [];
+  const tempGroups = tempGroupsRaw ?? [];
 
   /* ── mutations ───────────────────────────────────────────────────── */
   const extractError = (err: unknown): string => {
@@ -305,13 +319,16 @@ export default function AdminFiringProfilesPage() {
     setMutationError('');
     const maxTemp = calcMaxTemp(form.heating_stages, form.cooling_stages);
     const stages = toStagesJson(form.heating_stages, form.cooling_stages);
+    const calculatedDuration = calcTotalDuration(form.heating_stages, form.cooling_stages);
+    const hasStages = form.heating_stages.some(s => s.rate > 0) || form.cooling_stages.some(s => s.rate > 0);
+    const effectiveDuration = hasStages && calculatedDuration > 0
+      ? calculatedDuration
+      : (form.total_duration_hours ? parseFloat(form.total_duration_hours) : null);
     const payload: Record<string, unknown> = {
       name: form.name,
       temperature_group_id: form.temperature_group_id || null,
       target_temperature: maxTemp || null,
-      total_duration_hours: form.total_duration_hours
-        ? parseFloat(form.total_duration_hours)
-        : null,
+      total_duration_hours: effectiveDuration,
       stages,
       is_active: form.is_active,
     };
@@ -353,11 +370,11 @@ export default function AdminFiringProfilesPage() {
         },
         {
           key: 'target_temperature',
-          header: 'Max Temp (\u00B0C)',
+          header: 'Max Temp (°C)',
           render: (r: FiringProfile) =>
             r.target_temperature != null ? (
               <span className="font-mono text-sm font-bold text-red-600">
-                {r.target_temperature}\u00B0C
+                {r.target_temperature}°C
               </span>
             ) : (
               <span className="text-gray-400">&mdash;</span>
@@ -491,16 +508,37 @@ export default function AdminFiringProfilesPage() {
                   ))}
               </select>
             </div>
-            <Input
-              label="Total Duration (hours)"
-              type="number"
-              step="0.5"
-              placeholder="e.g. 8"
-              value={form.total_duration_hours}
-              onChange={(e) =>
-                setForm({ ...form, total_duration_hours: e.target.value })
-              }
-            />
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Total Duration (hours)
+              </label>
+              {(() => {
+                const calculated = calcTotalDuration(form.heating_stages, form.cooling_stages);
+                const manual = form.total_duration_hours ? parseFloat(form.total_duration_hours) : 0;
+                const hasStages = form.heating_stages.some(s => s.rate > 0) || form.cooling_stages.some(s => s.rate > 0);
+                const effectiveDuration = hasStages && calculated > 0 ? calculated : manual;
+                return (
+                  <>
+                    <input
+                      type="number"
+                      step="0.5"
+                      placeholder="auto from stages"
+                      value={hasStages && calculated > 0 ? calculated : form.total_duration_hours}
+                      onChange={(e) => setForm({ ...form, total_duration_hours: e.target.value })}
+                      readOnly={hasStages && calculated > 0}
+                      className={`w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none ${
+                        hasStages && calculated > 0 ? 'bg-gray-50 text-gray-600' : 'bg-white'
+                      }`}
+                    />
+                    {hasStages && calculated > 0 && (
+                      <p className="mt-0.5 text-xs text-blue-500">
+                        ≈{effectiveDuration}h calculated from {form.heating_stages.length + form.cooling_stages.length} intervals
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
           </div>
 
           {/* Heating intervals */}
@@ -525,7 +563,7 @@ export default function AdminFiringProfilesPage() {
               <span className="text-gray-500">
                 Max temp:{' '}
                 <strong className="text-red-600">
-                  {calcMaxTemp(form.heating_stages, form.cooling_stages)}\u00B0C
+                  {calcMaxTemp(form.heating_stages, form.cooling_stages)}°C
                 </strong>
               </span>
               <span className="text-gray-500">
@@ -533,6 +571,9 @@ export default function AdminFiringProfilesPage() {
               </span>
               <span className="text-gray-500">
                 Cooling intervals: <strong>{form.cooling_stages.length}</strong>
+              </span>
+              <span className="text-gray-500">
+                Total: <strong className="text-blue-600">≈{calcTotalDuration(form.heating_stages, form.cooling_stages)}h</strong>
               </span>
             </div>
           </div>

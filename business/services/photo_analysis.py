@@ -143,11 +143,19 @@ async def analyze_photo(
 
     system_prompt = _build_system_prompt(analysis_type, context)
 
-    # Build Claude Vision API request
+    # Build Claude Vision API request with prompt caching.
+    # System prompt is cached (same per analysis_type) → up to 90% savings
+    # on repeated calls of same type within 5-minute TTL.
     payload = {
         "model": ANTHROPIC_MODEL,
         "max_tokens": 1024,
-        "system": system_prompt,
+        "system": [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
         "messages": [
             {
                 "role": "user",
@@ -183,6 +191,15 @@ async def analyze_photo(
             )
             resp.raise_for_status()
             data = resp.json()
+
+        # Log cache performance
+        usage = data.get("usage", {})
+        cache_read = usage.get("cache_read_input_tokens", 0)
+        cache_write = usage.get("cache_creation_input_tokens", 0)
+        if cache_read > 0:
+            logger.info("Photo analysis cache HIT: %d tokens from cache", cache_read)
+        elif cache_write > 0:
+            logger.info("Photo analysis cache WRITE: %d tokens cached", cache_write)
 
         # Extract text from response
         content_blocks = data.get("content", [])

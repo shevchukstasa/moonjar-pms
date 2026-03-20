@@ -74,7 +74,12 @@ async def _call_anthropic(
     messages: list[dict],
     api_key: str,
 ) -> str:
-    """Call Anthropic Claude API."""
+    """Call Anthropic Claude API with prompt caching enabled.
+
+    Prompt caching saves up to 90% on repeated system prompts.
+    The system prompt is cached via cache_control; subsequent calls
+    within the 5-minute TTL pay only 10% of the input token cost.
+    """
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             "https://api.anthropic.com/v1/messages",
@@ -86,13 +91,30 @@ async def _call_anthropic(
             json={
                 "model": "claude-sonnet-4-20250514",
                 "max_tokens": 1024,
-                "system": system_prompt,
+                # Prompt caching: system as array of blocks with cache_control
+                "system": [
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
                 "messages": messages,
             },
             timeout=60,
         )
         resp.raise_for_status()
         data = resp.json()
+
+        # Log cache performance for monitoring
+        usage = data.get("usage", {})
+        cache_read = usage.get("cache_read_input_tokens", 0)
+        cache_write = usage.get("cache_creation_input_tokens", 0)
+        if cache_read > 0:
+            logger.info("Anthropic cache HIT: %d tokens read from cache", cache_read)
+        elif cache_write > 0:
+            logger.info("Anthropic cache WRITE: %d tokens cached", cache_write)
+
         # Claude API returns content as a list of blocks
         content_blocks = data.get("content", [])
         text_parts = [

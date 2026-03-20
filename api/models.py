@@ -217,6 +217,7 @@ class GlazingBoardSpec(Base):
     board_width_cm = Column(sa.Numeric(6, 1), nullable=False)
     tiles_per_board = Column(sa.Integer, nullable=False)
     area_per_board_m2 = Column(sa.Numeric(8, 4), nullable=False)
+    area_per_two_boards_m2 = Column(sa.Numeric(8, 4))  # 2× area — workers glaze 2 boards at a time
     tiles_along_length = Column(sa.Integer, nullable=False)
     tiles_across_width = Column(sa.Integer, nullable=False)
     tile_orientation_cm = Column(sa.String(30))  # e.g. "10×30"

@@ -1728,6 +1728,17 @@ def _ensure_schema():
 
     _run_section("edge_profile_columns", _add_edge_profile_columns)
 
+    # --- Section: Add area_per_two_boards_m2 to glazing_board_specs ---
+    def _add_two_boards_column(conn):
+        try:
+            conn.execute(text("""
+                ALTER TABLE glazing_board_specs ADD COLUMN IF NOT EXISTS area_per_two_boards_m2 NUMERIC(8,4);
+            """))
+        except Exception as e:
+            logger.warning(f"_add_two_boards_column: {e}")
+
+    _run_section("glazing_board_two_boards_col", _add_two_boards_column)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""

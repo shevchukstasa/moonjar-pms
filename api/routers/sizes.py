@@ -94,6 +94,7 @@ def _upsert_glazing_board(db: Session, size: Size) -> GlazingBoardSpec:
     spec.board_width_cm = result.board_width_cm
     spec.tiles_per_board = result.tiles_per_board
     spec.area_per_board_m2 = result.area_per_board_m2
+    spec.area_per_two_boards_m2 = result.area_per_two_boards_m2
     spec.tiles_along_length = result.tiles_along_length
     spec.tiles_across_width = result.tiles_across_width
     spec.tile_orientation_cm = result.tile_orientation_cm
@@ -189,7 +190,7 @@ async def get_glazing_board(
         "tiles_per_board": b.tiles_per_board,
         "tiles_per_two_boards": b.tiles_per_board * 2,
         "area_per_board_m2": float(b.area_per_board_m2),
-        "area_per_two_boards_m2": round(float(b.area_per_board_m2) * 2, 4),
+        "area_per_two_boards_m2": float(b.area_per_two_boards_m2) if b.area_per_two_boards_m2 else round(float(b.area_per_board_m2) * 2, 4),
         "tiles_along_length": b.tiles_along_length,
         "tiles_across_width": b.tiles_across_width,
         "tile_orientation_cm": b.tile_orientation_cm,

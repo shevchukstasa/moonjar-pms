@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui/Badge';
 import { useTabloStore } from '@/stores/tabloStore';
 import type { PositionItem } from './PositionRow';
-import { formatPlaceOfApplication, formatEdgeProfile } from './PositionRow';
+import { formatPlaceOfApplication, formatEdgeProfile, formatShape } from './PositionRow';
 
 interface BatchInfo {
   id: string;
@@ -63,17 +63,18 @@ export function BatchGroup({ batch, positions }: Props) {
                   <td className="px-4 py-2 text-sm">{p.order_number}</td>
                   <td className="px-4 py-2 text-sm">{p.color}</td>
                   <td className="px-4 py-2 text-sm">{p.size}</td>
-                  <td className="px-4 py-2 text-sm">{p.thickness_mm ? `${p.thickness_mm} mm` : '\u2014'}</td>
-                  <td className="px-4 py-2 text-sm">{p.shape ? p.shape.charAt(0).toUpperCase() + p.shape.slice(1) : '\u2014'}</td>
+                  <td className="px-4 py-2 text-sm">{p.thickness_mm ? `${p.thickness_mm} mm` : '10 mm'}</td>
+                  <td className="px-4 py-2 text-sm">{formatShape(p.shape, p.width_cm, p.length_cm)}</td>
                   <td className="px-4 py-2 text-sm">{formatPlaceOfApplication(p.place_of_application)}</td>
                   <td className="px-4 py-2 text-sm">
                     {(() => {
-                      const edgeBadge = formatEdgeProfile(p.edge_profile, p.edge_profile_sides);
-                      return edgeBadge ? (
+                      const edge = formatEdgeProfile(p.edge_profile, p.edge_profile_sides);
+                      const isNonDefault = p.edge_profile && p.edge_profile !== 'straight';
+                      return isNonDefault ? (
                         <span className="inline-flex items-center rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
-                          {edgeBadge}
+                          {edge}
                         </span>
-                      ) : '\u2014';
+                      ) : edge;
                     })()}
                   </td>
                   <td className="px-4 py-2 text-right text-sm">{p.quantity}</td>

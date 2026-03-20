@@ -14,7 +14,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { DataTable } from '@/components/ui/Table';
 import { FactorySelector } from '@/components/layout/FactorySelector';
 import apiClient from '@/api/client';
-import { formatEdgeProfile } from '@/components/tablo/PositionRow';
+import { formatEdgeProfile, formatShape } from '@/components/tablo/PositionRow';
 
 const SECTION_TABS = [
   { id: 'glazing', label: 'Glazing' },
@@ -168,12 +168,12 @@ export default function ManagerSchedulePage() {
     {
       key: 'thickness_mm',
       header: 'Thickness',
-      render: (item) => item.thickness_mm ? `${item.thickness_mm} mm` : '\u2014',
+      render: (item) => item.thickness_mm ? `${item.thickness_mm} mm` : '10 mm',
     },
     {
       key: 'shape',
       header: 'Shape',
-      render: (item) => item.shape ? item.shape.charAt(0).toUpperCase() + item.shape.slice(1) : '\u2014',
+      render: (item) => formatShape(item.shape, item.width_cm, item.length_cm),
     },
     {
       key: 'place_of_application',
@@ -186,19 +186,20 @@ export default function ManagerSchedulePage() {
           all_edges: 'Face + all edges',
           with_back: 'All surfaces',
         };
-        return item.place_of_application ? (labels[item.place_of_application] ?? item.place_of_application) : '\u2014';
+        return item.place_of_application ? (labels[item.place_of_application] ?? item.place_of_application) : labels['face_only'];
       },
     },
     {
       key: 'edge_profile',
       header: 'Edge',
       render: (item) => {
-        const badge = formatEdgeProfile(item.edge_profile, item.edge_profile_sides);
-        return badge ? (
+        const edge = formatEdgeProfile(item.edge_profile, item.edge_profile_sides);
+        const isNonDefault = item.edge_profile && item.edge_profile !== 'straight';
+        return isNonDefault ? (
           <span className="inline-flex items-center rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
-            {badge}
+            {edge}
           </span>
-        ) : '\u2014';
+        ) : edge;
       },
     },
     {

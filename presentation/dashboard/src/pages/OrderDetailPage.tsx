@@ -13,7 +13,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { DataTable } from '@/components/ui/Table';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { StatusDropdown } from '@/components/tablo/StatusDropdown';
-import { formatEdgeProfile } from '@/components/tablo/PositionRow';
+import { formatEdgeProfile, formatPlaceOfApplication, formatShape } from '@/components/tablo/PositionRow';
 
 const VALID_STATUSES = [
   { value: 'new', label: 'New' },
@@ -103,37 +103,29 @@ export default function OrderDetailPage() {
     {
       key: 'thickness_mm',
       header: 'Thickness',
-      render: (p) => p.thickness_mm ? `${p.thickness_mm} mm` : '\u2014',
+      render: (p) => p.thickness_mm ? `${p.thickness_mm} mm` : '10 mm',
     },
     {
       key: 'shape',
       header: 'Shape',
-      render: (p) => p.shape ? p.shape.charAt(0).toUpperCase() + p.shape.slice(1) : '\u2014',
+      render: (p) => formatShape(p.shape, p.width_cm, p.length_cm),
     },
     {
       key: 'place_of_application',
       header: 'Glaze Place',
-      render: (p) => {
-        const labels: Record<string, string> = {
-          face_only: 'Face',
-          edges_1: 'Face + 1 edge',
-          edges_2: 'Face + 2 edges',
-          all_edges: 'Face + all edges',
-          with_back: 'All surfaces',
-        };
-        return p.place_of_application ? (labels[p.place_of_application] ?? p.place_of_application) : '\u2014';
-      },
+      render: (p) => formatPlaceOfApplication(p.place_of_application),
     },
     {
       key: 'edge_profile',
       header: 'Edge',
       render: (p) => {
-        const badge = formatEdgeProfile(p.edge_profile, p.edge_profile_sides);
-        return badge ? (
+        const edge = formatEdgeProfile(p.edge_profile, p.edge_profile_sides);
+        const isNonDefault = p.edge_profile && p.edge_profile !== 'straight';
+        return isNonDefault ? (
           <span className="inline-flex items-center rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
-            {badge}
+            {edge}
           </span>
-        ) : '\u2014';
+        ) : edge;
       },
     },
     { key: 'quantity', header: 'Qty' },

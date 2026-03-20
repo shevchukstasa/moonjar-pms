@@ -45,7 +45,7 @@ const POA_LABELS: Record<string, string> = {
 };
 
 export function formatPlaceOfApplication(value?: string | null): string {
-  if (!value) return '\u2014';
+  if (!value) return POA_LABELS['face_only'];  // default: Face (top only)
   return POA_LABELS[value] ?? value;
 }
 
@@ -63,12 +63,20 @@ const EDGE_PROFILE_LABELS: Record<string, string> = {
   custom: 'Custom',
 };
 
-/** Format edge profile for display. Returns null if straight or not set. */
-export function formatEdgeProfile(profile?: string | null, sides?: number | null): string | null {
-  if (!profile || profile === 'straight') return null;
+/** Format edge profile for display. Returns 'Straight' as default when not set. */
+export function formatEdgeProfile(profile?: string | null, sides?: number | null): string {
+  if (!profile || profile === 'straight') return EDGE_PROFILE_LABELS['straight'];
   const label = EDGE_PROFILE_LABELS[profile] ?? profile;
   if (sides && sides > 0) return `${label} \u00D7${sides}`;
   return label;
+}
+
+/** Format shape with smart default: square if width==length, rectangle otherwise */
+export function formatShape(shape?: string | null, widthCm?: number | null, lengthCm?: number | null): string {
+  if (shape) return shape.charAt(0).toUpperCase() + shape.slice(1);
+  // Default based on dimensions
+  if (widthCm && lengthCm && widthCm === lengthCm) return 'Square';
+  return 'Rectangle';
 }
 
 const NON_SPLITTABLE_STATUSES = ['in_kiln', 'fired'];
@@ -249,17 +257,18 @@ export function PositionRow({ position, index, section, onSplit, onMerge, mobile
           </Tooltip>
         )}
       </td>
-      <td className="px-3 py-2 text-sm">{position.thickness_mm ? `${position.thickness_mm} mm` : '\u2014'}</td>
-      <td className="px-3 py-2 text-sm">{position.shape ? position.shape.charAt(0).toUpperCase() + position.shape.slice(1) : '\u2014'}</td>
+      <td className="px-3 py-2 text-sm">{position.thickness_mm ? `${position.thickness_mm} mm` : '10 mm'}</td>
+      <td className="px-3 py-2 text-sm">{formatShape(position.shape, position.width_cm, position.length_cm)}</td>
       <td className="px-3 py-2 text-sm">{formatPlaceOfApplication(position.place_of_application)}</td>
       <td className="px-3 py-2 text-sm">
         {(() => {
-          const edgeBadge = formatEdgeProfile(position.edge_profile, position.edge_profile_sides);
-          return edgeBadge ? (
+          const edge = formatEdgeProfile(position.edge_profile, position.edge_profile_sides);
+          const isNonDefault = position.edge_profile && position.edge_profile !== 'straight';
+          return isNonDefault ? (
             <span className="inline-flex items-center rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
-              {edgeBadge}
+              {edge}
             </span>
-          ) : '\u2014';
+          ) : edge;
         })()}
       </td>
       <td className="px-3 py-2 text-sm">

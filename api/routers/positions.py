@@ -201,6 +201,10 @@ def _serialize_position(p) -> dict:
         "glazeable_sqm": float(p.glazeable_sqm) if getattr(p, 'glazeable_sqm', None) else None,
         "size_id": str(p.size_id) if getattr(p, 'size_id', None) else None,
         "recipe_name": p.recipe.name if getattr(p, 'recipe', None) and p.recipe else None,
+        # Edge profile
+        "edge_profile": getattr(p, 'edge_profile', None),
+        "edge_profile_sides": getattr(p, 'edge_profile_sides', None),
+        "edge_profile_notes": getattr(p, 'edge_profile_notes', None),
         # Schedule
         "planned_glazing_date": p.planned_glazing_date.isoformat() if getattr(p, 'planned_glazing_date', None) else None,
         "planned_kiln_date": p.planned_kiln_date.isoformat() if getattr(p, 'planned_kiln_date', None) else None,
@@ -675,6 +679,9 @@ async def split_position(
             priority_order=p.priority_order,
             position_number=p.position_number,
             split_index=_si(),
+            edge_profile=getattr(p, 'edge_profile', None),
+            edge_profile_sides=getattr(p, 'edge_profile_sides', None),
+            edge_profile_notes=getattr(p, 'edge_profile_notes', None),
             created_at=now,
             updated_at=now,
         )
@@ -707,6 +714,9 @@ async def split_position(
             priority_order=p.priority_order,
             position_number=p.position_number,
             split_index=_si(),
+            edge_profile=getattr(p, 'edge_profile', None),
+            edge_profile_sides=getattr(p, 'edge_profile_sides', None),
+            edge_profile_notes=getattr(p, 'edge_profile_notes', None),
             created_at=now,
             updated_at=now,
         )
@@ -755,6 +765,9 @@ async def split_position(
             priority_order=p.priority_order,
             position_number=p.position_number,
             split_index=_si(),
+            edge_profile=getattr(p, 'edge_profile', None),
+            edge_profile_sides=getattr(p, 'edge_profile_sides', None),
+            edge_profile_notes=getattr(p, 'edge_profile_notes', None),
             created_at=now,
             updated_at=now,
         )

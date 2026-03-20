@@ -14,6 +14,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { DataTable } from '@/components/ui/Table';
 import { FactorySelector } from '@/components/layout/FactorySelector';
 import apiClient from '@/api/client';
+import { formatEdgeProfile } from '@/components/tablo/PositionRow';
 
 const SECTION_TABS = [
   { id: 'glazing', label: 'Glazing' },
@@ -186,6 +187,18 @@ export default function ManagerSchedulePage() {
           with_back: 'All surfaces',
         };
         return item.place_of_application ? (labels[item.place_of_application] ?? item.place_of_application) : '\u2014';
+      },
+    },
+    {
+      key: 'edge_profile',
+      header: 'Edge',
+      render: (item) => {
+        const badge = formatEdgeProfile(item.edge_profile, item.edge_profile_sides);
+        return badge ? (
+          <span className="inline-flex items-center rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
+            {badge}
+          </span>
+        ) : '\u2014';
       },
     },
     {

@@ -1708,6 +1708,26 @@ def _ensure_schema():
 
     _run_section("consumption_rules_nullable_ml", _consumption_rules_nullable_ml)
 
+    # --- Section: Add edge_profile columns to production_order_items and order_positions ---
+    def _add_edge_profile_columns(conn):
+        edge_cols = [
+            ("production_order_items", "edge_profile VARCHAR(30)"),
+            ("production_order_items", "edge_profile_sides SMALLINT"),
+            ("production_order_items", "edge_profile_notes VARCHAR(255)"),
+            ("order_positions", "edge_profile VARCHAR(30)"),
+            ("order_positions", "edge_profile_sides SMALLINT"),
+            ("order_positions", "edge_profile_notes VARCHAR(255)"),
+        ]
+        for table, col_def in edge_cols:
+            try:
+                conn.execute(text(f"""
+                    ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col_def};
+                """))
+            except Exception as e:
+                logger.warning(f"_add_edge_profile_columns: skip {table}.{col_def.split()[0]}: {e}")
+
+    _run_section("edge_profile_columns", _add_edge_profile_columns)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""

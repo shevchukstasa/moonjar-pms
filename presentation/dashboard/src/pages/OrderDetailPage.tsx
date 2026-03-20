@@ -13,6 +13,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { DataTable } from '@/components/ui/Table';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { StatusDropdown } from '@/components/tablo/StatusDropdown';
+import { formatEdgeProfile } from '@/components/tablo/PositionRow';
 
 const VALID_STATUSES = [
   { value: 'new', label: 'New' },
@@ -121,6 +122,18 @@ export default function OrderDetailPage() {
           with_back: 'All surfaces',
         };
         return p.place_of_application ? (labels[p.place_of_application] ?? p.place_of_application) : '\u2014';
+      },
+    },
+    {
+      key: 'edge_profile',
+      header: 'Edge',
+      render: (p) => {
+        const badge = formatEdgeProfile(p.edge_profile, p.edge_profile_sides);
+        return badge ? (
+          <span className="inline-flex items-center rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
+            {badge}
+          </span>
+        ) : '\u2014';
       },
     },
     { key: 'quantity', header: 'Qty' },

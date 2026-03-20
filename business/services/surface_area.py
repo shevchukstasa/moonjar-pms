@@ -366,6 +366,20 @@ def calculate_glazeable_sqm_for_position(db, position) -> Optional[Decimal]:
     poa = getattr(position, 'place_of_application', None) or ''
     poa = poa.strip().lower()
 
+    # Edge profile coefficients — multiply edge area when profile is non-straight
+    EDGE_PROFILE_COEFFICIENTS = {
+        'straight': Decimal('1.0'),
+        'beveled_45': Decimal('1.0'),
+        'beveled_30': Decimal('1.05'),
+        'rounded': Decimal('1.15'),
+        'bullnose': Decimal('1.57'),
+        'pencil': Decimal('1.05'),
+        'ogee': Decimal('1.25'),
+        'waterfall': Decimal('1.15'),
+        'stepped': Decimal('1.1'),
+        'custom': Decimal('1.2'),
+    }
+
     if poa and poa != 'face_only' and face_area > 0:
         original_face = face_area
 
@@ -397,23 +411,27 @@ def calculate_glazeable_sqm_for_position(db, position) -> Optional[Decimal]:
             except Exception:
                 pass
 
+        # Determine edge profile coefficient
+        _edge_profile = getattr(position, 'edge_profile', None) or ''
+        _edge_coeff = EDGE_PROFILE_COEFFICIENTS.get(_edge_profile.strip().lower(), Decimal('1.0'))
+
         if t_m > 0 and (w_m > 0 or h_m > 0):
             perimeter = Decimal('2') * (w_m + h_m)
-            one_long_edge = h_m * t_m  # one long side
+            one_long_edge = h_m * t_m * _edge_coeff  # one long side, adjusted for profile
 
             if poa == 'edges_1':
                 face_area += one_long_edge
             elif poa == 'edges_2':
                 face_area += Decimal('2') * one_long_edge
             elif poa == 'all_edges':
-                face_area += perimeter * t_m
+                face_area += perimeter * t_m * _edge_coeff
             elif poa == 'with_back':
-                face_area += face_area + perimeter * t_m  # double face + all edges
+                face_area += face_area + perimeter * t_m * _edge_coeff  # double face + all edges
 
         position_label = getattr(position, 'id', None) or getattr(position, 'position_number', '?')
         logger.info(
-            "POA_ADJUST | position=%s | poa=%s | face=%.4f → adjusted=%.4f",
-            position_label, poa, original_face, face_area,
+            "POA_ADJUST | position=%s | poa=%s | edge_profile=%s | coeff=%s | face=%.4f → adjusted=%.4f",
+            position_label, poa, _edge_profile or 'none', _edge_coeff, original_face, face_area,
         )
 
     return face_area

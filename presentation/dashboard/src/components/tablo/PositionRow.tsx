@@ -30,6 +30,9 @@ export interface PositionItem {
   calculated_area_cm2?: number | null;
   thickness_mm?: number | null;
   place_of_application?: string | null;
+  edge_profile?: string | null;
+  edge_profile_sides?: number | null;
+  edge_profile_notes?: string | null;
 }
 
 /** Human-readable labels for place_of_application enum */
@@ -44,6 +47,28 @@ const POA_LABELS: Record<string, string> = {
 export function formatPlaceOfApplication(value?: string | null): string {
   if (!value) return '\u2014';
   return POA_LABELS[value] ?? value;
+}
+
+/** Human-readable labels for edge profile types */
+const EDGE_PROFILE_LABELS: Record<string, string> = {
+  straight: 'Straight',
+  beveled_45: 'Bevel 45\u00B0',
+  beveled_30: 'Bevel 30\u00B0',
+  rounded: 'Rounded',
+  bullnose: 'Bullnose',
+  pencil: 'Pencil',
+  ogee: 'Ogee',
+  waterfall: 'Waterfall',
+  stepped: 'Stepped',
+  custom: 'Custom',
+};
+
+/** Format edge profile for display. Returns null if straight or not set. */
+export function formatEdgeProfile(profile?: string | null, sides?: number | null): string | null {
+  if (!profile || profile === 'straight') return null;
+  const label = EDGE_PROFILE_LABELS[profile] ?? profile;
+  if (sides && sides > 0) return `${label} \u00D7${sides}`;
+  return label;
 }
 
 const NON_SPLITTABLE_STATUSES = ['in_kiln', 'fired'];
@@ -146,6 +171,14 @@ export function PositionRow({ position, index, section, onSplit, onMerge, mobile
                   {position.application_method}
                 </span>
               )}
+              {(() => {
+                const edgeBadge = formatEdgeProfile(position.edge_profile, position.edge_profile_sides);
+                return edgeBadge ? (
+                  <span className="ml-1.5 inline-flex items-center rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
+                    {edgeBadge}
+                  </span>
+                ) : null;
+              })()}
             </p>
           </div>
           {delay > 0 && (
@@ -219,6 +252,16 @@ export function PositionRow({ position, index, section, onSplit, onMerge, mobile
       <td className="px-3 py-2 text-sm">{position.thickness_mm ? `${position.thickness_mm} mm` : '\u2014'}</td>
       <td className="px-3 py-2 text-sm">{position.shape ? position.shape.charAt(0).toUpperCase() + position.shape.slice(1) : '\u2014'}</td>
       <td className="px-3 py-2 text-sm">{formatPlaceOfApplication(position.place_of_application)}</td>
+      <td className="px-3 py-2 text-sm">
+        {(() => {
+          const edgeBadge = formatEdgeProfile(position.edge_profile, position.edge_profile_sides);
+          return edgeBadge ? (
+            <span className="inline-flex items-center rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
+              {edgeBadge}
+            </span>
+          ) : '\u2014';
+        })()}
+      </td>
       <td className="px-3 py-2 text-sm">
         {position.application ?? '\u2014'}
         {position.application_method && (

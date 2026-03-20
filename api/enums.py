@@ -394,6 +394,19 @@ class BackupType(str, Enum):
     MANUAL = 'manual'
 
 
+class EdgeProfileType(str, Enum):
+    STRAIGHT = 'straight'
+    BEVELED_45 = 'beveled_45'
+    BEVELED_30 = 'beveled_30'
+    ROUNDED = 'rounded'
+    BULLNOSE = 'bullnose'
+    PENCIL = 'pencil'
+    OGEE = 'ogee'
+    WATERFALL = 'waterfall'
+    STEPPED = 'stepped'
+    CUSTOM = 'custom'
+
+
 class ApplicationMethodCode(str, Enum):
     SS = 'ss'                    # Spray engobe + Spray glaze
     S = 's'                      # No engobe, Spray glaze only

@@ -1040,6 +1040,10 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
             application_collection=item_data.get("application_collection"),
             application_method=item_data.get("application_method"),
             colors_for_splashing=item_data.get("colors_for_splashing"),
+            # Edge profile data
+            edge_profile=item_data.get("edge_profile"),
+            edge_profile_sides=item_data.get("edge_profile_sides"),
+            edge_profile_notes=item_data.get("edge_profile_notes"),
         )
         db.add(item)
         db.flush()

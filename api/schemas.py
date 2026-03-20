@@ -909,6 +909,9 @@ class OrderPositionCreate(BaseModel):
     is_merged: Optional[bool] = None
     priority_order: Optional[int] = None
     firing_round: Optional[int] = None
+    edge_profile: Optional[str] = None
+    edge_profile_sides: Optional[int] = None
+    edge_profile_notes: Optional[str] = None
 
 
 class OrderPositionUpdate(BaseModel):
@@ -942,6 +945,9 @@ class OrderPositionUpdate(BaseModel):
     is_merged: Optional[bool] = None
     priority_order: Optional[int] = None
     firing_round: Optional[int] = None
+    edge_profile: Optional[str] = None
+    edge_profile_sides: Optional[int] = None
+    edge_profile_notes: Optional[str] = None
 
 
 class OrderPositionResponse(BaseModel):
@@ -976,6 +982,9 @@ class OrderPositionResponse(BaseModel):
     is_merged: bool
     priority_order: Optional[int] = None
     firing_round: int = 1
+    edge_profile: Optional[str] = None
+    edge_profile_sides: Optional[int] = None
+    edge_profile_notes: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

@@ -28,6 +28,22 @@ export interface PositionItem {
   shape?: string | null;
   shape_dimensions?: Record<string, number> | null;
   calculated_area_cm2?: number | null;
+  thickness_mm?: number | null;
+  place_of_application?: string | null;
+}
+
+/** Human-readable labels for place_of_application enum */
+const POA_LABELS: Record<string, string> = {
+  face_only: 'Face',
+  edges_1: 'Face + 1 edge',
+  edges_2: 'Face + 2 edges',
+  all_edges: 'Face + all edges',
+  with_back: 'All surfaces',
+};
+
+export function formatPlaceOfApplication(value?: string | null): string {
+  if (!value) return '\u2014';
+  return POA_LABELS[value] ?? value;
 }
 
 const NON_SPLITTABLE_STATUSES = ['in_kiln', 'fired'];
@@ -200,6 +216,9 @@ export function PositionRow({ position, index, section, onSplit, onMerge, mobile
           </Tooltip>
         )}
       </td>
+      <td className="px-3 py-2 text-sm">{position.thickness_mm ? `${position.thickness_mm} mm` : '\u2014'}</td>
+      <td className="px-3 py-2 text-sm">{position.shape ? position.shape.charAt(0).toUpperCase() + position.shape.slice(1) : '\u2014'}</td>
+      <td className="px-3 py-2 text-sm">{formatPlaceOfApplication(position.place_of_application)}</td>
       <td className="px-3 py-2 text-sm">
         {position.application ?? '\u2014'}
         {position.application_method && (

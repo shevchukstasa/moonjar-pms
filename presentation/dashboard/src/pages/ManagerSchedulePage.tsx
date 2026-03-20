@@ -165,6 +165,30 @@ export default function ManagerSchedulePage() {
     { key: 'color', header: 'Color' },
     { key: 'size', header: 'Size' },
     {
+      key: 'thickness_mm',
+      header: 'Thickness',
+      render: (item) => item.thickness_mm ? `${item.thickness_mm} mm` : '\u2014',
+    },
+    {
+      key: 'shape',
+      header: 'Shape',
+      render: (item) => item.shape ? item.shape.charAt(0).toUpperCase() + item.shape.slice(1) : '\u2014',
+    },
+    {
+      key: 'place_of_application',
+      header: 'Glaze Place',
+      render: (item) => {
+        const labels: Record<string, string> = {
+          face_only: 'Face',
+          edges_1: 'Face + 1 edge',
+          edges_2: 'Face + 2 edges',
+          all_edges: 'Face + all edges',
+          with_back: 'All surfaces',
+        };
+        return item.place_of_application ? (labels[item.place_of_application] ?? item.place_of_application) : '\u2014';
+      },
+    },
+    {
       key: 'application',
       header: 'Application',
       render: (item) => item.application ?? '—',

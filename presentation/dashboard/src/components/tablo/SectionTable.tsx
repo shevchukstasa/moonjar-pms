@@ -108,6 +108,9 @@ export function SectionTable({ positions, section, onSplitPosition }: Props) {
                   <th className="px-3 py-2">#</th>
                   <th className="px-3 py-2">Color</th>
                   <th className="px-3 py-2">Size</th>
+                  <th className="px-3 py-2">Thickness</th>
+                  <th className="px-3 py-2">Shape</th>
+                  <th className="px-3 py-2">Glaze Place</th>
                   <th className="px-3 py-2">Application</th>
                   <th className="px-3 py-2">Collection</th>
                   <th className="px-3 py-2 text-right">Qty</th>
@@ -130,7 +133,7 @@ export function SectionTable({ positions, section, onSplitPosition }: Props) {
               </tbody>
               <tfoot className="border-t bg-gray-50">
                 <tr>
-                  <td colSpan={7} className="px-3 py-2 text-xs font-semibold text-gray-600">
+                  <td colSpan={10} className="px-3 py-2 text-xs font-semibold text-gray-600">
                     Total: {filtered.length} positions
                   </td>
                   <td className="px-3 py-2 text-right text-xs font-semibold text-gray-600">

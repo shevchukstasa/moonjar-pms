@@ -99,6 +99,30 @@ export default function OrderDetailPage() {
     },
     { key: 'color', header: 'Color' },
     { key: 'size', header: 'Size' },
+    {
+      key: 'thickness_mm',
+      header: 'Thickness',
+      render: (p) => p.thickness_mm ? `${p.thickness_mm} mm` : '\u2014',
+    },
+    {
+      key: 'shape',
+      header: 'Shape',
+      render: (p) => p.shape ? p.shape.charAt(0).toUpperCase() + p.shape.slice(1) : '\u2014',
+    },
+    {
+      key: 'place_of_application',
+      header: 'Glaze Place',
+      render: (p) => {
+        const labels: Record<string, string> = {
+          face_only: 'Face',
+          edges_1: 'Face + 1 edge',
+          edges_2: 'Face + 2 edges',
+          all_edges: 'Face + all edges',
+          with_back: 'All surfaces',
+        };
+        return p.place_of_application ? (labels[p.place_of_application] ?? p.place_of_application) : '\u2014';
+      },
+    },
     { key: 'quantity', header: 'Qty' },
     {
       key: 'status',

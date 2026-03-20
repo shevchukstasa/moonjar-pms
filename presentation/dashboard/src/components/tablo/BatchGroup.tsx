@@ -1,6 +1,7 @@
 import { Badge } from '@/components/ui/Badge';
 import { useTabloStore } from '@/stores/tabloStore';
 import type { PositionItem } from './PositionRow';
+import { formatPlaceOfApplication } from './PositionRow';
 
 interface BatchInfo {
   id: string;
@@ -48,6 +49,9 @@ export function BatchGroup({ batch, positions }: Props) {
                 <th className="px-4 py-2">Order</th>
                 <th className="px-4 py-2">Color</th>
                 <th className="px-4 py-2">Size</th>
+                <th className="px-4 py-2">Thickness</th>
+                <th className="px-4 py-2">Shape</th>
+                <th className="px-4 py-2">Glaze Place</th>
                 <th className="px-4 py-2 text-right">Qty</th>
                 <th className="px-4 py-2">Status</th>
               </tr>
@@ -58,6 +62,9 @@ export function BatchGroup({ batch, positions }: Props) {
                   <td className="px-4 py-2 text-sm">{p.order_number}</td>
                   <td className="px-4 py-2 text-sm">{p.color}</td>
                   <td className="px-4 py-2 text-sm">{p.size}</td>
+                  <td className="px-4 py-2 text-sm">{p.thickness_mm ? `${p.thickness_mm} mm` : '\u2014'}</td>
+                  <td className="px-4 py-2 text-sm">{p.shape ? p.shape.charAt(0).toUpperCase() + p.shape.slice(1) : '\u2014'}</td>
+                  <td className="px-4 py-2 text-sm">{formatPlaceOfApplication(p.place_of_application)}</td>
                   <td className="px-4 py-2 text-right text-sm">{p.quantity}</td>
                   <td className="px-4 py-2"><Badge status={p.status} /></td>
                 </tr>

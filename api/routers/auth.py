@@ -20,10 +20,27 @@ from api.auth import (
     verify_google_token, log_security_event, get_current_user,
     ALGORITHM,
 )
-from api.models import User, ActiveSession  # ActiveSession needed for refresh token rotation
+from api.models import User, ActiveSession, UserFactory, Factory  # ActiveSession needed for refresh token rotation
 
 router = APIRouter()
 logger = logging.getLogger("moonjar.auth")
+
+# Roles that automatically see ALL active factories (no manual assignment needed)
+_GLOBAL_FACTORY_ROLES = {"owner", "administrator"}
+
+
+def _get_user_factories(db: Session, user: User, role: str) -> list[dict]:
+    """Return list of {id, name} for factories accessible by this user."""
+    if role in _GLOBAL_FACTORY_ROLES:
+        rows = db.query(Factory.id, Factory.name).filter(Factory.is_active.is_(True)).all()
+    else:
+        rows = (
+            db.query(Factory.id, Factory.name)
+            .join(UserFactory, UserFactory.factory_id == Factory.id)
+            .filter(UserFactory.user_id == user.id)
+            .all()
+        )
+    return [{"id": str(r.id), "name": r.name} for r in rows]
 
 # Temporary pre-2FA token lifetime (5 minutes)
 _TOTP_PENDING_EXPIRE_MINUTES = 5
@@ -118,9 +135,11 @@ async def login(data: LoginRequest, request: Request, response: Response,
         # This is intentional — the SPA reads access_token from the response for
         # in-memory storage (e.g. WebSocket auth query param). Cookies provide the
         # primary auth mechanism; the body token is a convenience for non-cookie flows.
+        factories = _get_user_factories(db, user, role_val)
         return {"access_token": access, "token_type": "bearer",
                 "user": {"id": str(user.id), "email": user.email,
-                         "role": role_val, "name": user.name}}
+                         "role": role_val, "name": user.name,
+                         "factories": factories}}
     except HTTPException:
         raise
     except Exception as e:
@@ -159,9 +178,11 @@ async def google_login(data: GoogleLoginRequest, request: Request, response: Res
     log_security_event(db, AuditActionType.LOGIN_SUCCESS,
                        actor_id=str(user.id), actor_email=user.email,
                        ip_address=request.client.host if request.client else None)
+    factories = _get_user_factories(db, user, role_val)
     return {"access_token": access, "token_type": "bearer",
             "user": {"id": str(user.id), "email": user.email,
-                     "role": role_val, "name": user.name}}
+                     "role": role_val, "name": user.name,
+                     "factories": factories}}
 
 
 @router.post("/refresh")
@@ -228,20 +249,8 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
 
 @router.get("/me")
 async def get_me(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
-    from api.models import UserFactory, Factory
     role = _role_str(current_user.role)
-    # Owner/administrator see ALL factories automatically (no manual assignment needed)
-    if role in ("owner", "administrator"):
-        all_factories = db.query(Factory.id, Factory.name).filter(Factory.is_active.is_(True)).all()
-        factories = [{"id": str(f.id), "name": f.name} for f in all_factories]
-    else:
-        user_factories = (
-            db.query(Factory.id, Factory.name)
-            .join(UserFactory, UserFactory.factory_id == Factory.id)
-            .filter(UserFactory.user_id == current_user.id)
-            .all()
-        )
-        factories = [{"id": str(f.id), "name": f.name} for f in user_factories]
+    factories = _get_user_factories(db, current_user, role)
     return {
         "id": str(current_user.id),
         "email": current_user.email,
@@ -350,6 +359,7 @@ async def totp_login_verify(
         details={"totp_method": method},
     )
 
+    factories = _get_user_factories(db, user, role_val)
     return {
         "access_token": access,
         "token_type": "bearer",
@@ -358,6 +368,7 @@ async def totp_login_verify(
             "email": user.email,
             "role": role_val,
             "name": user.name,
+            "factories": factories,
         },
     }
 

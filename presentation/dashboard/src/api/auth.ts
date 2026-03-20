@@ -6,7 +6,12 @@ export interface LoginInput {
 }
 
 export interface GoogleLoginInput {
-  credential: string;
+  id_token: string;
+}
+
+export interface FactoryBrief {
+  id: string;
+  name: string;
 }
 
 export interface UserProfile {
@@ -16,6 +21,8 @@ export interface UserProfile {
   role: string;
   language: string;
   is_active: boolean;
+  totp_enabled?: boolean;
+  factories?: FactoryBrief[];
 }
 
 export const authApi = {
@@ -31,6 +38,8 @@ export const authApi = {
     apiClient.post('/auth/logout-all').then((r) => r.data),
   me: () =>
     apiClient.get<UserProfile>('/auth/me').then((r) => r.data),
-  verifyOwnerKey: (data: { owner_key: string }) =>
+  verifyOwnerKey: (data: { key: string }) =>
     apiClient.post('/auth/verify-owner-key', data).then((r) => r.data),
+  verifyTotp: (data: { totp_pending_token: string; code: string }) =>
+    apiClient.post('/auth/totp-verify', data).then((r) => r.data),
 };

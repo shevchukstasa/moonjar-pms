@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
 import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import apiClient from '@/api/client';
+import { authApi } from '@/api/auth';
 import { roleRoutes } from '@/lib/roleRoutes';
 
 export default function LoginPage() {
@@ -12,6 +13,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // TOTP state
+  const [totpPendingToken, setTotpPendingToken] = useState<string | null>(null);
+  const [totpCode, setTotpCode] = useState('');
+  const totpInputRef = useRef<HTMLInputElement>(null);
+
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
 
@@ -20,13 +27,25 @@ export default function LoginPage() {
     navigate(roleRoutes[data.user.role] || '/');
   };
 
+  // Focus TOTP input when the TOTP form appears
+  useEffect(() => {
+    if (totpPendingToken) {
+      totpInputRef.current?.focus();
+    }
+  }, [totpPendingToken]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
       const { data } = await apiClient.post('/auth/login', { email, password });
-      handleLoginSuccess(data);
+      if (data.requires_totp && data.totp_pending_token) {
+        setTotpPendingToken(data.totp_pending_token);
+        setTotpCode('');
+      } else {
+        handleLoginSuccess(data);
+      }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Login failed';
       setError(msg);
@@ -46,13 +65,43 @@ export default function LoginPage() {
       const { data } = await apiClient.post('/auth/google', {
         id_token: response.credential,
       });
-      handleLoginSuccess(data);
+      if (data.requires_totp && data.totp_pending_token) {
+        setTotpPendingToken(data.totp_pending_token);
+        setTotpCode('');
+      } else {
+        handleLoginSuccess(data);
+      }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Google sign-in failed';
       setError(msg);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleTotpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!totpPendingToken) return;
+    setError('');
+    setLoading(true);
+    try {
+      const data = await authApi.verifyTotp({
+        totp_pending_token: totpPendingToken,
+        code: totpCode,
+      });
+      handleLoginSuccess(data);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Verification failed';
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBackToLogin = () => {
+    setTotpPendingToken(null);
+    setTotpCode('');
+    setError('');
   };
 
   return (
@@ -63,31 +112,78 @@ export default function LoginPage() {
           <p className="mt-1 text-sm text-gray-500">Production Management System</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          <Input label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-          {error && <p className="text-sm text-red-500">{error}</p>}
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? 'Signing in...' : 'Sign In'}
-          </Button>
-        </form>
+        {totpPendingToken ? (
+          <>
+            <div className="mb-6 text-center">
+              <h2 className="text-lg font-semibold text-gray-800">Two-factor authentication</h2>
+              <p className="mt-2 text-sm text-gray-500">
+                Enter the 6-digit code from your authenticator app
+              </p>
+            </div>
 
-        <div className="my-5 flex items-center gap-3">
-          <div className="h-px flex-1 bg-gray-200" />
-          <span className="text-xs text-gray-400 uppercase">or</span>
-          <div className="h-px flex-1 bg-gray-200" />
-        </div>
+            <form onSubmit={handleTotpSubmit} className="space-y-4">
+              <Input
+                ref={totpInputRef}
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                pattern="[0-9]*"
+                placeholder="000000"
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                className="text-center text-2xl tracking-[0.3em]"
+                required
+              />
+              {error && <p className="text-sm text-red-500">{error}</p>}
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={loading || totpCode.length !== 6}
+              >
+                {loading ? 'Verifying...' : 'Verify'}
+              </Button>
+            </form>
 
-        <div className="flex justify-center">
-          <GoogleLogin
-            onSuccess={handleGoogleSuccess}
-            onError={() => setError('Google sign-in failed')}
-            size="large"
-            width={350}
-            text="signin_with"
-            shape="rectangular"
-          />
-        </div>
+            <div className="mt-4 text-center">
+              <button
+                type="button"
+                onClick={handleBackToLogin}
+                className="text-sm text-primary-500 hover:text-primary-600 hover:underline"
+              >
+                Back to login
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <Input label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              {error && <p className="text-sm text-red-500">{error}</p>}
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? 'Signing in...' : 'Sign In'}
+              </Button>
+            </form>
+
+            <div className="my-5 flex items-center gap-3">
+              <div className="h-px flex-1 bg-gray-200" />
+              <span className="text-xs text-gray-400 uppercase">or</span>
+              <div className="h-px flex-1 bg-gray-200" />
+            </div>
+
+            <div className="flex justify-center">
+              <GoogleLogin
+                onSuccess={handleGoogleSuccess}
+                onError={() => setError('Google sign-in failed')}
+                size="large"
+                width={350}
+                text="signin_with"
+                shape="rectangular"
+              />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

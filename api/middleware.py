@@ -31,6 +31,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         "/api/auth/refresh",
         "/api/auth/logout",
         "/api/auth/verify-owner-key",
+        "/api/auth/totp-verify",
         "/api/telegram/webhook",
         "/api/ws/",
         "/api/ws",

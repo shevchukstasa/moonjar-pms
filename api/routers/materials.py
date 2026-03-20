@@ -1122,6 +1122,18 @@ async def update_material(
 
     updates = data.model_dump(exclude_unset=True)
 
+    # PM role restrictions: cannot change name, balance, or factory_id directly
+    role_val = _ev(current_user.role) if hasattr(current_user, 'role') else None
+    if role_val == "production_manager":
+        pm_forbidden = {'name', 'balance', 'unit'}
+        forbidden_present = pm_forbidden & set(updates.keys())
+        if forbidden_present:
+            raise HTTPException(
+                403,
+                f"Production Managers cannot change: {', '.join(sorted(forbidden_present))}. "
+                "Use Inventory Audit to adjust balance.",
+            )
+
     # Handle subgroup_id change — sync material_type from subgroup.code
     if 'subgroup_id' in updates:
         from api.models import MaterialSubgroup
@@ -1272,6 +1284,14 @@ async def create_transaction(
     """Manual receive, write-off, or inventory adjustment transaction."""
     if data.type not in ("receive", "manual_write_off", "inventory"):
         raise HTTPException(400, "Manual transactions must be 'receive', 'manual_write_off', or 'inventory'")
+
+    # PM role restrictions
+    role_val = _ev(current_user.role) if hasattr(current_user, 'role') else None
+    if role_val == "production_manager":
+        if data.type == "manual_write_off":
+            raise HTTPException(403, "Production Managers cannot do manual write-offs. Use Inventory Audit instead.")
+        if data.type == "inventory" and not data.notes:
+            raise HTTPException(400, "Reason/notes are required for inventory audit")
 
     if data.type in ("receive", "manual_write_off") and data.quantity <= 0:
         raise HTTPException(400, "Quantity must be positive")

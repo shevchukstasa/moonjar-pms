@@ -18,7 +18,7 @@ from api.models import (
 )
 from api.enums import QcResult, QcStage, PositionStatus, QmBlockType
 
-require_qm_or_admin = require_role("administrator", "quality_manager")
+require_qm_or_admin = require_role("owner", "administrator", "quality_manager")
 
 router = APIRouter()
 

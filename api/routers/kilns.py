@@ -315,11 +315,11 @@ async def update_kiln_status(
                     f"Posisi terdampak: {count if 'count' in dir() else '?'} — dijadwalkan ulang"
                 )
                 notify_pm(db, factory_id, "kiln_breakdown", alert_title, alert_msg,
-                          related_entity_type="resource",
+                          related_entity_type="kiln",
                           related_entity_id=kiln_id)
                 # Also send to masters chat with reschedule button
                 from api.models import Factory
-                factory = db.query(Factory).get(factory_id)
+                factory = db.query(Factory).filter(Factory.id == factory_id).first()
                 if factory and factory.masters_group_chat_id:
                     kid_short = str(kiln_id)[:8]
                     kiln_buttons = [

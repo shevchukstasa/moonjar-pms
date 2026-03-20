@@ -36,9 +36,11 @@ import AdminPackagingPage from '@/pages/AdminPackagingPage';
 import AdminSizesPage from '@/pages/AdminSizesPage';
 import AdminFiringProfilesPage from '@/pages/AdminFiringProfilesPage';
 import ConsumptionRulesPage from '@/pages/ConsumptionRulesPage';
+import PMGuidePage from '@/pages/PMGuidePage';
 import SettingsPage from '@/pages/SettingsPage';
 import AppLayout from '@/components/layout/AppLayout';
 import { Spinner } from '@/components/ui/Spinner';
+import { ErrorBoundary, PageErrorFallback } from '@/components/ErrorBoundary';
 
 /** Try to restore session from JWT cookie on app mount */
 function useSessionRestore() {
@@ -60,7 +62,17 @@ function useSessionRestore() {
 function RequireAuth() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  return <AppLayout><Outlet /></AppLayout>;
+  return (
+    <AppLayout>
+      <ErrorBoundary
+        fallback={(error, reset) => (
+          <PageErrorFallback error={error} onReset={reset} />
+        )}
+      >
+        <Outlet />
+      </ErrorBoundary>
+    </AppLayout>
+  );
 }
 
 function RequireRole({ roles }: { roles: string[] }) {
@@ -83,65 +95,68 @@ export default function App() {
   }
 
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route element={<RequireAuth />}>
-        <Route path="/" element={<RoleRedirect />} />
-        <Route element={<RequireRole roles={['owner']} />}>
-          <Route path="/owner" element={<OwnerDashboard />} />
+    <ErrorBoundary>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route element={<RequireAuth />}>
+          <Route path="/" element={<RoleRedirect />} />
+          <Route element={<RequireRole roles={['owner']} />}>
+            <Route path="/owner" element={<OwnerDashboard />} />
+          </Route>
+          <Route element={<RequireRole roles={['ceo', 'owner', 'administrator']} />}>
+            <Route path="/ceo" element={<CeoDashboard />} />
+          </Route>
+          <Route element={<RequireRole roles={['owner', 'administrator']} />}>
+            <Route path="/admin" element={<AdminPanelPage />} />
+            <Route path="/admin/suppliers" element={<AdminSuppliersPage />} />
+            <Route path="/admin/collections" element={<AdminCollectionsPage />} />
+            <Route path="/admin/color-collections" element={<AdminColorCollectionsPage />} />
+            <Route path="/admin/colors" element={<AdminColorsPage />} />
+            <Route path="/admin/application-types" element={<AdminAppTypesPage />} />
+            <Route path="/admin/places-of-application" element={<AdminPoaPage />} />
+            <Route path="/admin/finishing-types" element={<AdminFinishingPage />} />
+            <Route path="/admin/materials" element={<AdminMaterialsPage />} />
+            <Route path="/admin/size-resolution/:taskId" element={<SizeResolutionPage />} />
+          </Route>
+          <Route element={<RequireRole roles={['owner', 'administrator', 'production_manager']} />}>
+            <Route path="/admin/recipes" element={<AdminRecipesPage />} />
+            <Route path="/admin/temperature-groups" element={<AdminTemperatureGroupsPage />} />
+            <Route path="/admin/warehouses" element={<AdminWarehousesPage />} />
+            <Route path="/admin/packaging" element={<AdminPackagingPage />} />
+            <Route path="/admin/sizes" element={<AdminSizesPage />} />
+            <Route path="/admin/consumption-rules" element={<ConsumptionRulesPage />} />
+            <Route path="/admin/firing-profiles" element={<AdminFiringProfilesPage />} />
+          </Route>
+          <Route element={<RequireRole roles={['owner', 'administrator', 'ceo']} />}>
+            <Route path="/users" element={<UsersPage />} />
+          </Route>
+          <Route element={<RequireRole roles={['production_manager', 'owner', 'administrator']} />}>
+            <Route path="/manager" element={<ManagerDashboard />} />
+            <Route path="/manager/orders/:orderId" element={<OrderDetailPage />} />
+            <Route path="/manager/schedule" element={<ManagerSchedulePage />} />
+            <Route path="/manager/kilns" element={<ManagerKilnsPage />} />
+            <Route path="/manager/materials" element={<ManagerMaterialsPage />} />
+            <Route path="/manager/shortage/:taskId" element={<ShortageDecisionPage />} />
+            <Route path="/manager/size-resolution/:taskId" element={<SizeResolutionPage />} />
+            <Route path="/manager/guide" element={<PMGuidePage />} />
+          </Route>
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/tablo" element={<TabloDashboard />} />
+          <Route element={<RequireRole roles={['quality_manager', 'owner', 'administrator']} />}>
+            <Route path="/quality" element={<QualityManagerDashboard />} />
+          </Route>
+          <Route element={<RequireRole roles={['warehouse', 'owner', 'administrator', 'production_manager']} />}>
+            <Route path="/warehouse" element={<WarehouseDashboard />} />
+          </Route>
+          <Route element={<RequireRole roles={['sorter_packer', 'owner', 'administrator', 'production_manager']} />}>
+            <Route path="/packing" element={<SorterPackerDashboard />} />
+          </Route>
+          <Route element={<RequireRole roles={['purchaser', 'owner', 'administrator', 'production_manager']} />}>
+            <Route path="/purchaser" element={<PurchaserDashboard />} />
+          </Route>
         </Route>
-        <Route element={<RequireRole roles={['ceo', 'owner', 'administrator']} />}>
-          <Route path="/ceo" element={<CeoDashboard />} />
-        </Route>
-        <Route element={<RequireRole roles={['owner', 'administrator']} />}>
-          <Route path="/admin" element={<AdminPanelPage />} />
-          <Route path="/admin/suppliers" element={<AdminSuppliersPage />} />
-          <Route path="/admin/collections" element={<AdminCollectionsPage />} />
-          <Route path="/admin/color-collections" element={<AdminColorCollectionsPage />} />
-          <Route path="/admin/colors" element={<AdminColorsPage />} />
-          <Route path="/admin/application-types" element={<AdminAppTypesPage />} />
-          <Route path="/admin/places-of-application" element={<AdminPoaPage />} />
-          <Route path="/admin/finishing-types" element={<AdminFinishingPage />} />
-          <Route path="/admin/materials" element={<AdminMaterialsPage />} />
-          <Route path="/admin/size-resolution/:taskId" element={<SizeResolutionPage />} />
-        </Route>
-        <Route element={<RequireRole roles={['owner', 'administrator', 'production_manager']} />}>
-          <Route path="/admin/recipes" element={<AdminRecipesPage />} />
-          <Route path="/admin/temperature-groups" element={<AdminTemperatureGroupsPage />} />
-          <Route path="/admin/warehouses" element={<AdminWarehousesPage />} />
-          <Route path="/admin/packaging" element={<AdminPackagingPage />} />
-          <Route path="/admin/sizes" element={<AdminSizesPage />} />
-          <Route path="/admin/consumption-rules" element={<ConsumptionRulesPage />} />
-          <Route path="/admin/firing-profiles" element={<AdminFiringProfilesPage />} />
-        </Route>
-        <Route element={<RequireRole roles={['owner', 'administrator', 'ceo']} />}>
-          <Route path="/users" element={<UsersPage />} />
-        </Route>
-        <Route element={<RequireRole roles={['production_manager', 'owner', 'administrator']} />}>
-          <Route path="/manager" element={<ManagerDashboard />} />
-          <Route path="/manager/orders/:orderId" element={<OrderDetailPage />} />
-          <Route path="/manager/schedule" element={<ManagerSchedulePage />} />
-          <Route path="/manager/kilns" element={<ManagerKilnsPage />} />
-          <Route path="/manager/materials" element={<ManagerMaterialsPage />} />
-          <Route path="/manager/shortage/:taskId" element={<ShortageDecisionPage />} />
-          <Route path="/manager/size-resolution/:taskId" element={<SizeResolutionPage />} />
-        </Route>
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/tablo" element={<TabloDashboard />} />
-        <Route element={<RequireRole roles={['quality_manager', 'owner', 'administrator']} />}>
-          <Route path="/quality" element={<QualityManagerDashboard />} />
-        </Route>
-        <Route element={<RequireRole roles={['warehouse', 'owner', 'administrator', 'production_manager']} />}>
-          <Route path="/warehouse" element={<WarehouseDashboard />} />
-        </Route>
-        <Route element={<RequireRole roles={['sorter_packer', 'owner', 'administrator', 'production_manager']} />}>
-          <Route path="/packing" element={<SorterPackerDashboard />} />
-        </Route>
-        <Route element={<RequireRole roles={['purchaser', 'owner', 'administrator', 'production_manager']} />}>
-          <Route path="/purchaser" element={<PurchaserDashboard />} />
-        </Route>
-      </Route>
-      <Route path="*" element={<NotFoundPage />} />
-    </Routes>
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </ErrorBoundary>
   );
 }

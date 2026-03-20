@@ -69,6 +69,8 @@ interface TxForm {
   type: 'receive' | 'manual_write_off' | 'inventory';
   quantity: string;
   notes: string;
+  /** For inventory audit: the new actual balance (PM enters this instead of delta) */
+  newBalance: string;
 }
 
 // ── Main page ───────────────────────────────────────────────────────────
@@ -76,6 +78,7 @@ interface TxForm {
 export default function ManagerMaterialsPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const isPM = user?.role === 'production_manager';
 
   // Dynamic hierarchy for type tabs
   const { data: hierarchy, isLoading: hierarchyLoading } = useMaterialHierarchy();
@@ -83,14 +86,27 @@ export default function ManagerMaterialsPage() {
 
   // Filters
   const { data: factoriesData } = useFactories();
-  const factories = factoriesData?.items ?? [];
+  const allFactories = factoriesData?.items ?? [];
+
+  // PM sees only their assigned factories
+  const userFactoryIds = user?.factories?.map((f) => f.id) ?? [];
+  const factories = isPM && userFactoryIds.length > 0
+    ? allFactories.filter((f) => userFactoryIds.includes(f.id))
+    : allFactories;
+
+  // PM with one factory → auto-select, no dropdown
   const [factoryId, setFactoryId] = useState('');
+  const effectiveFactoryId = useMemo(() => {
+    if (isPM && factories.length === 1 && !factoryId) return factories[0].id;
+    return factoryId;
+  }, [isPM, factories, factoryId]);
+
   const [activeType, setActiveType] = useState('all');
   const [search, setSearch] = useState('');
 
   // Data
   const { data, isLoading, isError } = useMaterials({
-    factory_id: factoryId || undefined,
+    factory_id: effectiveFactoryId || undefined,
     material_type: activeType !== 'all' ? activeType : undefined,
     search: search || undefined,
     per_page: 200,
@@ -102,7 +118,7 @@ export default function ManagerMaterialsPage() {
   const suppliers = suppliersData?.items ?? [];
 
   // Warehouse Sections
-  const { data: warehouseSectionsData } = useWarehouseSections({ factory_id: factoryId || undefined });
+  const { data: warehouseSectionsData } = useWarehouseSections({ factory_id: effectiveFactoryId || undefined });
   const warehouseSections = warehouseSectionsData?.items ?? [];
 
   // Mutations
@@ -116,7 +132,7 @@ export default function ManagerMaterialsPage() {
   const [formError, setFormError] = useState('');
 
   const [txDialog, setTxDialog] = useState<{ open: boolean; item: MaterialItem | null }>({ open: false, item: null });
-  const [txForm, setTxForm] = useState<TxForm>({ type: 'receive', quantity: '', notes: '' });
+  const [txForm, setTxForm] = useState<TxForm>({ type: 'receive', quantity: '', notes: '', newBalance: '' });
   const [txError, setTxError] = useState('');
 
   // Transaction history dialog
@@ -132,11 +148,11 @@ export default function ManagerMaterialsPage() {
       ...emptyForm,
       material_type: defaultType ?? '',
       subgroup_id: sg?.subgroupId ?? '',
-      factory_id: factoryId,
+      factory_id: effectiveFactoryId,
     });
     setFormError('');
     setEditDialog({ open: true, item: null });
-  }, [factoryId, subgroups]);
+  }, [effectiveFactoryId, subgroups]);
 
   const openEdit = useCallback((item: MaterialItem) => {
     setForm({
@@ -160,44 +176,69 @@ export default function ManagerMaterialsPage() {
   }, []);
 
   // Are we in aggregate mode (no specific factory selected)?
-  const isAggregateMode = !factoryId;
+  const isAggregateMode = !effectiveFactoryId;
 
   const handleSave = useCallback(async () => {
-    if (!form.name.trim()) { setFormError('Name is required'); return; }
+    if (!isPM && !form.name.trim()) { setFormError('Name is required'); return; }
     if (!form.subgroup_id && !form.material_type) { setFormError('Type is required'); return; }
     setFormError('');
 
-    const payload: Record<string, unknown> = {
-      name: form.name.trim(),
-      material_type: form.material_type,
-      subgroup_id: form.subgroup_id || null,
-      unit: form.unit,
-      balance: parseFloat(form.balance) || 0,
-      min_balance: parseFloat(form.min_balance) || 0,
-      supplier_id: form.supplier_id || null,
-      warehouse_section: form.warehouse_section || 'raw_materials',
-    };
-    if (form.factory_id) {
-      payload.factory_id = form.factory_id;
-    }
+    const isEditing = !!editDialog.item;
 
-    try {
-      if (editDialog.item) {
-        await updateMaterial.mutateAsync({ id: editDialog.item.id, data: payload });
-      } else {
-        await createMaterial.mutateAsync(payload);
+    if (isPM && isEditing) {
+      // PM can only update: subgroup, warehouse_section, min_balance, supplier
+      const payload: Record<string, unknown> = {
+        subgroup_id: form.subgroup_id || null,
+        material_type: form.material_type,
+        min_balance: parseFloat(form.min_balance) || 0,
+        supplier_id: form.supplier_id || null,
+        warehouse_section: form.warehouse_section || 'raw_materials',
+      };
+      try {
+        await updateMaterial.mutateAsync({ id: editDialog.item!.id, data: payload });
+        closeEdit();
+      } catch (err: unknown) {
+        const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+        setFormError(detail ?? 'Save failed');
       }
-      closeEdit();
-    } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setFormError(detail ?? 'Save failed');
+    } else {
+      // Full save (create or non-PM edit)
+      const payload: Record<string, unknown> = {
+        name: form.name.trim(),
+        material_type: form.material_type,
+        subgroup_id: form.subgroup_id || null,
+        unit: form.unit,
+        balance: parseFloat(form.balance) || 0,
+        min_balance: parseFloat(form.min_balance) || 0,
+        supplier_id: form.supplier_id || null,
+        warehouse_section: form.warehouse_section || 'raw_materials',
+      };
+      if (form.factory_id) {
+        payload.factory_id = form.factory_id;
+      }
+      try {
+        if (isEditing) {
+          await updateMaterial.mutateAsync({ id: editDialog.item!.id, data: payload });
+        } else {
+          await createMaterial.mutateAsync(payload);
+        }
+        closeEdit();
+      } catch (err: unknown) {
+        const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+        setFormError(detail ?? 'Save failed');
+      }
     }
-  }, [form, editDialog.item, createMaterial, updateMaterial, closeEdit]);
+  }, [form, editDialog.item, isPM, createMaterial, updateMaterial, closeEdit]);
 
   // ── Transaction dialog ──────────────────────────────────────────────────
 
-  const openTx = useCallback((item: MaterialItem) => {
-    setTxForm({ type: 'receive', quantity: '', notes: '' });
+  const openTx = useCallback((item: MaterialItem, mode: 'receive' | 'inventory' | 'manual_write_off' = 'receive') => {
+    setTxForm({
+      type: mode,
+      quantity: '',
+      notes: '',
+      newBalance: mode === 'inventory' ? String(item.balance) : '',
+    });
     setTxError('');
     setTxDialog({ open: true, item });
   }, []);
@@ -217,6 +258,35 @@ export default function ManagerMaterialsPage() {
 
   const handleTx = useCallback(async () => {
     if (!txDialog.item) return;
+
+    if (txForm.type === 'inventory' && isPM) {
+      // Inventory audit for PM: calculate delta from new balance
+      const newBal = parseFloat(txForm.newBalance);
+      if (isNaN(newBal) || newBal < 0) { setTxError('Enter a valid new balance'); return; }
+      if (!txForm.notes.trim()) { setTxError('Reason is required for inventory audit'); return; }
+
+      const currentBalance = Number(txDialog.item.balance);
+      const delta = newBal - currentBalance;
+      if (delta === 0) { setTxError('New balance is the same as current'); return; }
+
+      setTxError('');
+      try {
+        await createTransaction.mutateAsync({
+          material_id: txDialog.item.id,
+          factory_id: txDialog.item.factory_id ?? '',
+          type: 'inventory',
+          quantity: delta,
+          notes: `[Inventory Audit] ${txForm.notes.trim()} | Previous: ${currentBalance}, New: ${newBal}`,
+        });
+        closeTx();
+      } catch (err: unknown) {
+        const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+        setTxError(detail ?? 'Transaction failed');
+      }
+      return;
+    }
+
+    // Standard transaction (receive / write-off / inventory for non-PM)
     const qty = parseFloat(txForm.quantity);
     if (!qty || qty <= 0) { setTxError('Enter a valid quantity'); return; }
     setTxError('');
@@ -233,7 +303,7 @@ export default function ManagerMaterialsPage() {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setTxError(detail ?? 'Transaction failed');
     }
-  }, [txDialog.item, txForm, createTransaction, closeTx]);
+  }, [txDialog.item, txForm, isPM, createTransaction, closeTx]);
 
   // ── Counts ──────────────────────────────────────────────────────────────
 
@@ -253,10 +323,11 @@ export default function ManagerMaterialsPage() {
   const saving = createMaterial.isPending || updateMaterial.isPending;
   const txPending = createTransaction.isPending;
 
-  const factoryOptions = [
-    { value: '', label: 'All factories' },
-    ...factories.map((f) => ({ value: f.id, label: f.name })),
-  ];
+  // PM sees only assigned factories, others see all
+  const showFactoryFilter = !isPM || factories.length > 1;
+  const factoryOptions = isPM
+    ? factories.map((f) => ({ value: f.id, label: f.name }))
+    : [{ value: '', label: 'All factories' }, ...factories.map((f) => ({ value: f.id, label: f.name }))];
 
   // Grouped subgroup options for the form
   const subgroupOptions = useMemo(() => {
@@ -288,16 +359,16 @@ export default function ManagerMaterialsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Materials</h1>
           <p className="mt-0.5 text-sm text-gray-500">
-            Inventory of raw materials, packaging, and consumables
+            {isPM ? 'Inventory management — receive, audit, and track materials' : 'Inventory of raw materials, packaging, and consumables'}
             {lowStockCount > 0 && (
               <span className="ml-2 inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                ⚠ {lowStockCount} low stock
+                {'\u26A0'} {lowStockCount} low stock
               </span>
             )}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => navigate('/manager')}>← Dashboard</Button>
+          <Button variant="secondary" onClick={() => navigate('/manager')}>{'\u2190'} Dashboard</Button>
           <Button onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}>
             + Add Material
           </Button>
@@ -306,13 +377,15 @@ export default function ManagerMaterialsPage() {
 
       {/* Filters row */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="w-56">
-          <Select
-            options={factoryOptions}
-            value={factoryId}
-            onChange={(e) => setFactoryId(e.target.value)}
-          />
-        </div>
+        {showFactoryFilter && (
+          <div className="w-56">
+            <Select
+              options={factoryOptions}
+              value={effectiveFactoryId}
+              onChange={(e) => setFactoryId(e.target.value)}
+            />
+          </div>
+        )}
         <div className="flex-1 min-w-48">
           <Input
             placeholder="Search materials\u2026"
@@ -365,7 +438,7 @@ export default function ManagerMaterialsPage() {
       {/* Content */}
       {isError ? (
         <Card>
-          <p className="py-8 text-center text-sm text-red-600">⚠ Error loading materials</p>
+          <p className="py-8 text-center text-sm text-red-600">{'\u26A0'} Error loading materials</p>
         </Card>
       ) : isLoading ? (
         <div className="flex justify-center py-16"><Spinner className="h-8 w-8" /></div>
@@ -383,9 +456,12 @@ export default function ManagerMaterialsPage() {
           items={displayItems}
           subgroups={subgroups}
           isAggregate={isAggregateMode}
-          hideNames={user?.role === 'production_manager'}
+          isPM={isPM}
+          hideNames={isPM}
           onEdit={openEdit}
-          onTransaction={openTx}
+          onReceive={(item) => openTx(item, 'receive')}
+          onInventoryAudit={(item) => openTx(item, 'inventory')}
+          onTransaction={isPM ? undefined : (item) => openTx(item, 'receive')}
           onHistory={openHistory}
         />
       )}
@@ -395,12 +471,13 @@ export default function ManagerMaterialsPage() {
         open={editDialog.open}
         onClose={closeEdit}
         title={editDialog.item
-          ? `Edit: ${user?.role === 'production_manager' ? (editDialog.item.material_code ?? editDialog.item.name) : editDialog.item.name}`
+          ? `Edit: ${isPM ? (editDialog.item.material_code ?? editDialog.item.name) : editDialog.item.name}`
           : 'Add Material'}
         className="w-full max-w-lg"
       >
         <div className="space-y-4">
-          {user?.role !== 'production_manager' && (
+          {/* Name — hidden for PM on edit, visible for create */}
+          {(!isPM || !editDialog.item) && (
             <Input
               label="Name *"
               value={form.name}
@@ -408,19 +485,23 @@ export default function ManagerMaterialsPage() {
               placeholder="e.g. Zinc Oxide ZnO"
             />
           )}
+
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Factory</label>
-              <Select
-                options={[
-                  { value: '', label: 'All factories (auto)' },
-                  ...factories.map((f) => ({ value: f.id, label: f.name })),
-                ]}
-                value={form.factory_id}
-                onChange={(e) => setForm({ ...form, factory_id: e.target.value })}
-              />
-            </div>
-            <div>
+            {/* Factory — PM cannot change, others can */}
+            {!isPM && (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Factory</label>
+                <Select
+                  options={[
+                    { value: '', label: 'All factories (auto)' },
+                    ...allFactories.map((f) => ({ value: f.id, label: f.name })),
+                  ]}
+                  value={form.factory_id}
+                  onChange={(e) => setForm({ ...form, factory_id: e.target.value })}
+                />
+              </div>
+            )}
+            <div className={isPM ? 'col-span-2' : ''}>
               <label className="mb-1 block text-sm font-medium text-gray-700">Subgroup *</label>
               <Select
                 options={subgroupOptions}
@@ -429,26 +510,42 @@ export default function ManagerMaterialsPage() {
               />
             </div>
           </div>
-          {!editDialog.item && !form.factory_id && (
+
+          {!editDialog.item && !form.factory_id && !isPM && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
               Stock will be auto-created for all active factories with the specified balance and min balance.
             </div>
           )}
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Unit</label>
-              <Select
-                options={UNIT_OPTIONS}
-                value={form.unit}
-                onChange={(e) => setForm({ ...form, unit: e.target.value })}
+
+          <div className={`grid gap-4 ${isPM && editDialog.item ? 'grid-cols-1' : 'grid-cols-3'}`}>
+            {/* Unit — only on create or for non-PM */}
+            {(!isPM || !editDialog.item) && (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Unit</label>
+                <Select
+                  options={UNIT_OPTIONS}
+                  value={form.unit}
+                  onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                />
+              </div>
+            )}
+            {/* Balance — only for create (non-PM edit and PM cannot edit balance directly) */}
+            {!editDialog.item && (
+              <NumericInput
+                label="Initial Balance"
+                value={form.balance}
+                onChange={(e) => setForm({ ...form, balance: e.target.value })}
+                placeholder="0"
               />
-            </div>
-            <NumericInput
-              label="Balance"
-              value={form.balance}
-              onChange={(e) => setForm({ ...form, balance: e.target.value })}
-              placeholder="0"
-            />
+            )}
+            {/* PM editing: show balance as read-only info */}
+            {isPM && editDialog.item && (
+              <div className="rounded-lg bg-gray-50 px-4 py-3">
+                <span className="text-sm text-gray-500">Current balance: </span>
+                <span className="font-semibold text-gray-900">{Number(editDialog.item.balance).toFixed(3)} {editDialog.item.unit}</span>
+                <p className="mt-1 text-xs text-gray-400">To change balance, use Inventory Audit</p>
+              </div>
+            )}
             <NumericInput
               label="Min Balance"
               value={form.min_balance}
@@ -456,6 +553,7 @@ export default function ManagerMaterialsPage() {
               placeholder="0"
             />
           </div>
+
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">Supplier</label>
             <Select
@@ -472,6 +570,7 @@ export default function ManagerMaterialsPage() {
               onChange={(e) => setForm({ ...form, warehouse_section: e.target.value })}
             />
           </div>
+
           {formError && <p className="text-sm text-red-600">{formError}</p>}
           <div className="flex justify-end gap-2 border-t pt-3">
             <Button variant="secondary" onClick={closeEdit}>Cancel</Button>
@@ -487,7 +586,9 @@ export default function ManagerMaterialsPage() {
         open={txDialog.open}
         onClose={closeTx}
         title={txDialog.item
-          ? `Transaction \u2014 ${user?.role === 'production_manager' ? (txDialog.item.material_code ?? txDialog.item.name) : txDialog.item.name}`
+          ? (txForm.type === 'inventory' && isPM
+            ? `Inventory Audit \u2014 ${isPM ? (txDialog.item.material_code ?? txDialog.item.name) : txDialog.item.name}`
+            : `Transaction \u2014 ${isPM ? (txDialog.item.material_code ?? txDialog.item.name) : txDialog.item.name}`)
           : 'Transaction'}
         className="w-full max-w-sm"
       >
@@ -497,62 +598,140 @@ export default function ManagerMaterialsPage() {
               <span className="text-gray-500">Current balance: </span>
               <span className="font-semibold">{txDialog.item.balance} {txDialog.item.unit}</span>
             </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">Operation</label>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  onClick={() => setTxForm({ ...txForm, type: 'receive' })}
-                  className={`rounded-lg border px-3 py-2 text-sm font-medium ${
-                    txForm.type === 'receive'
-                      ? 'border-green-500 bg-green-50 text-green-700'
-                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {'\u2191'} Receive
-                </button>
-                <button
-                  onClick={() => setTxForm({ ...txForm, type: 'manual_write_off' })}
-                  className={`rounded-lg border px-3 py-2 text-sm font-medium ${
-                    txForm.type === 'manual_write_off'
-                      ? 'border-red-500 bg-red-50 text-red-700'
-                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {'\u2193'} Write-off
-                </button>
-                <button
-                  onClick={() => setTxForm({ ...txForm, type: 'inventory' })}
-                  className={`rounded-lg border px-3 py-2 text-sm font-medium ${
-                    txForm.type === 'inventory'
-                      ? 'border-amber-500 bg-amber-50 text-amber-700'
-                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {'\u2261'} Inventory
-                </button>
+
+            {/* Operation selector */}
+            {isPM ? (
+              /* PM sees only Receive and Inventory Audit */
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Operation</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setTxForm({ ...txForm, type: 'receive', newBalance: '' })}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                      txForm.type === 'receive'
+                        ? 'border-green-500 bg-green-50 text-green-700'
+                        : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {'\u2191'} Receive
+                  </button>
+                  <button
+                    onClick={() => setTxForm({ ...txForm, type: 'inventory', newBalance: String(txDialog.item!.balance) })}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                      txForm.type === 'inventory'
+                        ? 'border-amber-500 bg-amber-50 text-amber-700'
+                        : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {'\u2261'} Inventory Audit
+                  </button>
+                </div>
               </div>
-            </div>
-            <NumericInput
-              label={`Quantity (${txDialog.item.unit})`}
-              value={txForm.quantity}
-              onChange={(e) => setTxForm({ ...txForm, quantity: e.target.value })}
-              placeholder="0.000"
-            />
-            <Input
-              label="Notes"
-              value={txForm.notes}
-              onChange={(e) => setTxForm({ ...txForm, notes: e.target.value })}
-              placeholder="Optional comment"
-            />
+            ) : (
+              /* Non-PM sees all 3 options */
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Operation</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => setTxForm({ ...txForm, type: 'receive' })}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                      txForm.type === 'receive'
+                        ? 'border-green-500 bg-green-50 text-green-700'
+                        : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {'\u2191'} Receive
+                  </button>
+                  <button
+                    onClick={() => setTxForm({ ...txForm, type: 'manual_write_off' })}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                      txForm.type === 'manual_write_off'
+                        ? 'border-red-500 bg-red-50 text-red-700'
+                        : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {'\u2193'} Write-off
+                  </button>
+                  <button
+                    onClick={() => setTxForm({ ...txForm, type: 'inventory' })}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                      txForm.type === 'inventory'
+                        ? 'border-amber-500 bg-amber-50 text-amber-700'
+                        : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {'\u2261'} Inventory
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* PM Inventory Audit: show new balance input + mandatory reason */}
+            {txForm.type === 'inventory' && isPM ? (
+              <>
+                <NumericInput
+                  label={`New actual balance (${txDialog.item.unit})`}
+                  value={txForm.newBalance}
+                  onChange={(e) => setTxForm({ ...txForm, newBalance: e.target.value })}
+                  placeholder="Enter actual balance after count"
+                />
+                {txForm.newBalance && !isNaN(parseFloat(txForm.newBalance)) && (
+                  <div className={`rounded-lg px-3 py-2 text-sm ${
+                    parseFloat(txForm.newBalance) - Number(txDialog.item.balance) > 0
+                      ? 'bg-green-50 text-green-700'
+                      : parseFloat(txForm.newBalance) - Number(txDialog.item.balance) < 0
+                        ? 'bg-red-50 text-red-700'
+                        : 'bg-gray-50 text-gray-500'
+                  }`}>
+                    Difference: {(parseFloat(txForm.newBalance) - Number(txDialog.item.balance) > 0 ? '+' : '')}
+                    {(parseFloat(txForm.newBalance) - Number(txDialog.item.balance)).toFixed(3)} {txDialog.item.unit}
+                  </div>
+                )}
+                <div>
+                  <Input
+                    label="Reason *"
+                    value={txForm.notes}
+                    onChange={(e) => setTxForm({ ...txForm, notes: e.target.value })}
+                    placeholder="Why does the balance differ? (required)"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">
+                    Explain the reason for the discrepancy (e.g., spillage, measurement error, etc.)
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <NumericInput
+                  label={`Quantity (${txDialog.item.unit})`}
+                  value={txForm.quantity}
+                  onChange={(e) => setTxForm({ ...txForm, quantity: e.target.value })}
+                  placeholder="0.000"
+                />
+                <Input
+                  label={txForm.type === 'manual_write_off' ? 'Reason *' : 'Notes'}
+                  value={txForm.notes}
+                  onChange={(e) => setTxForm({ ...txForm, notes: e.target.value })}
+                  placeholder={txForm.type === 'manual_write_off' ? 'Reason for write-off (required)' : 'Optional comment'}
+                />
+              </>
+            )}
+
             {txError && <p className="text-sm text-red-600">{txError}</p>}
             <div className="flex justify-end gap-2 border-t pt-3">
               <Button variant="secondary" onClick={closeTx}>Cancel</Button>
               <Button
                 onClick={handleTx}
                 disabled={txPending}
-                className={txForm.type === 'manual_write_off' ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500' : txForm.type === 'inventory' ? 'bg-amber-600 hover:bg-amber-700 focus:ring-amber-500' : ''}
+                className={
+                  txForm.type === 'manual_write_off' ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500' :
+                  txForm.type === 'inventory' ? 'bg-amber-600 hover:bg-amber-700 focus:ring-amber-500' : ''
+                }
               >
-                {txPending ? 'Saving\u2026' : txForm.type === 'receive' ? '\u2191 Receive' : txForm.type === 'inventory' ? '\u2261 Inventory' : '\u2193 Write-off'}
+                {txPending ? 'Saving\u2026' :
+                  txForm.type === 'receive' ? '\u2191 Receive' :
+                  txForm.type === 'inventory' && isPM ? '\u2261 Confirm Audit' :
+                  txForm.type === 'inventory' ? '\u2261 Inventory' :
+                  '\u2193 Write-off'}
               </Button>
             </div>
           </div>
@@ -564,7 +743,7 @@ export default function ManagerMaterialsPage() {
         open={historyDialog.open}
         onClose={closeHistory}
         title={historyDialog.item
-          ? `Transaction History — ${user?.role === 'production_manager' ? (historyDialog.item.material_code ?? historyDialog.item.name) : historyDialog.item.name}`
+          ? `Transaction History \u2014 ${isPM ? (historyDialog.item.material_code ?? historyDialog.item.name) : historyDialog.item.name}`
           : 'Transaction History'}
         className="w-full max-w-2xl"
       >
@@ -595,9 +774,10 @@ export default function ManagerMaterialsPage() {
                         tx.type === 'receive' ? 'bg-green-100 text-green-700' :
                         tx.type === 'consume' || tx.type === 'manual_write_off' ? 'bg-red-100 text-red-700' :
                         tx.type === 'reserve' || tx.type === 'unreserve' ? 'bg-blue-100 text-blue-700' :
+                        tx.type === 'inventory' ? 'bg-amber-100 text-amber-700' :
                         'bg-gray-100 text-gray-700'
                       }`}>
-                        {tx.type.replace(/_/g, ' ')}
+                        {tx.type === 'inventory' ? 'audit' : tx.type.replace(/_/g, ' ')}
                       </span>
                     </td>
                     <td className={`px-3 py-2 text-right font-mono text-sm ${
@@ -631,13 +811,16 @@ interface MaterialsTableProps {
   items: MaterialItem[];
   subgroups: { value: string; label: string; icon: string }[];
   isAggregate?: boolean;
+  isPM?: boolean;
   hideNames?: boolean;
   onEdit: (item: MaterialItem) => void;
-  onTransaction: (item: MaterialItem) => void;
+  onReceive?: (item: MaterialItem) => void;
+  onInventoryAudit?: (item: MaterialItem) => void;
+  onTransaction?: (item: MaterialItem) => void;
   onHistory: (item: MaterialItem) => void;
 }
 
-function MaterialsTable({ items, subgroups, isAggregate, hideNames, onEdit, onTransaction, onHistory }: MaterialsTableProps) {
+function MaterialsTable({ items, subgroups, isAggregate, isPM, hideNames, onEdit, onReceive, onInventoryAudit, onTransaction, onHistory }: MaterialsTableProps) {
   const typeLabel = (code: string) => subgroups.find((s) => s.value === code)?.label ?? code;
   const typeIcon = (code: string) => subgroups.find((s) => s.value === code)?.icon ?? '';
 
@@ -694,14 +877,31 @@ function MaterialsTable({ items, subgroups, isAggregate, hideNames, onEdit, onTr
               </td>
               <td className="px-4 py-3">
                 <div className="flex items-center gap-1">
-                  {isAggregate ? (
-                    <Button size="sm" variant="ghost" disabled title="Select a factory to manage transactions">
-                      ±
-                    </Button>
+                  {isPM ? (
+                    /* PM: separate Receive and Audit buttons */
+                    isAggregate ? (
+                      <span className="text-xs text-gray-400">Select factory</span>
+                    ) : (
+                      <>
+                        <Button size="sm" variant="ghost" onClick={() => onReceive?.(m)} title="Receive material">
+                          {'\u2191'}
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => onInventoryAudit?.(m)} title="Inventory audit">
+                          {'\u2261'}
+                        </Button>
+                      </>
+                    )
                   ) : (
-                    <Button size="sm" variant="ghost" onClick={() => onTransaction(m)}>
-                      ±
-                    </Button>
+                    /* Non-PM: single transaction button */
+                    isAggregate ? (
+                      <Button size="sm" variant="ghost" disabled title="Select a factory to manage transactions">
+                        {'\u00B1'}
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="ghost" onClick={() => onTransaction?.(m)}>
+                        {'\u00B1'}
+                      </Button>
+                    )
                   )}
                   <Button size="sm" variant="ghost" onClick={() => onHistory(m)} title="Transaction history">
                     Hst

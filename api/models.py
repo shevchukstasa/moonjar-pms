@@ -64,6 +64,9 @@ class User(Base):
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
+    # Reverse relationship for factory scoping (apply_factory_filter)
+    user_factories = relationship('UserFactory', foreign_keys='UserFactory.user_id', back_populates='user', lazy='selectin')
+
 
 class UserFactory(Base):
     __tablename__ = 'user_factories'
@@ -77,7 +80,7 @@ class UserFactory(Base):
         UniqueConstraint('user_id', 'factory_id'),
     )
 
-    user = relationship('User', foreign_keys=[user_id])
+    user = relationship('User', foreign_keys=[user_id], back_populates='user_factories')
     factory = relationship('Factory', foreign_keys=[factory_id])
 
 
@@ -1897,7 +1900,7 @@ class PositionPhoto(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id'), nullable=True)
     factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
-    telegram_file_id = Column(sa.String(200), nullable=False)
+    telegram_file_id = Column(sa.String(200), nullable=True)  # nullable for web uploads
     telegram_chat_id = Column(sa.BigInteger)
     uploaded_by_telegram_id = Column(sa.BigInteger)
     uploaded_by_user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'))

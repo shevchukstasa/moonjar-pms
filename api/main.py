@@ -72,6 +72,7 @@ from api.routers import grinding
 from api.routers import stone_reservations
 from api.routers import settings as settings_router
 from api.routers import factory_calendar
+from api.routers import guides
 
 
 def _ensure_schema():
@@ -1739,6 +1740,15 @@ def _ensure_schema():
 
     _run_section("glazing_board_two_boards_col", _add_two_boards_column)
 
+    # --- Section: Fix position_photos.telegram_file_id nullable for web uploads ---
+    def _fix_position_photo_nullable(conn):
+        conn.execute(text("""
+            ALTER TABLE position_photos
+            ALTER COLUMN telegram_file_id DROP NOT NULL;
+        """))
+
+    _run_section("position_photo_telegram_nullable", _fix_position_photo_nullable)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""
@@ -1925,5 +1935,6 @@ def setup_routers():
     app.include_router(factory_calendar.router, prefix="/api/factory-calendar", tags=["factory-calendar"])
     app.include_router(stone_reservations.router, prefix="/api/stone-reservations", tags=["stone-reservations"])
     app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
+    app.include_router(guides.router, prefix="/api/guides", tags=["guides"])
 
 setup_routers()

@@ -32,6 +32,7 @@ export interface MaterialItem {
   warehouse_section: string | null;
   supplier_id: string | null;
   supplier_name: string | null;
+  size_id: string | null;
   is_low_stock: boolean;
   deficit?: number;
   factory_count?: number;
@@ -51,6 +52,7 @@ export interface TransactionItem {
   notes: string | null;
   created_by: string | null;
   created_by_name: string | null;
+  created_by_role: string | null;
   created_at: string | null;
 }
 

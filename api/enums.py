@@ -250,6 +250,7 @@ class NotificationType(str, Enum):
     READY_FOR_SHIPMENT = 'ready_for_shipment'
     STOCK_SHORTAGE = 'stock_shortage'
     CANCELLATION_REQUEST = 'cancellation_request'
+    CHANGE_REQUEST = 'change_request'
 
 class RelatedEntityType(str, Enum):
     ORDER = 'order'

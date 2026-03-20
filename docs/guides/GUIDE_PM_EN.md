@@ -14,7 +14,9 @@
 5. [Tasks](#5-tasks)
 6. [Consumption Rules](#6-consumption-rules)
 7. [Schedule Management](#7-schedule-management)
-8. [Tips and Best Practices](#8-tips-and-best-practices)
+8. [Kiln Inspections](#8-kiln-inspections)
+9. [Consumption Measurement Tasks](#9-consumption-measurement-tasks)
+10. [Tips and Best Practices](#10-tips-and-best-practices)
 
 ---
 
@@ -134,7 +136,7 @@ Built-in AI assistant for quick questions about production, orders, and material
 
 Additional tabs appear automatically when relevant data exists:
 
-- **Blocking** -- positions blocked by material shortages, missing recipes, stencils, color matching, or QM holds
+- **Blocking** -- positions blocked by material shortages, missing recipes, stencils, color matching, missing consumption data (`AWAITING_CONSUMPTION_DATA`), or QM holds
 - **Cancellations** -- cancellation requests from Sales
 - **Change Requests** -- order modification requests from Sales
 - **Mismatch** -- positions with color mismatches that require your decision
@@ -358,6 +360,7 @@ PLANNED
   +-- AWAITING_STENCIL_SILKSCREEN (blocked: no stencil)
   +-- AWAITING_COLOR_MATCHING (blocked: color matching needed)
   +-- AWAITING_SIZE_CONFIRMATION (blocked: size unclear)
+  +-- AWAITING_CONSUMPTION_DATA (blocked: missing consumption rate for recipe)
   |
   v
 SENT_TO_GLAZING -> ENGOBE_APPLIED -> ENGOBE_CHECK -> GLAZED
@@ -417,6 +420,7 @@ When a position is blocked and the standard solution is not available or practic
 | `awaiting_recipe` | Position moves to PLANNED (PM takes responsibility) |
 | `awaiting_stencil_silkscreen` | Blocking tasks closed, position moves to PLANNED |
 | `awaiting_color_matching` | Blocking tasks closed, position moves to PLANNED |
+| `awaiting_consumption_data` | Consumption measurement task closed, position moves to PLANNED (PM accepts default rate risk) |
 | `blocked_by_qm` | QM blocking tasks closed, position moves to PLANNED |
 
 > **Warning**: Force-unblock for `insufficient_materials` can result in negative material balances. These are tracked in the `negative_balances` table and will appear as alerts.
@@ -454,6 +458,7 @@ When Sales sends a cancellation or change request, it appears on the dynamic **C
 | `stock_shortage` | Stone stock shortage | PM |
 | `size_resolution` | Clarify size | PM |
 | `glazing_board_needed` | Custom glazing board | PM |
+| `consumption_measurement` | Measure missing consumption rate (ml/m2) for a recipe | PM |
 
 ### 5.2. Creating a Task
 
@@ -641,9 +646,150 @@ To delete a position:
 
 ---
 
-## 8. Tips and Best Practices
+## 8. Kiln Inspections
 
-### 8.1. Daily Routine
+Regular kiln inspections are essential to maintaining safe and efficient firing operations. The Kiln Inspections feature provides a structured checklist-based workflow for documenting kiln condition and tracking repairs.
+
+### 10.1. Overview
+
+The weekly kiln inspection covers **8 categories with 35 inspection items** in total. Each inspection is tied to a specific kiln and performed by a Production Manager.
+
+**Path**: `/manager/kiln-inspections`
+
+### 10.2. Inspection Categories
+
+| # | Category | Items | What to Check |
+|---|---|---|---|
+| 1 | Exterior Structure | 4-5 | Cracks, mortar joints, metal frame, door seals, ventilation openings |
+| 2 | Interior / Firing Chamber | 4-5 | Brick lining, shelves, posts, kiln wash, floor condition |
+| 3 | Heating Elements | 4-5 | Element integrity, connections, resistance readings, element supports |
+| 4 | Temperature Control | 4-5 | Thermocouple accuracy, controller function, pyrometric cones, zone consistency |
+| 5 | Electrical System | 4-5 | Wiring, contactors, fuses, grounding, control panel condition |
+| 6 | Gas System (if applicable) | 3-4 | Burners, gas lines, regulators, flame sensors, ventilation |
+| 7 | Safety Equipment | 3-4 | Emergency shutoff, warning labels, fire extinguisher proximity, PPE availability |
+| 8 | Operational Readiness | 3-4 | Kiln furniture inventory, loading tools, logbook up to date, cleaning status |
+
+### 10.3. How to Perform an Inspection
+
+1. Go to **Kiln Inspections** page (`/manager/kiln-inspections`).
+2. Click the **New Inspection** tab.
+3. **Select the kiln** you are inspecting from the dropdown.
+4. The checklist loads automatically with all 35 items grouped by category.
+5. Go through each item and select a rating:
+
+| Rating | Meaning | Action Required |
+|---|---|---|
+| **OK** | Item is in good condition | None |
+| **Not Applicable** | Item does not apply to this kiln type | None |
+| **Damaged** | Item is damaged but kiln can still operate with caution | Auto-flagged for follow-up |
+| **Needs Repair** | Item requires repair before next use | Auto-flagged for follow-up, repair log entry created |
+
+6. Add optional notes to any item for additional context (e.g., "Small crack on upper left corner, monitor next week").
+7. Click **Submit Inspection** when all items are rated.
+
+> **Important**: Items marked as **Damaged** or **Needs Repair** are automatically highlighted in the inspection report and generate entries in the Repair Log for tracking.
+
+### 10.4. Reviewing Past Inspections
+
+- The **Inspection History** tab shows all completed inspections sorted by date.
+- Click any inspection to view the full report with all ratings and notes.
+- Use the filter to view inspections for a specific kiln.
+- Compare inspections over time to track deterioration trends.
+
+### 10.5. Repair Log
+
+The Repair Log tracks every issue identified during inspections from report to resolution.
+
+**Repair statuses**:
+
+| Status | Meaning |
+|---|---|
+| `open` | Issue identified, not yet addressed |
+| `in_progress` | Repair work has started |
+| `completed` | Repair finished and verified |
+
+**Workflow**:
+1. When an inspection item is rated **Damaged** or **Needs Repair**, a repair log entry is automatically created with status `open`.
+2. Assign the repair to the appropriate person or team.
+3. Update the status to `in_progress` when work begins.
+4. Mark as `completed` when the repair is done and verified.
+5. The next kiln inspection should confirm the repair was effective.
+
+> **Best practice**: Review the Repair Log at the start of each week. Prioritize open items for kilns scheduled for upcoming firings.
+
+---
+
+## 9. Consumption Measurement Tasks
+
+### 9.1. What Are Consumption Measurement Tasks?
+
+When a new order arrives and the position uses an application method (e.g., SS, BS, SB) but the assigned recipe is **missing the required consumption rate** (spray rate or brush rate in ml/m2), the system cannot calculate how much material to reserve. In this case, the position is blocked with status `AWAITING_CONSUMPTION_DATA` and a **blocking task** of type `consumption_measurement` is created and assigned to the PM.
+
+### 9.2. When Does This Happen?
+
+This occurs when **all three conditions** are met:
+1. A position has a recipe assigned (glaze or engobe).
+2. The consumption rule specifies an application method that requires a specific rate (e.g., spray rate for SS method, brush rate for BS method).
+3. The recipe does **not** have the required rate field filled in.
+
+**Application method codes and which rate they require**:
+
+| Code | Full Name | Engobe Rate | Glaze Rate |
+|---|---|---|---|
+| `SS` | Spray engobe + Spray glaze | Spray rate | Spray rate |
+| `BS` | Brush engobe + Spray glaze | Brush rate | Spray rate |
+| `SB` | Spray engobe + Brush glaze | Spray rate | Brush rate |
+| `S` | Spray glaze only (no engobe) | -- | Spray rate |
+| `splashing` | Splashing method | -- | Splash rate |
+
+### 9.3. How to Handle a Consumption Measurement Task
+
+**Step 1: Find the task**
+
+The task appears on your **Tasks** tab with type `consumption_measurement`. It is marked as **blocking**, meaning the associated position cannot proceed until it is resolved.
+
+The task description includes:
+- **Recipe name** -- which recipe is missing the rate
+- **Missing rate type** -- spray rate (ml/m2) or brush rate (ml/m2)
+- **Order number and position** -- which order is waiting
+
+**Step 2: Physically measure the consumption rate**
+
+1. Prepare a test piece of the correct size and material.
+2. Apply the glaze or engobe using the specified method (spray or brush).
+3. Measure the volume of material used (in ml).
+4. Calculate the area of the test piece (in m2).
+5. Divide: **consumption rate = volume used (ml) / area (m2)**.
+
+> **Tip**: Perform at least 2-3 test applications and average the results for accuracy. Document the test conditions (nozzle size, pressure, distance for spray; brush type and technique for brush).
+
+**Step 3: Enter the measured rate**
+
+1. Open the task and click the action to enter the consumption rate.
+2. Enter the measured rate in **ml/m2**.
+3. Confirm the entry.
+
+**Step 4: What happens next**
+
+After you enter the consumption rate:
+- The recipe is updated with the new rate value.
+- The blocking task is marked as `done`.
+- The position status changes from `AWAITING_CONSUMPTION_DATA` back to `PLANNED`.
+- The system proceeds with material reservation using the newly entered rate.
+- All other positions using the same recipe and application method also benefit from this rate going forward.
+
+### 9.4. Practical Tips for Measurement
+
+- **Keep a measurement log**: Record all measurements with date, recipe, method, test piece size, and result. This helps resolve future disputes about rates.
+- **Standardize conditions**: Use consistent spray pressure, nozzle size, and distance for reproducible results.
+- **For brush application**: Note the brush type and technique used, as these significantly affect the rate.
+- **Update rates proactively**: If you notice a recipe will be used with a new application method, measure the rate in advance to avoid blocking when the order arrives.
+
+---
+
+## 10. Tips and Best Practices
+
+### 10.1. Daily Routine
 
 **Morning (start of shift)**:
 1. Check the **Orders** tab -- any new orders?
@@ -665,31 +811,33 @@ To delete a position:
 13. Review Sales requests -- handle any pending Cancellation or Change Requests.
 
 **Weekly**:
-14. Check kiln maintenance schedule.
-15. Review and update consumption rules if needed.
-16. Consider a full factory reschedule if significant changes have occurred.
+14. **Perform kiln inspections** -- complete the 35-item checklist for each active kiln (see Section 8).
+15. **Review the Repair Log** -- follow up on open and in-progress repair items.
+16. Check kiln maintenance schedule.
+17. Review and update consumption rules if needed.
+18. Consider a full factory reschedule if significant changes have occurred.
 
-### 8.2. Factory Selector Best Practices
+### 10.2. Factory Selector Best Practices
 
 - Always select a **specific factory** before performing operations that modify data (creating orders, forming batches, receiving materials).
 - Use "All Factories" mode only for overview and monitoring.
 - If you are assigned to one factory, the selector is hidden and your factory is always active.
 
-### 8.3. Handling Material Shortages
+### 10.3. Handling Material Shortages
 
 1. First, check the transaction history to understand consumption trends.
 2. Verify the min_balance setting is still accurate -- adjust via Edit if needed.
 3. Coordinate with the Purchaser to place orders for critical materials.
 4. Only use force-unblock for material shortages as a last resort -- it creates negative balances.
 
-### 8.4. Inventory Audit Best Practices
+### 10.4. Inventory Audit Best Practices
 
 - Perform regular audits (weekly or monthly) for high-turnover materials.
 - Always enter a clear, specific reason -- "recount" is not helpful; "Recount after spillage on March 15" is.
 - Compare the audit difference with recent transaction history to identify patterns.
 - If you consistently see discrepancies, review the consumption rules -- the rates may need adjustment.
 
-### 8.5. Notifications
+### 10.5. Notifications
 
 PM receives notifications for:
 - New orders arriving from Sales webhook
@@ -701,7 +849,7 @@ The **Telegram bot** sends a daily summary at 21:00 (Indonesian language) with:
 - Full task list for the next day
 - KPI for the current day
 
-### 8.6. Keyboard and Interface Tips
+### 10.6. Keyboard and Interface Tips
 
 - Use the **search box** on the Materials page to quickly find materials by name or code.
 - On the Schedule page, the **Status Dropdown** shows only valid transitions -- you cannot accidentally select an invalid status.

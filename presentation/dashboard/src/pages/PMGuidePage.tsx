@@ -21,7 +21,7 @@ const LANGUAGES = [
   { code: 'id', label: 'Bahasa Indonesia', flag: '\uD83C\uDDEE\uD83C\uDDE9' },
 ] as const;
 
-/** Icons for each top-level section (by index 0-7) */
+/** Icons for each top-level section (by index 0-9) */
 const SECTION_ICONS = [
   '\uD83D\uDE80', // Getting Started
   '\uD83D\uDCCA', // Dashboard
@@ -30,6 +30,8 @@ const SECTION_ICONS = [
   '\u2705',       // Tasks
   '\uD83D\uDCD0', // Consumption Rules
   '\uD83D\uDCC5', // Schedule
+  '\uD83D\uDD25', // Kiln Inspections
+  '\uD83E\uDDEA', // Consumption Measurement Tasks
   '\uD83D\uDCA1', // Tips
 ];
 

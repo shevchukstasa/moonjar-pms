@@ -1788,6 +1788,7 @@ async def lifespan(app: FastAPI):
             from api.schema_patches.application_methods_patch import apply_patch as am_patch
             from api.schema_patches.shape_dimensions_patch import apply_patch as sd_patch
             from api.schema_patches.kiln_inspection_patch import apply_patch as ki_patch
+            from api.schema_patches.firing_profile_temp_group_patch import apply as fp_tg_patch
             cr_patch(conn)
             dc_patch(conn)
             sr_patch(conn)
@@ -1797,6 +1798,7 @@ async def lifespan(app: FastAPI):
             am_patch(conn)
             sd_patch(conn)
             ki_patch(conn)
+            fp_tg_patch(conn)
             logger.info("Schema patches applied successfully")
     except Exception as e:
         logger.warning(f"Schema patches warning (non-fatal): {e}")

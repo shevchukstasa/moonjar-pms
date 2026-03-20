@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { firingProfilesApi, type FiringProfile } from '@/api/firingProfiles';
+import apiClient from '@/api/client';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DataTable } from '@/components/ui/Table';
@@ -11,9 +12,17 @@ import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 
 /* ── types ──────────────────────────────────────────────────────────── */
+interface TemperatureGroup {
+  id: string;
+  name: string;
+  temperature: number;
+  is_active: boolean;
+}
+
 interface ProfileForm {
   name: string;
-  max_temperature: string;
+  temperature_group_id: string;
+  target_temperature: string;
   total_duration_hours: string;
   ramp_rate: string;
   cooling_type: string;
@@ -29,7 +38,8 @@ const COOLING_TYPE_OPTIONS = [
 
 const emptyForm: ProfileForm = {
   name: '',
-  max_temperature: '',
+  temperature_group_id: '',
+  target_temperature: '',
   total_duration_hours: '',
   ramp_rate: '',
   cooling_type: '',
@@ -52,7 +62,13 @@ export default function AdminFiringProfilesPage() {
     queryFn: () => firingProfilesApi.list(),
   });
 
+  const { data: tempGroupsData } = useQuery<{ items: TemperatureGroup[] }>({
+    queryKey: ['temperature-groups'],
+    queryFn: () => apiClient.get('/reference/temperature-groups').then((r) => r.data),
+  });
+
   const items = data?.items ?? [];
+  const tempGroups = tempGroupsData?.items ?? [];
 
   /* ── mutations ───────────────────────────────────────────────────── */
   const extractError = (err: unknown): string => {
@@ -110,7 +126,8 @@ export default function AdminFiringProfilesPage() {
     setEditItem(item);
     setForm({
       name: item.name,
-      max_temperature: item.max_temperature != null ? String(item.max_temperature) : '',
+      temperature_group_id: item.temperature_group_id ?? '',
+      target_temperature: item.target_temperature != null ? String(item.target_temperature) : '',
       total_duration_hours: item.total_duration_hours != null ? String(item.total_duration_hours) : '',
       ramp_rate: item.ramp_rate != null ? String(item.ramp_rate) : '',
       cooling_type: item.cooling_type ?? '',
@@ -123,7 +140,8 @@ export default function AdminFiringProfilesPage() {
     setMutationError('');
     const payload: Record<string, unknown> = {
       name: form.name,
-      max_temperature: form.max_temperature ? parseFloat(form.max_temperature) : null,
+      temperature_group_id: form.temperature_group_id || null,
+      target_temperature: form.target_temperature ? parseInt(form.target_temperature) : null,
       total_duration_hours: form.total_duration_hours ? parseFloat(form.total_duration_hours) : null,
       ramp_rate: form.ramp_rate ? parseFloat(form.ramp_rate) : null,
       cooling_type: form.cooling_type || null,
@@ -144,11 +162,21 @@ export default function AdminFiringProfilesPage() {
     () => [
       { key: 'name', header: 'Name' },
       {
-        key: 'max_temperature',
-        header: 'Max Temp (°C)',
+        key: 'temperature_group',
+        header: 'Temp Group',
         render: (r: FiringProfile) =>
-          r.max_temperature != null ? (
-            <span className="font-mono text-sm">{r.max_temperature}</span>
+          r.temperature_group_name ? (
+            <Badge status="active" label={r.temperature_group_name} />
+          ) : (
+            <span className="text-gray-400">&mdash;</span>
+          ),
+      },
+      {
+        key: 'target_temperature',
+        header: 'Max Temp (\u00B0C)',
+        render: (r: FiringProfile) =>
+          r.target_temperature != null ? (
+            <span className="font-mono text-sm">{r.target_temperature}</span>
           ) : (
             <span className="text-gray-400">&mdash;</span>
           ),
@@ -158,7 +186,7 @@ export default function AdminFiringProfilesPage() {
         header: 'Duration (h)',
         render: (r: FiringProfile) =>
           r.total_duration_hours != null ? (
-            <span className="font-mono text-sm">{r.total_duration_hours}</span>
+            <span className="font-mono text-sm font-bold">{r.total_duration_hours}</span>
           ) : (
             <span className="text-gray-400">&mdash;</span>
           ),
@@ -263,15 +291,37 @@ export default function AdminFiringProfilesPage() {
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             required
           />
+
+          {/* Temperature Group selector */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Temperature Group
+            </label>
+            <select
+              value={form.temperature_group_id}
+              onChange={(e) => setForm({ ...form, temperature_group_id: e.target.value })}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            >
+              <option value="">-- Not assigned --</option>
+              {tempGroups
+                .filter((g) => g.is_active)
+                .map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name} ({g.temperature}&deg;C)
+                  </option>
+                ))}
+            </select>
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <Input
-              label="Max Temperature (°C)"
+              label="Max Temperature (\u00B0C)"
               type="number"
               step="1"
               placeholder="e.g. 1012"
-              value={form.max_temperature}
+              value={form.target_temperature}
               onChange={(e) =>
-                setForm({ ...form, max_temperature: e.target.value })
+                setForm({ ...form, target_temperature: e.target.value })
               }
             />
             <Input
@@ -287,7 +337,7 @@ export default function AdminFiringProfilesPage() {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Input
-              label="Ramp Rate (°C/h)"
+              label="Ramp Rate (\u00B0C/h)"
               type="number"
               step="0.1"
               placeholder="e.g. 50"

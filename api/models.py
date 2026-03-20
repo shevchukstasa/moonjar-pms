@@ -1789,6 +1789,11 @@ class FiringProfile(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(sa.String(200), nullable=False)
+    temperature_group_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('firing_temperature_groups.id', ondelete='SET NULL'),
+        nullable=True,
+    )
     product_type = Column(PgEnum(ProductType))                       # nullable = matches all
     collection = Column(sa.String(100))                              # nullable = matches all
     thickness_min_mm = Column(sa.Numeric(5, 1))                      # nullable = no lower bound
@@ -1801,6 +1806,8 @@ class FiringProfile(Base):
     is_active = Column(sa.Boolean, nullable=False, default=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    temperature_group = relationship('FiringTemperatureGroup', foreign_keys=[temperature_group_id])
 
 
 class RecipeFiringStage(Base):

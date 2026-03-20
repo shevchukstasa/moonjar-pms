@@ -14,7 +14,6 @@ const navByRole: Record<string, NavItem[]> = {
     { to: '/manager', label: 'Manager' },
     { to: '/manager/schedule', label: 'Schedule' },
     { to: '/manager/kilns', label: 'Kilns' },
-    { to: '/manager/kiln-inspections', label: 'Kiln Inspections' },
     { to: '/manager/materials', label: 'Materials (Mgr)' },
     { section: 'Catalog' },
     { to: '/admin/materials', label: 'Materials' },
@@ -87,19 +86,19 @@ export function Sidebar() {
   return (
     <aside className={cn('fixed left-0 top-0 z-40 flex h-screen flex-col border-r bg-white transition-all', sidebarOpen ? 'w-64' : 'w-16')}>
       <div className="flex h-16 items-center justify-between border-b px-4">
-        {sidebarOpen && <span className="text-lg font-semibold"><span className="text-blue-600">Moonjar</span> <span className="font-bold text-gray-900">Production</span></span>}
+        {sidebarOpen && <span className="text-2xl font-semibold"><span className="text-blue-600">Moonjar</span> <span className="font-bold text-gray-900">Production</span></span>}
         <button onClick={toggleSidebar} className="rounded p-1 text-gray-400 hover:bg-gray-100">{sidebarOpen ? '\u2190' : '\u2192'}</button>
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
         {items.map((item) =>
           'section' in item ? (
             sidebarOpen ? (
-              <div key={item.section} className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-gray-400 first:pt-0">{item.section}</div>
+              <div key={item.section} className="px-3 pb-1 pt-4 text-[13px] font-semibold uppercase tracking-wider text-gray-400 first:pt-0">{item.section}</div>
             ) : (
               <div key={item.section} className="my-2 border-t border-gray-200" />
             )
           ) : (
-            <NavLink key={item.to} to={item.to} className={({ isActive }) => cn('flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors', isActive ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-100')}>
+            <NavLink key={item.to} to={item.to} className={({ isActive }) => cn('flex items-center gap-3 rounded-md px-3 py-2 text-base font-medium transition-colors', isActive ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-100')}>
               {sidebarOpen ? item.label : item.label[0]}
             </NavLink>
           ),

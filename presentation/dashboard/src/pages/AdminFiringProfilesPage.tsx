@@ -19,34 +19,194 @@ interface TemperatureGroup {
   is_active: boolean;
 }
 
+/** One interval in the heating or cooling curve */
+interface TempStage {
+  start_temp: number;
+  end_temp: number;
+  rate: number; // °C/h
+}
+
 interface ProfileForm {
   name: string;
   temperature_group_id: string;
-  target_temperature: string;
   total_duration_hours: string;
-  ramp_rate: string;
-  cooling_type: string;
   is_active: boolean;
+  heating_stages: TempStage[];
+  cooling_stages: TempStage[];
 }
-
-const COOLING_TYPE_OPTIONS = [
-  { value: '', label: '-- None --' },
-  { value: 'natural', label: 'Natural' },
-  { value: 'forced', label: 'Forced' },
-  { value: 'controlled', label: 'Controlled' },
-];
 
 const emptyForm: ProfileForm = {
   name: '',
   temperature_group_id: '',
-  target_temperature: '',
   total_duration_hours: '',
-  ramp_rate: '',
-  cooling_type: '',
   is_active: true,
+  heating_stages: [{ start_temp: 20, end_temp: 1000, rate: 100 }],
+  cooling_stages: [{ start_temp: 1000, end_temp: 20, rate: 50 }],
 };
 
-/* ── component ──────────────────────────────────────────────────────── */
+/** Parse stages from backend JSONB into heating/cooling arrays */
+function parseStages(stages: unknown[]): { heating: TempStage[]; cooling: TempStage[] } {
+  const heating: TempStage[] = [];
+  const cooling: TempStage[] = [];
+  if (!Array.isArray(stages) || stages.length === 0) {
+    return { heating: [], cooling: [] };
+  }
+  for (const s of stages) {
+    const st = s as { type?: string; start_temp?: number; end_temp?: number; rate?: number };
+    const stage: TempStage = {
+      start_temp: st.start_temp ?? 0,
+      end_temp: st.end_temp ?? 0,
+      rate: st.rate ?? 0,
+    };
+    if (st.type === 'cooling') {
+      cooling.push(stage);
+    } else {
+      heating.push(stage);
+    }
+  }
+  return { heating, cooling };
+}
+
+/** Convert heating/cooling arrays to backend JSONB format */
+function toStagesJson(heating: TempStage[], cooling: TempStage[]): object[] {
+  const result: object[] = [];
+  for (const s of heating) {
+    result.push({ type: 'heating', start_temp: s.start_temp, end_temp: s.end_temp, rate: s.rate });
+  }
+  for (const s of cooling) {
+    result.push({ type: 'cooling', start_temp: s.start_temp, end_temp: s.end_temp, rate: s.rate });
+  }
+  return result;
+}
+
+/** Calculate max temp from stages */
+function calcMaxTemp(heating: TempStage[], cooling: TempStage[]): number {
+  let max = 0;
+  for (const s of [...heating, ...cooling]) {
+    max = Math.max(max, s.start_temp, s.end_temp);
+  }
+  return max;
+}
+
+/* ── StageEditor sub-component ─────────────────────────────────────── */
+function StageEditor({
+  label,
+  stages,
+  onChange,
+  color,
+}: {
+  label: string;
+  stages: TempStage[];
+  onChange: (stages: TempStage[]) => void;
+  color: 'red' | 'blue';
+}) {
+  const borderColor = color === 'red' ? 'border-red-200' : 'border-blue-200';
+  const bgColor = color === 'red' ? 'bg-red-50' : 'bg-blue-50';
+  const textColor = color === 'red' ? 'text-red-700' : 'text-blue-700';
+  const arrowIcon = color === 'red' ? '\u2191' : '\u2193'; // ↑ heating, ↓ cooling
+
+  const updateStage = (idx: number, field: keyof TempStage, value: number) => {
+    const next = [...stages];
+    next[idx] = { ...next[idx], [field]: value };
+    // Auto-chain: if end_temp changed and there's a next stage, update its start_temp
+    if (field === 'end_temp' && idx < next.length - 1) {
+      next[idx + 1] = { ...next[idx + 1], start_temp: value };
+    }
+    // Auto-chain: if start_temp changed and there's a prev stage, this is manual override
+    onChange(next);
+  };
+
+  const addStage = () => {
+    const lastEnd = stages.length > 0 ? stages[stages.length - 1].end_temp : (color === 'red' ? 20 : 1000);
+    const newEnd = color === 'red' ? lastEnd + 200 : Math.max(lastEnd - 200, 20);
+    onChange([...stages, { start_temp: lastEnd, end_temp: newEnd, rate: color === 'red' ? 100 : 50 }]);
+  };
+
+  const removeStage = (idx: number) => {
+    const next = stages.filter((_, i) => i !== idx);
+    // Re-chain start temps
+    for (let i = 1; i < next.length; i++) {
+      next[i] = { ...next[i], start_temp: next[i - 1].end_temp };
+    }
+    onChange(next);
+  };
+
+  return (
+    <div className={`rounded-lg border ${borderColor} ${bgColor} p-3`}>
+      <div className="mb-2 flex items-center justify-between">
+        <h4 className={`text-sm font-semibold ${textColor}`}>
+          {arrowIcon} {label} ({stages.length} {stages.length === 1 ? 'interval' : 'intervals'})
+        </h4>
+        <button
+          type="button"
+          onClick={addStage}
+          className={`rounded px-2 py-0.5 text-xs font-medium ${textColor} hover:bg-white/50`}
+        >
+          + Add Interval
+        </button>
+      </div>
+
+      {stages.length === 0 && (
+        <p className="py-2 text-center text-xs text-gray-400">No intervals defined</p>
+      )}
+
+      {stages.map((stage, idx) => (
+        <div key={idx} className="mb-2 flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              value={stage.start_temp}
+              onChange={(e) => updateStage(idx, 'start_temp', parseFloat(e.target.value) || 0)}
+              disabled={idx > 0} // auto-chained from previous
+              className={`w-20 rounded border px-2 py-1 text-center text-sm font-mono ${
+                idx > 0 ? 'bg-gray-100 text-gray-500' : 'bg-white'
+              }`}
+              title="Start \u00B0C"
+            />
+            <span className="text-gray-400">\u2192</span>
+            <input
+              type="number"
+              value={stage.end_temp}
+              onChange={(e) => updateStage(idx, 'end_temp', parseFloat(e.target.value) || 0)}
+              className="w-20 rounded border bg-white px-2 py-1 text-center text-sm font-mono"
+              title="End \u00B0C"
+            />
+            <span className="text-xs text-gray-400">\u00B0C</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-gray-500">@</span>
+            <input
+              type="number"
+              value={stage.rate}
+              onChange={(e) => updateStage(idx, 'rate', parseFloat(e.target.value) || 0)}
+              className="w-20 rounded border bg-white px-2 py-1 text-center text-sm font-mono"
+              title="Rate \u00B0C/h"
+            />
+            <span className="text-xs text-gray-400">\u00B0C/h</span>
+          </div>
+          {/* Calculated duration */}
+          <span className="ml-1 text-xs text-gray-400">
+            {stage.rate > 0
+              ? `\u2248${(Math.abs(stage.end_temp - stage.start_temp) / stage.rate).toFixed(1)}h`
+              : ''}
+          </span>
+          {stages.length > 1 && (
+            <button
+              type="button"
+              onClick={() => removeStage(idx)}
+              className="ml-auto text-sm text-red-400 hover:text-red-600"
+              title="Remove interval"
+            >
+              \u2715
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── main component ──────────────────────────────────────────────────── */
 export default function AdminFiringProfilesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -75,12 +235,16 @@ export default function AdminFiringProfilesPage() {
     const resp = (err as { response?: { data?: { detail?: unknown } } })?.response?.data;
     if (!resp) return String(err);
     if (typeof resp.detail === 'string') return resp.detail;
-    if (Array.isArray(resp.detail)) return resp.detail.map((d: { msg?: string }) => d.msg || JSON.stringify(d)).join('; ');
+    if (Array.isArray(resp.detail))
+      return resp.detail.map((d: { msg?: string }) => d.msg || JSON.stringify(d)).join('; ');
     return JSON.stringify(resp);
   };
 
   const createMutation = useMutation({
-    mutationFn: (payload: Record<string, unknown>) => firingProfilesApi.create(payload as unknown as Parameters<typeof firingProfilesApi.create>[0]),
+    mutationFn: (payload: Record<string, unknown>) =>
+      firingProfilesApi.create(
+        payload as unknown as Parameters<typeof firingProfilesApi.create>[0],
+      ),
     onSuccess: () => {
       setMutationError('');
       queryClient.invalidateQueries({ queryKey: ['admin-firing-profiles'] });
@@ -123,28 +287,32 @@ export default function AdminFiringProfilesPage() {
   }, []);
 
   const openEdit = useCallback((item: FiringProfile) => {
+    const { heating, cooling } = parseStages((item as unknown as Record<string, unknown>).stages as unknown[] ?? []);
     setEditItem(item);
     setForm({
       name: item.name,
       temperature_group_id: item.temperature_group_id ?? '',
-      target_temperature: item.target_temperature != null ? String(item.target_temperature) : '',
-      total_duration_hours: item.total_duration_hours != null ? String(item.total_duration_hours) : '',
-      ramp_rate: item.ramp_rate != null ? String(item.ramp_rate) : '',
-      cooling_type: item.cooling_type ?? '',
+      total_duration_hours:
+        item.total_duration_hours != null ? String(item.total_duration_hours) : '',
       is_active: item.is_active,
+      heating_stages: heating.length > 0 ? heating : [{ start_temp: 20, end_temp: item.target_temperature ?? 1000, rate: 100 }],
+      cooling_stages: cooling.length > 0 ? cooling : [{ start_temp: item.target_temperature ?? 1000, end_temp: 20, rate: 50 }],
     });
     setDialogOpen(true);
   }, []);
 
   const handleSubmit = useCallback(() => {
     setMutationError('');
+    const maxTemp = calcMaxTemp(form.heating_stages, form.cooling_stages);
+    const stages = toStagesJson(form.heating_stages, form.cooling_stages);
     const payload: Record<string, unknown> = {
       name: form.name,
       temperature_group_id: form.temperature_group_id || null,
-      target_temperature: form.target_temperature ? parseInt(form.target_temperature) : null,
-      total_duration_hours: form.total_duration_hours ? parseFloat(form.total_duration_hours) : null,
-      ramp_rate: form.ramp_rate ? parseFloat(form.ramp_rate) : null,
-      cooling_type: form.cooling_type || null,
+      target_temperature: maxTemp || null,
+      total_duration_hours: form.total_duration_hours
+        ? parseFloat(form.total_duration_hours)
+        : null,
+      stages,
       is_active: form.is_active,
     };
     if (editItem) {
@@ -156,93 +324,101 @@ export default function AdminFiringProfilesPage() {
 
   const saving = createMutation.isPending || updateMutation.isPending;
 
+  /* ── helper: format stages summary for table ──────────────────────── */
+  const formatStagesSummary = (item: FiringProfile) => {
+    const raw = (item as unknown as Record<string, unknown>).stages as unknown[];
+    if (!Array.isArray(raw) || raw.length === 0) return null;
+    const { heating, cooling } = parseStages(raw);
+    const parts: string[] = [];
+    if (heating.length > 0) parts.push(`${heating.length} heat`);
+    if (cooling.length > 0) parts.push(`${cooling.length} cool`);
+    return parts.join(' + ');
+  };
+
   /* ── table columns ───────────────────────────────────────────────── */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const columns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = useMemo(
-    () => [
-      { key: 'name', header: 'Name' },
-      {
-        key: 'temperature_group',
-        header: 'Temp Group',
-        render: (r: FiringProfile) =>
-          r.temperature_group_name ? (
-            <Badge status="active" label={r.temperature_group_name} />
-          ) : (
-            <span className="text-gray-400">&mdash;</span>
+  const columns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] =
+    useMemo(
+      () => [
+        { key: 'name', header: 'Name' },
+        {
+          key: 'temperature_group',
+          header: 'Temp Group',
+          render: (r: FiringProfile) =>
+            r.temperature_group_name ? (
+              <Badge status="active" label={r.temperature_group_name} />
+            ) : (
+              <span className="text-gray-400">&mdash;</span>
+            ),
+        },
+        {
+          key: 'target_temperature',
+          header: 'Max Temp (\u00B0C)',
+          render: (r: FiringProfile) =>
+            r.target_temperature != null ? (
+              <span className="font-mono text-sm font-bold text-red-600">
+                {r.target_temperature}\u00B0C
+              </span>
+            ) : (
+              <span className="text-gray-400">&mdash;</span>
+            ),
+        },
+        {
+          key: 'total_duration_hours',
+          header: 'Duration (h)',
+          render: (r: FiringProfile) =>
+            r.total_duration_hours != null ? (
+              <span className="font-mono text-sm font-bold">{r.total_duration_hours}h</span>
+            ) : (
+              <span className="text-gray-400">&mdash;</span>
+            ),
+        },
+        {
+          key: 'stages',
+          header: 'Curve',
+          render: (r: FiringProfile) => {
+            const summary = formatStagesSummary(r);
+            return summary ? (
+              <span className="rounded bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
+                {summary}
+              </span>
+            ) : (
+              <span className="text-gray-400">&mdash;</span>
+            );
+          },
+        },
+        {
+          key: 'is_active',
+          header: 'Status',
+          render: (r: FiringProfile) => (
+            <Badge
+              status={r.is_active ? 'active' : 'inactive'}
+              label={r.is_active ? 'Active' : 'Inactive'}
+            />
           ),
-      },
-      {
-        key: 'target_temperature',
-        header: 'Max Temp (\u00B0C)',
-        render: (r: FiringProfile) =>
-          r.target_temperature != null ? (
-            <span className="font-mono text-sm">{r.target_temperature}</span>
-          ) : (
-            <span className="text-gray-400">&mdash;</span>
+        },
+        {
+          key: 'actions',
+          header: '',
+          render: (r: FiringProfile) => (
+            <div className="flex gap-1">
+              <Button variant="ghost" size="sm" onClick={() => openEdit(r)}>
+                Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-red-600"
+                onClick={() => setDeleteId(r.id)}
+              >
+                Delete
+              </Button>
+            </div>
           ),
-      },
-      {
-        key: 'total_duration_hours',
-        header: 'Duration (h)',
-        render: (r: FiringProfile) =>
-          r.total_duration_hours != null ? (
-            <span className="font-mono text-sm font-bold">{r.total_duration_hours}</span>
-          ) : (
-            <span className="text-gray-400">&mdash;</span>
-          ),
-      },
-      {
-        key: 'ramp_rate',
-        header: 'Ramp Rate',
-        render: (r: FiringProfile) =>
-          r.ramp_rate != null ? (
-            <span className="font-mono text-sm">{r.ramp_rate}</span>
-          ) : (
-            <span className="text-gray-400">&mdash;</span>
-          ),
-      },
-      {
-        key: 'cooling_type',
-        header: 'Cooling',
-        render: (r: FiringProfile) =>
-          r.cooling_type ? (
-            <span className="text-sm capitalize">{r.cooling_type}</span>
-          ) : (
-            <span className="text-gray-400">&mdash;</span>
-          ),
-      },
-      {
-        key: 'is_active',
-        header: 'Status',
-        render: (r: FiringProfile) => (
-          <Badge
-            status={r.is_active ? 'active' : 'inactive'}
-            label={r.is_active ? 'Active' : 'Inactive'}
-          />
-        ),
-      },
-      {
-        key: 'actions',
-        header: '',
-        render: (r: FiringProfile) => (
-          <div className="flex gap-1">
-            <Button variant="ghost" size="sm" onClick={() => openEdit(r)}>
-              Edit
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-red-600"
-              onClick={() => setDeleteId(r.id)}
-            >
-              Delete
-            </Button>
-          </div>
-        ),
-      },
-    ],
-    [openEdit],
-  );
+        },
+      ],
+      [openEdit],
+    );
 
   /* ── render ──────────────────────────────────────────────────────── */
   return (
@@ -282,9 +458,9 @@ export default function AdminFiringProfilesPage() {
         open={dialogOpen}
         onClose={closeDialog}
         title={editItem ? 'Edit Firing Profile' : 'Add Firing Profile'}
-        className="w-full max-w-lg"
+        className="w-full max-w-2xl"
       >
-        <div className="space-y-4">
+        <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
           <Input
             label="Name"
             value={form.name}
@@ -292,85 +468,81 @@ export default function AdminFiringProfilesPage() {
             required
           />
 
-          {/* Temperature Group selector */}
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Temperature Group
-            </label>
-            <select
-              value={form.temperature_group_id}
-              onChange={(e) => setForm({ ...form, temperature_group_id: e.target.value })}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-            >
-              <option value="">-- Not assigned --</option>
-              {tempGroups
-                .filter((g) => g.is_active)
-                .map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name} ({g.temperature}&deg;C)
-                  </option>
-                ))}
-            </select>
-          </div>
-
           <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="Max Temperature (\u00B0C)"
-              type="number"
-              step="1"
-              placeholder="e.g. 1012"
-              value={form.target_temperature}
-              onChange={(e) =>
-                setForm({ ...form, target_temperature: e.target.value })
-              }
-            />
+            {/* Temperature Group selector */}
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Temperature Group
+              </label>
+              <select
+                value={form.temperature_group_id}
+                onChange={(e) =>
+                  setForm({ ...form, temperature_group_id: e.target.value })
+                }
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">-- Not assigned --</option>
+                {tempGroups
+                  .filter((g) => g.is_active)
+                  .map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name} ({g.temperature}&deg;C)
+                    </option>
+                  ))}
+              </select>
+            </div>
             <Input
               label="Total Duration (hours)"
               type="number"
               step="0.5"
-              placeholder="e.g. 24"
+              placeholder="e.g. 8"
               value={form.total_duration_hours}
               onChange={(e) =>
                 setForm({ ...form, total_duration_hours: e.target.value })
               }
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="Ramp Rate (\u00B0C/h)"
-              type="number"
-              step="0.1"
-              placeholder="e.g. 50"
-              value={form.ramp_rate}
-              onChange={(e) => setForm({ ...form, ramp_rate: e.target.value })}
-            />
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                Cooling Type
-              </label>
-              <select
-                value={form.cooling_type}
-                onChange={(e) =>
-                  setForm({ ...form, cooling_type: e.target.value })
-                }
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              >
-                {COOLING_TYPE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+
+          {/* Heating intervals */}
+          <StageEditor
+            label="Heating Intervals"
+            stages={form.heating_stages}
+            onChange={(s) => setForm({ ...form, heating_stages: s })}
+            color="red"
+          />
+
+          {/* Cooling intervals */}
+          <StageEditor
+            label="Cooling Intervals"
+            stages={form.cooling_stages}
+            onChange={(s) => setForm({ ...form, cooling_stages: s })}
+            color="blue"
+          />
+
+          {/* Summary */}
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-gray-500">
+                Max temp:{' '}
+                <strong className="text-red-600">
+                  {calcMaxTemp(form.heating_stages, form.cooling_stages)}\u00B0C
+                </strong>
+              </span>
+              <span className="text-gray-500">
+                Heating intervals: <strong>{form.heating_stages.length}</strong>
+              </span>
+              <span className="text-gray-500">
+                Cooling intervals: <strong>{form.cooling_stages.length}</strong>
+              </span>
             </div>
           </div>
+
           <div className="flex items-center gap-2">
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={form.is_active}
-                onChange={(e) =>
-                  setForm({ ...form, is_active: e.target.checked })
-                }
+                onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
                 className="rounded"
               />
               Active
@@ -400,8 +572,8 @@ export default function AdminFiringProfilesPage() {
         title="Delete Firing Profile"
       >
         <p className="text-sm text-gray-600">
-          Are you sure you want to delete this firing profile? This action
-          cannot be undone.
+          Are you sure you want to delete this firing profile? This action cannot be
+          undone.
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setDeleteId(null)}>

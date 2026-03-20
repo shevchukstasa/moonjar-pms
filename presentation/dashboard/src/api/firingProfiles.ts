@@ -5,9 +5,9 @@ export interface FiringProfile {
   name: string;
   temperature_group_id: string | null;
   temperature_group_name: string | null;
-  max_temperature: number;
   target_temperature: number;
   total_duration_hours: number;
+  stages: { type: string; start_temp: number; end_temp: number; rate: number }[];
   ramp_rate: number | null;
   cooling_type: string | null;
   is_active: boolean;
@@ -18,9 +18,9 @@ export interface FiringProfile {
 export interface FiringProfileForm {
   name: string;
   temperature_group_id?: string | null;
-  max_temperature?: number;
   target_temperature?: number;
   total_duration_hours: number;
+  stages?: object[];
   ramp_rate?: number | null;
   cooling_type?: string | null;
   is_active?: boolean;

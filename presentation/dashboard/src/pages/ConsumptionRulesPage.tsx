@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import {
   useConsumptionRules,
   useCreateConsumptionRule,
@@ -8,6 +9,7 @@ import {
 } from '@/hooks/useConsumptionRules';
 import { useSizes } from '@/hooks/useSizes';
 import type { ConsumptionRuleItem, ConsumptionRuleInput } from '@/api/consumptionRules';
+import { referenceApi } from '@/api/reference';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -16,7 +18,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 
-/* ── Constants ──────────────────────────────────────────────────────── */
+/* ── Constants (only for recipe_type which is truly static) ──── */
 
 const RECIPE_TYPES = [
   { value: '', label: '— Any —' },
@@ -24,30 +26,95 @@ const RECIPE_TYPES = [
   { value: 'engobe', label: 'Engobe' },
 ];
 
-const APPLICATION_METHODS = [
-  { value: '', label: '— Any —' },
-  { value: 'spray', label: 'Spray' },
-  { value: 'brush', label: 'Brush' },
-  { value: 'dip', label: 'Dip' },
-];
+/* ── Multi-select chip component ──────────────────────────────── */
 
-const PRODUCT_TYPES = [
-  { value: '', label: '— Any —' },
-  { value: 'tile', label: 'Tile' },
-  { value: 'sink', label: 'Sink' },
-  { value: 'custom_product', label: 'Custom Product' },
-];
+function MultiSelectChips({
+  label,
+  options,
+  selected,
+  onChange,
+}: {
+  label: string;
+  options: { value: string; label: string }[];
+  selected: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const filtered = useMemo(() => {
+    if (!search) return options;
+    const q = search.toLowerCase();
+    return options.filter((o) => o.label.toLowerCase().includes(q));
+  }, [options, search]);
 
-const SHAPES = [
-  { value: '', label: '— Any —' },
-  { value: 'rectangle', label: 'Rectangle' },
-  { value: 'square', label: 'Square' },
-  { value: 'circle', label: 'Circle' },
-  { value: 'hexagon', label: 'Hexagon' },
-  { value: 'irregular', label: 'Irregular' },
-];
+  const toggle = (val: string) => {
+    if (selected.includes(val)) {
+      onChange(selected.filter((v) => v !== val));
+    } else {
+      onChange([...selected, val]);
+    }
+  };
 
-/* ── Form interface ─────────────────────────────────────────────── */
+  return (
+    <div>
+      <label className="mb-1 block text-sm font-medium text-gray-700">{label}</label>
+      {/* Selected chips */}
+      {selected.length > 0 && (
+        <div className="mb-1 flex flex-wrap gap-1">
+          {selected.map((val) => {
+            const opt = options.find((o) => o.value === val);
+            return (
+              <span
+                key={val}
+                className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800"
+              >
+                {opt?.label ?? val}
+                <button
+                  type="button"
+                  onClick={() => toggle(val)}
+                  className="ml-0.5 text-blue-600 hover:text-blue-900"
+                >
+                  &times;
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {/* Search + options */}
+      {options.length > 6 && (
+        <input
+          type="text"
+          placeholder="Search..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="mb-1 w-full rounded border border-gray-300 px-2 py-1 text-xs"
+        />
+      )}
+      <div className="max-h-32 overflow-y-auto rounded border border-gray-200 bg-white">
+        {filtered.length === 0 ? (
+          <div className="px-2 py-1 text-xs text-gray-400">No options</div>
+        ) : (
+          filtered.map((o) => (
+            <label
+              key={o.value}
+              className="flex cursor-pointer items-center gap-2 px-2 py-1 text-xs hover:bg-gray-50"
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(o.value)}
+                onChange={() => toggle(o.value)}
+                className="rounded"
+              />
+              {o.label}
+            </label>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Form interface ─────────────────────────────────────────── */
 
 interface RuleForm {
   rule_number: string;
@@ -57,6 +124,7 @@ interface RuleForm {
   color_collection: string;
   product_type: string;
   size_id: string;
+  size_ids: string[];  // for multi-select (creates separate rules per size)
   shape: string;
   thickness_mm_min: string;
   thickness_mm_max: string;
@@ -79,6 +147,7 @@ const emptyForm: RuleForm = {
   color_collection: '',
   product_type: '',
   size_id: '',
+  size_ids: [],
   shape: '',
   thickness_mm_min: '',
   thickness_mm_max: '',
@@ -93,7 +162,7 @@ const emptyForm: RuleForm = {
   notes: '',
 };
 
-/* ── Component ──────────────────────────────────────────────────── */
+/* ── Component ──────────────────────────────────────────────── */
 
 export default function ConsumptionRulesPage() {
   const navigate = useNavigate();
@@ -104,13 +173,77 @@ export default function ConsumptionRulesPage() {
   const updateMutation = useUpdateConsumptionRule();
   const deleteMutation = useDeleteConsumptionRule();
 
+  // Load reference data from DB
+  const { data: refData } = useQuery({
+    queryKey: ['reference', 'all'],
+    queryFn: referenceApi.getAll,
+  });
+  const { data: appMethods } = useQuery({
+    queryKey: ['reference', 'application-methods'],
+    queryFn: referenceApi.getApplicationMethods,
+  });
+  const { data: collectionsData } = useQuery({
+    queryKey: ['reference', 'collections'],
+    queryFn: referenceApi.getCollections,
+  });
+
+  // Build dropdown options from DB
+  const productTypeOptions = useMemo(() => [
+    { value: '', label: '— Any —' },
+    ...(refData?.product_types?.map((t) => ({ value: t.value, label: t.label })) ?? []),
+  ], [refData]);
+
+  const shapeOptions = useMemo(() => [
+    { value: '', label: '— Any —' },
+    ...(refData?.shape_types?.map((t) => ({ value: t.value, label: t.label })) ?? []),
+  ], [refData]);
+
+  const applicationMethodOptions = useMemo(() => [
+    { value: '', label: '— Any —' },
+    ...(appMethods?.map((m) => ({ value: m.code, label: `${m.name} (${m.code.toUpperCase()})` })) ?? []),
+  ], [appMethods]);
+
+  const collectionOptions = useMemo(() => [
+    { value: '', label: '— Any —' },
+    ...(collectionsData?.map((c) => ({ value: c.value, label: c.label })) ?? []),
+  ], [collectionsData]);
+
+  const colorCollectionOptions = useMemo(() => {
+    // Get unique color_collection values from existing rules + reference
+    const vals = new Set<string>();
+    rules?.forEach((r) => { if (r.color_collection) vals.add(r.color_collection); });
+    return [
+      { value: '', label: '— Any —' },
+      ...Array.from(vals).sort().map((v) => ({ value: v, label: v })),
+      { value: 'Collection 2025/2026', label: 'Collection 2025/2026' },
+      { value: 'Custom', label: 'Custom' },
+    ];
+  }, [rules]);
+
+  const placeOfApplicationOptions = useMemo(() => [
+    { value: '', label: '— Any —' },
+    { value: 'face_only', label: 'Face only' },
+    { value: 'edges_1', label: 'Edges (1 side)' },
+    { value: 'edges_2', label: 'Edges (2 sides)' },
+    { value: 'all_edges', label: 'All edges' },
+    { value: 'with_back', label: 'With back' },
+  ], []);
+
+  const sizeOptions = useMemo(() =>
+    sizes.map((s) => ({
+      value: s.id,
+      label: `${s.name} (${s.width_mm}×${s.height_mm})`,
+    })),
+  [sizes]);
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<ConsumptionRuleItem | null>(null);
   const [form, setForm] = useState<RuleForm>(emptyForm);
   const [formError, setFormError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<ConsumptionRuleItem | null>(null);
+  const [multiSizeMode, setMultiSizeMode] = useState(false);
 
-  /* ── Helpers ───────────────────────────────────────────────────── */
+  /* ── Helpers ───────────────────────────────────────────────── */
 
   const openCreate = useCallback(() => {
     setEditItem(null);
@@ -119,6 +252,7 @@ export default function ConsumptionRulesPage() {
       : 1;
     setForm({ ...emptyForm, rule_number: String(nextNum) });
     setFormError('');
+    setMultiSizeMode(false);
     setDialogOpen(true);
   }, [rules]);
 
@@ -132,6 +266,7 @@ export default function ConsumptionRulesPage() {
       color_collection: item.color_collection ?? '',
       product_type: item.product_type ?? '',
       size_id: item.size_id ?? '',
+      size_ids: item.size_id ? [item.size_id] : [],
       shape: item.shape ?? '',
       thickness_mm_min: item.thickness_mm_min != null ? String(item.thickness_mm_min) : '',
       thickness_mm_max: item.thickness_mm_max != null ? String(item.thickness_mm_max) : '',
@@ -146,6 +281,7 @@ export default function ConsumptionRulesPage() {
       notes: item.notes ?? '',
     });
     setFormError('');
+    setMultiSizeMode(false);
     setDialogOpen(true);
   }, []);
 
@@ -154,39 +290,56 @@ export default function ConsumptionRulesPage() {
     setEditItem(null);
     setForm(emptyForm);
     setFormError('');
+    setMultiSizeMode(false);
   }, []);
+
+  const buildPayload = useCallback((sizeId: string | null): ConsumptionRuleInput => ({
+    rule_number: parseInt(form.rule_number) || 0,
+    name: form.name.trim(),
+    description: form.description || null,
+    collection: form.collection || null,
+    color_collection: form.color_collection || null,
+    product_type: form.product_type || null,
+    size_id: sizeId || null,
+    shape: form.shape || null,
+    thickness_mm_min: form.thickness_mm_min ? parseFloat(form.thickness_mm_min) : null,
+    thickness_mm_max: form.thickness_mm_max ? parseFloat(form.thickness_mm_max) : null,
+    place_of_application: form.place_of_application || null,
+    recipe_type: form.recipe_type || null,
+    application_method: form.application_method || null,
+    consumption_ml_per_sqm: parseFloat(form.consumption_ml_per_sqm),
+    coats: parseInt(form.coats) || 1,
+    specific_gravity_override: form.specific_gravity_override ? parseFloat(form.specific_gravity_override) : null,
+    priority: parseInt(form.priority) || 0,
+    is_active: form.is_active,
+    notes: form.notes || null,
+  }), [form]);
 
   const handleSave = useCallback(async () => {
     if (!form.name.trim()) { setFormError('Name is required'); return; }
     if (!form.consumption_ml_per_sqm) { setFormError('Consumption ml/m² is required'); return; }
     setFormError('');
 
-    const payload: ConsumptionRuleInput = {
-      rule_number: parseInt(form.rule_number) || 0,
-      name: form.name.trim(),
-      description: form.description || null,
-      collection: form.collection || null,
-      color_collection: form.color_collection || null,
-      product_type: form.product_type || null,
-      size_id: form.size_id || null,
-      shape: form.shape || null,
-      thickness_mm_min: form.thickness_mm_min ? parseFloat(form.thickness_mm_min) : null,
-      thickness_mm_max: form.thickness_mm_max ? parseFloat(form.thickness_mm_max) : null,
-      place_of_application: form.place_of_application || null,
-      recipe_type: form.recipe_type || null,
-      application_method: form.application_method || null,
-      consumption_ml_per_sqm: parseFloat(form.consumption_ml_per_sqm),
-      coats: parseInt(form.coats) || 1,
-      specific_gravity_override: form.specific_gravity_override ? parseFloat(form.specific_gravity_override) : null,
-      priority: parseInt(form.priority) || 0,
-      is_active: form.is_active,
-      notes: form.notes || null,
-    };
-
     try {
       if (editItem) {
+        // Edit mode: single rule update
+        const payload = buildPayload(form.size_id || null);
         await updateMutation.mutateAsync({ id: editItem.id, data: payload });
+      } else if (multiSizeMode && form.size_ids.length > 0) {
+        // Multi-size mode: create one rule per size
+        let num = parseInt(form.rule_number) || 0;
+        for (const sid of form.size_ids) {
+          const sizeName = sizes.find((s) => s.id === sid)?.name ?? '';
+          const payload = buildPayload(sid);
+          payload.rule_number = num++;
+          payload.name = form.size_ids.length > 1
+            ? `${form.name.trim()} — ${sizeName}`
+            : form.name.trim();
+          await createMutation.mutateAsync(payload);
+        }
       } else {
+        // Single size or no size
+        const payload = buildPayload(form.size_id || null);
         await createMutation.mutateAsync(payload);
       }
       closeDialog();
@@ -194,7 +347,7 @@ export default function ConsumptionRulesPage() {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setFormError(detail ?? 'Save failed');
     }
-  }, [form, editItem, createMutation, updateMutation, closeDialog]);
+  }, [form, editItem, multiSizeMode, sizes, createMutation, updateMutation, closeDialog, buildPayload]);
 
   const handleDelete = useCallback(async () => {
     if (!deleteTarget) return;
@@ -206,7 +359,7 @@ export default function ConsumptionRulesPage() {
 
   const saving = createMutation.isPending || updateMutation.isPending;
 
-  /* ── Render ────────────────────────────────────────────────────── */
+  /* ── Render ────────────────────────────────────────────────── */
 
   return (
     <div className="space-y-6">
@@ -362,41 +515,61 @@ export default function ConsumptionRulesPage() {
               />
               <Select
                 label="Product Type"
-                options={PRODUCT_TYPES}
+                options={productTypeOptions}
                 value={form.product_type}
                 onChange={(e) => setForm({ ...form, product_type: e.target.value })}
               />
               <Select
                 label="Application Method"
-                options={APPLICATION_METHODS}
+                options={applicationMethodOptions}
                 value={form.application_method}
                 onChange={(e) => setForm({ ...form, application_method: e.target.value })}
               />
             </div>
             <div className="mt-3 grid grid-cols-3 gap-3">
-              <Select
-                label="Size"
-                options={[
-                  { value: '', label: '— Any —' },
-                  ...sizes.map((s) => ({
-                    value: s.id,
-                    label: `${s.name} (${s.width_mm}×${s.height_mm})`,
-                  })),
-                ]}
-                value={form.size_id}
-                onChange={(e) => setForm({ ...form, size_id: e.target.value })}
-              />
+              {/* Size: single or multi select */}
+              <div>
+                {!editItem && (
+                  <label className="mb-1 flex items-center gap-2 text-xs text-gray-500">
+                    <input
+                      type="checkbox"
+                      checked={multiSizeMode}
+                      onChange={(e) => setMultiSizeMode(e.target.checked)}
+                      className="rounded"
+                    />
+                    Multi-size (creates rule per size)
+                  </label>
+                )}
+                {multiSizeMode && !editItem ? (
+                  <MultiSelectChips
+                    label="Sizes"
+                    options={sizeOptions}
+                    selected={form.size_ids}
+                    onChange={(ids) => setForm({ ...form, size_ids: ids })}
+                  />
+                ) : (
+                  <Select
+                    label="Size"
+                    options={[
+                      { value: '', label: '— Any —' },
+                      ...sizeOptions,
+                    ]}
+                    value={form.size_id}
+                    onChange={(e) => setForm({ ...form, size_id: e.target.value })}
+                  />
+                )}
+              </div>
               <Select
                 label="Shape"
-                options={SHAPES}
+                options={shapeOptions}
                 value={form.shape}
                 onChange={(e) => setForm({ ...form, shape: e.target.value })}
               />
-              <Input
+              <Select
                 label="Place of Application"
+                options={placeOfApplicationOptions}
                 value={form.place_of_application}
                 onChange={(e) => setForm({ ...form, place_of_application: e.target.value })}
-                placeholder="e.g. top, bottom, edges"
               />
             </div>
             <div className="mt-3 grid grid-cols-3 gap-3">
@@ -414,19 +587,19 @@ export default function ConsumptionRulesPage() {
                 value={form.thickness_mm_max}
                 onChange={(e) => setForm({ ...form, thickness_mm_max: e.target.value })}
               />
-              <Input
+              <Select
                 label="Collection"
+                options={collectionOptions}
                 value={form.collection}
                 onChange={(e) => setForm({ ...form, collection: e.target.value })}
-                placeholder="e.g. Natural"
               />
             </div>
             <div className="mt-3">
-              <Input
+              <Select
                 label="Color Collection"
+                options={colorCollectionOptions}
                 value={form.color_collection}
                 onChange={(e) => setForm({ ...form, color_collection: e.target.value })}
-                placeholder="e.g. Earth Tones"
               />
             </div>
           </div>
@@ -465,6 +638,14 @@ export default function ConsumptionRulesPage() {
             </div>
           </div>
 
+          {/* Multi-size info banner */}
+          {multiSizeMode && form.size_ids.length > 1 && !editItem && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              Will create <strong>{form.size_ids.length} separate rules</strong> — one for each selected size.
+              Each rule name will have the size appended (e.g. &quot;{form.name} — 10x10&quot;).
+            </div>
+          )}
+
           {/* Row 5: Priority + Active + Notes */}
           <div className="grid grid-cols-2 gap-4">
             <Input
@@ -499,7 +680,13 @@ export default function ConsumptionRulesPage() {
               Cancel
             </Button>
             <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving...' : editItem ? 'Update' : 'Create'}
+              {saving
+                ? 'Saving...'
+                : editItem
+                  ? 'Update'
+                  : multiSizeMode && form.size_ids.length > 1
+                    ? `Create ${form.size_ids.length} Rules`
+                    : 'Create'}
             </Button>
           </div>
         </div>

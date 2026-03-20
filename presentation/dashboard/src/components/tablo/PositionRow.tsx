@@ -33,6 +33,8 @@ export interface PositionItem {
   edge_profile?: string | null;
   edge_profile_sides?: number | null;
   edge_profile_notes?: string | null;
+  width_cm?: number | null;
+  length_cm?: number | null;
 }
 
 /** Human-readable labels for place_of_application enum */

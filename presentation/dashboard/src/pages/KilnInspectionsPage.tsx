@@ -318,7 +318,7 @@ function NewInspectionForm({ factoryId, onDone }: { factoryId: string | null; on
             <label className="block text-xs font-medium text-gray-500 mb-1">Inspector</label>
             <input
               type="text"
-              value={user?.full_name || user?.email || ''}
+              value={user?.name || user?.email || ''}
               readOnly
               className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500"
             />

@@ -27,6 +27,8 @@ from api.models import (
     Task,
     DefectRecord,
     DailyTaskDistribution,
+    GlazingBoardSpec,
+    Size,
 )
 from api.enums import (
     PositionStatus,
@@ -247,6 +249,9 @@ def _collect_glazing_tasks(db: Session, factory_id: UUID, target_date: date) -> 
         if engobe_needed:
             consumption_info += " + engobe"
 
+        # ── Glazing board info ──
+        board_info = _get_board_info_for_position(db, pos, recipe)
+
         # Check if position is behind schedule
         behind_schedule = (
             pos.planned_glazing_date is not None
@@ -270,9 +275,69 @@ def _collect_glazing_tasks(db: Session, factory_id: UUID, target_date: date) -> 
             "behind_schedule": behind_schedule,
             "collection": getattr(pos, "collection", None) or "",
             "application_type": getattr(pos, "application_type", None) or "",
+            # Board info for workers
+            "board_info": board_info,
         })
 
     return tasks
+
+
+def _get_board_info_for_position(db: Session, position, recipe) -> Optional[dict]:
+    """Get glazing board info for a position: board size, tiles per board, ml per 2 boards.
+
+    Workers need to know:
+    - Which board to use (standard 122×21 or custom)
+    - How many tiles per board
+    - How many ml of glaze per 2 boards (they glaze 2 boards simultaneously)
+    """
+    try:
+        size_id = getattr(position, 'size_id', None)
+        if not size_id:
+            return None
+
+        board = db.query(GlazingBoardSpec).filter(GlazingBoardSpec.size_id == size_id).first()
+        if not board:
+            return None
+
+        # Calculate ml per 2 boards from recipe consumption rate
+        area_2boards = float(board.area_per_two_boards_m2) if board.area_per_two_boards_m2 else float(board.area_per_board_m2) * 2
+        ml_per_2boards = 0.0
+
+        if recipe:
+            ml_per_sqm = None
+            app_method = (getattr(position, 'application_method_code', None) or '').lower()
+
+            SPRAY_METHODS = {'ss', 's', 'bs', 'stencil', 'raku', 'gold'}
+            BRUSH_METHODS = {'sb', 'splashing'}
+
+            if app_method in SPRAY_METHODS and getattr(recipe, 'consumption_spray_ml_per_sqm', None):
+                ml_per_sqm = float(recipe.consumption_spray_ml_per_sqm)
+            elif app_method in BRUSH_METHODS and getattr(recipe, 'consumption_brush_ml_per_sqm', None):
+                ml_per_sqm = float(recipe.consumption_brush_ml_per_sqm)
+            elif getattr(recipe, 'consumption_spray_ml_per_sqm', None):
+                ml_per_sqm = float(recipe.consumption_spray_ml_per_sqm)
+            elif getattr(recipe, 'consumption_brush_ml_per_sqm', None):
+                ml_per_sqm = float(recipe.consumption_brush_ml_per_sqm)
+            elif recipe.glaze_settings:
+                gs_val = recipe.glaze_settings.get("consumption_ml_per_sqm")
+                if gs_val:
+                    ml_per_sqm = float(gs_val)
+
+            if ml_per_sqm:
+                ml_per_2boards = round(ml_per_sqm * area_2boards, 0)
+
+        return {
+            "board_size": f"{float(board.board_length_cm):.0f}×{float(board.board_width_cm):.0f}",
+            "board_width_cm": float(board.board_width_cm),
+            "is_standard": not board.is_custom_board,
+            "tiles_per_board": board.tiles_per_board,
+            "tiles_per_2boards": board.tiles_per_board * 2,
+            "area_per_2boards_m2": round(area_2boards, 4),
+            "ml_per_2boards": int(ml_per_2boards),
+        }
+    except Exception as e:
+        logger.warning("BOARD_INFO_FAIL | position=%s | %s", getattr(position, 'id', '?'), e)
+        return None
 
 
 def _estimate_glaze_qty_kg(position, recipe) -> Decimal:
@@ -751,6 +816,13 @@ def _format_message_id(distribution: dict) -> str:
             consumption = task.get("consumption_info", "")
             if consumption:
                 lines.append(f"   \u2022 Glasir: {consumption}")
+            # Board info for workers
+            bi = task.get("board_info")
+            if bi:
+                board_type = "standar" if bi["is_standard"] else f"khusus {bi['board_size']} cm"
+                lines.append(f"   \U0001f4d0 Papan: {board_type} | {bi['tiles_per_board']} pcs/papan")
+                if bi.get("ml_per_2boards"):
+                    lines.append(f"   \U0001f4a7 Glasir: {bi['ml_per_2boards']} ml / 2 papan ({bi['area_per_2boards_m2']:.2f} m\u00b2)")
             if i < len(glazing):
                 lines.append("")  # blank line between items
     else:
@@ -847,6 +919,12 @@ def _format_message_en(distribution: dict) -> str:
             consumption = task.get("consumption_info", "")
             if consumption:
                 lines.append(f"   \u2022 Glaze: {consumption}")
+            bi = task.get("board_info")
+            if bi:
+                board_type = "standard" if bi["is_standard"] else f"custom {bi['board_size']} cm"
+                lines.append(f"   \U0001f4d0 Board: {board_type} | {bi['tiles_per_board']} pcs/board")
+                if bi.get("ml_per_2boards"):
+                    lines.append(f"   \U0001f4a7 Glaze: {bi['ml_per_2boards']} ml / 2 boards ({bi['area_per_2boards_m2']:.2f} m\u00b2)")
             if i < len(glazing):
                 lines.append("")
     else:
@@ -940,6 +1018,12 @@ def _format_message_ru(distribution: dict) -> str:
             consumption = task.get("consumption_info", "")
             if consumption:
                 lines.append(f"   \u2022 \u0413\u043b\u0430\u0437\u0443\u0440\u044c: {consumption}")
+            bi = task.get("board_info")
+            if bi:
+                board_type = "\u0441\u0442\u0430\u043d\u0434\u0430\u0440\u0442" if bi["is_standard"] else f"\u043a\u0430\u0441\u0442\u043e\u043c {bi['board_size']} \u0441\u043c"
+                lines.append(f"   \U0001f4d0 \u0414\u043e\u0441\u043a\u0430: {board_type} | {bi['tiles_per_board']} \u0448\u0442/\u0434\u043e\u0441\u043a\u0443")
+                if bi.get("ml_per_2boards"):
+                    lines.append(f"   \U0001f4a7 \u0420\u0430\u0441\u0445\u043e\u0434: {bi['ml_per_2boards']} \u043c\u043b / 2 \u0434\u043e\u0441\u043a\u0438 ({bi['area_per_2boards_m2']:.2f} \u043c\u00b2)")
             if i < len(glazing):
                 lines.append("")
     else:

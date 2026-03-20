@@ -316,6 +316,7 @@ async def get_blocking_summary(
                 "status": _ev(t.status),
                 "description": t.description,
                 "created_at": t.created_at.isoformat() if t.created_at else None,
+                **({"metadata": t.metadata_json} if t.metadata_json else {}),
             }
             for t in related_tasks
         ]

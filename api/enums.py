@@ -28,6 +28,7 @@ class PositionStatus(str, Enum):
     AWAITING_STENCIL_SILKSCREEN = 'awaiting_stencil_silkscreen'
     AWAITING_COLOR_MATCHING = 'awaiting_color_matching'
     AWAITING_SIZE_CONFIRMATION = 'awaiting_size_confirmation'
+    AWAITING_CONSUMPTION_DATA = 'awaiting_consumption_data'
     ENGOBE_APPLIED = 'engobe_applied'
     ENGOBE_CHECK = 'engobe_check'
     GLAZED = 'glazed'
@@ -79,6 +80,7 @@ class TaskType(str, Enum):
     SIZE_RESOLUTION = 'size_resolution'
     MATERIAL_RECEIVING = 'material_receiving'
     GLAZING_BOARD_NEEDED = 'glazing_board_needed'
+    CONSUMPTION_MEASUREMENT = 'consumption_measurement'
 
 class TaskStatus(str, Enum):
     PENDING = 'pending'

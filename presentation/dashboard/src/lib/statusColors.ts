@@ -12,6 +12,7 @@ export const statusColors: Record<string, string> = {
   awaiting_stencil_silkscreen: 'bg-amber-100 text-amber-700',
   awaiting_color_matching: 'bg-amber-100 text-amber-700',
   awaiting_size_confirmation: 'bg-cyan-100 text-cyan-700',
+  awaiting_consumption_data: 'bg-teal-100 text-teal-700',
   engobe_applied: 'bg-sky-100 text-sky-700',
   engobe_check: 'bg-sky-100 text-sky-700',
   glazed: 'bg-blue-100 text-blue-700',

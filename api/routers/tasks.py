@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
-from api.models import Task, User, ProductionOrder, OrderPosition, ProductionOrderItem, Factory, Size, GlazingBoardSpec
+from api.models import Task, User, ProductionOrder, OrderPosition, ProductionOrderItem, Factory, Size, GlazingBoardSpec, Recipe
 from api.enums import TaskStatus, TaskType, PositionStatus, UserRole
 
 router = APIRouter()
@@ -536,4 +536,120 @@ async def resolve_size(
         "created_new_size": data.create_new_size,
         "reservation": reservation_result,
         "glazing_board": glazing_board_result,
+    }
+
+
+# ── Resolve Consumption Measurement Task ────────────────────
+
+class ConsumptionResolutionInput(BaseModel):
+    spray_ml_per_sqm: Optional[float] = None
+    brush_ml_per_sqm: Optional[float] = None
+
+
+@router.post("/{task_id}/resolve-consumption")
+async def resolve_consumption(
+    task_id: UUID,
+    data: ConsumptionResolutionInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """PM resolves consumption measurement: enters measured rate(s) for recipe."""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(404, "Task not found")
+
+    if _ev(task.type) != "consumption_measurement":
+        raise HTTPException(400, "Task is not a consumption_measurement task")
+
+    if _ev(task.status) == "done":
+        raise HTTPException(400, "Task is already resolved")
+
+    now = datetime.now(timezone.utc)
+    meta = task.metadata_json if isinstance(task.metadata_json, dict) else {}
+    if isinstance(task.metadata_json, str):
+        import json as _json
+        try:
+            meta = _json.loads(task.metadata_json)
+        except Exception:
+            meta = {}
+
+    missing_rates = meta.get("missing_rates", [])
+
+    # Validate that at least one required rate is provided
+    if "spray" in missing_rates and not data.spray_ml_per_sqm:
+        raise HTTPException(400, "spray_ml_per_sqm is required (was missing)")
+    if "brush" in missing_rates and not data.brush_ml_per_sqm:
+        raise HTTPException(400, "brush_ml_per_sqm is required (was missing)")
+
+    # Find and update recipe
+    recipe_id = meta.get("recipe_id")
+    if not recipe_id:
+        raise HTTPException(400, "No recipe_id in task metadata")
+
+    recipe = db.query(Recipe).filter(Recipe.id == UUID(recipe_id)).first()
+    if not recipe:
+        raise HTTPException(404, f"Recipe {recipe_id} not found")
+
+    updated_fields = []
+    if data.spray_ml_per_sqm:
+        from decimal import Decimal
+        recipe.consumption_spray_ml_per_sqm = Decimal(str(data.spray_ml_per_sqm))
+        updated_fields.append(f"spray={data.spray_ml_per_sqm}")
+    if data.brush_ml_per_sqm:
+        from decimal import Decimal
+        recipe.consumption_brush_ml_per_sqm = Decimal(str(data.brush_ml_per_sqm))
+        updated_fields.append(f"brush={data.brush_ml_per_sqm}")
+
+    # Find related position and unblock
+    position = db.query(OrderPosition).filter(
+        OrderPosition.id == task.related_position_id
+    ).first()
+
+    if position and _ev(position.status) == "awaiting_consumption_data":
+        position.status = PositionStatus.PLANNED
+        position.updated_at = now
+
+    # Close task
+    task.status = TaskStatus.DONE
+    task.completed_at = now
+    task.updated_at = now
+    task.metadata_json = {
+        **meta,
+        "resolution": "consumption_measured",
+        "spray_ml_per_sqm": data.spray_ml_per_sqm,
+        "brush_ml_per_sqm": data.brush_ml_per_sqm,
+        "resolved_by": str(current_user.id),
+        "resolved_at": now.isoformat(),
+    }
+
+    # Trigger material reservation for the unblocked position
+    reservation_result = None
+    if position and _ev(position.status) == "planned" and position.recipe_id:
+        try:
+            from business.services.material_reservation import (
+                reserve_materials_for_position,
+            )
+            result = reserve_materials_for_position(db, position, recipe, position.factory_id)
+            if result.shortages:
+                position.status = PositionStatus.INSUFFICIENT_MATERIALS
+                reservation_result = {
+                    "status": "insufficient_materials",
+                    "shortages": len(result.shortages),
+                }
+            else:
+                reservation_result = {"status": "reserved"}
+        except Exception as e:
+            import logging
+            logging.getLogger("moonjar.tasks").warning(
+                "Material reservation after consumption resolution failed: %s", e
+            )
+
+    db.commit()
+
+    return {
+        "task_status": "done",
+        "recipe_id": recipe_id,
+        "updated_fields": updated_fields,
+        "position_status": _ev(position.status) if position else None,
+        "reservation": reservation_result,
     }

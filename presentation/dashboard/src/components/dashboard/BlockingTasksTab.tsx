@@ -23,6 +23,7 @@ const STATUS_LABELS: Record<string, string> = {
   awaiting_stencil_silkscreen: 'Stencil / Silkscreen',
   awaiting_color_matching: 'Color Matching',
   awaiting_size_confirmation: 'Awaiting Size',
+  awaiting_consumption_data: 'Consumption Measurement',
   blocked_by_qm: 'QM Block',
 };
 
@@ -32,6 +33,7 @@ const STATUS_BADGE_COLORS: Record<string, string> = {
   awaiting_stencil_silkscreen: 'bg-amber-100 text-amber-800 border-amber-200',
   awaiting_color_matching: 'bg-orange-100 text-orange-800 border-orange-200',
   awaiting_size_confirmation: 'bg-cyan-100 text-cyan-800 border-cyan-200',
+  awaiting_consumption_data: 'bg-teal-100 text-teal-800 border-teal-200',
   blocked_by_qm: 'bg-pink-100 text-pink-800 border-pink-200',
 };
 
@@ -41,6 +43,7 @@ const KPI_ICONS: Record<string, string> = {
   awaiting_stencil_silkscreen: '🖼',
   awaiting_color_matching: '🎨',
   awaiting_size_confirmation: '📏',
+  awaiting_consumption_data: '🧪',
   blocked_by_qm: '🔍',
 };
 

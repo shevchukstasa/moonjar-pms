@@ -215,6 +215,9 @@ def _ensure_schema():
         # Purchaser lifecycle — expanded status values
         ("purchase_status", "in_transit"),
         ("purchase_status", "closed"),
+        # Consumption measurement: PM needs to measure consumption rate
+        ("position_status", "awaiting_consumption_data"),
+        ("task_type", "consumption_measurement"),
     ]
     try:
         raw_conn = engine.raw_connection()

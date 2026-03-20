@@ -543,6 +543,14 @@ def process_order_item(
     # Check blocking tasks (stencil, silkscreen, color matching)
     check_blocking_tasks(db, order, position, item)
 
+    # ── Consumption rate check ──────────────────────────────────
+    # For each application method (e.g. BS = Brush engobe + Spray glaze),
+    # verify the recipe has the required consumption rate.
+    # If missing → create a blocking task for PM to measure.
+    _consumption_blocked = _check_consumption_rates(db, order, position, recipe)
+    if _consumption_blocked:
+        return position  # skip material reservation until rate is measured
+
     # Size resolution — match position dimensions against sizes reference table.
     # Must happen BEFORE material reservation because we need to know which stone
     # to reserve. If size can't be determined, block the position.
@@ -692,6 +700,120 @@ def process_order_item(
             create_auto_purchase_request(db, order.factory_id, truly_missing, order)
 
     return position
+
+
+# ────────────────────────────────────────────────────────────────
+# §2b  Consumption rate check
+# ────────────────────────────────────────────────────────────────
+
+# Which consumption rates are required for each application method.
+# Key letters: S=spray, B=brush.
+# E.g. BS = first letter B (engobe brush), second letter S (glaze spray)
+# → needs both brush and spray rates.
+_METHOD_REQUIRED_RATES: dict[str, list[str]] = {
+    'ss': ['spray'],                # spray engobe + spray glaze → spray
+    's':  ['spray'],                # spray glaze only → spray
+    'bs': ['brush', 'spray'],       # brush engobe + spray glaze
+    'sb': ['spray', 'brush'],       # spray engobe + brush glaze
+    'splashing': ['spray'],         # spray + splash
+    'stencil': ['spray'],           # spray through stencil
+    'silk_screen': ['spray'],       # spray + silk screen
+    'gold': ['spray', 'brush'],     # 1st firing SS, 2nd brush gold
+    'raku': ['spray'],              # spray, raku kiln
+}
+
+
+def _check_consumption_rates(
+    db: Session,
+    order,
+    position,
+    recipe,
+) -> bool:
+    """Check if recipe has required consumption rates for the position's method.
+
+    Returns True if the position was blocked (missing rates), False if OK.
+    """
+    if not recipe:
+        return False  # no recipe → already handled above
+
+    method = getattr(position, 'application_method_code', None)
+    if not method:
+        return False  # no method set → nothing to check
+
+    required = _METHOD_REQUIRED_RATES.get(method.strip().lower(), [])
+    if not required:
+        return False
+
+    missing_methods: list[str] = []
+    for rate_type in required:
+        if rate_type == 'spray' and not recipe.consumption_spray_ml_per_sqm:
+            missing_methods.append('spray')
+        elif rate_type == 'brush' and not recipe.consumption_brush_ml_per_sqm:
+            missing_methods.append('brush')
+
+    if not missing_methods:
+        return False  # all rates present
+
+    # Deduplicate (e.g. 'spray' might appear once only)
+    missing_methods = list(dict.fromkeys(missing_methods))
+
+    missing_label = ' & '.join(m.capitalize() for m in missing_methods)
+    recipe_name = getattr(recipe, 'name', 'Unknown')
+
+    logger.warning(
+        "CONSUMPTION_MISSING | order=%s position=%s | recipe=%s method=%s "
+        "missing=[%s]",
+        order.order_number, position.id, recipe_name, method,
+        ', '.join(missing_methods),
+    )
+
+    # Block position if still PLANNED
+    if position.status == PositionStatus.PLANNED:
+        position.status = PositionStatus.AWAITING_CONSUMPTION_DATA
+
+    # Create blocking task for PM
+    task = Task(
+        factory_id=order.factory_id,
+        type=TaskType.CONSUMPTION_MEASUREMENT,
+        status=TaskStatus.PENDING,
+        assigned_role=UserRole.PRODUCTION_MANAGER,
+        related_order_id=order.id,
+        related_position_id=position.id,
+        blocking=True,
+        description=(
+            f"Measure {missing_label} consumption rate for \"{recipe_name}\" "
+            f"(method: {method.upper()})"
+        ),
+        metadata_json=__import__('json').dumps({
+            "recipe_id": str(recipe.id),
+            "recipe_name": recipe_name,
+            "application_method": method,
+            "missing_rates": missing_methods,
+            "order_number": order.order_number,
+            "position_color": position.color,
+            "position_size": position.size,
+        }),
+    )
+    db.add(task)
+    db.flush()
+
+    # Notify PM
+    from business.services.notifications import notify_pm
+    notify_pm(
+        db=db,
+        factory_id=order.factory_id,
+        type="task_assigned",
+        title=f"Consumption measurement needed: {recipe_name}",
+        message=(
+            f"Order {order.order_number}: recipe \"{recipe_name}\" is missing "
+            f"{missing_label} consumption rate (method {method.upper()}). "
+            f"Please measure and enter the rate."
+        ),
+        related_entity_type="position",
+        related_entity_id=position.id,
+    )
+
+    return True
 
 
 # ────────────────────────────────────────────────────────────────

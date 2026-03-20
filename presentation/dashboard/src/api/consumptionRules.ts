@@ -16,7 +16,7 @@ export interface ConsumptionRuleItem {
   place_of_application: string | null;
   recipe_type: string | null;
   application_method: string | null;
-  consumption_ml_per_sqm: number;
+  consumption_ml_per_sqm: number | null;
   coats: number;
   specific_gravity_override: number | null;
   priority: number;
@@ -40,7 +40,7 @@ export interface ConsumptionRuleInput {
   place_of_application?: string | null;
   recipe_type?: string | null;
   application_method?: string | null;
-  consumption_ml_per_sqm: number;
+  consumption_ml_per_sqm?: number | null;
   coats?: number;
   specific_gravity_override?: number | null;
   priority?: number;

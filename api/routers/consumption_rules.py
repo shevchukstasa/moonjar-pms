@@ -32,7 +32,7 @@ class ConsumptionRuleInput(BaseModel):
     place_of_application: Optional[str] = None
     recipe_type: Optional[str] = None
     application_method: Optional[str] = None
-    consumption_ml_per_sqm: float
+    consumption_ml_per_sqm: Optional[float] = None  # optional override, rates come from recipe
     coats: int = 1
     specific_gravity_override: Optional[float] = None
     priority: int = 0
@@ -84,7 +84,7 @@ def _serialize_rule(r: ConsumptionRule) -> dict:
         "place_of_application": r.place_of_application,
         "recipe_type": r.recipe_type,
         "application_method": r.application_method,
-        "consumption_ml_per_sqm": float(r.consumption_ml_per_sqm),
+        "consumption_ml_per_sqm": float(r.consumption_ml_per_sqm) if r.consumption_ml_per_sqm else None,
         "coats": r.coats,
         "specific_gravity_override": float(r.specific_gravity_override) if r.specific_gravity_override else None,
         "priority": r.priority,

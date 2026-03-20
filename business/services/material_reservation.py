@@ -224,6 +224,11 @@ def _calculate_required(rm, position, recipe=None) -> Decimal:
         getattr(position, 'application_method_code', None) or ''
     ).lower().strip()
 
+    # ConsumptionRule can override the application method
+    cr = getattr(position, '_consumption_rule', None)
+    if cr and cr.application_method:
+        method_code = cr.application_method.lower().strip()
+
     def _get_method_rate() -> Optional[Decimal]:
         """Try to get a method-specific rate from RecipeMaterial columns.
 

@@ -1947,8 +1947,8 @@ class ConsumptionRule(Base):
     recipe_type = Column(sa.String(20))          # glaze / engobe
     application_method = Column(sa.String(20))   # spray / brush
 
-    # Output: how much material per m²
-    consumption_ml_per_sqm = Column(sa.Numeric(10, 2), nullable=False)
+    # Output: how much material per m² (optional override — rates normally come from recipe)
+    consumption_ml_per_sqm = Column(sa.Numeric(10, 2), nullable=True)
     # Number of coats (layers)
     coats = Column(sa.Integer, nullable=False, default=1)
     # Specific gravity override (if different from recipe default)

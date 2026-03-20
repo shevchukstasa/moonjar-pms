@@ -18,14 +18,25 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 
-/* ── Constants (only for recipe_type which is truly static) ──── */
+/* ── Constants ──────────────────────────────────────────────── */
 
 const RECIPE_TYPES = [
-  { value: '', label: '— Any —' },
+  { value: '', label: '-- Any --' },
   { value: 'glaze', label: 'Glaze' },
   { value: 'engobe', label: 'Engobe' },
-  { value: 'both', label: 'Both (Engobe + Glaze)' },
 ];
+
+const APPLICATION_METHOD_DESCRIPTIONS: Record<string, string> = {
+  ss: 'Spray engobe + Spray glaze -- rates from recipe spray fields',
+  s: 'Spray glaze only (no engobe) -- rate from recipe spray field',
+  bs: 'Brush engobe + Spray glaze -- rates from recipe',
+  sb: 'Spray engobe + Brush glaze -- rates from recipe',
+  splashing: 'Splashing method -- rate from recipe splash field',
+  silk_screen: 'Silk screen method -- rate from recipe silk screen field',
+  stencil: 'Stencil method -- rate from recipe spray field',
+  raku: 'Raku method -- rate from recipe spray field',
+  gold: 'Gold application -- rate from recipe spray field',
+};
 
 /* ── Multi-select chip component ──────────────────────────────── */
 
@@ -133,9 +144,7 @@ interface RuleForm {
   recipe_type: string;
   application_method: string;
   consumption_ml_per_sqm: string;
-  engobe_ml_per_sqm: string;  // used when recipe_type='both'
   coats: string;
-  engobe_coats: string;
   specific_gravity_override: string;
   priority: string;
   is_active: boolean;
@@ -158,9 +167,7 @@ const emptyForm: RuleForm = {
   recipe_type: '',
   application_method: '',
   consumption_ml_per_sqm: '',
-  engobe_ml_per_sqm: '',
   coats: '1',
-  engobe_coats: '1',
   specific_gravity_override: '',
   priority: '0',
   is_active: true,
@@ -194,22 +201,22 @@ export default function ConsumptionRulesPage() {
 
   // Build dropdown options from DB
   const productTypeOptions = useMemo(() => [
-    { value: '', label: '— Any —' },
+    { value: '', label: '-- Any --' },
     ...(refData?.product_types?.map((t) => ({ value: t.value, label: t.label })) ?? []),
   ], [refData]);
 
   const shapeOptions = useMemo(() => [
-    { value: '', label: '— Any —' },
+    { value: '', label: '-- Any --' },
     ...(refData?.shape_types?.map((t) => ({ value: t.value, label: t.label })) ?? []),
   ], [refData]);
 
   const applicationMethodOptions = useMemo(() => [
-    { value: '', label: '— Any —' },
+    { value: '', label: '-- Select method --' },
     ...(appMethods?.map((m) => ({ value: m.code, label: `${m.name} (${m.code.toUpperCase()})` })) ?? []),
   ], [appMethods]);
 
   const collectionOptions = useMemo(() => [
-    { value: '', label: '— Any —' },
+    { value: '', label: '-- Any --' },
     ...(collectionsData?.map((c) => ({ value: c.value, label: c.label })) ?? []),
   ], [collectionsData]);
 
@@ -218,7 +225,7 @@ export default function ConsumptionRulesPage() {
     const vals = new Set<string>();
     rules?.forEach((r) => { if (r.color_collection) vals.add(r.color_collection); });
     return [
-      { value: '', label: '— Any —' },
+      { value: '', label: '-- Any --' },
       ...Array.from(vals).sort().map((v) => ({ value: v, label: v })),
       { value: 'Collection 2025/2026', label: 'Collection 2025/2026' },
       { value: 'Custom', label: 'Custom' },
@@ -226,7 +233,7 @@ export default function ConsumptionRulesPage() {
   }, [rules]);
 
   const placeOfApplicationOptions = useMemo(() => [
-    { value: '', label: '— Any —' },
+    { value: '', label: '-- Any --' },
     { value: 'face_only', label: 'Face only' },
     { value: 'edges_1', label: 'Edges (1 side)' },
     { value: 'edges_2', label: 'Edges (2 sides)' },
@@ -237,7 +244,7 @@ export default function ConsumptionRulesPage() {
   const sizeOptions = useMemo(() =>
     sizes.map((s) => ({
       value: s.id,
-      label: `${s.name} (${s.width_mm}×${s.height_mm})`,
+      label: `${s.name} (${s.width_mm}x${s.height_mm})`,
     })),
   [sizes]);
 
@@ -247,6 +254,7 @@ export default function ConsumptionRulesPage() {
   const [formError, setFormError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<ConsumptionRuleItem | null>(null);
   const [multiSizeMode, setMultiSizeMode] = useState(false);
+  const [showRateOverride, setShowRateOverride] = useState(false);
 
   /* ── Helpers ───────────────────────────────────────────────── */
 
@@ -258,11 +266,14 @@ export default function ConsumptionRulesPage() {
     setForm({ ...emptyForm, rule_number: String(nextNum) });
     setFormError('');
     setMultiSizeMode(false);
+    setShowRateOverride(false);
     setDialogOpen(true);
   }, [rules]);
 
   const openEdit = useCallback((item: ConsumptionRuleItem) => {
     setEditItem(item);
+    const hasOverride = item.consumption_ml_per_sqm != null;
+    setShowRateOverride(hasOverride);
     setForm({
       rule_number: String(item.rule_number),
       name: item.name,
@@ -278,12 +289,10 @@ export default function ConsumptionRulesPage() {
       place_of_application: item.place_of_application ?? '',
       recipe_type: item.recipe_type ?? '',
       application_method: item.application_method ?? '',
-      consumption_ml_per_sqm: String(item.consumption_ml_per_sqm),
+      consumption_ml_per_sqm: item.consumption_ml_per_sqm != null ? String(item.consumption_ml_per_sqm) : '',
       coats: String(item.coats),
       specific_gravity_override: item.specific_gravity_override != null ? String(item.specific_gravity_override) : '',
       priority: String(item.priority),
-      engobe_ml_per_sqm: '',
-      engobe_coats: '1',
       is_active: item.is_active,
       notes: item.notes ?? '',
     });
@@ -298,6 +307,7 @@ export default function ConsumptionRulesPage() {
     setForm(emptyForm);
     setFormError('');
     setMultiSizeMode(false);
+    setShowRateOverride(false);
   }, []);
 
   const buildPayload = useCallback((sizeId: string | null): ConsumptionRuleInput => ({
@@ -314,71 +324,41 @@ export default function ConsumptionRulesPage() {
     place_of_application: form.place_of_application || null,
     recipe_type: form.recipe_type || null,
     application_method: form.application_method || null,
-    consumption_ml_per_sqm: parseFloat(form.consumption_ml_per_sqm),
+    consumption_ml_per_sqm: showRateOverride && form.consumption_ml_per_sqm
+      ? parseFloat(form.consumption_ml_per_sqm)
+      : null,
     coats: parseInt(form.coats) || 1,
-    specific_gravity_override: form.specific_gravity_override ? parseFloat(form.specific_gravity_override) : null,
+    specific_gravity_override: showRateOverride && form.specific_gravity_override
+      ? parseFloat(form.specific_gravity_override)
+      : null,
     priority: parseInt(form.priority) || 0,
     is_active: form.is_active,
     notes: form.notes || null,
-  }), [form]);
+  }), [form, showRateOverride]);
 
   const handleSave = useCallback(async () => {
     if (!form.name.trim()) { setFormError('Name is required'); return; }
-
-    const isBothMode = form.recipe_type === 'both';
-    if (!form.consumption_ml_per_sqm) { setFormError('Glaze ml/m² is required'); return; }
-    if (isBothMode && !form.engobe_ml_per_sqm) { setFormError('Engobe ml/m² is required'); return; }
+    if (!form.application_method) { setFormError('Application method is required'); return; }
     setFormError('');
-
-    // Helper: create rules for a given size (or null)
-    const createForSize = async (sizeId: string | null, ruleNum: number, nameSuffix: string) => {
-      if (isBothMode) {
-        // Create glaze rule
-        const glazePayload = buildPayload(sizeId);
-        glazePayload.recipe_type = 'glaze';
-        glazePayload.rule_number = ruleNum;
-        glazePayload.name = `${form.name.trim()}${nameSuffix} — Glaze`;
-        await createMutation.mutateAsync(glazePayload);
-
-        // Create engobe rule
-        const engobePayload = buildPayload(sizeId);
-        engobePayload.recipe_type = 'engobe';
-        engobePayload.rule_number = ruleNum + 1;
-        engobePayload.name = `${form.name.trim()}${nameSuffix} — Engobe`;
-        engobePayload.consumption_ml_per_sqm = parseFloat(form.engobe_ml_per_sqm);
-        engobePayload.coats = parseInt(form.engobe_coats) || 1;
-        engobePayload.specific_gravity_override = null; // engobe SG from recipe
-        await createMutation.mutateAsync(engobePayload);
-
-        return 2; // created 2 rules
-      } else {
-        const payload = buildPayload(sizeId);
-        payload.rule_number = ruleNum;
-        if (nameSuffix) payload.name = `${form.name.trim()}${nameSuffix}`;
-        await createMutation.mutateAsync(payload);
-        return 1;
-      }
-    };
 
     try {
       if (editItem) {
-        // Edit mode: single rule update (no "both" split on edit)
         const payload = buildPayload(form.size_id || null);
-        if (isBothMode) payload.recipe_type = 'glaze'; // edit saves as glaze
         await updateMutation.mutateAsync({ id: editItem.id, data: payload });
       } else if (multiSizeMode && form.size_ids.length > 0) {
-        // Multi-size mode: create rules per size (× 2 if "both")
         let num = parseInt(form.rule_number) || 0;
         for (const sid of form.size_ids) {
           const sizeName = sizes.find((s) => s.id === sid)?.name ?? '';
-          const suffix = form.size_ids.length > 1 ? ` — ${sizeName}` : '';
-          const created = await createForSize(sid, num, suffix);
-          num += created;
+          const suffix = form.size_ids.length > 1 ? ` -- ${sizeName}` : '';
+          const payload = buildPayload(sid);
+          payload.rule_number = num;
+          if (suffix) payload.name = `${form.name.trim()}${suffix}`;
+          await createMutation.mutateAsync(payload);
+          num += 1;
         }
       } else {
-        // Single size or no size
-        const num = parseInt(form.rule_number) || 0;
-        await createForSize(form.size_id || null, num, '');
+        const payload = buildPayload(form.size_id || null);
+        await createMutation.mutateAsync(payload);
       }
       closeDialog();
     } catch (err: unknown) {
@@ -397,6 +377,11 @@ export default function ConsumptionRulesPage() {
 
   const saving = createMutation.isPending || updateMutation.isPending;
 
+  // Get method description for the currently selected method
+  const selectedMethodDesc = form.application_method
+    ? APPLICATION_METHOD_DESCRIPTIONS[form.application_method.toLowerCase()] ?? null
+    : null;
+
   /* ── Render ────────────────────────────────────────────────── */
 
   return (
@@ -405,7 +390,8 @@ export default function ConsumptionRulesPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Consumption Rules</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Define how glaze and engobe consumption (ml/m²) is calculated based on product characteristics
+            Define application method and optional rate overrides based on product characteristics.
+            Rates come from recipes by default.
           </p>
         </div>
         <div className="flex gap-2">
@@ -439,7 +425,7 @@ export default function ConsumptionRulesPage() {
                 <th className="px-3 py-2">Thickness (mm)</th>
                 <th className="px-3 py-2">Application</th>
                 <th className="px-3 py-2">Place</th>
-                <th className="px-3 py-2 text-right">ml/m²</th>
+                <th className="px-3 py-2 text-right">ml/m2</th>
                 <th className="px-3 py-2 text-right">Coats</th>
                 <th className="px-3 py-2 text-right">SG Override</th>
                 <th className="px-3 py-2">Status</th>
@@ -456,25 +442,33 @@ export default function ConsumptionRulesPage() {
                       <div className="text-xs text-gray-400 line-clamp-1">{r.description}</div>
                     )}
                   </td>
-                  <td className="px-3 py-2 capitalize">{r.recipe_type || '—'}</td>
-                  <td className="px-3 py-2">{r.product_type || '—'}</td>
+                  <td className="px-3 py-2 capitalize">{r.recipe_type || '--'}</td>
+                  <td className="px-3 py-2">{r.product_type || '--'}</td>
                   <td className="px-3 py-2">
-                    <div>{r.size_name || '—'}</div>
+                    <div>{r.size_name || '--'}</div>
                     {r.shape && <div className="text-xs text-gray-400">{r.shape}</div>}
                   </td>
                   <td className="px-3 py-2 font-mono text-xs">
                     {r.thickness_mm_min != null || r.thickness_mm_max != null
-                      ? `${r.thickness_mm_min ?? '—'}–${r.thickness_mm_max ?? '—'}`
-                      : '—'}
+                      ? `${r.thickness_mm_min ?? '--'}--${r.thickness_mm_max ?? '--'}`
+                      : '--'}
                   </td>
-                  <td className="px-3 py-2 capitalize">{r.application_method || '—'}</td>
-                  <td className="px-3 py-2">{r.place_of_application || '—'}</td>
-                  <td className="px-3 py-2 text-right font-mono font-semibold text-blue-700">
-                    {r.consumption_ml_per_sqm}
+                  <td className="px-3 py-2">
+                    <span className="font-mono font-semibold uppercase text-indigo-700">
+                      {r.application_method || '--'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">{r.place_of_application || '--'}</td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {r.consumption_ml_per_sqm != null ? (
+                      <span className="font-semibold text-blue-700">{r.consumption_ml_per_sqm}</span>
+                    ) : (
+                      <span className="text-gray-400 text-xs">from recipe</span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right">{r.coats}</td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {r.specific_gravity_override ?? '—'}
+                    {r.specific_gravity_override ?? '--'}
                   </td>
                   <td className="px-3 py-2">
                     <Badge
@@ -526,7 +520,7 @@ export default function ConsumptionRulesPage() {
                 label="Name *"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="e.g. Glaze spray — standard tile 30x60"
+                placeholder="e.g. SS standard tile 30x60"
               />
             </div>
           </div>
@@ -558,10 +552,10 @@ export default function ConsumptionRulesPage() {
                 onChange={(e) => setForm({ ...form, product_type: e.target.value })}
               />
               <Select
-                label="Application Method"
-                options={applicationMethodOptions}
-                value={form.application_method}
-                onChange={(e) => setForm({ ...form, application_method: e.target.value })}
+                label="Place of Application"
+                options={placeOfApplicationOptions}
+                value={form.place_of_application}
+                onChange={(e) => setForm({ ...form, place_of_application: e.target.value })}
               />
             </div>
             <div className="mt-3 grid grid-cols-3 gap-3">
@@ -589,7 +583,7 @@ export default function ConsumptionRulesPage() {
                   <Select
                     label="Size"
                     options={[
-                      { value: '', label: '— Any —' },
+                      { value: '', label: '-- Any --' },
                       ...sizeOptions,
                     ]}
                     value={form.size_id}
@@ -604,10 +598,10 @@ export default function ConsumptionRulesPage() {
                 onChange={(e) => setForm({ ...form, shape: e.target.value })}
               />
               <Select
-                label="Place of Application"
-                options={placeOfApplicationOptions}
-                value={form.place_of_application}
-                onChange={(e) => setForm({ ...form, place_of_application: e.target.value })}
+                label="Collection"
+                options={collectionOptions}
+                value={form.collection}
+                onChange={(e) => setForm({ ...form, collection: e.target.value })}
               />
             </div>
             <div className="mt-3 grid grid-cols-3 gap-3">
@@ -626,14 +620,6 @@ export default function ConsumptionRulesPage() {
                 onChange={(e) => setForm({ ...form, thickness_mm_max: e.target.value })}
               />
               <Select
-                label="Collection"
-                options={collectionOptions}
-                value={form.collection}
-                onChange={(e) => setForm({ ...form, collection: e.target.value })}
-              />
-            </div>
-            <div className="mt-3">
-              <Select
                 label="Color Collection"
                 options={colorCollectionOptions}
                 value={form.color_collection}
@@ -642,71 +628,67 @@ export default function ConsumptionRulesPage() {
             </div>
           </div>
 
-          {/* Row 4: Consumption values */}
+          {/* Row 4: Consumption Calculation — Application Method + optional overrides */}
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
             <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-blue-600">
               Consumption Calculation
             </h3>
 
-            {form.recipe_type === 'both' ? (
-              <>
-                {/* Glaze section */}
-                <p className="mb-1 text-xs font-semibold text-blue-700">Glaze</p>
-                <div className="mb-3 grid grid-cols-3 gap-3">
-                  <Input
-                    label="Glaze ml/m² *"
-                    type="number"
-                    step="0.01"
-                    value={form.consumption_ml_per_sqm}
-                    onChange={(e) => setForm({ ...form, consumption_ml_per_sqm: e.target.value })}
-                    placeholder="e.g. 850"
-                  />
-                  <Input
-                    label="Glaze Coats"
-                    type="number"
-                    min="1"
-                    value={form.coats}
-                    onChange={(e) => setForm({ ...form, coats: e.target.value })}
-                  />
-                  <Input
-                    label="Glaze SG Override"
-                    type="number"
-                    step="0.001"
-                    value={form.specific_gravity_override}
-                    onChange={(e) => setForm({ ...form, specific_gravity_override: e.target.value })}
-                    placeholder="Leave empty for recipe SG"
-                  />
-                </div>
-                {/* Engobe section */}
-                <p className="mb-1 text-xs font-semibold text-green-700">Engobe</p>
-                <div className="grid grid-cols-3 gap-3">
-                  <Input
-                    label="Engobe ml/m² *"
-                    type="number"
-                    step="0.01"
-                    value={form.engobe_ml_per_sqm}
-                    onChange={(e) => setForm({ ...form, engobe_ml_per_sqm: e.target.value })}
-                    placeholder="e.g. 600"
-                  />
-                  <Input
-                    label="Engobe Coats"
-                    type="number"
-                    min="1"
-                    value={form.engobe_coats}
-                    onChange={(e) => setForm({ ...form, engobe_coats: e.target.value })}
-                  />
-                  <div className="flex items-end pb-1 text-xs text-gray-400">
-                    SG from engobe recipe
-                  </div>
-                </div>
-                <p className="mt-2 text-xs text-blue-600">
-                  Two rules will be created: one for glaze and one for engobe, with shared matching criteria.
+            {/* Application Method — THE KEY FIELD */}
+            <div className="mb-3">
+              <Select
+                label="Application Method *"
+                options={applicationMethodOptions}
+                value={form.application_method}
+                onChange={(e) => setForm({ ...form, application_method: e.target.value })}
+              />
+              {selectedMethodDesc && (
+                <p className="mt-1 text-xs text-blue-700">{selectedMethodDesc}</p>
+              )}
+              {!form.application_method && (
+                <p className="mt-1 text-xs text-gray-500">
+                  The application method determines which rates from the recipe are used
+                  (spray, brush, etc.) for engobe and glaze.
                 </p>
-              </>
-            ) : (
-              <div className="grid grid-cols-3 gap-3">
+              )}
+            </div>
+
+            {/* Coats — always visible */}
+            <div className="mb-3 w-1/3">
+              <Input
+                label="Coats"
+                type="number"
+                min="1"
+                value={form.coats}
+                onChange={(e) => setForm({ ...form, coats: e.target.value })}
+              />
+            </div>
+
+            {/* Override toggle */}
+            <div className="mt-3 border-t border-blue-200 pt-3">
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={showRateOverride}
+                  onChange={(e) => {
+                    setShowRateOverride(e.target.checked);
+                    if (!e.target.checked) {
+                      setForm({ ...form, consumption_ml_per_sqm: '', specific_gravity_override: '' });
+                    }
+                  }}
+                  className="rounded"
+                />
+                Override recipe rates (advanced)
+              </label>
+              <p className="mt-1 text-xs text-gray-400">
+                Only use this for special cases where recipe rates do not apply.
+              </p>
+            </div>
+
+            {showRateOverride && (
+              <div className="mt-3 grid grid-cols-2 gap-3 rounded border border-amber-200 bg-amber-50 p-3">
                 <Input
-                  label="ml per m² *"
+                  label="ml/m2 override"
                   type="number"
                   step="0.01"
                   value={form.consumption_ml_per_sqm}
@@ -714,14 +696,7 @@ export default function ConsumptionRulesPage() {
                   placeholder="e.g. 850"
                 />
                 <Input
-                  label="Coats"
-                  type="number"
-                  min="1"
-                  value={form.coats}
-                  onChange={(e) => setForm({ ...form, coats: e.target.value })}
-                />
-                <Input
-                  label="SG Override"
+                  label="SG override"
                   type="number"
                   step="0.001"
                   value={form.specific_gravity_override}
@@ -735,20 +710,9 @@ export default function ConsumptionRulesPage() {
           </div>
 
           {/* Info banners */}
-          {!editItem && (multiSizeMode && form.size_ids.length > 1 || form.recipe_type === 'both') && (
+          {!editItem && multiSizeMode && form.size_ids.length > 1 && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-              {(() => {
-                const sizeCount = multiSizeMode ? form.size_ids.length : 1;
-                const perSize = form.recipe_type === 'both' ? 2 : 1;
-                const total = sizeCount * perSize;
-                return (
-                  <>
-                    Will create <strong>{total} rule{total > 1 ? 's' : ''}</strong>
-                    {multiSizeMode && form.size_ids.length > 1 && <> ({form.size_ids.length} sizes)</>}
-                    {form.recipe_type === 'both' && <> (× 2: glaze + engobe)</>}
-                  </>
-                );
-              })()}
+              Will create <strong>{form.size_ids.length} rules</strong> ({form.size_ids.length} sizes)
             </div>
           )}
 

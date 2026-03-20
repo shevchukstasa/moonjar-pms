@@ -1695,6 +1695,19 @@ def _ensure_schema():
 
     _run_section("seed_tps_parameters", _seed_tps_parameters)
 
+    # --- Section: Make consumption_rules.consumption_ml_per_sqm nullable ---
+    def _consumption_rules_nullable_ml(conn):
+        """consumption_ml_per_sqm is now optional — rates come from recipe by default."""
+        try:
+            conn.execute(text(
+                "ALTER TABLE consumption_rules ALTER COLUMN consumption_ml_per_sqm DROP NOT NULL"
+            ))
+            logger.info("_consumption_rules_nullable_ml: made consumption_ml_per_sqm nullable")
+        except Exception:
+            pass  # already nullable
+
+    _run_section("consumption_rules_nullable_ml", _consumption_rules_nullable_ml)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""

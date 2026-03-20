@@ -1,10 +1,14 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useBlockingSummary } from '@/hooks/usePositions';
+import { positionsApi } from '@/api/positions';
+import { recipesApi, type RecipeItem } from '@/api/recipes';
 import { Card } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { ForceUnblockDialog } from './ForceUnblockDialog';
 import { MaterialReservationsPanel } from './MaterialReservationsPanel';
 import type { BlockedPositionInfo } from '@/api/positions';
@@ -55,6 +59,7 @@ export function BlockingTasksTab({ factoryId }: BlockingTasksTabProps) {
   const [unblockTarget, setUnblockTarget] = useState<BlockedPositionInfo | null>(null);
   const [materialsTarget, setMaterialsTarget] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<string | null>(null);
+  const [recipeAssignTarget, setRecipeAssignTarget] = useState<BlockedPositionInfo | null>(null);
 
   if (isLoading) {
     return <div className="flex justify-center py-12"><Spinner /></div>;
@@ -181,6 +186,15 @@ export function BlockingTasksTab({ factoryId }: BlockingTasksTabProps) {
                         Materials
                       </Button>
                     )}
+                    {p.status === 'awaiting_recipe' && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setRecipeAssignTarget(p)}
+                      >
+                        Assign Recipe
+                      </Button>
+                    )}
                     {p.status === 'awaiting_size_confirmation' && p.related_tasks.length > 0 && (
                       <Button
                         variant="secondary"
@@ -230,6 +244,159 @@ export function BlockingTasksTab({ factoryId }: BlockingTasksTabProps) {
           onClose={() => setMaterialsTarget(null)}
         />
       )}
+
+      {/* Recipe Assign Dialog */}
+      {recipeAssignTarget && (
+        <RecipeAssignDialog
+          position={recipeAssignTarget}
+          onClose={() => setRecipeAssignTarget(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/* ── RecipeAssignDialog ────────────────────────────────────────────── */
+
+function RecipeAssignDialog({ position, onClose }: { position: BlockedPositionInfo; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState('');
+  const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
+  const [error, setError] = useState('');
+
+  const { data: recipesData, isLoading: recipesLoading } = useQuery<{ items: RecipeItem[]; total: number }>({
+    queryKey: ['recipes-for-assign'],
+    queryFn: () => recipesApi.list({ per_page: 500 }),
+  });
+
+  const recipes = recipesData?.items ?? [];
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return recipes.filter((r) => r.is_active);
+    const q = search.toLowerCase();
+    return recipes
+      .filter((r) => r.is_active)
+      .filter(
+        (r) =>
+          r.name.toLowerCase().includes(q) ||
+          (r.color_collection && r.color_collection.toLowerCase().includes(q)) ||
+          (r.client_name && r.client_name.toLowerCase().includes(q)),
+      );
+  }, [recipes, search]);
+
+  const assignMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedRecipeId) throw new Error('No recipe selected');
+      // 1. PATCH position with recipe_id
+      await positionsApi.update(position.id, { recipe_id: selectedRecipeId });
+      // 2. Force-unblock to move past awaiting_recipe now that recipe is assigned
+      await positionsApi.forceUnblock(position.id, `Recipe assigned: ${recipes.find((r) => r.id === selectedRecipeId)?.name ?? selectedRecipeId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['positions'] });
+      queryClient.invalidateQueries({ queryKey: ['blocking-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      onClose();
+    },
+    onError: (err: unknown) => {
+      const resp = (err as { response?: { data?: { detail?: string } } })?.response?.data;
+      setError(resp?.detail || (err instanceof Error ? err.message : String(err)));
+    },
+  });
+
+  const selectedRecipe = recipes.find((r) => r.id === selectedRecipeId);
+
+  return (
+    <Dialog open onClose={onClose} title="Assign Recipe" className="w-full max-w-lg">
+      <div className="space-y-4">
+        {/* Position info */}
+        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+          <div className="text-sm">
+            <span className="font-medium text-gray-900">{position.order_number}</span>
+            <span className="mx-1 text-gray-400">/</span>
+            <span className="text-gray-600">{position.position_label}</span>
+          </div>
+          <div className="mt-0.5 text-sm text-gray-600">
+            Color: <span className="font-medium">{position.color}</span>
+            {position.collection && (
+              <span className="ml-2 text-gray-400">({position.collection})</span>
+            )}
+          </div>
+        </div>
+
+        {/* Search */}
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">Search recipes</label>
+          <input
+            type="text"
+            placeholder="Type to search by name, collection, or client..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            autoFocus
+          />
+        </div>
+
+        {/* Recipe list */}
+        <div className="max-h-60 overflow-y-auto rounded-lg border border-gray-200">
+          {recipesLoading ? (
+            <div className="flex justify-center py-6"><Spinner /></div>
+          ) : filtered.length === 0 ? (
+            <div className="py-6 text-center text-sm text-gray-400">
+              {search ? 'No recipes match your search' : 'No active recipes found'}
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {filtered.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => setSelectedRecipeId(r.id)}
+                  className={`w-full px-3 py-2 text-left text-sm transition-colors hover:bg-blue-50 ${
+                    selectedRecipeId === r.id ? 'bg-blue-50 ring-1 ring-inset ring-blue-300' : ''
+                  }`}
+                >
+                  <div className="font-medium text-gray-900">{r.name}</div>
+                  <div className="mt-0.5 flex items-center gap-3 text-xs text-gray-500">
+                    {r.color_collection && <span>Collection: {r.color_collection}</span>}
+                    {r.recipe_type && <span>Type: {r.recipe_type}</span>}
+                    {r.client_name && <span>Client: {r.client_name}</span>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Selected recipe summary */}
+        {selectedRecipe && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+            Selected: <span className="font-medium">{selectedRecipe.name}</span>
+            {selectedRecipe.color_collection && (
+              <span className="ml-1 text-blue-600">({selectedRecipe.color_collection})</span>
+            )}
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button
+            onClick={() => assignMutation.mutate()}
+            disabled={!selectedRecipeId || assignMutation.isPending}
+          >
+            {assignMutation.isPending ? 'Assigning...' : 'Assign'}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
   );
 }

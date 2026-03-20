@@ -1334,6 +1334,20 @@ async def create_transaction(
             import logging
             logging.getLogger("moonjar").warning(f"purchaser_lifecycle hook failed: {e}")
 
+        # Auto-unblock positions that were waiting for this material
+        try:
+            from business.services.material_reservation import check_and_unblock_positions_after_receive
+            unblocked = check_and_unblock_positions_after_receive(
+                db=db,
+                material_id=data.material_id,
+                factory_id=data.factory_id,
+            )
+            if unblocked:
+                db.commit()
+        except Exception as e:
+            import logging
+            logging.getLogger("moonjar").warning(f"auto-unblock hook failed: {e}")
+
     return _serialize_transaction(t, db)
 
 

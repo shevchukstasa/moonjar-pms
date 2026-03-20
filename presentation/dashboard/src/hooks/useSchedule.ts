@@ -84,3 +84,15 @@ export function useAssignBatchPositions() {
     },
   });
 }
+
+export function useAutoFormBatches() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { factory_id: string; target_date?: string; mode?: string }) =>
+      scheduleApi.autoFormBatches(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schedule'] });
+      qc.invalidateQueries({ queryKey: ['positions'] });
+    },
+  });
+}

@@ -726,3 +726,167 @@ def create_auto_purchase_request(
         "AUTO_PURCHASE_REQUEST | order=%s | shortages=%d materials | %d requests created",
         order.order_number, len(shortages), requests_created,
     )
+
+
+# ────────────────────────────────────────────────────────────────
+# §4.5  Auto-unblock positions after material receive
+# ────────────────────────────────────────────────────────────────
+
+def check_and_unblock_positions_after_receive(
+    db: Session,
+    material_id: UUID,
+    factory_id: UUID,
+) -> list[UUID]:
+    """
+    After material is received, check all INSUFFICIENT_MATERIALS positions
+    at this factory. If ALL recipe materials are now available, auto-unblock
+    the position back to PLANNED and reserve materials.
+
+    Returns list of position IDs that were unblocked.
+    """
+    from api.models import (
+        OrderPosition, RecipeMaterial, MaterialStock,
+        MaterialTransaction, Material, Recipe,
+    )
+    from api.enums import PositionStatus, TransactionType
+    from sqlalchemy import func
+    from datetime import datetime, timezone
+
+    # 1. Find all positions stuck in INSUFFICIENT_MATERIALS at this factory
+    blocked_positions = (
+        db.query(OrderPosition)
+        .filter(
+            OrderPosition.factory_id == factory_id,
+            OrderPosition.status == PositionStatus.INSUFFICIENT_MATERIALS,
+            OrderPosition.recipe_id.isnot(None),
+        )
+        .all()
+    )
+
+    if not blocked_positions:
+        return []
+
+    unblocked_ids = []
+
+    for position in blocked_positions:
+        try:
+            recipe = db.query(Recipe).get(position.recipe_id)
+            if not recipe:
+                continue
+
+            # Get all recipe materials
+            recipe_materials = (
+                db.query(RecipeMaterial)
+                .filter(RecipeMaterial.recipe_id == recipe.id)
+                .all()
+            )
+            if not recipe_materials:
+                continue
+
+            # Check if ALL materials are now sufficient
+            all_sufficient = True
+            for rm in recipe_materials:
+                material = db.query(Material).get(rm.material_id)
+                if not material:
+                    continue
+
+                required = _calculate_required(rm, position, recipe=recipe)
+
+                # Current stock balance
+                stock = (
+                    db.query(MaterialStock)
+                    .filter(
+                        MaterialStock.material_id == rm.material_id,
+                        MaterialStock.factory_id == factory_id,
+                    )
+                    .first()
+                )
+                balance = Decimal(str(stock.balance)) if stock else Decimal("0")
+
+                # Net reserved across all positions for this material+factory
+                total_reserved = (
+                    db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+                    .filter(
+                        MaterialTransaction.material_id == rm.material_id,
+                        MaterialTransaction.factory_id == factory_id,
+                        MaterialTransaction.type == TransactionType.RESERVE,
+                    )
+                    .scalar()
+                )
+                total_unreserved = (
+                    db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+                    .filter(
+                        MaterialTransaction.material_id == rm.material_id,
+                        MaterialTransaction.factory_id == factory_id,
+                        MaterialTransaction.type == TransactionType.UNRESERVE,
+                    )
+                    .scalar()
+                )
+                net_reserved = Decimal(str(total_reserved)) - Decimal(str(total_unreserved))
+                effective_available = balance - net_reserved
+
+                if effective_available < required:
+                    all_sufficient = False
+                    break
+
+            if not all_sufficient:
+                continue
+
+            # All materials sufficient — reserve and unblock
+            result = reserve_materials_for_position(db, position, recipe, factory_id)
+
+            if result.all_sufficient:
+                position.status = PositionStatus.PLANNED
+                position.updated_at = datetime.now(timezone.utc)
+                unblocked_ids.append(position.id)
+
+                mat_name = (
+                    db.query(Material.name)
+                    .filter(Material.id == material_id)
+                    .scalar()
+                ) or str(material_id)
+
+                logger.info(
+                    "AUTO_UNBLOCK | position=%s | material received: %s",
+                    position.id, mat_name,
+                )
+            else:
+                # Reservation failed (race condition — stock changed between check and reserve)
+                # Unreserve any partial reservations that were created
+                if result.reserved:
+                    for need in result.reserved:
+                        unreserve_txns = (
+                            db.query(MaterialTransaction)
+                            .filter(
+                                MaterialTransaction.related_position_id == position.id,
+                                MaterialTransaction.material_id == need.material_id,
+                                MaterialTransaction.type == TransactionType.RESERVE,
+                            )
+                            .order_by(MaterialTransaction.created_at.desc())
+                            .first()
+                        )
+                        if unreserve_txns:
+                            db.add(MaterialTransaction(
+                                material_id=need.material_id,
+                                factory_id=factory_id,
+                                type=TransactionType.UNRESERVE,
+                                quantity=unreserve_txns.quantity,
+                                related_order_id=position.order_id,
+                                related_position_id=position.id,
+                                notes="Rolled back: auto-unblock reservation failed",
+                            ))
+
+        except Exception as e:
+            logger.warning(
+                "AUTO_UNBLOCK_ERROR | position=%s | error=%s",
+                position.id, str(e),
+            )
+            continue
+
+    if unblocked_ids:
+        logger.info(
+            "AUTO_UNBLOCK_SUMMARY | factory=%s | material=%s | %d positions unblocked",
+            factory_id, material_id, len(unblocked_ids),
+        )
+
+    return unblocked_ids

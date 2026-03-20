@@ -37,4 +37,7 @@ export const scheduleApi = {
 
   assignBatchPositions: (batchId: string, positionIds: string[]) =>
     apiClient.post(`/schedule/batches/${batchId}/positions`, { position_ids: positionIds }).then((r) => r.data),
+
+  autoFormBatches: (data: { factory_id: string; target_date?: string; mode?: string }) =>
+    apiClient.post('/batches/auto-form', data).then((r) => r.data),
 };

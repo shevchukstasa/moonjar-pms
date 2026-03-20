@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Trash2 } from 'lucide-react';
 import { useUiStore } from '@/stores/uiStore';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { useGlazingSchedule, useFiringSchedule, useSortingSchedule, useQcSchedule, useKilnSchedule } from '@/hooks/useSchedule';
+import { useGlazingSchedule, useFiringSchedule, useSortingSchedule, useQcSchedule, useKilnSchedule, useAutoFormBatches } from '@/hooks/useSchedule';
 import { Badge } from '@/components/ui/Badge';
 import { StatusDropdown } from '@/components/tablo/StatusDropdown';
 import { Button } from '@/components/ui/Button';
@@ -40,6 +40,31 @@ export default function ManagerSchedulePage() {
   const { data: qcData, isLoading: qcLoading, isError: qcError } = useQcSchedule(activeFactoryId);
   const { data: kilnData, isLoading: kilnLoading, isError: kilnError } = useKilnSchedule(activeFactoryId);
   const hasError = glazingError || firingError || sortingError || qcError || kilnError;
+
+  const autoFormMutation = useAutoFormBatches();
+  const [autoFormResult, setAutoFormResult] = useState<string | null>(null);
+
+  const handleAutoFormBatches = useCallback(async () => {
+    if (!activeFactoryId) {
+      alert('Please select a specific factory first.');
+      return;
+    }
+    if (!window.confirm('Auto-form kiln batches from ready positions?')) return;
+    setAutoFormResult(null);
+    try {
+      const result = await autoFormMutation.mutateAsync({ factory_id: activeFactoryId });
+      if (result.batches_created === 0) {
+        setAutoFormResult('No batches formed — no kiln-ready positions found.');
+      } else {
+        setAutoFormResult(
+          `Formed ${result.batches_created} batch${result.batches_created > 1 ? 'es' : ''} with ${result.positions_assigned} position${result.positions_assigned > 1 ? 's' : ''}.`
+        );
+      }
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Auto-form failed';
+      setAutoFormResult(`Error: ${msg}`);
+    }
+  }, [activeFactoryId, autoFormMutation]);
 
   // Fetch PM cleanup permissions — works for a single factory or "All Factories"
   useEffect(() => {
@@ -229,6 +254,26 @@ export default function ManagerSchedulePage() {
 
       {/* Tabs */}
       <Tabs tabs={SECTION_TABS} activeTab={tab} onChange={setTab} />
+
+      {/* Auto-Form Batches — visible on Firing and Kilns tabs */}
+      {(tab === 'firing' || tab === 'kilns') && (
+        <div className="flex items-center gap-4">
+          <Button
+            onClick={handleAutoFormBatches}
+            disabled={autoFormMutation.isPending || !activeFactoryId}
+          >
+            {autoFormMutation.isPending ? 'Forming...' : 'Auto-Form Batches'}
+          </Button>
+          {!activeFactoryId && (
+            <span className="text-sm text-gray-400">Select a factory first</span>
+          )}
+          {autoFormResult && (
+            <div className={`rounded-lg border px-3 py-1.5 text-sm ${autoFormResult.startsWith('Error') ? 'border-red-200 bg-red-50 text-red-700' : 'border-green-200 bg-green-50 text-green-700'}`}>
+              {autoFormResult}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* API Error */}
       {hasError && (

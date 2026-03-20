@@ -1247,6 +1247,82 @@ class KilnConstant(Base):
     updated_by_rel = relationship('User', foreign_keys=[updated_by])
 
 
+class KilnInspectionItem(Base):
+    """Template items for kiln inspection checklists.
+    Seeded once; shared across all kilns. Categories match the physical checklist."""
+    __tablename__ = 'kiln_inspection_items'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    category = Column(sa.String(100), nullable=False)  # e.g. "Frame & Stability"
+    item_text = Column(sa.String(500), nullable=False)  # e.g. "Kiln stands stable, no wobble"
+    sort_order = Column(sa.Integer, nullable=False, default=0)
+    is_active = Column(sa.Boolean, nullable=False, default=True)
+    applies_to_kiln_types = Column(JSONB)  # null = all; ["big","raku"] = specific types only
+
+
+class KilnInspection(Base):
+    """A single inspection session (one date × one kiln)."""
+    __tablename__ = 'kiln_inspections'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    resource_id = Column(UUID(as_uuid=True), ForeignKey('resources.id'), nullable=False)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    inspection_date = Column(sa.Date, nullable=False)
+    inspected_by_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    notes = Column(sa.Text)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('resource_id', 'inspection_date', name='uq_kiln_inspection_date'),
+    )
+
+    resource = relationship('Resource', foreign_keys=[resource_id])
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    inspected_by = relationship('User', foreign_keys=[inspected_by_id])
+    results = relationship('KilnInspectionResult', back_populates='inspection', cascade='all, delete-orphan')
+
+
+class KilnInspectionResult(Base):
+    """Result for a single checklist item within an inspection."""
+    __tablename__ = 'kiln_inspection_results'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    inspection_id = Column(UUID(as_uuid=True), ForeignKey('kiln_inspections.id', ondelete='CASCADE'), nullable=False)
+    item_id = Column(UUID(as_uuid=True), ForeignKey('kiln_inspection_items.id'), nullable=False)
+    result = Column(sa.String(20), nullable=False)  # 'ok', 'not_applicable', 'damaged', 'needs_repair'
+    notes = Column(sa.Text)
+
+    inspection = relationship('KilnInspection', foreign_keys=[inspection_id], back_populates='results')
+    item = relationship('KilnInspectionItem', foreign_keys=[item_id])
+
+
+class KilnRepairLog(Base):
+    """Repair log for kiln issues — tracks from report to completion."""
+    __tablename__ = 'kiln_repair_logs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    resource_id = Column(UUID(as_uuid=True), ForeignKey('resources.id'), nullable=False)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    date_reported = Column(sa.Date, nullable=False, server_default=sa.func.current_date())
+    reported_by_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    issue_description = Column(sa.Text, nullable=False)
+    diagnosis = Column(sa.Text)
+    repair_actions = Column(sa.Text)
+    spare_parts_used = Column(sa.Text)
+    technician = Column(sa.String(200))
+    date_completed = Column(sa.Date)
+    status = Column(sa.String(30), nullable=False, default='open')  # open, in_progress, done
+    notes = Column(sa.Text)
+    # Link to inspection result that triggered this repair (optional)
+    inspection_result_id = Column(UUID(as_uuid=True), ForeignKey('kiln_inspection_results.id'))
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    resource = relationship('Resource', foreign_keys=[resource_id])
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    reported_by = relationship('User', foreign_keys=[reported_by_id])
+
+
 class DailyTaskDistribution(Base):
     __tablename__ = 'daily_task_distributions'
 

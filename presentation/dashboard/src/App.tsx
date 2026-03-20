@@ -37,6 +37,7 @@ import AdminSizesPage from '@/pages/AdminSizesPage';
 import AdminFiringProfilesPage from '@/pages/AdminFiringProfilesPage';
 import ConsumptionRulesPage from '@/pages/ConsumptionRulesPage';
 import PMGuidePage from '@/pages/PMGuidePage';
+import KilnInspectionsPage from '@/pages/KilnInspectionsPage';
 import SettingsPage from '@/pages/SettingsPage';
 import AppLayout from '@/components/layout/AppLayout';
 import { Spinner } from '@/components/ui/Spinner';
@@ -136,6 +137,7 @@ export default function App() {
             <Route path="/manager/schedule" element={<ManagerSchedulePage />} />
             <Route path="/manager/kilns" element={<ManagerKilnsPage />} />
             <Route path="/manager/materials" element={<ManagerMaterialsPage />} />
+            <Route path="/manager/kiln-inspections" element={<KilnInspectionsPage />} />
             <Route path="/manager/shortage/:taskId" element={<ShortageDecisionPage />} />
             <Route path="/manager/size-resolution/:taskId" element={<SizeResolutionPage />} />
             <Route path="/manager/guide" element={<PMGuidePage />} />

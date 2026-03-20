@@ -1784,6 +1784,7 @@ async def lifespan(app: FastAPI):
             from api.schema_patches.rotation_rules_patch import apply_patch as rr_patch
             from api.schema_patches.application_methods_patch import apply_patch as am_patch
             from api.schema_patches.shape_dimensions_patch import apply_patch as sd_patch
+            from api.schema_patches.kiln_inspection_patch import apply_patch as ki_patch
             cr_patch(conn)
             dc_patch(conn)
             sr_patch(conn)
@@ -1792,6 +1793,7 @@ async def lifespan(app: FastAPI):
             rr_patch(conn)
             am_patch(conn)
             sd_patch(conn)
+            ki_patch(conn)
             logger.info("Schema patches applied successfully")
     except Exception as e:
         logger.warning(f"Schema patches warning (non-fatal): {e}")
@@ -1897,6 +1899,8 @@ def setup_routers():
     app.include_router(factories.router, prefix="/api/factories", tags=["factories"])
     app.include_router(kilns.router, prefix="/api/kilns", tags=["kilns"])
     app.include_router(kiln_maintenance.router, prefix="/api/kiln-maintenance", tags=["kiln-maintenance"])
+    from api.routers import kiln_inspections
+    app.include_router(kiln_inspections.router, prefix="/api/kiln-inspections", tags=["kiln-inspections"])
     app.include_router(kiln_constants.router, prefix="/api/kiln-constants", tags=["kiln-constants"])
     app.include_router(reference.router, prefix="/api/reference", tags=["reference"])
     app.include_router(toc.router, prefix="/api/toc", tags=["toc"])

@@ -278,11 +278,16 @@ def calculate_glazeable_sqm_for_position(db, position) -> Optional[Decimal]:
     2. If only size string available → parse "WxH" → exact for standard shapes,
        coefficient for non-standard
     3. Fallback: quantity_sqm / quantity × coefficient
+
+    After base face area is computed, adjusts for place_of_application
+    (edges_1, edges_2, all_edges, with_back).
     """
     shape = getattr(position, "shape", None)
     shape_str = shape.value if hasattr(shape, "value") else str(shape or "rectangle")
     product_type = getattr(position, "product_type", None)
     pt_str = product_type.value if hasattr(product_type, "value") else str(product_type or "tile")
+
+    face_area: Optional[Decimal] = None
 
     # 0. Precise calculation from shape_dimensions JSONB (universal shape system)
     dims = getattr(position, "shape_dimensions", None)
@@ -300,55 +305,115 @@ def calculate_glazeable_sqm_for_position(db, position) -> Optional[Decimal]:
                 if L and W:
                     bowl_cm2 = _calculate_bowl_surface(float(L), float(W), float(depth_for_sink), bowl_for_sink)
                     area_sqm += bowl_cm2 / 10000.0
-            return Decimal(str(round(area_sqm, 4)))
+            face_area = Decimal(str(round(area_sqm, 4)))
 
-    length = getattr(position, "length_cm", None)
-    width = getattr(position, "width_cm", None)
-    depth = getattr(position, "depth_cm", None)
-    bowl = getattr(position, "bowl_shape", None)
+    if face_area is None:
+        length = getattr(position, "length_cm", None)
+        width = getattr(position, "width_cm", None)
+        depth = getattr(position, "depth_cm", None)
+        bowl = getattr(position, "bowl_shape", None)
 
-    # 1. Exact dimensions available (legacy: length_cm / width_cm)
-    if length and width and float(length) > 0 and float(width) > 0:
-        area = calculate_glazeable_surface(
-            shape=shape_str,
-            length_cm=float(length),
-            width_cm=float(width),
-            depth_cm=float(depth) if depth else 0,
-            bowl_shape=bowl,
-            product_type=pt_str,
+        # 1. Exact dimensions available (legacy: length_cm / width_cm)
+        if length and width and float(length) > 0 and float(width) > 0:
+            area = calculate_glazeable_surface(
+                shape=shape_str,
+                length_cm=float(length),
+                width_cm=float(width),
+                depth_cm=float(depth) if depth else 0,
+                bowl_shape=bowl,
+                product_type=pt_str,
+            )
+            face_area = Decimal(str(area))
+
+    if face_area is None:
+        # 2. Parse size string "WxH" (e.g., "30x60", "10x10")
+        size = getattr(position, "size", None)
+        if size:
+            import re
+            m = re.match(r"(\d+)\s*[x×X]\s*(\d+)", str(size))
+            if m:
+                w_cm = float(m.group(1))
+                h_cm = float(m.group(2))
+
+                if shape_str in ("rectangle", "square"):
+                    # Exact for standard shapes
+                    area = calculate_glazeable_surface(
+                        shape=shape_str,
+                        length_cm=h_cm,
+                        width_cm=w_cm,
+                        product_type=pt_str,
+                    )
+                    face_area = Decimal(str(area))
+                else:
+                    # Non-standard shape: use bounding box × coefficient
+                    bounding_area_sqm = (w_cm * h_cm) / 10000.0
+                    coeff = get_shape_coefficient(db, shape_str, pt_str)
+                    face_area = Decimal(str(round(bounding_area_sqm * coeff, 4)))
+
+    if face_area is None:
+        # 3. Fallback: use existing quantity_sqm / quantity × coefficient
+        qty_sqm = getattr(position, "quantity_sqm", None)
+        qty = getattr(position, "quantity", None)
+        if qty_sqm and qty and int(qty) > 0:
+            area_per_piece = float(qty_sqm) / int(qty)
+            coeff = get_shape_coefficient(db, shape_str, pt_str)
+            face_area = Decimal(str(round(area_per_piece * coeff, 4)))
+
+    if face_area is None:
+        return None
+
+    # --- Adjust for place_of_application (edges/back add surface) ---
+    poa = getattr(position, 'place_of_application', None) or ''
+    poa = poa.strip().lower()
+
+    if poa and poa != 'face_only' and face_area > 0:
+        original_face = face_area
+
+        # Get thickness in meters
+        t_m = Decimal('0')
+        thickness = getattr(position, 'thickness_mm', None)
+        if thickness and float(thickness) > 0:
+            t_m = Decimal(str(thickness)) / Decimal('1000')
+
+        # Get W and H in meters
+        w_m = Decimal('0')
+        h_m = Decimal('0')
+        w_cm = getattr(position, 'width_cm', None)
+        h_cm = getattr(position, 'length_cm', None)
+        if w_cm and float(w_cm) > 0:
+            w_m = Decimal(str(w_cm)) / Decimal('100')
+        if h_cm and float(h_cm) > 0:
+            h_m = Decimal(str(h_cm)) / Decimal('100')
+
+        # If no explicit dimensions, try parsing from size string
+        if (w_m == 0 or h_m == 0) and getattr(position, 'size', None):
+            try:
+                from business.kiln.capacity import parse_size
+                parsed = parse_size(position.size)
+                if parsed:
+                    pw, ph = parsed  # in cm
+                    w_m = Decimal(str(pw)) / Decimal('100')
+                    h_m = Decimal(str(ph)) / Decimal('100')
+            except Exception:
+                pass
+
+        if t_m > 0 and (w_m > 0 or h_m > 0):
+            perimeter = Decimal('2') * (w_m + h_m)
+            one_long_edge = h_m * t_m  # one long side
+
+            if poa == 'edges_1':
+                face_area += one_long_edge
+            elif poa == 'edges_2':
+                face_area += Decimal('2') * one_long_edge
+            elif poa == 'all_edges':
+                face_area += perimeter * t_m
+            elif poa == 'with_back':
+                face_area += face_area + perimeter * t_m  # double face + all edges
+
+        position_label = getattr(position, 'id', None) or getattr(position, 'position_number', '?')
+        logger.info(
+            "POA_ADJUST | position=%s | poa=%s | face=%.4f → adjusted=%.4f",
+            position_label, poa, original_face, face_area,
         )
-        return Decimal(str(area))
 
-    # 2. Parse size string "WxH" (e.g., "30x60", "10x10")
-    size = getattr(position, "size", None)
-    if size:
-        import re
-        m = re.match(r"(\d+)\s*[x×X]\s*(\d+)", str(size))
-        if m:
-            w_cm = float(m.group(1))
-            h_cm = float(m.group(2))
-
-            if shape_str in ("rectangle", "square"):
-                # Exact for standard shapes
-                area = calculate_glazeable_surface(
-                    shape=shape_str,
-                    length_cm=h_cm,
-                    width_cm=w_cm,
-                    product_type=pt_str,
-                )
-                return Decimal(str(area))
-            else:
-                # Non-standard shape: use bounding box × coefficient
-                bounding_area_sqm = (w_cm * h_cm) / 10000.0
-                coeff = get_shape_coefficient(db, shape_str, pt_str)
-                return Decimal(str(round(bounding_area_sqm * coeff, 4)))
-
-    # 3. Fallback: use existing quantity_sqm / quantity × coefficient
-    qty_sqm = getattr(position, "quantity_sqm", None)
-    qty = getattr(position, "quantity", None)
-    if qty_sqm and qty and int(qty) > 0:
-        area_per_piece = float(qty_sqm) / int(qty)
-        coeff = get_shape_coefficient(db, shape_str, pt_str)
-        return Decimal(str(round(area_per_piece * coeff, 4)))
-
-    return None
+    return face_area

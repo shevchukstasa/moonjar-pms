@@ -22,6 +22,132 @@ logger = logging.getLogger("moonjar.material_reservation")
 
 
 # ────────────────────────────────────────────────────────────────
+# ConsumptionRule lookup — find best matching override for a position
+# ────────────────────────────────────────────────────────────────
+
+def find_best_consumption_rule(db: Session, position, recipe_type: str = "glaze") -> Optional["ConsumptionRule"]:
+    """Find the most specific matching ConsumptionRule for a position.
+
+    ConsumptionRule overrides are used for:
+    - Non-standard shapes (triangle, octagon, trapezoid, etc.)
+    - Sinks and countertops (different application method)
+    - Specific size/collection combos that need different rates
+
+    Matching: every non-null field in the rule must match the position.
+    The rule with the most matching fields wins (most specific).
+    """
+    from api.models import ConsumptionRule
+
+    rules = db.query(ConsumptionRule).filter(
+        ConsumptionRule.is_active.is_(True),
+    ).all()
+
+    if not rules:
+        return None
+
+    # Position attributes for matching
+    pos_product_type = (getattr(position, 'product_type', None) or '')
+    if hasattr(pos_product_type, 'value'):
+        pos_product_type = pos_product_type.value
+    pos_product_type = pos_product_type.lower().strip()
+
+    pos_shape = (getattr(position, 'shape', None) or '')
+    if hasattr(pos_shape, 'value'):
+        pos_shape = pos_shape.value
+    pos_shape = pos_shape.lower().strip()
+
+    pos_size_id = str(getattr(position, 'size_id', '') or '')
+    pos_collection = (getattr(position, 'collection', '') or '').lower().strip()
+    pos_color_collection = (getattr(position, 'color_collection', '') or '').lower().strip()
+    pos_method = (getattr(position, 'application_method_code', '') or '').lower().strip()
+    pos_poa = (getattr(position, 'place_of_application', '') or '').lower().strip()
+    pos_thickness = float(getattr(position, 'thickness_mm', 0) or 0)
+
+    best_rule = None
+    best_score = -1
+
+    for rule in rules:
+        # Filter by recipe_type if specified on rule
+        if rule.recipe_type and rule.recipe_type.lower() != recipe_type.lower():
+            continue
+
+        score = 0
+        match = True
+
+        # Each non-null criterion must match
+        if rule.product_type:
+            if rule.product_type.lower().strip() == pos_product_type:
+                score += 1
+            else:
+                match = False
+                continue
+
+        if rule.shape:
+            if rule.shape.lower().strip() == pos_shape:
+                score += 1
+            else:
+                match = False
+                continue
+
+        if rule.size_id:
+            if str(rule.size_id) == pos_size_id:
+                score += 2  # size match is very specific
+            else:
+                match = False
+                continue
+
+        if rule.collection:
+            if rule.collection.lower().strip() == pos_collection:
+                score += 1
+            else:
+                match = False
+                continue
+
+        if rule.color_collection:
+            if rule.color_collection.lower().strip() == pos_color_collection:
+                score += 1
+            else:
+                match = False
+                continue
+
+        if rule.application_method:
+            if rule.application_method.lower().strip() == pos_method:
+                score += 1
+            else:
+                match = False
+                continue
+
+        if rule.place_of_application:
+            if rule.place_of_application.lower().strip() == pos_poa:
+                score += 1
+            else:
+                match = False
+                continue
+
+        if rule.thickness_mm_min is not None:
+            if pos_thickness < float(rule.thickness_mm_min):
+                match = False
+                continue
+
+        if rule.thickness_mm_max is not None:
+            if pos_thickness > float(rule.thickness_mm_max):
+                match = False
+                continue
+
+        if rule.thickness_mm_min is not None or rule.thickness_mm_max is not None:
+            score += 1
+
+        # Use rule.priority as tiebreaker
+        effective_score = score * 100 + (rule.priority or 0)
+
+        if match and effective_score > best_score:
+            best_score = effective_score
+            best_rule = rule
+
+    return best_rule
+
+
+# ────────────────────────────────────────────────────────────────
 # Data classes
 # ────────────────────────────────────────────────────────────────
 
@@ -166,9 +292,18 @@ def _calculate_required(rm, position, recipe=None) -> Decimal:
             except Exception:
                 pass
 
+        # Check for ConsumptionRule override (pre-attached by caller)
+        cr = getattr(position, '_consumption_rule', None)
+
         # Determine consumption rate (ml/m²) based on application method
         rate_ml_per_sqm = Decimal("500")  # default fallback
-        if r:
+
+        # ConsumptionRule override takes priority
+        if cr and cr.consumption_ml_per_sqm:
+            rate_ml_per_sqm = Decimal(str(cr.consumption_ml_per_sqm))
+            if cr.coats and cr.coats > 1:
+                rate_ml_per_sqm *= Decimal(str(cr.coats))
+        elif r:
             # Prefer new method_code-based lookup, fall back to legacy application_type
             app_method = method_code or (getattr(position, 'application_type', None) or "").lower().strip()
 
@@ -192,8 +327,11 @@ def _calculate_required(rm, position, recipe=None) -> Decimal:
                     rate_ml_per_sqm = Decimal(str(gs["consumption_ml_per_sqm"]))
 
         # Determine SG (specific gravity) for ml → grams conversion
+        # ConsumptionRule SG override takes priority over recipe SG
         sg = Decimal("1.0")
-        if r and r.specific_gravity and float(r.specific_gravity) > 0:
+        if cr and cr.specific_gravity_override:
+            sg = Decimal(str(cr.specific_gravity_override))
+        elif r and r.specific_gravity and float(r.specific_gravity) > 0:
             sg = Decimal(str(r.specific_gravity))
 
         # For g_per_100g, also apply method-specific component ratio if available
@@ -395,6 +533,21 @@ def reserve_materials_for_position(
         .all()
     )
 
+    # Find best matching ConsumptionRule (if any) for overrides
+    try:
+        glaze_rule = find_best_consumption_rule(db, position, recipe_type="glaze")
+        engobe_rule = find_best_consumption_rule(db, position, recipe_type="engobe")
+        if glaze_rule:
+            logger.info("CONSUMPTION_RULE | position=%s | glaze override: rule #%d '%s' ml/m²=%.1f",
+                        position.id, glaze_rule.rule_number, glaze_rule.name, float(glaze_rule.consumption_ml_per_sqm))
+        if engobe_rule:
+            logger.info("CONSUMPTION_RULE | position=%s | engobe override: rule #%d '%s' ml/m²=%.1f",
+                        position.id, engobe_rule.rule_number, engobe_rule.name, float(engobe_rule.consumption_ml_per_sqm))
+    except Exception as e:
+        logger.warning("CONSUMPTION_RULE_LOOKUP_FAIL | %s", e)
+        glaze_rule = None
+        engobe_rule = None
+
     reserved = []
     shortages = []
 
@@ -406,6 +559,18 @@ def reserve_materials_for_position(
                 recipe.id, rm.material_id,
             )
             continue
+
+        # Determine which consumption rule applies to this material
+        mat_type = ''
+        if hasattr(rm, 'material') and rm.material:
+            mat_type = (getattr(rm.material, 'material_type', '') or '').lower()
+
+        if mat_type == 'engobe' and engobe_rule:
+            position._consumption_rule = engobe_rule
+        elif glaze_rule:
+            position._consumption_rule = glaze_rule
+        else:
+            position._consumption_rule = None
 
         # --- Calculate required quantity ---
         required = _calculate_required(rm, position, recipe=recipe)

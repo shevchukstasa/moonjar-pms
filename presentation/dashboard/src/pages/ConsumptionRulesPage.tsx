@@ -24,6 +24,7 @@ const RECIPE_TYPES = [
   { value: '', label: '— Any —' },
   { value: 'glaze', label: 'Glaze' },
   { value: 'engobe', label: 'Engobe' },
+  { value: 'both', label: 'Both (Engobe + Glaze)' },
 ];
 
 /* ── Multi-select chip component ──────────────────────────────── */
@@ -132,7 +133,9 @@ interface RuleForm {
   recipe_type: string;
   application_method: string;
   consumption_ml_per_sqm: string;
+  engobe_ml_per_sqm: string;  // used when recipe_type='both'
   coats: string;
+  engobe_coats: string;
   specific_gravity_override: string;
   priority: string;
   is_active: boolean;
@@ -155,7 +158,9 @@ const emptyForm: RuleForm = {
   recipe_type: '',
   application_method: '',
   consumption_ml_per_sqm: '',
+  engobe_ml_per_sqm: '',
   coats: '1',
+  engobe_coats: '1',
   specific_gravity_override: '',
   priority: '0',
   is_active: true,
@@ -277,6 +282,8 @@ export default function ConsumptionRulesPage() {
       coats: String(item.coats),
       specific_gravity_override: item.specific_gravity_override != null ? String(item.specific_gravity_override) : '',
       priority: String(item.priority),
+      engobe_ml_per_sqm: '',
+      engobe_coats: '1',
       is_active: item.is_active,
       notes: item.notes ?? '',
     });

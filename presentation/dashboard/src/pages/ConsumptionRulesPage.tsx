@@ -324,30 +324,61 @@ export default function ConsumptionRulesPage() {
 
   const handleSave = useCallback(async () => {
     if (!form.name.trim()) { setFormError('Name is required'); return; }
-    if (!form.consumption_ml_per_sqm) { setFormError('Consumption ml/m² is required'); return; }
+
+    const isBothMode = form.recipe_type === 'both';
+    if (!form.consumption_ml_per_sqm) { setFormError('Glaze ml/m² is required'); return; }
+    if (isBothMode && !form.engobe_ml_per_sqm) { setFormError('Engobe ml/m² is required'); return; }
     setFormError('');
+
+    // Helper: create rules for a given size (or null)
+    const createForSize = async (sizeId: string | null, ruleNum: number, nameSuffix: string) => {
+      if (isBothMode) {
+        // Create glaze rule
+        const glazePayload = buildPayload(sizeId);
+        glazePayload.recipe_type = 'glaze';
+        glazePayload.rule_number = ruleNum;
+        glazePayload.name = `${form.name.trim()}${nameSuffix} — Glaze`;
+        await createMutation.mutateAsync(glazePayload);
+
+        // Create engobe rule
+        const engobePayload = buildPayload(sizeId);
+        engobePayload.recipe_type = 'engobe';
+        engobePayload.rule_number = ruleNum + 1;
+        engobePayload.name = `${form.name.trim()}${nameSuffix} — Engobe`;
+        engobePayload.consumption_ml_per_sqm = parseFloat(form.engobe_ml_per_sqm);
+        engobePayload.coats = parseInt(form.engobe_coats) || 1;
+        engobePayload.specific_gravity_override = null; // engobe SG from recipe
+        await createMutation.mutateAsync(engobePayload);
+
+        return 2; // created 2 rules
+      } else {
+        const payload = buildPayload(sizeId);
+        payload.rule_number = ruleNum;
+        if (nameSuffix) payload.name = `${form.name.trim()}${nameSuffix}`;
+        await createMutation.mutateAsync(payload);
+        return 1;
+      }
+    };
 
     try {
       if (editItem) {
-        // Edit mode: single rule update
+        // Edit mode: single rule update (no "both" split on edit)
         const payload = buildPayload(form.size_id || null);
+        if (isBothMode) payload.recipe_type = 'glaze'; // edit saves as glaze
         await updateMutation.mutateAsync({ id: editItem.id, data: payload });
       } else if (multiSizeMode && form.size_ids.length > 0) {
-        // Multi-size mode: create one rule per size
+        // Multi-size mode: create rules per size (× 2 if "both")
         let num = parseInt(form.rule_number) || 0;
         for (const sid of form.size_ids) {
           const sizeName = sizes.find((s) => s.id === sid)?.name ?? '';
-          const payload = buildPayload(sid);
-          payload.rule_number = num++;
-          payload.name = form.size_ids.length > 1
-            ? `${form.name.trim()} — ${sizeName}`
-            : form.name.trim();
-          await createMutation.mutateAsync(payload);
+          const suffix = form.size_ids.length > 1 ? ` — ${sizeName}` : '';
+          const created = await createForSize(sid, num, suffix);
+          num += created;
         }
       } else {
         // Single size or no size
-        const payload = buildPayload(form.size_id || null);
-        await createMutation.mutateAsync(payload);
+        const num = parseInt(form.rule_number) || 0;
+        await createForSize(form.size_id || null, num, '');
       }
       closeDialog();
     } catch (err: unknown) {
@@ -616,40 +647,108 @@ export default function ConsumptionRulesPage() {
             <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-blue-600">
               Consumption Calculation
             </h3>
-            <div className="grid grid-cols-3 gap-3">
-              <Input
-                label="ml per m² *"
-                type="number"
-                step="0.01"
-                value={form.consumption_ml_per_sqm}
-                onChange={(e) => setForm({ ...form, consumption_ml_per_sqm: e.target.value })}
-                placeholder="e.g. 850"
-              />
-              <Input
-                label="Coats"
-                type="number"
-                min="1"
-                value={form.coats}
-                onChange={(e) => setForm({ ...form, coats: e.target.value })}
-              />
-              <Input
-                label="SG Override"
-                type="number"
-                step="0.001"
-                value={form.specific_gravity_override}
-                onChange={(e) =>
-                  setForm({ ...form, specific_gravity_override: e.target.value })
-                }
-                placeholder="Leave empty to use recipe SG"
-              />
-            </div>
+
+            {form.recipe_type === 'both' ? (
+              <>
+                {/* Glaze section */}
+                <p className="mb-1 text-xs font-semibold text-blue-700">Glaze</p>
+                <div className="mb-3 grid grid-cols-3 gap-3">
+                  <Input
+                    label="Glaze ml/m² *"
+                    type="number"
+                    step="0.01"
+                    value={form.consumption_ml_per_sqm}
+                    onChange={(e) => setForm({ ...form, consumption_ml_per_sqm: e.target.value })}
+                    placeholder="e.g. 850"
+                  />
+                  <Input
+                    label="Glaze Coats"
+                    type="number"
+                    min="1"
+                    value={form.coats}
+                    onChange={(e) => setForm({ ...form, coats: e.target.value })}
+                  />
+                  <Input
+                    label="Glaze SG Override"
+                    type="number"
+                    step="0.001"
+                    value={form.specific_gravity_override}
+                    onChange={(e) => setForm({ ...form, specific_gravity_override: e.target.value })}
+                    placeholder="Leave empty for recipe SG"
+                  />
+                </div>
+                {/* Engobe section */}
+                <p className="mb-1 text-xs font-semibold text-green-700">Engobe</p>
+                <div className="grid grid-cols-3 gap-3">
+                  <Input
+                    label="Engobe ml/m² *"
+                    type="number"
+                    step="0.01"
+                    value={form.engobe_ml_per_sqm}
+                    onChange={(e) => setForm({ ...form, engobe_ml_per_sqm: e.target.value })}
+                    placeholder="e.g. 600"
+                  />
+                  <Input
+                    label="Engobe Coats"
+                    type="number"
+                    min="1"
+                    value={form.engobe_coats}
+                    onChange={(e) => setForm({ ...form, engobe_coats: e.target.value })}
+                  />
+                  <div className="flex items-end pb-1 text-xs text-gray-400">
+                    SG from engobe recipe
+                  </div>
+                </div>
+                <p className="mt-2 text-xs text-blue-600">
+                  Two rules will be created: one for glaze and one for engobe, with shared matching criteria.
+                </p>
+              </>
+            ) : (
+              <div className="grid grid-cols-3 gap-3">
+                <Input
+                  label="ml per m² *"
+                  type="number"
+                  step="0.01"
+                  value={form.consumption_ml_per_sqm}
+                  onChange={(e) => setForm({ ...form, consumption_ml_per_sqm: e.target.value })}
+                  placeholder="e.g. 850"
+                />
+                <Input
+                  label="Coats"
+                  type="number"
+                  min="1"
+                  value={form.coats}
+                  onChange={(e) => setForm({ ...form, coats: e.target.value })}
+                />
+                <Input
+                  label="SG Override"
+                  type="number"
+                  step="0.001"
+                  value={form.specific_gravity_override}
+                  onChange={(e) =>
+                    setForm({ ...form, specific_gravity_override: e.target.value })
+                  }
+                  placeholder="Leave empty to use recipe SG"
+                />
+              </div>
+            )}
           </div>
 
-          {/* Multi-size info banner */}
-          {multiSizeMode && form.size_ids.length > 1 && !editItem && (
+          {/* Info banners */}
+          {!editItem && (multiSizeMode && form.size_ids.length > 1 || form.recipe_type === 'both') && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-              Will create <strong>{form.size_ids.length} separate rules</strong> — one for each selected size.
-              Each rule name will have the size appended (e.g. &quot;{form.name} — 10x10&quot;).
+              {(() => {
+                const sizeCount = multiSizeMode ? form.size_ids.length : 1;
+                const perSize = form.recipe_type === 'both' ? 2 : 1;
+                const total = sizeCount * perSize;
+                return (
+                  <>
+                    Will create <strong>{total} rule{total > 1 ? 's' : ''}</strong>
+                    {multiSizeMode && form.size_ids.length > 1 && <> ({form.size_ids.length} sizes)</>}
+                    {form.recipe_type === 'both' && <> (× 2: glaze + engobe)</>}
+                  </>
+                );
+              })()}
             </div>
           )}
 

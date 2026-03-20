@@ -28,7 +28,13 @@ async def seed_status(db: Session = Depends(get_db)):
     counts = {}
     for table in ["colors", "sizes", "firing_profiles", "factories", "users",
                    "recipes", "materials", "resources", "tps_parameters",
-                   "application_methods", "application_collections", "color_collections"]:
+                   "application_methods", "application_collections", "color_collections",
+                   "recipe_materials", "material_stock", "glazing_board_specs",
+                   "defect_causes", "collections", "finishing_types", "application_types",
+                   "places_of_application", "suppliers", "packaging_box_types",
+                   "quality_assignment_config", "kiln_loading_rules", "kiln_constants",
+                   "warehouse_sections", "production_orders", "order_positions",
+                   "tasks", "batches", "schedule_slots"]:
         try:
             row = db.execute(text(f"SELECT count(*) FROM {table}")).scalar()  # noqa: S608
             counts[table] = row

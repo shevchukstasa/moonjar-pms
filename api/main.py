@@ -1530,24 +1530,24 @@ def _ensure_schema():
 
     # --- Section: Seed colors ---
     def _seed_colors(conn):
-        """Seed 25 product colors. is_basic=True for base/neutral colors."""
+        """Seed 25 product colors. All standard catalog colors are base (is_basic=True)."""
         _COLORS = [
-            ("Burgundy", False), ("Lava Core", False), ("Raw Turmeric", False),
-            ("Wild Honey", False), ("Mocha Nude", False), ("Rose Dust", False),
-            ("Wabi Beige", False), ("Wild Olive", False), ("Basalt Green", False),
-            ("Moss Glaze", False), ("Jade Dream", False), ("Matcha Leaf", False),
-            ("Turquoise Depth", False), ("Lagoon Spark", False), ("Frost Blue", False),
-            ("Frosted White", True), ("Milk Crackle", True), ("Soft Graphite", True),
-            ("Lavender Ash", False), ("Velvet Fig", False), ("Raw Indigo", False),
-            ("Black Rock", True), ("Raku Turquoise", False), ("Raku Green", False),
-            ("Gold", False),
+            "Burgundy", "Lava Core", "Raw Turmeric",
+            "Wild Honey", "Mocha Nude", "Rose Dust",
+            "Wabi Beige", "Wild Olive", "Basalt Green",
+            "Moss Glaze", "Jade Dream", "Matcha Leaf",
+            "Turquoise Depth", "Lagoon Spark", "Frost Blue",
+            "Frosted White", "Milk Crackle", "Soft Graphite",
+            "Lavender Ash", "Velvet Fig", "Raw Indigo",
+            "Black Rock", "Raku Turquoise", "Raku Green",
+            "Gold",
         ]
-        for cname, is_basic in _COLORS:
+        for cname in _COLORS:
             conn.execute(text(
                 "INSERT INTO colors (id, name, is_basic) "
-                "VALUES (gen_random_uuid(), :name, :is_basic) "
-                "ON CONFLICT (name) DO NOTHING"
-            ), {"name": cname, "is_basic": is_basic})
+                "VALUES (gen_random_uuid(), :name, true) "
+                "ON CONFLICT (name) DO UPDATE SET is_basic = true"
+            ), {"name": cname})
         logger.info(f"_seed_colors: upserted {len(_COLORS)} colors")
 
     _run_section("seed_colors", _seed_colors)

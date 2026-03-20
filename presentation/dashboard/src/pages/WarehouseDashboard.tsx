@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
 import { useUiStore } from '@/stores/uiStore';
+import { formatDateTime, formatDate } from '@/lib/format';
 import {
   useMaterials,
   useLowStock,
@@ -253,8 +254,7 @@ function TransactionsTab({
     }
   };
 
-  const fmtDate = (d: string | null) =>
-    d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '--';
+  const fmtDate = (d: string | null) => d ? formatDateTime(d) : '--';
 
   const txBadge = (type: string) => {
     if (type === 'receive') return <Badge status="receive" label="Receive" />;
@@ -432,8 +432,7 @@ function PurchaseRequestsTab({
     );
   }
 
-  const fmtDate = (d: string | null) =>
-    d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '--';
+  const fmtDate = (d: string | null) => d ? formatDate(d) : '--';
 
   return (
     <div className="space-y-3">

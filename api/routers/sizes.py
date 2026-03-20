@@ -159,6 +159,26 @@ async def list_sizes(
     return {"items": [_serialize_size(s) for s in items], "total": len(items)}
 
 
+@router.post("/recalculate-all-boards")
+async def recalculate_all_glazing_boards(
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin_or_pm),
+):
+    """Recalculate glazing board specs for ALL sizes. Use after formula changes."""
+    sizes = db.query(Size).all()
+    updated = 0
+    errors = []
+    for s in sizes:
+        try:
+            _upsert_glazing_board(db, s)
+            updated += 1
+        except Exception as exc:
+            errors.append({"size": s.name, "error": str(exc)})
+    db.commit()
+    logger.info("GLAZING_BOARD | recalculated %d sizes, %d errors", updated, len(errors))
+    return {"updated": updated, "errors": errors, "total": len(sizes)}
+
+
 @router.get("/{size_id}/glazing-board")
 async def get_glazing_board(
     size_id: UUID,

@@ -187,6 +187,8 @@ def _serialize_position(p) -> dict:
         "shape": _ev(p.shape),
         "shape_dimensions": p.shape_dimensions if getattr(p, 'shape_dimensions', None) else None,
         "thickness_mm": float(p.thickness_mm) if p.thickness_mm else 11.0,
+        "width_cm": float(p.width_cm) if getattr(p, 'width_cm', None) else None,
+        "length_cm": float(p.length_cm) if getattr(p, 'length_cm', None) else None,
         "recipe_id": str(p.recipe_id) if p.recipe_id else None,
         "mandatory_qc": p.mandatory_qc,
         "split_category": _ev(p.split_category),

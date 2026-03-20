@@ -21,6 +21,22 @@ async def health_check():
     return {"status": "ok", "service": "moonjar-pms"}
 
 
+@router.get("/health/seed-status")
+async def seed_status(db: Session = Depends(get_db)):
+    """Public diagnostic: count rows in key reference tables."""
+    from sqlalchemy import text
+    counts = {}
+    for table in ["colors", "sizes", "firing_profiles", "factories", "users",
+                   "recipes", "materials", "resources", "tps_parameters",
+                   "application_methods", "application_collections", "color_collections"]:
+        try:
+            row = db.execute(text(f"SELECT count(*) FROM {table}")).scalar()  # noqa: S608
+            counts[table] = row
+        except Exception as e:
+            counts[table] = f"ERROR: {e}"
+    return counts
+
+
 def _verify_internal_auth(request: Request) -> None:
     """Verify internal endpoint access via ADMIN_IP_ALLOWLIST or X-Internal-Key header.
 

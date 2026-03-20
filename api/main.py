@@ -269,6 +269,20 @@ def _ensure_schema():
     # --- Section 2: Missing tables ---
     def _create_tables(conn):
         conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS color_collections (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(100) UNIQUE NOT NULL,
+                description VARCHAR(255),
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            CREATE TABLE IF NOT EXISTS colors (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(100) UNIQUE NOT NULL,
+                code VARCHAR(20),
+                is_basic BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
             CREATE TABLE IF NOT EXISTS firing_profiles (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 factory_id UUID NOT NULL REFERENCES factories(id),

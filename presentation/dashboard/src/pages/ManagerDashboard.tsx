@@ -70,6 +70,7 @@ const ORDER_STATUS_OPTIONS = [
   { value: 'in_production', label: 'In Production' },
   { value: 'partially_ready', label: 'Partially Ready' },
   { value: 'ready_for_shipment', label: 'Ready for Shipment' },
+  { value: 'shipped', label: 'Shipped' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
 

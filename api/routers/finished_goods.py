@@ -1,4 +1,5 @@
-"""Finished Goods Stock router — CRUD + availability check across factories."""
+"""Finished Goods Stock router — CRUD + availability check across factories.
+All mutations (create, update, delete) are audit-logged."""
 
 import uuid as uuid_mod
 from datetime import datetime, timezone
@@ -11,7 +12,7 @@ from sqlalchemy import and_
 from api.database import get_db
 from api.auth import get_current_user
 from api.roles import require_management
-from api.models import FinishedGoodsStock
+from api.models import FinishedGoodsStock, AuditLog
 
 router = APIRouter()
 
@@ -97,9 +98,20 @@ async def upsert_finished_goods(
     ).first()
 
     if existing:
+        old_qty = existing.quantity
+        old_reserved = existing.reserved_quantity
         existing.quantity = data.quantity
         existing.reserved_quantity = data.reserved_quantity
         existing.updated_at = datetime.now(timezone.utc)
+        # Audit log
+        db.add(AuditLog(
+            id=uuid_mod.uuid4(), action="update",
+            table_name="finished_goods_stock", record_id=existing.id,
+            user_id=current_user.id, user_email=current_user.email,
+            old_data={"color": data.color, "size": data.size,
+                      "old_qty": old_qty, "new_qty": data.quantity,
+                      "old_reserved": old_reserved, "new_reserved": data.reserved_quantity},
+        ))
         db.commit()
         db.refresh(existing)
         return _serialize_stock(existing)
@@ -116,6 +128,15 @@ async def upsert_finished_goods(
         updated_at=datetime.now(timezone.utc),
     )
     db.add(stock)
+    # Audit log
+    db.add(AuditLog(
+        id=uuid_mod.uuid4(), action="create",
+        table_name="finished_goods_stock", record_id=stock.id,
+        user_id=current_user.id, user_email=current_user.email,
+        old_data={"color": data.color, "size": data.size, "collection": data.collection,
+                  "product_type": data.product_type, "quantity": data.quantity,
+                  "factory_id": data.factory_id},
+    ))
     db.commit()
     db.refresh(stock)
     return _serialize_stock(stock)
@@ -155,10 +176,20 @@ async def delete_finished_goods(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
-    """Delete / write-off a finished goods stock record."""
+    """Delete / write-off a finished goods stock record. Audit-logged."""
     stock = db.query(FinishedGoodsStock).filter(FinishedGoodsStock.id == stock_id).first()
     if not stock:
         raise HTTPException(404, "Stock record not found")
+    # Audit log before delete
+    db.add(AuditLog(
+        id=uuid_mod.uuid4(), action="delete",
+        table_name="finished_goods_stock", record_id=stock.id,
+        user_id=current_user.id, user_email=current_user.email,
+        old_data={"color": stock.color, "size": stock.size, "collection": stock.collection,
+                  "quantity": stock.quantity, "reserved": stock.reserved_quantity,
+                  "factory_id": str(stock.factory_id),
+                  "factory_name": stock.factory.name if stock.factory else None},
+    ))
     db.delete(stock)
     db.commit()
     return None

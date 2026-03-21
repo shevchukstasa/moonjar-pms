@@ -83,4 +83,7 @@ export const finishedGoodsApi = {
 
   checkAvailability: (params: AvailabilityParams) =>
     apiClient.get<AvailabilityResponse>('/finished-goods/availability', { params }).then((r) => r.data),
+
+  delete: (id: string) =>
+    apiClient.delete(`/finished-goods/${id}`).then((r) => r.data),
 };

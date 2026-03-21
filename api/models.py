@@ -2376,6 +2376,21 @@ class ApplicationMethod(Base):
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 
+class AuditLog(Base):
+    """Audit log for all create/update/delete operations on critical data."""
+    __tablename__ = 'audit_logs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    action = Column(sa.String(20), nullable=False)  # create, update, delete
+    table_name = Column(sa.String(100), nullable=False)  # finished_goods_stock, etc.
+    record_id = Column(UUID(as_uuid=True), nullable=False)
+    old_data = Column(JSONB, nullable=True)  # snapshot before mutation
+    user_id = Column(UUID(as_uuid=True), nullable=True)
+    user_email = Column(sa.String(255), nullable=True)
+    ip_address = Column(sa.String(45), nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+
 class ApplicationCollection(Base):
     __tablename__ = 'application_collections'
 

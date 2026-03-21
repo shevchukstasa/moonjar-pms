@@ -96,6 +96,12 @@ export default function FinishedGoodsPage() {
     onSuccess: (data) => setAvailResult(data),
   });
 
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => finishedGoodsApi.delete(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['finished-goods'] }); setDeleteId(null); },
+  });
+
   // ── Upsert form state ──
   const [form, setForm] = useState({ factory_id: '', color: '', size: '', collection: '', product_type: 'tile', quantity: '', reserved_quantity: '0' });
 
@@ -212,7 +218,10 @@ export default function FinishedGoodsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>Edit</Button>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>Edit</Button>
+                        <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => setDeleteId(item.id)}>Delete</Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -387,6 +396,23 @@ export default function FinishedGoodsPage() {
               )}
             </div>
           )}
+        </div>
+      </Dialog>
+
+      {/* Delete Confirmation */}
+      <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} title="Delete Stock Record">
+        <p className="text-sm text-gray-600">
+          Are you sure you want to delete this stock record? This action will be logged in the audit trail.
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setDeleteId(null)}>Cancel</Button>
+          <Button
+            variant="danger"
+            onClick={() => deleteId && deleteMut.mutate(deleteId)}
+            disabled={deleteMut.isPending}
+          >
+            {deleteMut.isPending ? 'Deleting...' : 'Delete'}
+          </Button>
         </div>
       </Dialog>
     </div>

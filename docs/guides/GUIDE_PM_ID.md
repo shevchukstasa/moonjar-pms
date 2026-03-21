@@ -1,6 +1,6 @@
 # Panduan Production Manager (PM) -- Moonjar PMS
 
-> Versi: 1.0 | Tanggal: 2026-03-20
+> Versi: 1.1 | Tanggal: 2026-03-21
 > Moonjar Production Management System
 
 ---
@@ -14,7 +14,24 @@
 5. [Tugas](#5-tugas)
 6. [Aturan Konsumsi](#6-aturan-konsumsi)
 7. [Pengelolaan Jadwal](#7-pengelolaan-jadwal)
-8. [Tips dan Praktik Terbaik](#8-tips-dan-praktik-terbaik)
+8. [Inspeksi Kiln](#8-inspeksi-kiln)
+9. [Tugas Pengukuran Konsumsi](#9-tugas-pengukuran-konsumsi)
+11. [Pemeliharaan Kiln](#11-pemeliharaan-kiln)
+12. [Keputusan Grinding](#12-keputusan-grinding)
+13. [Barang Jadi](#13-barang-jadi)
+14. [Rekonsiliasi](#14-rekonsiliasi)
+15. [Laporan dan Analitik](#15-laporan-dan-analitik)
+16. [Kalender Pabrik](#16-kalender-pabrik)
+17. [Pengelolaan Resep](#17-pengelolaan-resep)
+18. [Profil Pembakaran](#18-profil-pembakaran)
+19. [Grup Suhu](#19-grup-suhu)
+20. [Pengelolaan Tahapan](#20-pengelolaan-tahapan)
+21. [Jadwal Pembakaran](#21-jadwal-pembakaran)
+22. [Pengelolaan Gudang](#22-pengelolaan-gudang)
+23. [Pengelolaan Kemasan](#23-pengelolaan-kemasan)
+24. [Pengelolaan Ukuran](#24-pengelolaan-ukuran)
+25. [Tablo (Papan Tampilan Produksi)](#25-tablo-papan-tampilan-produksi)
+26. [Tips dan Praktik Terbaik](#26-tips-dan-praktik-terbaik)
 
 ---
 
@@ -46,9 +63,24 @@ Sebagai Production Manager, Anda memiliki akses ke halaman-halaman berikut:
 | Dashboard PM | `/manager` | Panel kendali utama dengan tab untuk pesanan, tugas, material, defek, dan lainnya |
 | Jadwal | `/manager/schedule` | Jadwal produksi per bagian (Glazing, Firing, Sorting, QC, Kilns) |
 | Kiln | `/manager/kilns` | Pengelolaan kiln, pemeliharaan, aturan pemuatan |
+| Inspeksi Kiln | `/manager/kiln-inspections` | Penilaian kondisi kiln mingguan berbasis checklist |
+| Pemeliharaan Kiln | `/manager/kiln-maintenance` | Pemeliharaan preventif dan korektif terjadwal |
+| Grinding | `/manager/grinding` | Keputusan grinding untuk produk yang cacat |
 | Material | `/manager/materials` | Inventaris material, penerimaan, audit, riwayat transaksi |
-| Aturan Konsumsi | `/consumption-rules` | Tingkat konsumsi glaze/engobe per meter persegi |
+| Resep | `/admin/recipes` | Pengelolaan resep glaze, engobe, dan produk |
+| Profil Pembakaran | `/admin/firing-profiles` | Kurva pemanasan/pendinginan multi-interval untuk kiln |
+| Grup Suhu | `/admin/temperature-groups` | Definisi grup suhu untuk co-firing |
+| Gudang | `/admin/warehouses` | Pengelolaan bagian gudang |
+| Kemasan | `/admin/packaging` | Jenis box, kapasitas, dan definisi spacer |
+| Ukuran | `/admin/sizes` | Definisi ukuran produk dengan dimensi spesifik per bentuk |
+| Aturan Konsumsi | `/admin/consumption-rules` | Tingkat konsumsi glaze/engobe per meter persegi |
+| Kalender Pabrik | `/admin/factory-calendar` | Hari kerja, hari libur, dan hari non-kerja per pabrik |
+| Barang Jadi | `/warehouse/finished-goods` | Inventaris produk jadi dan pemeriksaan ketersediaan |
+| Rekonsiliasi | `/warehouse/reconciliations` | Sesi penghitungan inventaris formal multi-material |
+| Laporan | `/reports` | Ringkasan pesanan, utilisasi kiln, dan analitik produksi |
+| Tablo | `/tablo` | Papan tampilan produksi layar penuh untuk monitor workshop |
 | Detail Pesanan | `/orders/:id` | Tampilan detail pesanan tertentu beserta posisinya |
+| Panduan | `/manager/guide` | Panduan PM ini (dalam aplikasi) |
 
 Bilah navigasi atas juga mencakup:
 
@@ -134,7 +166,7 @@ Asisten AI bawaan untuk pertanyaan cepat tentang produksi, pesanan, dan material
 
 Tab tambahan muncul secara otomatis ketika ada data yang relevan:
 
-- **Blocking** -- posisi yang diblokir karena kekurangan material, resep belum ada, stensil belum ada, pencocokan warna, atau penahanan QM
+- **Blocking** -- posisi yang diblokir karena kekurangan material, resep belum ada, stensil belum ada, pencocokan warna, data konsumsi belum ada (`AWAITING_CONSUMPTION_DATA`), atau penahanan QM
 - **Cancellations** -- permintaan pembatalan dari Sales
 - **Change Requests** -- permintaan perubahan pesanan dari Sales
 - **Mismatch** -- posisi dengan ketidakcocokan warna yang memerlukan keputusan Anda
@@ -358,6 +390,7 @@ PLANNED (Direncanakan)
   +-- AWAITING_STENCIL_SILKSCREEN (diblokir: stensil belum ada)
   +-- AWAITING_COLOR_MATCHING (diblokir: pencocokan warna diperlukan)
   +-- AWAITING_SIZE_CONFIRMATION (diblokir: ukuran belum jelas)
+  +-- AWAITING_CONSUMPTION_DATA (diblokir: tingkat konsumsi resep belum ada)
   |
   v
 SENT_TO_GLAZING -> ENGOBE_APPLIED -> ENGOBE_CHECK -> GLAZED
@@ -417,6 +450,7 @@ Ketika posisi diblokir dan solusi standar tidak tersedia atau tidak praktis, And
 | `awaiting_recipe` | Posisi pindah ke PLANNED (PM bertanggung jawab) |
 | `awaiting_stencil_silkscreen` | Tugas pemblokir ditutup, posisi pindah ke PLANNED |
 | `awaiting_color_matching` | Tugas pemblokir ditutup, posisi pindah ke PLANNED |
+| `awaiting_consumption_data` | Tugas pengukuran konsumsi ditutup, posisi pindah ke PLANNED (PM menerima risiko tingkat default) |
 | `blocked_by_qm` | Tugas QM pemblokir ditutup, posisi pindah ke PLANNED |
 
 > **Peringatan**: Force-unblock untuk `insufficient_materials` dapat menyebabkan saldo material negatif. Ini dilacak di tabel `negative_balances` dan akan muncul sebagai peringatan.
@@ -454,6 +488,7 @@ Ketika Sales mengirim permintaan pembatalan atau perubahan, itu muncul di tab di
 | `stock_shortage` | Kekurangan stok batu | PM |
 | `size_resolution` | Klarifikasi ukuran | PM |
 | `glazing_board_needed` | Papan glazing khusus | PM |
+| `consumption_measurement` | Mengukur tingkat konsumsi (ml/m2) yang belum ada untuk suatu resep | PM |
 
 ### 5.2. Membuat Tugas
 
@@ -641,9 +676,693 @@ Untuk menghapus posisi:
 
 ---
 
-## 8. Tips dan Praktik Terbaik
+## 8. Inspeksi Kiln
 
-### 8.1. Rutinitas Harian
+Inspeksi kiln secara rutin sangat penting untuk menjaga operasi pembakaran yang aman dan efisien. Fitur Inspeksi Kiln menyediakan alur kerja berbasis checklist yang terstruktur untuk mendokumentasikan kondisi kiln dan melacak perbaikan.
+
+### 8.1. Ringkasan
+
+Inspeksi kiln mingguan mencakup **8 kategori dengan 35 item inspeksi** secara total. Setiap inspeksi terkait dengan kiln tertentu dan dilakukan oleh Production Manager.
+
+**Jalur**: `/manager/kiln-inspections`
+
+### 8.2. Kategori Inspeksi
+
+| # | Kategori | Item | Apa yang Diperiksa |
+|---|---|---|---|
+| 1 | Struktur Eksterior | 4-5 | Retakan, sambungan mortar, rangka logam, segel pintu, lubang ventilasi |
+| 2 | Interior / Ruang Pembakaran | 4-5 | Lapisan bata, rak, tiang penyangga, kiln wash, kondisi lantai |
+| 3 | Elemen Pemanas | 4-5 | Keutuhan elemen, koneksi, pembacaan resistansi, penyangga elemen |
+| 4 | Kontrol Suhu | 4-5 | Akurasi thermocouple, fungsi controller, pyrometric cones, konsistensi zona |
+| 5 | Sistem Kelistrikan | 4-5 | Pengkabelan, kontaktor, sekering, grounding, kondisi panel kontrol |
+| 6 | Sistem Gas (jika ada) | 3-4 | Burner, saluran gas, regulator, sensor api, ventilasi |
+| 7 | Peralatan Keselamatan | 3-4 | Tombol darurat, label peringatan, kedekatan alat pemadam, ketersediaan APD |
+| 8 | Kesiapan Operasional | 3-4 | Inventaris perabotan kiln, alat pemuatan, buku log terkini, status kebersihan |
+
+### 8.3. Cara Melakukan Inspeksi
+
+1. Buka halaman **Kiln Inspections** (`/manager/kiln-inspections`).
+2. Klik tab **New Inspection**.
+3. **Pilih kiln** yang akan Anda inspeksi dari dropdown.
+4. Checklist dimuat secara otomatis dengan semua 35 item yang dikelompokkan berdasarkan kategori.
+5. Periksa setiap item dan pilih penilaian:
+
+| Penilaian | Arti | Tindakan yang Diperlukan |
+|---|---|---|
+| **OK** | Item dalam kondisi baik | Tidak ada |
+| **Not Applicable** | Item tidak berlaku untuk jenis kiln ini | Tidak ada |
+| **Damaged** | Item rusak tetapi kiln masih bisa beroperasi dengan hati-hati | Otomatis ditandai untuk tindak lanjut |
+| **Needs Repair** | Item memerlukan perbaikan sebelum penggunaan berikutnya | Otomatis ditandai untuk tindak lanjut, entri log perbaikan dibuat |
+
+6. Tambahkan catatan opsional pada item apa pun untuk konteks tambahan (contoh: "Retakan kecil di pojok kiri atas, pantau minggu depan").
+7. Klik **Submit Inspection** ketika semua item sudah dinilai.
+
+> **Penting**: Item yang ditandai sebagai **Damaged** atau **Needs Repair** secara otomatis disorot dalam laporan inspeksi dan menghasilkan entri di Repair Log untuk pelacakan.
+
+### 8.4. Meninjau Inspeksi Sebelumnya
+
+- Tab **Inspection History** menampilkan semua inspeksi yang telah selesai diurutkan berdasarkan tanggal.
+- Klik inspeksi mana pun untuk melihat laporan lengkap dengan semua penilaian dan catatan.
+- Gunakan filter untuk melihat inspeksi kiln tertentu.
+- Bandingkan inspeksi dari waktu ke waktu untuk melacak tren kerusakan.
+
+### 8.5. Repair Log (Log Perbaikan)
+
+Repair Log melacak setiap masalah yang diidentifikasi selama inspeksi dari laporan hingga penyelesaian.
+
+**Status perbaikan**:
+
+| Status | Arti |
+|---|---|
+| `open` | Masalah teridentifikasi, belum ditangani |
+| `in_progress` | Pekerjaan perbaikan telah dimulai |
+| `completed` | Perbaikan selesai dan terverifikasi |
+
+**Alur kerja**:
+1. Ketika item inspeksi dinilai **Damaged** atau **Needs Repair**, entri log perbaikan secara otomatis dibuat dengan status `open`.
+2. Tugaskan perbaikan kepada orang atau tim yang sesuai.
+3. Perbarui status menjadi `in_progress` ketika pekerjaan dimulai.
+4. Tandai sebagai `completed` ketika perbaikan selesai dan terverifikasi.
+5. Inspeksi kiln berikutnya harus mengkonfirmasi bahwa perbaikan efektif.
+
+> **Praktik terbaik**: Tinjau Repair Log di awal setiap minggu. Prioritaskan item yang masih terbuka untuk kiln yang dijadwalkan untuk pembakaran mendatang.
+
+---
+
+## 9. Tugas Pengukuran Konsumsi
+
+### 9.1. Apa Itu Tugas Pengukuran Konsumsi?
+
+Ketika pesanan baru tiba dan posisi menggunakan metode aplikasi (contoh: SS, BS, SB) tetapi resep yang ditetapkan **tidak memiliki tingkat konsumsi yang diperlukan** (tingkat semprot atau kuas dalam ml/m2), sistem tidak dapat menghitung berapa banyak material yang perlu direservasi. Dalam hal ini, posisi diblokir dengan status `AWAITING_CONSUMPTION_DATA` dan **tugas pemblokir** bertipe `consumption_measurement` dibuat dan ditugaskan kepada PM.
+
+### 9.2. Kapan Ini Terjadi?
+
+Ini terjadi ketika **ketiga kondisi** terpenuhi:
+1. Posisi memiliki resep yang ditetapkan (glaze atau engobe).
+2. Aturan konsumsi menentukan metode aplikasi yang memerlukan tingkat tertentu (contoh: tingkat semprot untuk metode SS, tingkat kuas untuk metode BS).
+3. Resep **tidak** memiliki bidang tingkat yang diperlukan terisi.
+
+**Kode metode aplikasi dan tingkat yang dibutuhkan**:
+
+| Kode | Nama Lengkap | Tingkat Engobe | Tingkat Glaze |
+|---|---|---|---|
+| `SS` | Semprot engobe + Semprot glaze | Tingkat semprot | Tingkat semprot |
+| `BS` | Kuas engobe + Semprot glaze | Tingkat kuas | Tingkat semprot |
+| `SB` | Semprot engobe + Kuas glaze | Tingkat semprot | Tingkat kuas |
+| `S` | Semprot glaze saja (tanpa engobe) | -- | Tingkat semprot |
+| `splashing` | Metode percikan | -- | Tingkat percikan |
+
+### 9.3. Cara Menangani Tugas Pengukuran Konsumsi
+
+**Langkah 1: Temukan tugas**
+
+Tugas muncul di tab **Tasks** Anda dengan jenis `consumption_measurement`. Tugas ini ditandai sebagai **blocking**, artinya posisi terkait tidak dapat melanjutkan sampai tugas diselesaikan.
+
+Deskripsi tugas mencakup:
+- **Nama resep** -- resep mana yang belum memiliki tingkat
+- **Jenis tingkat yang hilang** -- tingkat semprot (ml/m2) atau tingkat kuas (ml/m2)
+- **Nomor pesanan dan posisi** -- pesanan mana yang menunggu
+
+**Langkah 2: Ukur tingkat konsumsi secara fisik**
+
+1. Siapkan potongan uji dengan ukuran dan material yang benar.
+2. Aplikasikan glaze atau engobe menggunakan metode yang ditentukan (semprot atau kuas).
+3. Ukur volume material yang digunakan (dalam ml).
+4. Hitung luas potongan uji (dalam m2).
+5. Bagi: **tingkat konsumsi = volume yang digunakan (ml) / luas (m2)**.
+
+> **Tips**: Lakukan setidaknya 2-3 kali aplikasi uji dan rata-ratakan hasilnya untuk akurasi. Dokumentasikan kondisi pengujian (ukuran nozzle, tekanan, jarak untuk semprot; jenis kuas dan teknik untuk kuas).
+
+**Langkah 3: Masukkan tingkat yang diukur**
+
+1. Buka tugas dan klik tindakan untuk memasukkan tingkat konsumsi.
+2. Masukkan tingkat yang diukur dalam **ml/m2**.
+3. Konfirmasi entri.
+
+**Langkah 4: Apa yang terjadi selanjutnya**
+
+Setelah Anda memasukkan tingkat konsumsi:
+- Resep diperbarui dengan nilai tingkat baru.
+- Tugas pemblokir ditandai sebagai `done`.
+- Status posisi berubah dari `AWAITING_CONSUMPTION_DATA` kembali ke `PLANNED`.
+- Sistem melanjutkan reservasi material menggunakan tingkat yang baru dimasukkan.
+- Semua posisi lain yang menggunakan resep dan metode aplikasi yang sama juga mendapat manfaat dari tingkat ini ke depannya.
+
+### 9.4. Tips Praktis untuk Pengukuran
+
+- **Simpan log pengukuran**: Catat semua pengukuran dengan tanggal, resep, metode, ukuran potongan uji, dan hasil. Ini membantu menyelesaikan perselisihan tentang tingkat di masa depan.
+- **Standarkan kondisi**: Gunakan tekanan semprot, ukuran nozzle, dan jarak yang konsisten untuk hasil yang dapat direproduksi.
+- **Untuk aplikasi kuas**: Catat jenis kuas dan teknik yang digunakan, karena ini sangat mempengaruhi tingkat.
+- **Perbarui tingkat secara proaktif**: Jika Anda tahu resep akan digunakan dengan metode aplikasi baru, ukur tingkatnya terlebih dahulu untuk menghindari pemblokiran saat pesanan tiba.
+
+---
+
+## 11. Pemeliharaan Kiln
+
+### 11.1. Ringkasan
+
+Halaman Pemeliharaan Kiln menyediakan alur kerja terstruktur untuk menjadwalkan, melacak, dan menyelesaikan pemeliharaan preventif dan korektif pada kiln. Berbeda dengan Inspeksi Kiln (Bagian 8) yang fokus pada penilaian kondisi mingguan, Pemeliharaan Kiln mengelola pekerjaan terjadwal: penggantian elemen, kalibrasi thermocouple, perbaikan bata, pembersihan mendalam, dan lainnya.
+
+**Jalur**: `/manager/kiln-maintenance`
+
+### 11.2. Tab Halaman
+
+| Tab | Fungsi |
+|---|---|
+| **Upcoming** | Menampilkan semua item pemeliharaan yang direncanakan diurutkan berdasarkan tanggal, dengan item yang terlambat disorot merah |
+| **History** | Catatan pemeliharaan yang selesai dan dibatalkan |
+| **Maintenance Types** | Mengelola katalog definisi jenis pemeliharaan (contoh: "Element replacement", "Deep clean") |
+
+### 11.3. Menjadwalkan Pemeliharaan
+
+1. Di tab **Upcoming**, klik **"+ Schedule Maintenance"**.
+2. Isi formulir:
+   - **Kiln** -- pilih kiln (difilter berdasarkan pabrik jika pabrik dipilih).
+   - **Maintenance Type** -- pilih dari jenis yang telah ditentukan.
+   - **Scheduled Date** -- kapan pemeliharaan harus dilakukan.
+   - **Notes** -- instruksi tambahan.
+3. Persyaratan diatur secara otomatis berdasarkan jenis pemeliharaan:
+   - **Requires empty kiln** -- kiln harus dikosongkan sebelum pekerjaan dimulai.
+   - **Requires cooled kiln** -- kiln harus pada suhu ruangan.
+   - **Requires power off** -- pasokan listrik harus diputus.
+4. Untuk pemeliharaan berulang, atur **Recurrence Interval** (dalam hari). Sistem secara otomatis menjadwalkan kejadian berikutnya setelah setiap penyelesaian.
+
+### 11.4. Menyelesaikan Pemeliharaan
+
+1. Temukan item pemeliharaan di tab **Upcoming**.
+2. Klik **"Complete"**.
+3. Opsional tambahkan **Completion Notes** yang menjelaskan apa yang telah dikerjakan.
+4. Klik **"Confirm"**. Item berpindah ke tab History.
+5. Jika item berulang, item terjadwal baru secara otomatis dibuat untuk interval berikutnya.
+
+### 11.5. Kartu Ringkasan
+
+Tab Upcoming menampilkan empat kartu ringkasan di bagian atas:
+
+| Kartu | Keterangan |
+|---|---|
+| Total Scheduled | Semua item pemeliharaan yang direncanakan dalam 90 hari ke depan |
+| Overdue | Item yang melewati tanggal jadwalnya (disorot merah) |
+| Today | Item yang jatuh tempo hari ini (disorot kuning) |
+| + Schedule | Tombol aksi cepat untuk menambah pemeliharaan baru |
+
+### 11.6. Mengelola Jenis Pemeliharaan
+
+Di tab **Maintenance Types** Anda dapat membuat, mengedit, dan menghapus definisi jenis. Setiap jenis memiliki:
+- **Name** -- contoh: "Element replacement", "Thermocouple calibration"
+- **Default requirements** -- apakah kiln harus kosong, dingin, atau listrik dimatikan
+- **Default recurrence interval** -- periode pengulangan otomatis dalam hari
+
+---
+
+## 12. Keputusan Grinding
+
+### 12.1. Ringkasan
+
+Halaman Keputusan Grinding mengelola produk yang dikategorikan sebagai "grinding" selama tahap Sorting. Item-item ini memiliki cacat permukaan minor yang berpotensi dipulihkan dengan grinding atau, sebagai alternatif, dikirim ke Mana (pihak eksternal) untuk pembuangan atau pengerjaan ulang.
+
+**Jalur**: `/manager/grinding`
+
+### 12.2. Alur Status
+
+Setiap item stok grinding memiliki salah satu dari tiga status:
+
+| Status | Arti |
+|---|---|
+| **Pending** | Menunggu keputusan PM |
+| **Grinding** | Diputuskan: akan di-grinding dan digunakan kembali |
+| **Sent to Mana** | Diputuskan: dikirim ke pihak eksternal untuk pemrosesan |
+
+### 12.3. Membuat Keputusan
+
+Untuk setiap item yang tertunda, Anda melihat tiga tombol tindakan:
+
+- **Grind** (hijau) -- tandai item untuk grinding internal dan penggunaan kembali.
+- **Hold** (kuning) -- pertahankan item dalam status tertunda untuk keputusan nanti.
+- **Mana** (merah) -- kirim ke Mana. Dialog konfirmasi muncul sebelum tindakan ini diselesaikan.
+
+### 12.4. Kartu Ringkasan
+
+Empat kartu KPI ditampilkan di bagian atas:
+
+| Kartu | Keterangan |
+|---|---|
+| Total Items | Semua item stok grinding |
+| Pending Decision | Item yang menunggu tindakan PM |
+| Decided (Grind) | Item yang disetujui untuk grinding |
+| Sent to Mana | Item yang dikirim ke pihak eksternal |
+
+### 12.5. Filter
+
+- **Tab status**: All / Pending / Decided (Grind) / Sent to Mana
+- **Factory selector**: Filter berdasarkan pabrik
+- **Pagination**: 50 item per halaman
+
+---
+
+## 13. Barang Jadi
+
+### 13.1. Ringkasan
+
+Halaman Barang Jadi (Finished Goods) melacak inventaris produk yang telah selesai dan siap untuk pengiriman atau penyimpanan. Halaman ini mencatat stok berdasarkan warna, ukuran, koleksi, jenis produk, dan pabrik.
+
+**Jalur**: `/warehouse/finished-goods`
+
+### 13.2. Tindakan Utama
+
+- **+ Add Stock** -- menambah catatan barang jadi baru (pabrik, warna, ukuran, koleksi, jenis produk, jumlah, jumlah yang direservasi).
+- **Edit** -- memperbarui jumlah atau jumlah yang direservasi untuk item yang sudah ada.
+- **Check Availability** -- melakukan kueri di semua pabrik untuk melihat apakah kombinasi warna/ukuran tertentu tersedia dalam jumlah yang dibutuhkan. Sistem menampilkan pabrik mana yang memiliki stok yang cocok dan berapa banyak potongan yang tersedia.
+
+### 13.3. Memahami Tabel
+
+| Kolom | Keterangan |
+|---|---|
+| **Color** | Nama warna produk |
+| **Size** | Ukuran produk |
+| **Collection** | Koleksi produk |
+| **Type** | Jenis produk (tile, sink, pebble) |
+| **Factory** | Pabrik mana yang menyimpan stok |
+| **Quantity** | Total potongan dalam stok |
+| **Reserved** | Potongan yang direservasi untuk pesanan |
+| **Available** | Jumlah dikurangi yang direservasi (kode warna: merah jika nol, kuning jika rendah, hijau jika cukup) |
+
+### 13.4. Filter
+
+- Dropdown **Factory** -- filter berdasarkan pabrik tertentu atau lihat semua.
+- **Color search** -- cari berdasarkan nama warna (dengan debounce).
+- **Pagination** -- 50 item per halaman.
+
+### 13.5. Total
+
+Total ringkasan di bagian bawah halaman menampilkan agregat Quantity, Reserved, dan Available untuk semua item yang terlihat.
+
+---
+
+## 14. Rekonsiliasi
+
+### 14.1. Ringkasan
+
+Halaman Rekonsiliasi (Reconciliations) mengelola sesi penghitungan inventaris formal. Berbeda dengan Audit Inventaris material tunggal (Bagian 3.6), Rekonsiliasi adalah acara terstruktur yang dapat mencakup beberapa material sekaligus. Digunakan untuk penghitungan stok penuh atau parsial secara berkala.
+
+**Jalur**: `/warehouse/reconciliations`
+
+### 14.2. Status Rekonsiliasi
+
+| Status | Arti |
+|---|---|
+| **Scheduled** | Direncanakan untuk tanggal mendatang |
+| **Draft** | Dibuat tetapi belum dimulai |
+| **In Progress** | Sedang dalam proses penghitungan |
+| **Completed** | Semua item dihitung dan penyesuaian diterapkan |
+| **Cancelled** | Rekonsiliasi dibatalkan |
+
+### 14.3. Membuat Rekonsiliasi
+
+1. Klik **"+ New Reconciliation"**.
+2. Pilih **Factory**.
+3. Tambahkan **Notes** opsional (contoh: "Penghitungan stok bulanan -- gudang A").
+4. Klik **"Create"**.
+
+### 14.4. Bekerja dengan Rekonsiliasi
+
+1. Klik baris rekonsiliasi untuk membukanya.
+2. **Tambahkan item** -- pilih material yang akan dimasukkan dalam penghitungan.
+3. Untuk setiap item, masukkan **jumlah aktual yang dihitung**.
+4. Sistem menampilkan **saldo sistem** di samping jumlah yang dihitung dan menghitung **selisih**.
+5. Ketika semua item dihitung, klik **"Complete"**.
+6. Saat selesai, sistem menerapkan penyesuaian saldo sebagai transaksi audit inventaris.
+
+### 14.5. Kartu Ringkasan
+
+| Kartu | Keterangan |
+|---|---|
+| Total | Semua rekonsiliasi |
+| In Progress | Rekonsiliasi aktif yang sedang dihitung |
+| Completed | Rekonsiliasi yang telah selesai |
+| Scheduled | Rekonsiliasi yang direncanakan untuk masa depan |
+
+### 14.6. Filter
+
+- **Factory Selector** -- filter berdasarkan pabrik.
+- **Tab status** -- All / In Progress / Completed / Scheduled / Cancelled.
+
+---
+
+## 15. Laporan dan Analitik
+
+### 15.1. Ringkasan
+
+Halaman Laporan menyediakan metrik produksi yang diagregasi dengan filter rentang tanggal dan pabrik.
+
+**Jalur**: `/reports`
+
+### 15.2. Filter
+
+- **Factory** -- pilih pabrik tertentu atau "All Factories".
+- **Date range** -- pemilih tanggal Dari / Sampai (default 30 hari terakhir).
+
+### 15.3. Ringkasan Pesanan
+
+Empat kartu KPI di bagian atas:
+
+| Kartu | Keterangan |
+|---|---|
+| **Total Orders** | Jumlah pesanan dalam periode yang dipilih (dengan jumlah yang sedang dalam proses sebagai subjudul) |
+| **Completed** | Pesanan yang mencapai status shipped (dengan jumlah tepat waktu sebagai subjudul) |
+| **On-time %** | Persentase pesanan yang selesai dan dikirim sesuai deadline. Hijau >= 80%, Kuning >= 50%, Merah < 50% |
+| **Avg Days to Complete** | Rata-rata jumlah hari dari pembuatan pesanan hingga status shipped |
+
+### 15.4. Utilisasi Kiln
+
+Untuk setiap kiln, kartu menampilkan:
+
+- **Nama kiln** dan badge persentase utilisasi (hijau >= 80%, kuning >= 50%, merah < 50%).
+- **Progress bar** menampilkan utilisasi secara visual.
+- **Total firings** jumlah pembakaran untuk periode tersebut.
+- **Average load** (m2 per pembakaran).
+
+Bagian ini membantu Anda mengidentifikasi kiln yang kurang dimanfaatkan yang bisa menerima batch tambahan dan kiln yang kelebihan beban yang mungkin memerlukan penyesuaian jadwal.
+
+---
+
+## 16. Kalender Pabrik
+
+### 16.1. Ringkasan
+
+Kalender Pabrik mengelola hari kerja, hari libur, dan hari non-kerja untuk setiap pabrik. Mesin penjadwalan menggunakan kalender ini untuk menghitung timeline produksi dan deadline yang akurat.
+
+**Jalur**: `/admin/factory-calendar`
+
+### 16.2. Tampilan Kalender
+
+Halaman menampilkan grid kalender bulanan secara visual. Setiap hari diberi kode warna:
+
+| Warna | Arti |
+|---|---|
+| **Putih** | Hari kerja normal |
+| **Merah / ditandai** | Hari non-kerja (hari libur, hari istirahat) |
+
+Klik hari mana pun untuk menambah atau menghapus entri hari libur. Klik dan seret untuk memilih rentang tanggal.
+
+### 16.3. Navigasi
+
+- **Panah bulan** -- maju atau mundur per bulan.
+- **Panah tahun** -- maju atau mundur per tahun.
+- **Factory selector** -- pilih kalender pabrik mana yang akan dikelola.
+
+### 16.4. Preset Hari Libur Massal
+
+Dua preset impor cepat tersedia:
+
+- **Indonesian National Holidays** -- mengimpor hari libur nasional utama (Tahun Baru, Idul Fitri, Hari Kemerdekaan, Natal, dll.).
+- **Balinese Holidays** -- mengimpor Nyepi, Galungan, Kuningan, dan hari upacara Bali lainnya.
+
+Klik preset untuk melihat pratinjau tanggal, lalu konfirmasi untuk menambahkan semuanya sekaligus. Entri yang sudah ada tidak akan diduplikasi.
+
+### 16.5. Menambah dan Menghapus Hari Libur
+
+**Menambah**: Klik hari di kalender, masukkan nama (contoh: "Nyepi"), dan simpan.
+
+**Menghapus**: Klik hari libur yang sudah ada dan konfirmasi penghapusan.
+
+> **Penting**: Perubahan pada kalender pabrik dapat mempengaruhi timeline produksi yang terjadwal. Setelah perubahan kalender yang signifikan, pertimbangkan untuk memicu penjadwalan ulang dari halaman Schedule.
+
+---
+
+## 17. Pengelolaan Resep
+
+### 17.1. Ringkasan
+
+Halaman Resep memungkinkan PM untuk melihat dan mengelola resep glaze, engobe, dan produk. Setiap resep mendefinisikan bahan-bahannya dengan jumlah, tingkat aplikasi (semprot, kuas, percikan, sablon), dan tautan ke grup suhu untuk pembakaran.
+
+**Jalur**: `/admin/recipes`
+
+### 17.2. Bidang Resep
+
+| Bidang | Keterangan |
+|---|---|
+| **Name** | Nama resep (contoh: "Moonjar White Glaze M-01") |
+| **Type** | Product, Glaze, atau Engobe |
+| **Color Collection** | Koleksi warna yang dimiliki resep ini |
+| **Client** | Nama klien (jika resep khusus klien) |
+| **Specific Gravity** | Kepadatan glaze/engobe yang dicampur (g/ml) |
+| **Spray Rate** | Tingkat konsumsi untuk aplikasi semprot (ml/m2) |
+| **Brush Rate** | Tingkat konsumsi untuk aplikasi kuas (ml/m2) |
+| **Default** | Apakah resep ini adalah default untuk jenisnya |
+| **Active** | Apakah resep saat ini sedang digunakan |
+
+### 17.3. Bahan-bahan
+
+Setiap resep memiliki daftar bahan yang dikelompokkan berdasarkan jenis material (Frits, Pigments, Oxides/Carbonates, Other). Untuk setiap bahan:
+- **Material** -- dipilih dari katalog material.
+- **Quantity** -- berat dalam formula resep.
+- **Per-ingredient rates** -- tingkat semprot, kuas, percikan, dan sablon dapat diatur secara individual.
+
+### 17.4. Tindakan Utama
+
+- **Create** -- menambah resep baru dengan bahan-bahan.
+- **Edit** -- mengubah bidang resep atau daftar bahan.
+- **Duplicate** -- menyalin resep yang ada untuk membuat varian.
+- **CSV Import** -- impor resep secara massal dari file CSV.
+
+### 17.5. Tautan Grup Suhu
+
+Resep dapat dihubungkan ke satu atau lebih grup suhu. Ini menentukan suhu kiln mana yang kompatibel dengan resep dan digunakan oleh algoritma pembentukan batch saat mengelompokkan posisi untuk co-firing.
+
+---
+
+## 18. Profil Pembakaran
+
+### 18.1. Ringkasan
+
+Profil Pembakaran (Firing Profiles) mendefinisikan kurva pemanasan dan pendinginan yang digunakan selama pembakaran kiln. Setiap profil menentukan tahapan suhu multi-interval: seberapa cepat kiln dipanaskan dari satu suhu ke suhu lainnya, dan bagaimana pendinginannya setelah itu.
+
+**Jalur**: `/admin/firing-profiles`
+
+### 18.2. Bidang Profil
+
+| Bidang | Keterangan |
+|---|---|
+| **Name** | Nama profil (contoh: "Standard 1012°C -- 14h") |
+| **Temperature Group** | Untuk grup suhu mana profil ini |
+| **Total Duration** | Perkiraan total waktu pembakaran dalam jam |
+| **Active** | Apakah profil ini tersedia untuk digunakan |
+
+### 18.3. Tahap Pemanasan dan Pendinginan
+
+Setiap profil memiliki dua daftar tahapan suhu:
+
+**Tahap pemanasan** (type = heating):
+- **Start Temp** -- suhu awal dalam °C (tahap pertama biasanya dimulai dari ~20°C).
+- **End Temp** -- suhu target untuk tahap ini.
+- **Rate** -- laju pemanasan dalam °C per jam.
+
+**Tahap pendinginan** (type = cooling):
+- **Start Temp** -- suhu di awal pendinginan (biasanya suhu puncak pembakaran).
+- **End Temp** -- suhu di akhir tahap pendinginan ini.
+- **Rate** -- laju pendinginan dalam °C per jam.
+
+Anda dapat menambahkan beberapa interval untuk membuat kurva yang kompleks. Contoh:
+- Tahap 1: 20°C -> 600°C pada 100°C/jam (pemanasan awal lambat)
+- Tahap 2: 600°C -> 1012°C pada 50°C/jam (pendekatan lambat ke target)
+- Pendinginan 1: 1012°C -> 600°C pada 80°C/jam (pendinginan awal terkontrol)
+- Pendinginan 2: 600°C -> 20°C pada 120°C/jam (pendinginan alami)
+
+### 18.4. Tindakan Utama
+
+- **Create** -- mendefinisikan profil baru dengan tahap pemanasan dan pendinginan.
+- **Edit** -- mengubah tahapan, laju, atau durasi.
+- **Activate / Deactivate** -- mengaktifkan/menonaktifkan ketersediaan profil.
+
+---
+
+## 19. Grup Suhu
+
+### 19.1. Ringkasan
+
+Grup Suhu (Temperature Groups) mengkategorikan suhu pembakaran. Setiap grup memiliki nama, suhu target (°C), dan urutan tampilan. Resep dan profil pembakaran dihubungkan ke grup suhu, memungkinkan sistem untuk secara otomatis mengelompokkan posisi yang kompatibel untuk co-firing.
+
+**Jalur**: `/admin/temperature-groups`
+
+### 19.2. Bidang
+
+| Bidang | Keterangan |
+|---|---|
+| **Name** | Nama grup (contoh: "Standard 1012°C", "Low-fire 800°C") |
+| **Temperature** | Suhu target pembakaran dalam °C |
+| **Description** | Catatan opsional |
+| **Display Order** | Posisi urutan dalam daftar |
+
+### 19.3. Tautan Resep
+
+Setiap grup suhu menampilkan resep-resep yang terhubung. Ini memudahkan untuk melihat glaze dan engobe mana yang dibakar pada suhu yang sama dan bisa berbagi batch kiln.
+
+### 19.4. Tindakan Utama
+
+- **Create** -- menambah grup suhu baru.
+- **Edit** (inline) -- mengubah nama, suhu, deskripsi, atau urutan tampilan.
+- **Delete** -- menghapus grup suhu (hanya jika tidak ada resep yang terhubung).
+- **CSV Import** -- impor massal dari file CSV.
+
+---
+
+## 20. Pengelolaan Tahapan
+
+### 20.1. Ringkasan
+
+Halaman Tahapan (Stages) mengelola definisi tahapan produksi yang dilalui posisi. Setiap tahapan memiliki nama dan urutan yang menentukan posisinya dalam alur produksi.
+
+**Jalur**: `/admin/stages`
+
+### 20.2. Bidang
+
+| Bidang | Keterangan |
+|---|---|
+| **Name** | Nama tahapan (contoh: "Glazing", "Firing", "Sorting", "QC") |
+| **Order** | Posisi numerik dalam urutan produksi |
+
+### 20.3. Tindakan Utama
+
+- **Create** -- menambah tahapan produksi baru.
+- **Edit** -- mengubah nama atau urutan.
+- **Delete** -- menghapus tahapan (hanya jika tidak direferensikan oleh posisi aktif).
+
+> **Catatan**: Definisi tahapan digunakan oleh mesin penjadwalan dan siklus hidup posisi. Mengubah urutan atau nama tahapan dapat mempengaruhi bagaimana posisi ditampilkan di halaman Schedule.
+
+---
+
+## 21. Jadwal Pembakaran
+
+### 21.1. Ringkasan
+
+Halaman Jadwal Pembakaran (Firing Schedules) mengelola template jadwal pembakaran per kiln. Jadwal pembakaran mendefinisikan parameter pembakaran yang direncanakan untuk kiln tertentu, termasuk data waktu dan konfigurasi.
+
+**Jalur**: `/admin/firing-schedules`
+
+### 21.2. Bidang
+
+| Bidang | Keterangan |
+|---|---|
+| **Kiln** | Kiln mana yang menerapkan jadwal ini |
+| **Name** | Nama jadwal (contoh: "Standard weekday firing") |
+| **Schedule Data** | Konfigurasi JSON dengan parameter pembakaran |
+| **Default** | Apakah ini jadwal default untuk kiln tersebut |
+
+### 21.3. Filter
+
+- **Dropdown Kiln** -- filter jadwal berdasarkan kiln.
+
+### 21.4. Tindakan Utama
+
+- **Create** -- menambah jadwal pembakaran baru untuk kiln.
+- **Edit** -- mengubah parameter jadwal.
+- **Set as Default** -- menandai jadwal sebagai default untuk kiln-nya.
+- **Delete** -- menghapus jadwal.
+
+---
+
+## 22. Pengelolaan Gudang
+
+### 22.1. Ringkasan
+
+Halaman Gudang (Warehouses) mengelola bagian gudang tempat material disimpan. Setiap bagian milik suatu pabrik dan dapat ditugaskan kepada pengguna tertentu.
+
+**Jalur**: `/admin/warehouses`
+
+### 22.2. Bidang
+
+| Bidang | Keterangan |
+|---|---|
+| **Name** | Nama bagian (contoh: "Raw Materials Store A") |
+| **Code** | Kode identifikasi singkat |
+| **Factory** | Pabrik mana yang memiliki bagian ini |
+| **Type** | Section (fisik), Warehouse (gudang penuh), atau Virtual |
+| **Managed By** | Pengguna yang bertanggung jawab atas bagian ini |
+| **Display Order** | Posisi urutan |
+| **Default** | Apakah ini bagian default untuk pabriknya |
+| **Active** | Apakah bagian saat ini sedang digunakan |
+
+### 22.3. Tindakan Utama
+
+- **Create** -- menambah bagian gudang baru.
+- **Edit** -- mengubah detail bagian.
+- **Delete** -- menghapus bagian.
+- **CSV Import** -- impor massal dari file CSV.
+
+---
+
+## 23. Pengelolaan Kemasan
+
+### 23.1. Ringkasan
+
+Halaman Kemasan (Packaging) mengelola definisi jenis box dan kapasitasnya. Setiap jenis box menentukan berapa banyak potongan dari setiap ukuran yang muat per box, dan material spacer mana yang digunakan.
+
+**Jalur**: `/admin/packaging`
+
+### 23.2. Konsep Utama
+
+- **Box Type** -- jenis box kemasan tertentu yang terhubung ke material (box itu sendiri adalah material dalam inventaris).
+- **Capacity** -- untuk setiap ukuran produk, mendefinisikan jumlah potongan per box dan luas (m2) per box.
+- **Spacers** -- untuk setiap ukuran produk, mendefinisikan material spacer mana yang digunakan dan berapa banyak spacer dalam setiap box.
+
+### 23.3. Tindakan Utama
+
+- **Create** -- menambah jenis box baru dengan kapasitas dan definisi spacer.
+- **Edit** -- mengubah kapasitas atau konfigurasi spacer.
+- **CSV Import** -- impor definisi kemasan secara massal.
+
+---
+
+## 24. Pengelolaan Ukuran
+
+### 24.1. Ringkasan
+
+Halaman Ukuran (Sizes) mengelola definisi ukuran produk. Setiap ukuran memiliki dimensi, bentuk, dan luas yang dihitung secara otomatis yang digunakan untuk perhitungan konsumsi material.
+
+**Jalur**: `/admin/sizes`
+
+### 24.2. Bidang
+
+| Bidang | Keterangan |
+|---|---|
+| **Name** | Nama ukuran (contoh: "30x60", "20x20 round") |
+| **Width** | Lebar dalam mm |
+| **Height** | Tinggi dalam mm |
+| **Thickness** | Ketebalan default dalam mm |
+| **Shape** | Rectangle, Round, Triangle, Octagon, Freeform |
+| **Shape Dimensions** | Parameter dimensi tambahan untuk bentuk non-persegi panjang |
+| **Area** | Luas yang dihitung dalam cm2 (otomatis berdasarkan bentuk dan dimensi) |
+| **Custom** | Apakah ini ukuran khusus sekali pakai |
+
+### 24.3. Tindakan Utama
+
+- **Create** -- menambah definisi ukuran baru dengan editor dimensi spesifik per bentuk.
+- **Edit** -- mengubah dimensi atau bentuk.
+- **Delete** -- menghapus ukuran (hanya jika tidak digunakan oleh posisi aktif).
+- **CSV Import** -- impor ukuran secara massal.
+
+---
+
+## 25. Tablo (Papan Tampilan Produksi)
+
+### 25.1. Ringkasan
+
+Halaman Tablo adalah papan tampilan produksi layar penuh yang dirancang untuk ditampilkan di TV atau monitor workshop. Halaman ini menyediakan ringkasan status produksi secara real-time tanpa memerlukan interaksi.
+
+**Jalur**: `/tablo`
+
+### 25.2. Penggunaan
+
+- Buka halaman Tablo di layar khusus di area produksi.
+- Tampilan diperbarui secara otomatis untuk menampilkan status produksi terkini.
+- Tidak diperlukan tindakan autentikasi di halaman ini -- ini adalah tampilan hanya-baca.
+
+---
+
+## 26. Tips dan Praktik Terbaik
+
+### 26.1. Rutinitas Harian
 
 **Pagi (awal shift)**:
 1. Periksa tab **Orders** -- ada pesanan baru?
@@ -665,31 +1384,33 @@ Untuk menghapus posisi:
 13. Tinjau permintaan Sales -- tangani Permintaan Pembatalan atau Perubahan yang tertunda.
 
 **Mingguan**:
-14. Periksa jadwal pemeliharaan kiln.
-15. Tinjau dan perbarui aturan konsumsi jika diperlukan.
-16. Pertimbangkan penjadwalan ulang pabrik penuh jika ada perubahan signifikan.
+14. **Lakukan inspeksi kiln** -- selesaikan checklist 35 item untuk setiap kiln aktif (lihat Bagian 8).
+15. **Tinjau Repair Log** -- tindak lanjuti item perbaikan yang terbuka dan sedang dalam proses.
+16. Periksa jadwal pemeliharaan kiln.
+17. Tinjau dan perbarui aturan konsumsi jika diperlukan.
+18. Pertimbangkan penjadwalan ulang pabrik penuh jika ada perubahan signifikan.
 
-### 8.2. Praktik Terbaik Pemilih Pabrik
+### 26.2. Praktik Terbaik Pemilih Pabrik
 
 - Selalu pilih **pabrik tertentu** sebelum melakukan operasi yang mengubah data (membuat pesanan, membentuk batch, menerima material).
 - Gunakan mode "All Factories" hanya untuk tinjauan umum dan pemantauan.
 - Jika Anda hanya ditugaskan ke satu pabrik, pemilih disembunyikan dan pabrik Anda selalu aktif.
 
-### 8.3. Menangani Kekurangan Material
+### 26.3. Menangani Kekurangan Material
 
 1. Pertama, periksa riwayat transaksi untuk memahami tren konsumsi.
 2. Verifikasi pengaturan min_balance masih akurat -- sesuaikan melalui Edit jika perlu.
 3. Koordinasikan dengan Purchaser untuk memesan material yang kritis.
 4. Gunakan force-unblock untuk kekurangan material hanya sebagai pilihan terakhir -- ini membuat saldo negatif.
 
-### 8.4. Praktik Terbaik Audit Inventaris
+### 26.4. Praktik Terbaik Audit Inventaris
 
 - Lakukan audit berkala (mingguan atau bulanan) untuk material dengan perputaran tinggi.
 - Selalu masukkan alasan yang jelas dan spesifik -- "penghitungan ulang" tidak membantu; "Penghitungan ulang setelah tumpahan pada 15 Maret" lebih baik.
 - Bandingkan selisih audit dengan riwayat transaksi terbaru untuk mengidentifikasi pola.
 - Jika Anda secara konsisten melihat perbedaan, tinjau aturan konsumsi -- tingkatnya mungkin perlu disesuaikan.
 
-### 8.5. Notifikasi
+### 26.5. Notifikasi
 
 PM menerima notifikasi untuk:
 - Pesanan baru yang masuk dari Sales webhook
@@ -701,7 +1422,7 @@ PM menerima notifikasi untuk:
 - Daftar tugas lengkap untuk hari berikutnya
 - KPI untuk hari ini
 
-### 8.6. Tips Antarmuka
+### 26.6. Tips Antarmuka
 
 - Gunakan **kotak pencarian** di halaman Material untuk mencari material berdasarkan nama atau kode dengan cepat.
 - Di halaman Jadwal, **Status Dropdown** hanya menampilkan transisi yang valid -- Anda tidak bisa salah memilih status yang tidak diizinkan.

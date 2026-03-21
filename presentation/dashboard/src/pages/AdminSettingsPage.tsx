@@ -28,10 +28,11 @@ export default function AdminSettingsPage() {
   const [activeTab, setActiveTab] = useState('escalation');
   const [selectedFactory, setSelectedFactory] = useState('');
 
-  const { data: factories = [], isLoading: loadingFactories } = useQuery({
+  const { data: factoriesRaw, isLoading: loadingFactories } = useQuery({
     queryKey: ['factories'],
     queryFn: () => factoriesApi.list(),
   });
+  const factories: { id: string; name: string }[] = Array.isArray(factoriesRaw) ? factoriesRaw : (factoriesRaw?.items ?? []);
 
   useEffect(() => {
     if (factories.length > 0 && !selectedFactory) {
@@ -303,10 +304,11 @@ function DefectThresholdsTab() {
     queryFn: () => adminSettingsApi.listDefectThresholds(),
   });
 
-  const { data: materials = [] } = useQuery({
+  const { data: materialsRaw } = useQuery({
     queryKey: ['materials-list'],
     queryFn: () => import('@/api/client').then((m) => m.default.get('/materials').then((r) => r.data)),
   });
+  const materials: { id: string; name: string }[] = Array.isArray(materialsRaw) ? materialsRaw : (materialsRaw?.items ?? []);
 
   const upsertMut = useMutation({
     mutationFn: ({ materialId, percent }: { materialId: string; percent: number }) =>
@@ -322,7 +324,7 @@ function DefectThresholdsTab() {
   if (isLoading) return <Card><Spinner /></Card>;
 
   const existingMaterialIds = new Set(thresholds.map((t: DefectThreshold) => t.material_id));
-  const availableMaterials = (materials as { id: string; name: string }[]).filter(
+  const availableMaterials = materials.filter(
     (m) => !existingMaterialIds.has(m.id),
   );
 

@@ -253,6 +253,34 @@ async def update_group(
     return _serialize_group(group)
 
 
+@router.delete("/groups/{group_id}", status_code=204)
+async def delete_group(
+    group_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Delete a material group. Admin only. Fails if group has materials."""
+    from api.models import MaterialGroup, Material
+
+    group = db.query(MaterialGroup).filter(MaterialGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(404, "Group not found")
+
+    # Check for materials in this group
+    mat_count = db.query(Material).filter(Material.group_id == group_id).count()
+    if mat_count > 0:
+        raise HTTPException(
+            400,
+            f"Cannot delete group '{group.name}': {mat_count} materials still assigned. "
+            "Move or delete them first.",
+        )
+
+    db.delete(group)
+    db.commit()
+    logger.info(f"Material group deleted: {group.name} by {current_user.email}")
+    return None
+
+
 # ────────────────────────────────────────────────────────────────
 # Subgroups CRUD
 # ────────────────────────────────────────────────────────────────
@@ -384,3 +412,30 @@ async def update_subgroup(
 
     logger.info(f"Material subgroup updated: {sg.name} by {current_user.email}")
     return _serialize_subgroup(sg)
+
+
+@router.delete("/subgroups/{subgroup_id}", status_code=204)
+async def delete_subgroup(
+    subgroup_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Delete a material subgroup. Admin only. Fails if subgroup has materials."""
+    from api.models import MaterialSubgroup, Material
+
+    sg = db.query(MaterialSubgroup).filter(MaterialSubgroup.id == subgroup_id).first()
+    if not sg:
+        raise HTTPException(404, "Subgroup not found")
+
+    mat_count = db.query(Material).filter(Material.subgroup_id == subgroup_id).count()
+    if mat_count > 0:
+        raise HTTPException(
+            400,
+            f"Cannot delete subgroup '{sg.name}': {mat_count} materials still assigned. "
+            "Move or delete them first.",
+        )
+
+    db.delete(sg)
+    db.commit()
+    logger.info(f"Material subgroup deleted: {sg.name} by {current_user.email}")
+    return None

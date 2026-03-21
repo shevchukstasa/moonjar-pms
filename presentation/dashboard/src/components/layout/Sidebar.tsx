@@ -31,9 +31,12 @@ const navByRole: Record<string, NavItem[]> = {
     { to: '/admin/packaging', label: 'Packaging' },
     { to: '/admin/sizes', label: 'Sizes' },
     { to: '/admin/consumption-rules', label: 'Consumption Rules' },
+    { to: '/admin/factory-calendar', label: 'Factory Calendar' },
     { section: 'Operations' },
     { to: '/quality', label: 'Quality' },
     { to: '/warehouse', label: 'Warehouse' },
+    { to: '/warehouse/finished-goods', label: 'Finished Goods' },
+    { to: '/warehouse/reconciliations', label: 'Reconciliations' },
     { to: '/packing', label: 'Sorting & Packing' },
     { to: '/purchaser', label: 'Purchasing' },
     { section: 'System' },
@@ -54,6 +57,8 @@ const navByRole: Record<string, NavItem[]> = {
     { to: '/admin/packaging', label: 'Packaging' },
     { to: '/admin/sizes', label: 'Sizes' },
     { to: '/admin/consumption-rules', label: 'Consumption Rules' },
+    { to: '/admin/factory-calendar', label: 'Factory Calendar' },
+    { to: '/warehouse/reconciliations', label: 'Reconciliations' },
     { to: '/users', label: 'Users' },
   ],
   ceo: [{ to: '/ceo', label: 'Dashboard' }, { to: '/tablo', label: 'Tablo' }, { to: '/users', label: 'Users' }],
@@ -62,6 +67,7 @@ const navByRole: Record<string, NavItem[]> = {
     { to: '/manager/schedule', label: 'Schedule' },
     { to: '/manager/kilns', label: 'Kilns' },
     { to: '/manager/kiln-inspections', label: 'Kiln Inspections' },
+    { to: '/manager/kiln-maintenance', label: 'Kiln Maintenance' },
     { to: '/manager/materials', label: 'Materials' },
     { to: '/admin/recipes', label: 'Recipes' },
     { to: '/admin/firing-profiles', label: 'Firing Profiles' },
@@ -70,11 +76,14 @@ const navByRole: Record<string, NavItem[]> = {
     { to: '/admin/packaging', label: 'Packaging' },
     { to: '/admin/sizes', label: 'Sizes' },
     { to: '/admin/consumption-rules', label: 'Consumption Rules' },
+    { to: '/admin/factory-calendar', label: 'Factory Calendar' },
+    { to: '/warehouse/finished-goods', label: 'Finished Goods' },
+    { to: '/warehouse/reconciliations', label: 'Reconciliations' },
     { to: '/tablo', label: 'Tablo' },
-    { to: '/manager/guide', label: '\uD83D\uDCD6 Guide' },
+    { to: '/manager/guide', label: '📖 Guide' },
   ],
   quality_manager: [{ to: '/quality', label: 'Quality' }],
-  warehouse: [{ to: '/warehouse', label: 'Warehouse' }],
+  warehouse: [{ to: '/warehouse', label: 'Warehouse' }, { to: '/warehouse/finished-goods', label: 'Finished Goods' }, { to: '/warehouse/reconciliations', label: 'Reconciliations' }],
   sorter_packer: [{ to: '/packing', label: 'Sorting & Packing' }],
   purchaser: [{ to: '/purchaser', label: 'Purchasing' }],
 };
@@ -87,7 +96,7 @@ export function Sidebar() {
     <aside className={cn('fixed left-0 top-0 z-40 flex h-screen flex-col border-r bg-white transition-all', sidebarOpen ? 'w-72' : 'w-16')}>
       <div className="flex h-20 items-center justify-between border-b px-4">
         {sidebarOpen && <span className="text-3xl font-semibold"><span className="text-blue-600">Moonjar</span> <span className="font-bold text-gray-900">Production</span></span>}
-        <button onClick={toggleSidebar} className="rounded p-1 text-gray-400 hover:bg-gray-100">{sidebarOpen ? '\u2190' : '\u2192'}</button>
+        <button onClick={toggleSidebar} className="rounded p-1 text-gray-400 hover:bg-gray-100">{sidebarOpen ? '←' : '→'}</button>
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
         {items.map((item) =>

@@ -35,9 +35,13 @@ import AdminWarehousesPage from '@/pages/AdminWarehousesPage';
 import AdminPackagingPage from '@/pages/AdminPackagingPage';
 import AdminSizesPage from '@/pages/AdminSizesPage';
 import AdminFiringProfilesPage from '@/pages/AdminFiringProfilesPage';
+import FactoryCalendarPage from '@/pages/FactoryCalendarPage';
 import ConsumptionRulesPage from '@/pages/ConsumptionRulesPage';
 import PMGuidePage from '@/pages/PMGuidePage';
 import KilnInspectionsPage from '@/pages/KilnInspectionsPage';
+import KilnMaintenancePage from '@/pages/KilnMaintenancePage';
+import ReconciliationsPage from '@/pages/ReconciliationsPage';
+import FinishedGoodsPage from '@/pages/FinishedGoodsPage';
 import SettingsPage from '@/pages/SettingsPage';
 import AppLayout from '@/components/layout/AppLayout';
 import { Spinner } from '@/components/ui/Spinner';
@@ -127,6 +131,7 @@ export default function App() {
             <Route path="/admin/sizes" element={<AdminSizesPage />} />
             <Route path="/admin/consumption-rules" element={<ConsumptionRulesPage />} />
             <Route path="/admin/firing-profiles" element={<AdminFiringProfilesPage />} />
+            <Route path="/admin/factory-calendar" element={<FactoryCalendarPage />} />
           </Route>
           <Route element={<RequireRole roles={['owner', 'administrator', 'ceo']} />}>
             <Route path="/users" element={<UsersPage />} />
@@ -138,6 +143,7 @@ export default function App() {
             <Route path="/manager/kilns" element={<ManagerKilnsPage />} />
             <Route path="/manager/materials" element={<ManagerMaterialsPage />} />
             <Route path="/manager/kiln-inspections" element={<KilnInspectionsPage />} />
+            <Route path="/manager/kiln-maintenance" element={<KilnMaintenancePage />} />
             <Route path="/manager/shortage/:taskId" element={<ShortageDecisionPage />} />
             <Route path="/manager/size-resolution/:taskId" element={<SizeResolutionPage />} />
             <Route path="/manager/guide" element={<PMGuidePage />} />
@@ -149,6 +155,8 @@ export default function App() {
           </Route>
           <Route element={<RequireRole roles={['warehouse', 'owner', 'administrator', 'production_manager']} />}>
             <Route path="/warehouse" element={<WarehouseDashboard />} />
+            <Route path="/warehouse/finished-goods" element={<FinishedGoodsPage />} />
+            <Route path="/warehouse/reconciliations" element={<ReconciliationsPage />} />
           </Route>
           <Route element={<RequireRole roles={['sorter_packer', 'owner', 'administrator', 'production_manager']} />}>
             <Route path="/packing" element={<SorterPackerDashboard />} />

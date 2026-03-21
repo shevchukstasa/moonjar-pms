@@ -54,6 +54,43 @@ async def list_reconciliations(
 
 # === RECONCILIATION ITEMS + COMPLETE (Decision 2026-03-19) ===
 
+@router.get("/{reconciliation_id}/items")
+async def list_reconciliation_items(
+    reconciliation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return all items for a reconciliation, with material name."""
+    recon = db.query(InventoryReconciliation).filter(
+        InventoryReconciliation.id == reconciliation_id,
+    ).first()
+    if not recon:
+        raise HTTPException(404, "Reconciliation not found")
+
+    items = (
+        db.query(InventoryReconciliationItem)
+        .filter(InventoryReconciliationItem.reconciliation_id == reconciliation_id)
+        .all()
+    )
+
+    result = []
+    for ri in items:
+        mat = db.query(Material).filter(Material.id == ri.material_id).first()
+        result.append({
+            "id": str(ri.id),
+            "material_id": str(ri.material_id),
+            "material_name": mat.name if mat else "Unknown",
+            "system_quantity": float(ri.system_quantity),
+            "actual_quantity": float(ri.actual_quantity),
+            "difference": float(ri.difference),
+            "reason": ri.reason,
+            "explanation": ri.explanation,
+            "adjustment_applied": ri.adjustment_applied,
+        })
+
+    return {"items": result, "total": len(result)}
+
+
 @router.post("/{reconciliation_id}/items", status_code=201)
 async def add_reconciliation_items(
     reconciliation_id: UUID,

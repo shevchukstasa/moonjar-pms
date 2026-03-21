@@ -151,6 +151,22 @@ async def update_finished_goods(
     return _serialize_stock(stock)
 
 
+# --- Delete (write-off) ---
+@router.delete("/{stock_id}", status_code=204)
+async def delete_finished_goods(
+    stock_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Delete / write-off a finished goods stock record."""
+    stock = db.query(FinishedGoodsStock).filter(FinishedGoodsStock.id == stock_id).first()
+    if not stock:
+        raise HTTPException(404, "Stock record not found")
+    db.delete(stock)
+    db.commit()
+    return None
+
+
 # --- Availability Check (cross-factory) ---
 @router.get("/availability")
 async def check_availability(

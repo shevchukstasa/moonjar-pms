@@ -7,6 +7,7 @@ import {
   type CalendarCreatePayload,
 } from '@/api/factoryCalendar';
 import { useFactories } from '@/hooks/useFactories';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
@@ -47,38 +48,68 @@ interface HolidayPreset {
 }
 
 function getIndonesianHolidays(year: number): HolidayPreset {
-  // Major Indonesian national holidays with fixed dates
+  // Indonesian national holidays — dates for 2026 (Islamic dates shift yearly)
+  // For other years these are approximate; admin should verify with government calendar
+  const holidays2026 = [
+    { date: '2026-01-01', name: "Tahun Baru Masehi (New Year)", source: 'government' },
+    { date: '2026-01-27', name: 'Isra Mi\'raj Nabi Muhammad', source: 'government' },
+    { date: '2026-02-12', name: 'Tahun Baru Imlek (Chinese New Year)', source: 'government' },
+    { date: '2026-03-19', name: 'Nyepi (Hari Raya Saka)', source: 'balinese' },
+    { date: '2026-03-20', name: 'Hari Raya Idul Fitri 1447H', source: 'government' },
+    { date: '2026-03-21', name: 'Hari Raya Idul Fitri 1447H (Hari 2)', source: 'government' },
+    { date: '2026-03-22', name: 'Cuti Bersama Idul Fitri', source: 'government' },
+    { date: '2026-03-23', name: 'Cuti Bersama Idul Fitri', source: 'government' },
+    { date: '2026-03-24', name: 'Cuti Bersama Idul Fitri', source: 'government' },
+    { date: '2026-04-03', name: 'Wafat Isa Al-Masih (Good Friday)', source: 'government' },
+    { date: '2026-05-01', name: 'Hari Buruh (Labour Day)', source: 'government' },
+    { date: '2026-05-14', name: 'Kenaikan Isa Al-Masih (Ascension)', source: 'government' },
+    { date: '2026-05-16', name: 'Hari Raya Waisak', source: 'government' },
+    { date: '2026-05-27', name: 'Hari Raya Idul Adha 1447H', source: 'government' },
+    { date: '2026-06-01', name: 'Hari Lahir Pancasila', source: 'government' },
+    { date: '2026-06-17', name: 'Tahun Baru Islam 1448H', source: 'government' },
+    { date: '2026-08-17', name: 'Hari Kemerdekaan RI', source: 'government' },
+    { date: '2026-08-26', name: 'Maulid Nabi Muhammad SAW', source: 'government' },
+    { date: '2026-12-25', name: 'Hari Natal (Christmas)', source: 'government' },
+  ];
+
+  if (year === 2026) {
+    return { label: 'Hari Libur Nasional Indonesia 2026', holidays: holidays2026 };
+  }
+
+  // Generic fallback for other years (fixed-date holidays only)
   return {
-    label: `Indonesian National Holidays ${year}`,
+    label: `Hari Libur Nasional Indonesia ${year}`,
     holidays: [
-      { date: `${year}-01-01`, name: "New Year's Day", source: 'government' },
-      { date: `${year}-02-01`, name: 'Isra Mi\'raj', source: 'government' },
-      { date: `${year}-03-29`, name: 'Nyepi (Day of Silence)', source: 'balinese' },
-      { date: `${year}-03-31`, name: 'Eid al-Fitr', source: 'government' },
-      { date: `${year}-04-01`, name: 'Eid al-Fitr (Day 2)', source: 'government' },
-      { date: `${year}-04-18`, name: 'Good Friday', source: 'government' },
-      { date: `${year}-05-01`, name: 'Labour Day', source: 'government' },
-      { date: `${year}-05-12`, name: 'Waisak', source: 'government' },
-      { date: `${year}-05-29`, name: 'Ascension of Christ', source: 'government' },
-      { date: `${year}-06-01`, name: 'Pancasila Day', source: 'government' },
-      { date: `${year}-06-07`, name: 'Eid al-Adha', source: 'government' },
-      { date: `${year}-06-27`, name: 'Islamic New Year', source: 'government' },
-      { date: `${year}-08-17`, name: 'Independence Day', source: 'government' },
-      { date: `${year}-09-05`, name: 'Mawlid (Prophet Birthday)', source: 'government' },
-      { date: `${year}-12-25`, name: 'Christmas Day', source: 'government' },
+      { date: `${year}-01-01`, name: "Tahun Baru Masehi", source: 'government' },
+      { date: `${year}-05-01`, name: 'Hari Buruh', source: 'government' },
+      { date: `${year}-06-01`, name: 'Hari Lahir Pancasila', source: 'government' },
+      { date: `${year}-08-17`, name: 'Hari Kemerdekaan RI', source: 'government' },
+      { date: `${year}-12-25`, name: 'Hari Natal', source: 'government' },
     ],
   };
 }
 
 function getBalineseHolidays(year: number): HolidayPreset {
+  // Balinese holidays for 2026 (Pawukon cycle dates shift yearly)
+  const holidays2026 = [
+    { date: '2026-03-18', name: 'Pengerupukan (Nyepi Eve)', source: 'balinese' },
+    { date: '2026-03-19', name: 'Nyepi (Hari Raya Saka 1948)', source: 'balinese' },
+    { date: '2026-03-20', name: 'Ngembak Geni (Day after Nyepi)', source: 'balinese' },
+    { date: '2026-04-15', name: 'Galungan', source: 'balinese' },
+    { date: '2026-04-25', name: 'Kuningan', source: 'balinese' },
+    { date: '2026-07-11', name: 'Saraswati', source: 'balinese' },
+    { date: '2026-10-14', name: 'Galungan', source: 'balinese' },
+    { date: '2026-10-24', name: 'Kuningan', source: 'balinese' },
+  ];
+
+  if (year === 2026) {
+    return { label: 'Hari Raya Bali 2026', holidays: holidays2026 };
+  }
+
   return {
-    label: `Balinese Holidays ${year}`,
+    label: `Hari Raya Bali ${year}`,
     holidays: [
-      { date: `${year}-03-29`, name: 'Nyepi (Day of Silence)', source: 'balinese' },
-      { date: `${year}-04-13`, name: 'Galungan', source: 'balinese' },
-      { date: `${year}-04-23`, name: 'Kuningan', source: 'balinese' },
-      { date: `${year}-10-11`, name: 'Galungan', source: 'balinese' },
-      { date: `${year}-10-21`, name: 'Kuningan', source: 'balinese' },
+      { date: `${year}-03-19`, name: 'Nyepi (approximate)', source: 'balinese' },
     ],
   };
 }
@@ -104,11 +135,16 @@ export default function FactoryCalendarPage() {
   const [bulkPreset, setBulkPreset] = useState<HolidayPreset | null>(null);
   const [deleteConfirmEntry, setDeleteConfirmEntry] = useState<CalendarEntry | null>(null);
 
-  // Factories
+  // Factories — filter by user's assigned factories for PM
+  const user = useCurrentUser();
   const { data: factoriesData, isLoading: factoriesLoading } = useFactories();
-  const factories = factoriesData?.items ?? [];
+  const allFactories = factoriesData?.items ?? [];
+  const GLOBAL_ROLES = new Set(['owner', 'administrator', 'ceo']);
+  const isGlobal = user && GLOBAL_ROLES.has(user.role);
+  const userFactoryIds = user?.factories?.map((f: { factory_id: string }) => f.factory_id) || [];
+  const factories = isGlobal ? allFactories : allFactories.filter((f) => userFactoryIds.includes(f.id));
 
-  // Auto-select first factory
+  // Auto-select first available factory (PM's own factory)
   if (!factoryId && factories.length > 0) {
     setFactoryId(factories[0].id);
   }

@@ -123,8 +123,8 @@ export function TOCZonesTab({ factoryId }: TOCZonesTabProps) {
                     >
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-semibold text-gray-900">{order.order_number}</span>
-                        <span className={`text-xs font-mono font-medium ${order.delta_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {order.delta_pct >= 0 ? '+' : ''}{order.delta_pct.toFixed(1)}%
+                        <span className={`text-xs font-mono font-medium ${(order.delta_pct ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {(order.delta_pct ?? 0) >= 0 ? '+' : ''}{(order.delta_pct ?? 0).toFixed(1)}%
                         </span>
                       </div>
 
@@ -132,7 +132,7 @@ export function TOCZonesTab({ factoryId }: TOCZonesTabProps) {
                       <div className="mb-1">
                         <div className="flex justify-between text-xs text-gray-500 mb-0.5">
                           <span>Work</span>
-                          <span>{order.work_pct.toFixed(0)}%</span>
+                          <span>{(order.work_pct ?? 0).toFixed(0)}%</span>
                         </div>
                         <ProgressBar value={order.work_pct} />
                       </div>
@@ -141,7 +141,7 @@ export function TOCZonesTab({ factoryId }: TOCZonesTabProps) {
                       <div className="mb-2">
                         <div className="flex justify-between text-xs text-gray-500 mb-0.5">
                           <span>Time</span>
-                          <span>{order.time_pct.toFixed(0)}%</span>
+                          <span>{(order.time_pct ?? 0).toFixed(0)}%</span>
                         </div>
                         <ProgressBar value={order.time_pct} />
                       </div>

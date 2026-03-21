@@ -1394,27 +1394,29 @@ function TocTabContent({ factoryId }: { factoryId: string | null }) {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {buffers.map((buffer) => {
-              const pct = buffer.target > 0 ? Math.round((buffer.hours / buffer.target) * 100) : 0;
+              const hours = buffer.hours ?? 0;
+              const target = buffer.target ?? 0;
+              const pct = target > 0 ? Math.round((hours / target) * 100) : 0;
               return (
                 <Card key={buffer.kiln_id}>
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="text-sm font-semibold text-gray-900">{buffer.kiln_name}</span>
+                    <span className="text-sm font-semibold text-gray-900">{buffer.kiln_name ?? 'Unknown'}</span>
                     <span
                       className={`inline-block h-3 w-3 rounded-full ${BUFFER_HEALTH_COLORS[buffer.health] || 'bg-gray-300'}`}
-                      title={`Health: ${buffer.health}`}
+                      title={`Health: ${buffer.health ?? 'unknown'}`}
                     />
                   </div>
                   {buffer.factory_name && (
                     <p className="mb-1 text-xs text-gray-400">{buffer.factory_name}</p>
                   )}
                   <div className="mb-2 flex items-baseline gap-1">
-                    <span className="text-xl font-bold text-gray-900">{buffer.hours}h</span>
-                    <span className="text-sm text-gray-500">/ {buffer.target}h target</span>
+                    <span className="text-xl font-bold text-gray-900">{hours}h</span>
+                    <span className="text-sm text-gray-500">/ {target}h target</span>
                   </div>
                   <ProgressBar value={pct} />
                   <div className="mt-2 flex justify-between text-xs text-gray-500">
-                    <span>{buffer.buffered_count} positions buffered</span>
-                    <span>{buffer.buffered_sqm.toFixed(1)} sqm</span>
+                    <span>{buffer.buffered_count ?? 0} positions buffered</span>
+                    <span>{(buffer.buffered_sqm ?? 0).toFixed(1)} sqm</span>
                   </div>
                 </Card>
               );

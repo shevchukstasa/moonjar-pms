@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -141,13 +141,15 @@ export default function FactoryCalendarPage() {
   const allFactories = factoriesData?.items ?? [];
   const GLOBAL_ROLES = new Set(['owner', 'administrator', 'ceo']);
   const isGlobal = user && GLOBAL_ROLES.has(user.role);
-  const userFactoryIds = user?.factories?.map((f: { factory_id: string }) => f.factory_id) || [];
+  const userFactoryIds = user?.factories?.map((f: { id?: string; factory_id?: string }) => f.id || f.factory_id) || [];
   const factories = isGlobal ? allFactories : allFactories.filter((f) => userFactoryIds.includes(f.id));
 
   // Auto-select first available factory (PM's own factory)
-  if (!factoryId && factories.length > 0) {
-    setFactoryId(factories[0].id);
-  }
+  useEffect(() => {
+    if (!factoryId && factories.length > 0) {
+      setFactoryId(factories[0].id);
+    }
+  }, [factories, factoryId]);
 
   const factoryName = factories.find((f) => f.id === factoryId)?.name ?? '';
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useUiStore } from '@/stores/uiStore';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -361,19 +361,19 @@ function NewReconciliationDialog({ onClose }: { onClose: () => void }) {
 
   // PM only sees their assigned factories
   const GLOBAL_ROLES = new Set(['owner', 'administrator', 'ceo']);
-  const userFactoryIds = user?.factories?.map((f: { factory_id: string }) => f.factory_id) || [];
+  const userFactoryIds = user?.factories?.map((f: { id?: string; factory_id?: string }) => f.id || f.factory_id) || [];
   const isGlobal = user && GLOBAL_ROLES.has(user.role);
   const factories = isGlobal ? allFactories : allFactories.filter((f) => userFactoryIds.includes(f.id));
 
-  // Auto-select if only one factory
-  const autoFactory = factories.length === 1 ? factories[0].id : '';
-  const [selectedFactory, setSelectedFactory] = useState(autoFactory);
+  const [selectedFactory, setSelectedFactory] = useState('');
   const [notes, setNotes] = useState('');
 
-  // Update selection when factories load
-  if (!selectedFactory && factories.length === 1) {
-    setSelectedFactory(factories[0].id);
-  }
+  // Auto-select if only one factory
+  useEffect(() => {
+    if (!selectedFactory && factories.length === 1) {
+      setSelectedFactory(factories[0].id);
+    }
+  }, [factories, selectedFactory]);
 
   const createMutation = useMutation({
     mutationFn: (data: Parameters<typeof reconciliationsApi.create>[0]) =>

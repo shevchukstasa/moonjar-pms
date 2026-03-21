@@ -1,5 +1,5 @@
 # Moonjar PMS — Architecture Audit Report
-Generated: 2026-03-21 13:25
+Generated: 2026-03-21 13:36
 
 ## A. Backend есть — Frontend нет
 
@@ -21,11 +21,11 @@ Generated: 2026-03-21 13:25
 | Модель | Таблица | Категория | Действие |
 |--------|---------|-----------|----------|
 | `DailyTaskDistribution` | `daily_task_distributions` | ИСПОЛЬЗУЕТСЯ ВНУТРЕННЕ | Опционально: GET-эндпоинт для просмотра истории |
-| `EscalationRule` | `escalation_rules` | ИСПОЛЬЗУЕТСЯ ВНУТРЕННЕ, НУЖЕН UI | НУЖЕН: Страница настройки эскалации в Admin |
+| `EscalationRule` | `escalation_rules` | ✅ РЕАЛИЗОВАНО (Admin Settings → Escalation Rules) | Закрыто |
 | `ManaShipment` | `mana_shipments` | ИСПОЛЬЗУЕТСЯ ВНУТРЕННЕ, НУЖЕН UI | НУЖЕН: Раздел в Warehouse для управления отгрузками Mana |
-| `MaterialDefectThreshold` | `material_defect_thresholds` | ИСПОЛЬЗУЕТСЯ ВНУТРЕННЕ, НУЖЕН UI | НУЖЕН: Настройка порогов в Admin → Materials |
-| `PurchaseConsolidationSetting` | `purchase_consolidation_settings` | ИСПОЛЬЗУЕТСЯ ВНУТРЕННЕ, НУЖЕН UI | НУЖЕН: Раздел настроек в Purchaser или Admin |
-| `ReceivingSetting` | `receiving_settings` | ИСПОЛЬЗУЕТСЯ ВНУТРЕННЕ, НУЖЕН UI | НУЖЕН: Переключатель в Admin → Settings (per factory) |
+| `MaterialDefectThreshold` | `material_defect_thresholds` | ✅ РЕАЛИЗОВАНО (Admin Settings → Defect Thresholds) | Закрыто |
+| `PurchaseConsolidationSetting` | `purchase_consolidation_settings` | ✅ РЕАЛИЗОВАНО (Admin Settings → Purchase Consolidation) | Закрыто |
+| `ReceivingSetting` | `receiving_settings` | ✅ РЕАЛИЗОВАНО (Admin Settings → Receiving) | Закрыто |
 | `StageReconciliationLog` | `stage_reconciliation_logs` | ИСПОЛЬЗУЕТСЯ ВНУТРЕННЕ | Опционально: GET-эндпоинт для просмотра логов |
 | `RagEmbedding` | `rag_embeddings` | ВНУТРЕННИЙ СЕРВИС | API не нужен |
 | `KilnCalculationLog` | `kiln_calculation_logs` | НЕ ИСПОЛЬЗУЕТСЯ | Удалить или реализовать запись логов |

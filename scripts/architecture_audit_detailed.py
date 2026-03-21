@@ -328,13 +328,13 @@ def main():
         {
             "name": "EscalationRule",
             "table": "escalation_rules",
-            "category": "ИСПОЛЬЗУЕТСЯ ВНУТРЕННЕ, НУЖЕН UI",
+            "category": "✅ РЕАЛИЗОВАНО (Admin Settings → Escalation Rules)",
             "description": (
                 "Правила эскалации задач: PM не решил за N часов → CEO → Owner.\n"
-                "   Движок эскалации работает, но правила нельзя настроить через UI.\n"
-                "   Сейчас: таймауты зашиты, менять можно только в БД."
+                "   API: /api/admin-settings/escalation-rules\n"
+                "   UI: Admin Settings → вкладка Escalation Rules"
             ),
-            "action": "НУЖЕН: Страница настройки эскалации в Admin",
+            "action": "Закрыто",
         },
         {
             "name": "ManaShipment",
@@ -350,34 +350,35 @@ def main():
         {
             "name": "MaterialDefectThreshold",
             "table": "material_defect_thresholds",
-            "category": "ИСПОЛЬЗУЕТСЯ ВНУТРЕННЕ, НУЖЕН UI",
+            "category": "✅ РЕАЛИЗОВАНО (Admin Settings → Defect Thresholds)",
             "description": (
                 "Пороги допустимого % дефектов при приёмке материалов.\n"
-                "   Warehouse автоматически одобряет, если дефекты < порога.\n"
-                "   Но пороги нельзя настроить через UI."
+                "   API: /api/admin-settings/defect-thresholds\n"
+                "   UI: Admin Settings → вкладка Defect Thresholds"
             ),
-            "action": "НУЖЕН: Настройка порогов в Admin → Materials",
+            "action": "Закрыто",
         },
         {
             "name": "PurchaseConsolidationSetting",
             "table": "purchase_consolidation_settings",
-            "category": "ИСПОЛЬЗУЕТСЯ ВНУТРЕННЕ, НУЖЕН UI",
+            "category": "✅ РЕАЛИЗОВАНО (Admin Settings → Purchase Consolidation)",
             "description": (
-                "Настройки консолидации закупок: окно объединения (дни),\n"
-                "   порог срочности, горизонт планирования.\n"
-                "   Purchaser-сервис использует, но настройки не редактируемы."
+                "Настройки консолидации закупок.\n"
+                "   API: /api/admin-settings/consolidation-settings\n"
+                "   UI: Admin Settings → вкладка Purchase Consolidation"
             ),
-            "action": "НУЖЕН: Раздел настроек в Purchaser или Admin",
+            "action": "Закрыто",
         },
         {
             "name": "ReceivingSetting",
             "table": "receiving_settings",
-            "category": "ИСПОЛЬЗУЕТСЯ ВНУТРЕННЕ, НУЖЕН UI",
+            "category": "✅ РЕАЛИЗОВАНО (Admin Settings → Receiving)",
             "description": (
                 "Режим приёмки материалов на фабрике: 'all' (ручная) или 'auto'.\n"
-                "   Влияет на Warehouse workflow. Нельзя переключить через UI."
+                "   API: /api/admin-settings/receiving-settings\n"
+                "   UI: Admin Settings → вкладка Receiving"
             ),
-            "action": "НУЖЕН: Переключатель в Admin → Settings (per factory)",
+            "action": "Закрыто",
         },
         {
             "name": "StageReconciliationLog",
@@ -433,12 +434,21 @@ def main():
         },
     ]
 
+    model_resolved = 0
     for item in models_no_api:
+        if "✅" in item["category"]:
+            model_resolved += 1
+            print(f"  {GREEN}✅ {item['name']}{RESET}  {DIM}({item['table']}) — РЕАЛИЗОВАНО{RESET}")
+            print()
+            continue
         cat_color = RED if "НУЖЕН UI" in item["category"] else (YELLOW if "ВНУТРЕННЕ" in item["category"] else DIM)
         print(f"  {BOLD}{item['name']}{RESET}  {DIM}({item['table']}){RESET}")
         print(f"  {cat_color}{item['category']}{RESET}")
         print(f"  {DIM}{item['description']}{RESET}")
         print(f"  → {CYAN}{item['action']}{RESET}")
+        print()
+    if model_resolved:
+        print(f"  {GREEN}{BOLD}→ {model_resolved} из {len(models_no_api)} моделей теперь с API и UI!{RESET}")
         print()
 
     # ═══════════════════════════════════════════════════════════════════

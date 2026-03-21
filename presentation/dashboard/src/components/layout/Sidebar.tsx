@@ -1,129 +1,325 @@
+import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { useUiStore } from '@/stores/uiStore';
 import { cn } from '@/lib/cn';
 
-type NavItem = { to: string; label: string } | { section: string };
+/* ── Types ──────────────────────────────────────────────────────────── */
 
-const navByRole: Record<string, NavItem[]> = {
+type NavItem = { to: string; label: string; icon?: string };
+type NavSection = { section: string; icon?: string; items: NavItem[]; defaultOpen?: boolean };
+
+/* ── Icon mapping for Notion-style sidebar ─────────────────────────── */
+
+const navByRole: Record<string, NavSection[]> = {
   owner: [
-    { section: 'Dashboards' },
-    { to: '/owner', label: 'Owner' },
-    { to: '/ceo', label: 'CEO' },
-    { section: 'Production' },
-    { to: '/manager', label: 'Manager' },
-    { to: '/manager/schedule', label: 'Schedule' },
-    { to: '/manager/kilns', label: 'Kilns' },
-    { to: '/manager/materials', label: 'Materials (Mgr)' },
-    { to: '/manager/grinding', label: 'Grinding' },
-    { section: 'Catalog' },
-    { to: '/admin/materials', label: 'Materials' },
-    { to: '/admin/recipes', label: 'Recipes' },
-    { to: '/admin/firing-profiles', label: 'Firing Profiles' },
-    { to: '/admin/temperature-groups', label: 'Temp Groups' },
-    { to: '/admin/colors', label: 'Colors' },
-    { to: '/admin/collections', label: 'Collections' },
-    { to: '/admin/color-collections', label: 'Color Collections' },
-    { to: '/admin/application-types', label: 'Application Types' },
-    { to: '/admin/places-of-application', label: 'Places of Application' },
-    { to: '/admin/finishing-types', label: 'Finishing Types' },
-    { to: '/admin/suppliers', label: 'Suppliers' },
-    { to: '/admin/warehouses', label: 'Warehouses' },
-    { to: '/admin/packaging', label: 'Packaging' },
-    { to: '/admin/sizes', label: 'Sizes' },
-    { to: '/admin/consumption-rules', label: 'Consumption Rules' },
-    { to: '/admin/factory-calendar', label: 'Factory Calendar' },
-    { to: '/admin/stages', label: 'Stages' },
-    { to: '/admin/firing-schedules', label: 'Firing Schedules' },
-    { section: 'Operations' },
-    { to: '/quality', label: 'Quality' },
-    { to: '/warehouse', label: 'Warehouse' },
-    { to: '/warehouse/finished-goods', label: 'Finished Goods' },
-    { to: '/warehouse/reconciliations', label: 'Reconciliations' },
-    { to: '/packing', label: 'Sorting & Packing' },
-    { to: '/purchaser', label: 'Purchasing' },
-    { to: '/reports', label: 'Reports' },
-    { section: 'System' },
-    { to: '/users', label: 'Users' },
-    { to: '/admin', label: 'Admin Panel' },
-    { to: '/admin/dashboard-access', label: 'Dashboard Access' },
-    { to: '/admin/settings', label: 'Settings' },
-    { to: '/tablo', label: 'Tablo' },
+    {
+      section: 'Dashboards', icon: '📊', defaultOpen: true, items: [
+        { to: '/owner', label: 'Owner', icon: '👑' },
+        { to: '/ceo', label: 'CEO', icon: '📈' },
+      ],
+    },
+    {
+      section: 'Production', icon: '🏭', defaultOpen: true, items: [
+        { to: '/manager', label: 'Manager', icon: '📋' },
+        { to: '/manager/schedule', label: 'Schedule', icon: '📅' },
+        { to: '/manager/kilns', label: 'Kilns', icon: '🔥' },
+        { to: '/manager/materials', label: 'Materials (Mgr)', icon: '📦' },
+        { to: '/manager/grinding', label: 'Grinding', icon: '⚙️' },
+        { to: '/tablo', label: 'Tablo', icon: '📺' },
+      ],
+    },
+    {
+      section: 'Kilns', icon: '🔥', items: [
+        { to: '/manager/kiln-inspections', label: 'Inspections', icon: '🔍' },
+        { to: '/manager/kiln-maintenance', label: 'Maintenance', icon: '🔧' },
+        { to: '/admin/firing-profiles', label: 'Firing Profiles', icon: '📈' },
+        { to: '/admin/temperature-groups', label: 'Temp Groups', icon: '🌡' },
+        { to: '/admin/firing-schedules', label: 'Firing Schedules', icon: '🗓' },
+      ],
+    },
+    {
+      section: 'Materials & Recipes', icon: '🎨', items: [
+        { to: '/admin/materials', label: 'Materials', icon: '🧪' },
+        { to: '/admin/recipes', label: 'Recipes', icon: '📝' },
+        { to: '/admin/consumption-rules', label: 'Consumption Rules', icon: '📏' },
+        { to: '/admin/colors', label: 'Colors', icon: '🎨' },
+        { to: '/admin/collections', label: 'Collections', icon: '📁' },
+        { to: '/admin/color-collections', label: 'Color Collections', icon: '🌈' },
+      ],
+    },
+    {
+      section: 'Catalog', icon: '📚', items: [
+        { to: '/admin/application-types', label: 'Application Types', icon: '✍️' },
+        { to: '/admin/places-of-application', label: 'Places of Application', icon: '📍' },
+        { to: '/admin/finishing-types', label: 'Finishing Types', icon: '✨' },
+        { to: '/admin/suppliers', label: 'Suppliers', icon: '🤝' },
+        { to: '/admin/sizes', label: 'Sizes', icon: '📐' },
+        { to: '/admin/stages', label: 'Stages', icon: '🔄' },
+      ],
+    },
+    {
+      section: 'Warehouse', icon: '📦', items: [
+        { to: '/admin/warehouses', label: 'Warehouses', icon: '🏪' },
+        { to: '/admin/packaging', label: 'Packaging', icon: '📦' },
+        { to: '/warehouse', label: 'Warehouse Dashboard', icon: '📊' },
+        { to: '/warehouse/finished-goods', label: 'Finished Goods', icon: '✅' },
+        { to: '/warehouse/reconciliations', label: 'Reconciliations', icon: '🔄' },
+      ],
+    },
+    {
+      section: 'Operations', icon: '⚡', items: [
+        { to: '/quality', label: 'Quality', icon: '🔬' },
+        { to: '/packing', label: 'Sorting & Packing', icon: '📦' },
+        { to: '/purchaser', label: 'Purchasing', icon: '🛒' },
+        { to: '/reports', label: 'Reports', icon: '📈' },
+      ],
+    },
+    {
+      section: 'System', icon: '⚙️', items: [
+        { to: '/users', label: 'Users', icon: '👥' },
+        { to: '/admin', label: 'Admin Panel', icon: '🛠' },
+        { to: '/admin/dashboard-access', label: 'Dashboard Access', icon: '🔐' },
+        { to: '/admin/settings', label: 'Settings', icon: '⚙️' },
+        { to: '/admin/factory-calendar', label: 'Factory Calendar', icon: '🗓' },
+      ],
+    },
   ],
   administrator: [
-    { to: '/admin', label: 'Admin Panel' },
-    { to: '/admin/materials', label: 'Materials' },
-    { to: '/admin/recipes', label: 'Recipes' },
-    { to: '/admin/firing-profiles', label: 'Firing Profiles' },
-    { to: '/admin/temperature-groups', label: 'Temperature Groups' },
-    { to: '/admin/colors', label: 'Colors' },
-    { to: '/admin/collections', label: 'Collections' },
-    { to: '/admin/suppliers', label: 'Suppliers' },
-    { to: '/admin/warehouses', label: 'Warehouses' },
-    { to: '/admin/packaging', label: 'Packaging' },
-    { to: '/admin/sizes', label: 'Sizes' },
-    { to: '/admin/consumption-rules', label: 'Consumption Rules' },
-    { to: '/admin/factory-calendar', label: 'Factory Calendar' },
-    { to: '/admin/stages', label: 'Stages' },
-    { to: '/admin/firing-schedules', label: 'Firing Schedules' },
-    { to: '/warehouse/reconciliations', label: 'Reconciliations' },
-    { to: '/users', label: 'Users' },
-    { to: '/admin/dashboard-access', label: 'Dashboard Access' },
-    { to: '/admin/settings', label: 'Settings' },
+    {
+      section: 'Admin', icon: '🛠', defaultOpen: true, items: [
+        { to: '/admin', label: 'Admin Panel', icon: '🛠' },
+        { to: '/users', label: 'Users', icon: '👥' },
+        { to: '/admin/dashboard-access', label: 'Dashboard Access', icon: '🔐' },
+        { to: '/admin/settings', label: 'Settings', icon: '⚙️' },
+      ],
+    },
+    {
+      section: 'Catalog', icon: '📚', items: [
+        { to: '/admin/materials', label: 'Materials', icon: '🧪' },
+        { to: '/admin/recipes', label: 'Recipes', icon: '📝' },
+        { to: '/admin/firing-profiles', label: 'Firing Profiles', icon: '📈' },
+        { to: '/admin/temperature-groups', label: 'Temperature Groups', icon: '🌡' },
+        { to: '/admin/colors', label: 'Colors', icon: '🎨' },
+        { to: '/admin/collections', label: 'Collections', icon: '📁' },
+        { to: '/admin/suppliers', label: 'Suppliers', icon: '🤝' },
+        { to: '/admin/warehouses', label: 'Warehouses', icon: '🏪' },
+        { to: '/admin/packaging', label: 'Packaging', icon: '📦' },
+        { to: '/admin/sizes', label: 'Sizes', icon: '📐' },
+        { to: '/admin/stages', label: 'Stages', icon: '🔄' },
+        { to: '/admin/firing-schedules', label: 'Firing Schedules', icon: '🗓' },
+      ],
+    },
+    {
+      section: 'Settings', icon: '⚙️', items: [
+        { to: '/admin/consumption-rules', label: 'Consumption Rules', icon: '📏' },
+        { to: '/admin/factory-calendar', label: 'Factory Calendar', icon: '🗓' },
+        { to: '/warehouse/reconciliations', label: 'Reconciliations', icon: '🔄' },
+      ],
+    },
   ],
-  ceo: [{ to: '/ceo', label: 'Dashboard' }, { to: '/reports', label: 'Reports' }, { to: '/tablo', label: 'Tablo' }, { to: '/users', label: 'Users' }],
+  ceo: [
+    {
+      section: 'CEO', icon: '📊', defaultOpen: true, items: [
+        { to: '/ceo', label: 'Dashboard', icon: '📊' },
+        { to: '/reports', label: 'Reports', icon: '📈' },
+        { to: '/tablo', label: 'Tablo', icon: '📺' },
+        { to: '/users', label: 'Users', icon: '👥' },
+      ],
+    },
+  ],
   production_manager: [
-    { to: '/manager', label: 'Dashboard' },
-    { to: '/manager/schedule', label: 'Schedule' },
-    { to: '/manager/kilns', label: 'Kilns' },
-    { to: '/manager/kiln-inspections', label: 'Kiln Inspections' },
-    { to: '/manager/kiln-maintenance', label: 'Kiln Maintenance' },
-    { to: '/manager/grinding', label: 'Grinding' },
-    { to: '/manager/materials', label: 'Materials' },
-    { to: '/admin/recipes', label: 'Recipes' },
-    { to: '/admin/firing-profiles', label: 'Firing Profiles' },
-    { to: '/admin/temperature-groups', label: 'Temp Groups' },
-    { to: '/admin/warehouses', label: 'Warehouses' },
-    { to: '/admin/packaging', label: 'Packaging' },
-    { to: '/admin/sizes', label: 'Sizes' },
-    { to: '/admin/consumption-rules', label: 'Consumption Rules' },
-    { to: '/admin/factory-calendar', label: 'Factory Calendar' },
-    { to: '/warehouse/finished-goods', label: 'Finished Goods' },
-    { to: '/warehouse/reconciliations', label: 'Reconciliations' },
-    { to: '/reports', label: 'Reports' },
-    { to: '/tablo', label: 'Tablo' },
-    { to: '/manager/guide', label: '📖 Guide' },
+    {
+      section: 'Production', icon: '📊', defaultOpen: true, items: [
+        { to: '/manager', label: 'Dashboard', icon: '📋' },
+        { to: '/manager/schedule', label: 'Schedule', icon: '📅' },
+        { to: '/tablo', label: 'Tablo', icon: '📺' },
+      ],
+    },
+    {
+      section: 'Kilns', icon: '🔥', defaultOpen: true, items: [
+        { to: '/manager/kilns', label: 'Kilns', icon: '🏭' },
+        { to: '/manager/kiln-inspections', label: 'Inspections', icon: '🔍' },
+        { to: '/manager/kiln-maintenance', label: 'Maintenance', icon: '🔧' },
+        { to: '/admin/firing-profiles', label: 'Firing Profiles', icon: '📈' },
+        { to: '/admin/temperature-groups', label: 'Temp Groups', icon: '🌡' },
+      ],
+    },
+    {
+      section: 'Materials', icon: '🎨', defaultOpen: true, items: [
+        { to: '/manager/materials', label: 'Materials', icon: '🧪' },
+        { to: '/admin/recipes', label: 'Recipes', icon: '📝' },
+        { to: '/admin/consumption-rules', label: 'Consumption Rules', icon: '📏' },
+        { to: '/manager/grinding', label: 'Grinding', icon: '⚙️' },
+      ],
+    },
+    {
+      section: 'Warehouse', icon: '📦', items: [
+        { to: '/admin/warehouses', label: 'Warehouses', icon: '🏪' },
+        { to: '/admin/packaging', label: 'Packaging', icon: '📦' },
+        { to: '/admin/sizes', label: 'Sizes', icon: '📐' },
+        { to: '/warehouse/finished-goods', label: 'Finished Goods', icon: '✅' },
+        { to: '/warehouse/reconciliations', label: 'Reconciliations', icon: '🔄' },
+      ],
+    },
+    {
+      section: 'Planning', icon: '📅', items: [
+        { to: '/admin/factory-calendar', label: 'Factory Calendar', icon: '🗓' },
+        { to: '/reports', label: 'Reports', icon: '📈' },
+      ],
+    },
+    {
+      section: 'Help', icon: '📖', items: [
+        { to: '/manager/guide', label: 'Guide', icon: '📚' },
+      ],
+    },
   ],
-  quality_manager: [{ to: '/quality', label: 'Quality' }],
-  warehouse: [{ to: '/warehouse', label: 'Warehouse' }, { to: '/warehouse/finished-goods', label: 'Finished Goods' }, { to: '/warehouse/reconciliations', label: 'Reconciliations' }],
-  sorter_packer: [{ to: '/packing', label: 'Sorting & Packing' }],
-  purchaser: [{ to: '/purchaser', label: 'Purchasing' }],
+  quality_manager: [
+    {
+      section: 'Quality', icon: '🔬', defaultOpen: true, items: [
+        { to: '/quality', label: 'Quality Dashboard', icon: '🔬' },
+      ],
+    },
+  ],
+  warehouse: [
+    {
+      section: 'Warehouse', icon: '📦', defaultOpen: true, items: [
+        { to: '/warehouse', label: 'Dashboard', icon: '📊' },
+        { to: '/warehouse/finished-goods', label: 'Finished Goods', icon: '✅' },
+        { to: '/warehouse/reconciliations', label: 'Reconciliations', icon: '🔄' },
+      ],
+    },
+  ],
+  sorter_packer: [
+    {
+      section: 'Packing', icon: '📦', defaultOpen: true, items: [
+        { to: '/packing', label: 'Sorting & Packing', icon: '📦' },
+      ],
+    },
+  ],
+  purchaser: [
+    {
+      section: 'Purchasing', icon: '🛒', defaultOpen: true, items: [
+        { to: '/purchaser', label: 'Purchasing', icon: '🛒' },
+      ],
+    },
+  ],
 };
+
+/* ── Collapsible Section ───────────────────────────────────────────── */
+
+function SidebarSection({
+  section,
+  sidebarOpen,
+}: {
+  section: NavSection;
+  sidebarOpen: boolean;
+}) {
+  const [expanded, setExpanded] = useState(section.defaultOpen ?? false);
+
+  if (!sidebarOpen) {
+    // Collapsed sidebar: show divider between sections
+    return (
+      <>
+        <div className="my-1 border-t border-gray-100" />
+        {section.items.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            title={item.label}
+            className={({ isActive }) =>
+              cn(
+                'flex items-center justify-center rounded-md p-2 text-lg transition-colors',
+                isActive ? 'bg-blue-50 text-blue-700' : 'text-gray-500 hover:bg-gray-100',
+              )
+            }
+          >
+            {item.icon || item.label[0]}
+          </NavLink>
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <div className="mb-0.5">
+      {/* Section header — clickable to collapse/expand */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors"
+      >
+        <span className="text-sm">{section.icon}</span>
+        <span className="flex-1 text-left">{section.section}</span>
+        <span className={cn('text-[10px] text-gray-300 transition-transform', expanded ? 'rotate-0' : '-rotate-90')}>
+          ▼
+        </span>
+      </button>
+
+      {/* Items */}
+      {expanded && (
+        <div className="ml-1 space-y-0.5">
+          {section.items.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-2.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
+                )
+              }
+            >
+              <span className="w-5 text-center text-sm">{item.icon}</span>
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Main Sidebar ──────────────────────────────────────────────────── */
 
 export function Sidebar() {
   const user = useAuthStore((s) => s.user);
   const { sidebarOpen, toggleSidebar } = useUiStore();
-  const items = user ? navByRole[user.role] || [] : [];
+  const sections = user ? navByRole[user.role] || [] : [];
+
   return (
-    <aside className={cn('fixed left-0 top-0 z-40 flex h-screen flex-col border-r bg-white transition-all', sidebarOpen ? 'w-64' : 'w-16')}>
-      <div className="flex h-16 items-center justify-between border-b px-4">
-        {sidebarOpen && <span className="text-2xl font-semibold"><span className="text-blue-600">Moonjar</span> <span className="font-bold text-gray-900">Production</span></span>}
-        <button onClick={toggleSidebar} className="rounded p-1 text-gray-400 hover:bg-gray-100">{sidebarOpen ? '←' : '→'}</button>
-      </div>
-      <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-3">
-        {items.map((item) =>
-          'section' in item ? (
-            sidebarOpen ? (
-              <div key={item.section} className="px-3 pb-1 pt-3 text-sm font-semibold uppercase tracking-wider text-gray-400 first:pt-0">{item.section}</div>
-            ) : (
-              <div key={item.section} className="my-2 border-t border-gray-200" />
-            )
-          ) : (
-            <NavLink key={item.to} to={item.to} className={({ isActive }) => cn('flex items-center gap-3 rounded-md px-3 py-2 text-base font-medium transition-colors', isActive ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-100')}>
-              {sidebarOpen ? item.label : item.label[0]}
-            </NavLink>
-          ),
+    <aside
+      className={cn(
+        'fixed left-0 top-0 z-40 flex h-screen flex-col border-r bg-white transition-all',
+        sidebarOpen ? 'w-60' : 'w-14',
+      )}
+    >
+      {/* Logo */}
+      <div className="flex h-14 items-center justify-between border-b px-3">
+        {sidebarOpen && (
+          <span className="text-lg font-semibold">
+            <span className="text-blue-600">Moonjar</span>{' '}
+            <span className="font-bold text-gray-900">PMS</span>
+          </span>
         )}
+        <button
+          onClick={toggleSidebar}
+          className="rounded p-1 text-gray-400 hover:bg-gray-100"
+        >
+          {sidebarOpen ? '←' : '→'}
+        </button>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 space-y-0.5 overflow-y-auto px-1.5 py-2">
+        {sections.map((section) => (
+          <SidebarSection
+            key={section.section}
+            section={section}
+            sidebarOpen={sidebarOpen}
+          />
+        ))}
       </nav>
     </aside>
   );

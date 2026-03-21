@@ -50,26 +50,37 @@ interface HolidayPreset {
 function getIndonesianHolidays(year: number): HolidayPreset {
   // Indonesian national holidays — dates for 2026 (Islamic dates shift yearly)
   // For other years these are approximate; admin should verify with government calendar
+  // Source: SKB 3 Menteri No. 1497/2025, 2/2025, 5/2025
+  // https://setneg.go.id/baca/index/inilah_skb_3_menteri_libur_nasional_dan_cuti_bersama_2026
+  // 17 Hari Libur Nasional + 8 Cuti Bersama
   const holidays2026 = [
-    { date: '2026-01-01', name: "Tahun Baru Masehi (New Year)", source: 'government' },
-    { date: '2026-01-27', name: 'Isra Mi\'raj Nabi Muhammad', source: 'government' },
-    { date: '2026-02-12', name: 'Tahun Baru Imlek (Chinese New Year)', source: 'government' },
-    { date: '2026-03-19', name: 'Nyepi (Hari Raya Saka)', source: 'balinese' },
-    { date: '2026-03-20', name: 'Hari Raya Idul Fitri 1447H', source: 'government' },
-    { date: '2026-03-21', name: 'Hari Raya Idul Fitri 1447H (Hari 2)', source: 'government' },
-    { date: '2026-03-22', name: 'Cuti Bersama Idul Fitri', source: 'government' },
+    // Hari Libur Nasional
+    { date: '2026-01-01', name: 'Tahun Baru 2026 Masehi', source: 'government' },
+    { date: '2026-01-16', name: 'Isra Mi\'raj Nabi Muhammad SAW', source: 'government' },
+    { date: '2026-02-17', name: 'Tahun Baru Imlek 2577', source: 'government' },
+    { date: '2026-03-19', name: 'Hari Suci Nyepi, Tahun Baru Saka 1948', source: 'balinese' },
+    { date: '2026-03-21', name: 'Hari Raya Idul Fitri 1447H', source: 'government' },
+    { date: '2026-03-22', name: 'Hari Raya Idul Fitri 1447H (Hari 2)', source: 'government' },
+    { date: '2026-04-03', name: 'Wafat Yesus Kristus (Good Friday)', source: 'government' },
+    { date: '2026-04-05', name: 'Paskah (Easter Sunday)', source: 'government' },
+    { date: '2026-05-01', name: 'Hari Buruh Internasional', source: 'government' },
+    { date: '2026-05-14', name: 'Kenaikan Yesus Kristus', source: 'government' },
+    { date: '2026-05-27', name: 'Hari Raya Idul Adha 1447H', source: 'government' },
+    { date: '2026-05-31', name: 'Hari Raya Waisak 2570 BE', source: 'government' },
+    { date: '2026-06-01', name: 'Hari Lahir Pancasila', source: 'government' },
+    { date: '2026-06-16', name: 'Tahun Baru Islam 1448H', source: 'government' },
+    { date: '2026-08-17', name: 'Hari Kemerdekaan RI', source: 'government' },
+    { date: '2026-08-25', name: 'Maulid Nabi Muhammad SAW', source: 'government' },
+    { date: '2026-12-25', name: 'Hari Natal', source: 'government' },
+    // Cuti Bersama
+    { date: '2026-02-16', name: 'Cuti Bersama Imlek', source: 'government' },
+    { date: '2026-03-18', name: 'Cuti Bersama Nyepi', source: 'government' },
+    { date: '2026-03-20', name: 'Cuti Bersama Idul Fitri', source: 'government' },
     { date: '2026-03-23', name: 'Cuti Bersama Idul Fitri', source: 'government' },
     { date: '2026-03-24', name: 'Cuti Bersama Idul Fitri', source: 'government' },
-    { date: '2026-04-03', name: 'Wafat Isa Al-Masih (Good Friday)', source: 'government' },
-    { date: '2026-05-01', name: 'Hari Buruh (Labour Day)', source: 'government' },
-    { date: '2026-05-14', name: 'Kenaikan Isa Al-Masih (Ascension)', source: 'government' },
-    { date: '2026-05-16', name: 'Hari Raya Waisak', source: 'government' },
-    { date: '2026-05-27', name: 'Hari Raya Idul Adha 1447H', source: 'government' },
-    { date: '2026-06-01', name: 'Hari Lahir Pancasila', source: 'government' },
-    { date: '2026-06-17', name: 'Tahun Baru Islam 1448H', source: 'government' },
-    { date: '2026-08-17', name: 'Hari Kemerdekaan RI', source: 'government' },
-    { date: '2026-08-26', name: 'Maulid Nabi Muhammad SAW', source: 'government' },
-    { date: '2026-12-25', name: 'Hari Natal (Christmas)', source: 'government' },
+    { date: '2026-05-15', name: 'Cuti Bersama Kenaikan Yesus', source: 'government' },
+    { date: '2026-05-28', name: 'Cuti Bersama Idul Adha', source: 'government' },
+    { date: '2026-12-24', name: 'Cuti Bersama Natal', source: 'government' },
   ];
 
   if (year === 2026) {
@@ -90,16 +101,20 @@ function getIndonesianHolidays(year: number): HolidayPreset {
 }
 
 function getBalineseHolidays(year: number): HolidayPreset {
-  // Balinese holidays for 2026 (Pawukon cycle dates shift yearly)
+  // Balinese holidays 2026 — Pawukon 210-day cycle
+  // Source: https://www.detik.com/bali/berita/d-8293016/jadwal-lengkap-hari-raya-hindu-sepanjang-tahun-2026
   const holidays2026 = [
+    { date: '2026-01-04', name: 'Hari Raya Saraswati', source: 'balinese' },
+    { date: '2026-01-08', name: 'Pagerwesi', source: 'balinese' },
     { date: '2026-03-18', name: 'Pengerupukan (Nyepi Eve)', source: 'balinese' },
-    { date: '2026-03-19', name: 'Nyepi (Hari Raya Saka 1948)', source: 'balinese' },
-    { date: '2026-03-20', name: 'Ngembak Geni (Day after Nyepi)', source: 'balinese' },
-    { date: '2026-04-15', name: 'Galungan', source: 'balinese' },
-    { date: '2026-04-25', name: 'Kuningan', source: 'balinese' },
-    { date: '2026-07-11', name: 'Saraswati', source: 'balinese' },
-    { date: '2026-10-14', name: 'Galungan', source: 'balinese' },
-    { date: '2026-10-24', name: 'Kuningan', source: 'balinese' },
+    { date: '2026-03-19', name: 'Nyepi (Tahun Baru Saka 1948)', source: 'balinese' },
+    { date: '2026-03-20', name: 'Ngembak Geni', source: 'balinese' },
+    { date: '2026-04-18', name: 'Tumpek Landep', source: 'balinese' },
+    { date: '2026-05-23', name: 'Tumpek Uduh', source: 'balinese' },
+    { date: '2026-06-16', name: 'Penampahan Galungan', source: 'balinese' },
+    { date: '2026-06-17', name: 'Galungan', source: 'balinese' },
+    { date: '2026-06-27', name: 'Kuningan', source: 'balinese' },
+    { date: '2026-08-03', name: 'Hari Raya Saraswati', source: 'balinese' },
   ];
 
   if (year === 2026) {

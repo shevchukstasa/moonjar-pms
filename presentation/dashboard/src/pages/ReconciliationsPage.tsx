@@ -357,9 +357,23 @@ function NewReconciliationDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const user = useCurrentUser();
   const { data: factoriesData } = useFactories();
-  const factories = factoriesData?.items || [];
-  const [selectedFactory, setSelectedFactory] = useState('');
+  const allFactories = factoriesData?.items || [];
+
+  // PM only sees their assigned factories
+  const GLOBAL_ROLES = new Set(['owner', 'administrator', 'ceo']);
+  const userFactoryIds = user?.factories?.map((f: { factory_id: string }) => f.factory_id) || [];
+  const isGlobal = user && GLOBAL_ROLES.has(user.role);
+  const factories = isGlobal ? allFactories : allFactories.filter((f) => userFactoryIds.includes(f.id));
+
+  // Auto-select if only one factory
+  const autoFactory = factories.length === 1 ? factories[0].id : '';
+  const [selectedFactory, setSelectedFactory] = useState(autoFactory);
   const [notes, setNotes] = useState('');
+
+  // Update selection when factories load
+  if (!selectedFactory && factories.length === 1) {
+    setSelectedFactory(factories[0].id);
+  }
 
   const createMutation = useMutation({
     mutationFn: (data: Parameters<typeof reconciliationsApi.create>[0]) =>
@@ -383,6 +397,7 @@ function NewReconciliationDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog open onClose={onClose} title="New Reconciliation">
       <div className="space-y-4">
+        {factories.length > 1 ? (
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Factory *</label>
           <select
@@ -398,6 +413,12 @@ function NewReconciliationDialog({ onClose }: { onClose: () => void }) {
             ))}
           </select>
         </div>
+        ) : factories.length === 1 ? (
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Factory</label>
+          <p className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">{factories[0].name}</p>
+        </div>
+        ) : null}
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Notes (optional)</label>
           <input

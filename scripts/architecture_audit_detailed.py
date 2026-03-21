@@ -49,6 +49,43 @@ def count_lines(path: Path) -> int:
     except:
         return 0
 
+
+def has_frontend_page(api_prefix: str) -> bool:
+    """Check if a frontend page exists that references this API prefix."""
+    # Map API prefix to known page files
+    page_map = {
+        "/api/kiln-maintenance": "KilnMaintenancePage.tsx",
+        "/api/factory-calendar": "FactoryCalendarPage.tsx",
+        "/api/reconciliations": "ReconciliationsPage.tsx",
+        "/api/finished-goods": "FinishedGoodsPage.tsx",
+        "/api/reports": "ReportsPage.tsx",
+        "/api/dashboard-access": "DashboardAccessPage.tsx",
+        "/api/grinding-stock": "GrindingPage.tsx",
+        "/api/settings": "SettingsPage.tsx",
+        "/api/kiln-firing-schedules": "KilnFiringSchedulesPage.tsx",
+        "/api/stages": "StagesPage.tsx",
+    }
+    page_file = page_map.get(api_prefix)
+    if page_file and (PAGES_DIR / page_file).exists():
+        return True
+    # Also check API client files
+    api_dir = DASHBOARD_DIR / "api"
+    for f in api_dir.glob("*.ts"):
+        try:
+            if api_prefix.replace("/api/", "") in f.read_text():
+                return True
+        except:
+            pass
+    return False
+
+
+def has_delete_endpoint(router_name: str) -> bool:
+    """Check if a router file has DELETE endpoint."""
+    rfile = ROUTERS_DIR / f"{router_name}.py"
+    if not rfile.exists():
+        return False
+    return "@router.delete(" in rfile.read_text()
+
 def count_endpoints(router_path: Path) -> dict:
     """Count HTTP methods in a router file."""
     text = router_path.read_text()
@@ -244,13 +281,23 @@ def main():
         },
     ]
 
+    resolved_count = 0
     for item in backend_no_frontend:
+        has_fe = has_frontend_page(item["api"])
+        if has_fe:
+            resolved_count += 1
+            print(f"  {GREEN}✅ {item['name']}{RESET}  {DIM}— РЕАЛИЗОВАНО{RESET}")
+            print()
+            continue
         priority_color = RED if item["priority"] == "ВЫСОКИЙ" else (YELLOW if item["priority"] == "СРЕДНИЙ" else DIM)
         print(f"  {BOLD}{item['name']}{RESET}")
         print(f"  {priority_color}Приоритет: {item['priority']}{RESET}  |  Кому нужно: {item['who_needs']}")
         print(f"  {DIM}{item['description']}{RESET}")
         print(f"  API: {CYAN}{item['api']}{RESET}  →  {item['endpoints']}")
         print(f"  Статус: {YELLOW}{item['status']}{RESET}")
+        print()
+    if resolved_count:
+        print(f"  {GREEN}{BOLD}→ {resolved_count} из {len(backend_no_frontend)} задач закрыты!{RESET}")
         print()
 
     # ═══════════════════════════════════════════════════════════════════
@@ -451,12 +498,18 @@ def main():
         {
             "router": "users",
             "issue": "Пользователей нельзя удалить",
-            "reason": "Можно создать и обновить, но не деактивировать/удалить.",
-            "verdict": "❌ Нужен DELETE или деактивация",
+            "reason": "Есть toggle-active (деактивация), но нет полного DELETE.",
+            "verdict": "⚠️ Возможно ОК — есть toggle-active для деактивации",
         },
     ]
 
     for item in crud_issues:
+        # Dynamic check: does the router now have DELETE?
+        has_del = has_delete_endpoint(item["router"])
+        if "❌" in item["verdict"] and has_del:
+            print(f"  {GREEN}✅ {item['router']}{RESET}: {item['issue']} {DIM}— ИСПРАВЛЕНО{RESET}")
+            print()
+            continue
         verdict_color = RED if "❌" in item["verdict"] else YELLOW
         print(f"  {BOLD}{item['router']}{RESET}: {item['issue']}")
         print(f"  {DIM}{item['reason']}{RESET}")

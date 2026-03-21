@@ -35,14 +35,20 @@ import AdminWarehousesPage from '@/pages/AdminWarehousesPage';
 import AdminPackagingPage from '@/pages/AdminPackagingPage';
 import AdminSizesPage from '@/pages/AdminSizesPage';
 import AdminFiringProfilesPage from '@/pages/AdminFiringProfilesPage';
+import AdminStagesPage from '@/pages/AdminStagesPage';
+import KilnFiringSchedulesPage from '@/pages/KilnFiringSchedulesPage';
 import FactoryCalendarPage from '@/pages/FactoryCalendarPage';
 import ConsumptionRulesPage from '@/pages/ConsumptionRulesPage';
 import PMGuidePage from '@/pages/PMGuidePage';
 import KilnInspectionsPage from '@/pages/KilnInspectionsPage';
 import KilnMaintenancePage from '@/pages/KilnMaintenancePage';
+import GrindingDecisionsPage from '@/pages/GrindingDecisionsPage';
 import ReconciliationsPage from '@/pages/ReconciliationsPage';
 import FinishedGoodsPage from '@/pages/FinishedGoodsPage';
+import ReportsPage from '@/pages/ReportsPage';
+import DashboardAccessPage from '@/pages/DashboardAccessPage';
 import SettingsPage from '@/pages/SettingsPage';
+import AdminSettingsPage from '@/pages/AdminSettingsPage';
 import AppLayout from '@/components/layout/AppLayout';
 import { Spinner } from '@/components/ui/Spinner';
 import { ErrorBoundary, PageErrorFallback } from '@/components/ErrorBoundary';
@@ -122,6 +128,8 @@ export default function App() {
             <Route path="/admin/finishing-types" element={<AdminFinishingPage />} />
             <Route path="/admin/materials" element={<AdminMaterialsPage />} />
             <Route path="/admin/size-resolution/:taskId" element={<SizeResolutionPage />} />
+            <Route path="/admin/dashboard-access" element={<DashboardAccessPage />} />
+            <Route path="/admin/settings" element={<AdminSettingsPage />} />
           </Route>
           <Route element={<RequireRole roles={['owner', 'administrator', 'production_manager']} />}>
             <Route path="/admin/recipes" element={<AdminRecipesPage />} />
@@ -131,6 +139,8 @@ export default function App() {
             <Route path="/admin/sizes" element={<AdminSizesPage />} />
             <Route path="/admin/consumption-rules" element={<ConsumptionRulesPage />} />
             <Route path="/admin/firing-profiles" element={<AdminFiringProfilesPage />} />
+            <Route path="/admin/stages" element={<AdminStagesPage />} />
+            <Route path="/admin/firing-schedules" element={<KilnFiringSchedulesPage />} />
             <Route path="/admin/factory-calendar" element={<FactoryCalendarPage />} />
           </Route>
           <Route element={<RequireRole roles={['owner', 'administrator', 'ceo']} />}>
@@ -144,9 +154,13 @@ export default function App() {
             <Route path="/manager/materials" element={<ManagerMaterialsPage />} />
             <Route path="/manager/kiln-inspections" element={<KilnInspectionsPage />} />
             <Route path="/manager/kiln-maintenance" element={<KilnMaintenancePage />} />
+            <Route path="/manager/grinding" element={<GrindingDecisionsPage />} />
             <Route path="/manager/shortage/:taskId" element={<ShortageDecisionPage />} />
             <Route path="/manager/size-resolution/:taskId" element={<SizeResolutionPage />} />
             <Route path="/manager/guide" element={<PMGuidePage />} />
+          </Route>
+          <Route element={<RequireRole roles={['owner', 'ceo', 'production_manager']} />}>
+            <Route path="/reports" element={<ReportsPage />} />
           </Route>
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/tablo" element={<TabloDashboard />} />

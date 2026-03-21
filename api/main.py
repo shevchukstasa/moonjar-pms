@@ -73,6 +73,7 @@ from api.routers import stone_reservations
 from api.routers import settings as settings_router
 from api.routers import factory_calendar
 from api.routers import guides
+from api.routers import admin_settings
 
 
 def _ensure_schema():
@@ -1944,6 +1945,7 @@ def setup_routers():
     app.include_router(factory_calendar.router, prefix="/api/factory-calendar", tags=["factory-calendar"])
     app.include_router(stone_reservations.router, prefix="/api/stone-reservations", tags=["stone-reservations"])
     app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
+    app.include_router(admin_settings.router, prefix="/api/admin-settings", tags=["admin-settings"])
     app.include_router(guides.router, prefix="/api/guides", tags=["guides"])
 
 setup_routers()

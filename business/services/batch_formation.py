@@ -21,6 +21,7 @@ from sqlalchemy import func as sa_func
 
 from api.models import (
     Batch,
+    KilnCalculationLog,
     OrderPosition,
     Resource,
     KilnMaintenanceSchedule,
@@ -434,9 +435,40 @@ def _calculate_position_loading(
             poa = op.place_of_application
             self.glaze_placement = poa if poa else "face-only"
 
+    import time as _time
+
     try:
         adapter = _PosAdapter(pos)
+        t0 = _time.monotonic()
         result = calculate_kiln_capacity(adapter, kiln, constants, loading_rules)
+        duration_ms = int((_time.monotonic() - t0) * 1000)
+
+        # Log calculation to KilnCalculationLog for auditability
+        try:
+            from sqlalchemy.orm import object_session
+            db = object_session(pos) or object_session(kiln)
+            if db:
+                log_entry = KilnCalculationLog(
+                    calculation_type="position_loading",
+                    resource_id=kiln.id,
+                    input_json={
+                        "position_id": str(pos.id),
+                        "size": adapter.size,
+                        "thickness_cm": adapter.thickness_cm,
+                        "product_type": adapter.product_type,
+                        "shape": adapter.shape,
+                        "glaze_placement": adapter.glaze_placement,
+                        "kiln_type": kiln.kiln_type,
+                        "kiln_capacity_sqm": float(kiln.capacity_sqm) if kiln.capacity_sqm else None,
+                    },
+                    output_json=result,
+                    duration_ms=duration_ms,
+                )
+                db.add(log_entry)
+                # Don't flush here — let the caller control the transaction
+        except Exception as log_exc:
+            logger.debug("KilnCalculationLog write failed: %s", log_exc)
+
         return result
     except (ValueError, ZeroDivisionError, TypeError, AttributeError) as exc:
         logger.debug(
@@ -516,8 +548,31 @@ def preview_position_in_kiln(
     Returns full capacity result with flat/edge/optimal breakdown,
     plus a loading plan entry.
     """
+    import time as _time
+
     constants, loading_rules = _get_kiln_constants_and_rules(db, kiln)
+    t0 = _time.monotonic()
     result = _calculate_position_loading(position, kiln, constants, loading_rules)
+    duration_ms = int((_time.monotonic() - t0) * 1000)
+
+    # Log preview calculation
+    try:
+        log_entry = KilnCalculationLog(
+            calculation_type="capacity_preview",
+            resource_id=kiln.id,
+            input_json={
+                "position_id": str(position.id),
+                "kiln_id": str(kiln.id),
+                "size": position.size,
+                "thickness_mm": float(position.thickness_mm) if position.thickness_mm else None,
+            },
+            output_json=result if result else {"fallback": True},
+            duration_ms=duration_ms,
+        )
+        db.add(log_entry)
+        db.flush()
+    except Exception as log_exc:
+        logger.debug("KilnCalculationLog preview write failed: %s", log_exc)
 
     if result is None:
         # Fall back to simple area comparison

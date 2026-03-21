@@ -1131,6 +1131,14 @@ class TpsDeviation(Base):
 
 
 class ProcessStep(Base):
+    """Production operation with productivity norms.
+
+    Examples:
+    - Glazing (spray): 1 person → 3 sqm/hour
+    - Glazing (brush): 1 person → 2 liters/hour
+    - Cutting: 1 person → 50 pieces/hour
+    - Packing: 1 person → 30 pieces/hour
+    """
     __tablename__ = 'process_steps'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1138,24 +1146,40 @@ class ProcessStep(Base):
     factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
     norm_time_minutes = Column(sa.Numeric(8, 2), nullable=False)
     sequence = Column(sa.Integer, nullable=False)
+    # Productivity norms
+    productivity_rate = Column(sa.Numeric(10, 2), nullable=True)   # e.g. 3.0
+    productivity_unit = Column(sa.String(50), nullable=True)       # e.g. "sqm/hour", "pcs/hour", "liters/hour"
+    measurement_basis = Column(sa.String(50), nullable=True)       # "per_person", "per_machine", "per_shift"
+    is_active = Column(sa.Boolean, nullable=False, server_default=sa.text('true'))
+    notes = Column(sa.Text, nullable=True)
 
     __table_args__ = (
         UniqueConstraint('factory_id', 'sequence'),
     )
 
     factory = relationship('Factory', foreign_keys=[factory_id])
+    standard_works = relationship('StandardWork', back_populates='process_step', cascade='all, delete-orphan')
 
 
 class StandardWork(Base):
+    """Detailed sub-operations within a ProcessStep.
+
+    Example for "Glazing (spray)":
+    - Prepare glaze mixture: 15 min (setup)
+    - Set up spray equipment: 10 min (setup)
+    - Apply coats: per ProcessStep rate (productive)
+    - Clean equipment: 20 min (setup)
+    """
     __tablename__ = 'standard_work'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     process_step_id = Column(UUID(as_uuid=True), ForeignKey('process_steps.id', ondelete='CASCADE'), nullable=False)
     description = Column(sa.Text, nullable=False)
     time_minutes = Column(sa.Numeric(8, 2), nullable=False)
+    is_setup = Column(sa.Boolean, nullable=False, server_default=sa.text('false'))
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
-    process_step = relationship('ProcessStep', foreign_keys=[process_step_id])
+    process_step = relationship('ProcessStep', back_populates='standard_works', foreign_keys=[process_step_id])
 
 
 class BottleneckConfig(Base):
@@ -1359,6 +1383,21 @@ class Notification(Base):
 
     user = relationship('User', foreign_keys=[user_id])
     factory = relationship('Factory', foreign_keys=[factory_id])
+
+
+class AuditLog(Base):
+    """Audit trail for all DELETE operations and other destructive actions."""
+    __tablename__ = 'audit_logs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    action = Column(sa.String(20), nullable=False)  # DELETE, DEACTIVATE, etc.
+    table_name = Column(sa.String(100), nullable=False)
+    record_id = Column(UUID(as_uuid=True), nullable=False)
+    old_data = Column(JSONB, nullable=True)  # snapshot of deleted record
+    user_id = Column(UUID(as_uuid=True), nullable=True)
+    user_email = Column(sa.String(255), nullable=True)
+    ip_address = Column(sa.String(45), nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 
 class AiChatHistory(Base):

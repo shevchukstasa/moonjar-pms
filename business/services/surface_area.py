@@ -14,7 +14,88 @@ from decimal import Decimal
 from typing import Optional
 import logging
 
+from sqlalchemy.orm import Session
+
 logger = logging.getLogger(__name__)
+
+
+def get_edge_height_for_thickness(
+    db: Session,
+    factory_id,
+    thickness_mm: float,
+) -> Optional[float]:
+    """Look up max glazeable edge height (cm) for a given tile thickness.
+
+    Uses EdgeHeightRule table: for the given factory and thickness range,
+    returns the max_edge_height_cm.  If no rule matches, returns the tile
+    thickness itself (full edge glazing).
+    """
+    from api.models import EdgeHeightRule
+
+    rule = (
+        db.query(EdgeHeightRule)
+        .filter(
+            EdgeHeightRule.factory_id == factory_id,
+            EdgeHeightRule.thickness_mm_min <= thickness_mm,
+            EdgeHeightRule.thickness_mm_max >= thickness_mm,
+        )
+        .first()
+    )
+    if rule:
+        return float(rule.max_edge_height_cm)
+    # No rule → default: edge height = tile thickness
+    return thickness_mm / 10.0  # mm to cm
+
+
+def calculate_edge_surface(
+    shape: str,
+    length_cm: float,
+    width_cm: float,
+    edge_height_cm: float,
+    edge_profile_sides: int = 4,
+) -> float:
+    """Calculate glazeable edge surface area for ONE piece in m².
+
+    Edge surface = perimeter × edge_height.
+    The edge_height is either from EdgeHeightRule or the tile thickness.
+
+    Args:
+        shape: rectangle, square, round, triangle, octagon, etc.
+        length_cm: Length in cm
+        width_cm: Width in cm
+        edge_height_cm: Height of the glazeable edge in cm
+        edge_profile_sides: How many sides have edge glaze (default all)
+
+    Returns:
+        Edge surface area in m²
+    """
+    if edge_height_cm <= 0 or length_cm <= 0 or width_cm <= 0:
+        return 0.0
+
+    L = float(length_cm)
+    W = float(width_cm)
+    H = float(edge_height_cm)
+
+    if shape == "round":
+        perimeter = pi * L  # circumference
+    elif shape == "triangle":
+        # Approximate equilateral triangle with base L and height W
+        side = L  # simplified
+        perimeter = 3 * side
+    elif shape == "octagon":
+        s = L / (1 + sqrt(2))
+        perimeter = 8 * s
+    else:
+        # rectangle, square
+        perimeter = 2 * (L + W)
+
+    # If not all sides are glazed, scale proportionally
+    if shape in ("rectangle", "square") and edge_profile_sides < 4:
+        # Approximate: reduce perimeter proportionally
+        perimeter = perimeter * (edge_profile_sides / 4.0)
+
+    edge_area_cm2 = perimeter * H
+    return round(edge_area_cm2 / 10000.0, 4)
 
 
 def calculate_glazeable_surface(

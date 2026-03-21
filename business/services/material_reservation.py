@@ -175,22 +175,62 @@ class ReservationResult:
 # Helper: Calculate required material quantity per position
 # ────────────────────────────────────────────────────────────────
 
-def _get_area_for_position(position) -> Decimal:
-    """Get the glazeable surface area (total for all pieces in the position).
+def _get_area_for_position(position, db=None) -> Decimal:
+    """Get the total glazeable surface area (face + edges) for the position.
 
-    Priority:
+    Priority for face area:
     1. glazeable_sqm × quantity (shape-aware area per piece)
     2. quantity_sqm (bounding-box total — legacy fallback)
     3. quantity (treat as per-piece)
+
+    Edge area is added when the position has edge_profile != 'straight'.
+    Edge height is determined by EdgeHeightRule for the tile thickness,
+    or defaults to tile thickness if no rule exists.
     """
+    # Face area
     if position.glazeable_sqm and position.glazeable_sqm > 0:
-        return Decimal(str(position.glazeable_sqm)) * Decimal(str(position.quantity))
-    if position.quantity_sqm and position.quantity_sqm > 0:
-        return Decimal(str(position.quantity_sqm))
-    return Decimal(str(position.quantity))
+        face_total = Decimal(str(position.glazeable_sqm)) * Decimal(str(position.quantity))
+    elif position.quantity_sqm and position.quantity_sqm > 0:
+        face_total = Decimal(str(position.quantity_sqm))
+    else:
+        face_total = Decimal(str(position.quantity))
+
+    # Edge area — only when edge profile requires glazing
+    edge_profile = getattr(position, 'edge_profile', None) or 'straight'
+    if edge_profile.lower() != 'straight' and db is not None:
+        try:
+            from business.services.surface_area import (
+                calculate_edge_surface,
+                get_edge_height_for_thickness,
+            )
+            thickness_mm = float(position.thickness_mm) if position.thickness_mm else 10.0
+            factory_id = getattr(position, 'factory_id', None)
+            if not factory_id and hasattr(position, 'order') and position.order:
+                factory_id = position.order.factory_id
+
+            edge_height_cm = get_edge_height_for_thickness(
+                db, factory_id, thickness_mm
+            ) if factory_id else (thickness_mm / 10.0)
+
+            shape = (position.shape.value if hasattr(position.shape, 'value')
+                     else str(position.shape)) if position.shape else 'rectangle'
+            width_cm = float(position.width_cm) if position.width_cm else 0
+            length_cm = float(position.length_cm) if position.length_cm else 0
+            edge_sides = int(position.edge_profile_sides) if getattr(position, 'edge_profile_sides', None) else 4
+
+            if width_cm > 0 and length_cm > 0 and edge_height_cm > 0:
+                edge_per_piece = calculate_edge_surface(
+                    shape, length_cm, width_cm, edge_height_cm, edge_sides
+                )
+                edge_total = Decimal(str(edge_per_piece)) * Decimal(str(position.quantity))
+                face_total += edge_total
+        except Exception as exc:
+            logger.debug("Edge area calculation failed: %s", exc)
+
+    return face_total
 
 
-def _calculate_required(rm, position, recipe=None) -> Decimal:
+def _calculate_required(rm, position, recipe=None, db=None) -> Decimal:
     """Calculate required material quantity based on recipe-material unit.
 
     Units:
@@ -281,12 +321,12 @@ def _calculate_required(rm, position, recipe=None) -> Decimal:
     method_rate = _get_method_rate()
 
     if rm.unit == "per_sqm":
-        area = _get_area_for_position(position)
+        area = _get_area_for_position(position, db=db)
         rate = method_rate if method_rate is not None else qty
         return rate * area
 
     if rm.unit == "g_per_100g":
-        area = _get_area_for_position(position)
+        area = _get_area_for_position(position, db=db)
 
         # Resolve recipe object
         r = recipe
@@ -577,8 +617,8 @@ def reserve_materials_for_position(
         else:
             position._consumption_rule = None
 
-        # --- Calculate required quantity ---
-        required = _calculate_required(rm, position, recipe=recipe)
+        # --- Calculate required quantity (with edge area via EdgeHeightRule) ---
+        required = _calculate_required(rm, position, recipe=recipe, db=db)
 
         # --- Current stock balance ---
         stock = (

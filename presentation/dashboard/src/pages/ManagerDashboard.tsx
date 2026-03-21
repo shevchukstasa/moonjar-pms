@@ -165,7 +165,9 @@ export default function ManagerDashboard() {
 
   const { data: ordersData, isLoading: ordersLoading, isError: ordersError } = useOrders(ordersParams);
   const { data: positionsData } = usePositions(
-    activeFactoryId ? { factory_id: activeFactoryId } : undefined,
+    activeFactoryId
+      ? { factory_id: activeFactoryId, exclude_statuses: 'shipped,cancelled' }
+      : { exclude_statuses: 'shipped,cancelled' },
   );
   const { data: shortageTasksData } = useShortageTasksForManager(activeFactoryId || undefined);
 

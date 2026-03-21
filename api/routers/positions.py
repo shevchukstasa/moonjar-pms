@@ -232,6 +232,7 @@ async def list_positions(
     section: str | None = None,
     batch_id: UUID | None = None,
     split_category: str | None = None,
+    exclude_statuses: str | None = None,
     search: str | None = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -253,6 +254,10 @@ async def list_positions(
         # Comma-separated statuses
         statuses = [s.strip() for s in status.split(",")]
         query = query.filter(OrderPosition.status.in_(statuses))
+
+    if exclude_statuses:
+        excluded = [s.strip() for s in exclude_statuses.split(",")]
+        query = query.filter(~OrderPosition.status.in_(excluded))
 
     if search:
         query = query.join(ProductionOrder, OrderPosition.order_id == ProductionOrder.id).filter(

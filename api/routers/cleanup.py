@@ -7,14 +7,11 @@ Remove this file once test data is cleaned up.
 
 import logging
 from uuid import UUID
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_role
 from api.models import (
     Factory,
@@ -35,7 +32,6 @@ from api.models import (
     OrderFinancial,
     QmBlock,
 )
-from api.enums import UserRole
 
 logger = logging.getLogger("moonjar.cleanup")
 

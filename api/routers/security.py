@@ -18,7 +18,7 @@ from api.config import get_settings
 from api.database import get_db
 from api.auth import get_current_user, log_security_event, hash_password, verify_password
 from api.roles import require_admin
-from api.models import SecurityAuditLog, ActiveSession, IpAllowlist, User, TotpBackupCode
+from api.models import SecurityAuditLog, ActiveSession, IpAllowlist, User, TotpBackupCode, RateLimitEvent
 from api.enums import AuditActionType, IpScope
 
 router = APIRouter()
@@ -592,3 +592,77 @@ async def totp_regenerate_backup_codes(
         "backup_codes": backup_codes,
         "message": "New backup codes generated. Previous codes are now invalid.",
     }
+
+
+# ---------------------------------------------------------------------------
+# Rate Limit Events
+# ---------------------------------------------------------------------------
+
+@router.get("/rate-limit-events")
+async def list_rate_limit_events(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    ip_address: str | None = None,
+    endpoint: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """List recent rate limit violation events (admin only)."""
+    q = db.query(RateLimitEvent).order_by(RateLimitEvent.created_at.desc())
+
+    if ip_address:
+        q = q.filter(RateLimitEvent.ip_address == ip_address)
+    if endpoint:
+        q = q.filter(RateLimitEvent.endpoint.ilike(f"%{endpoint}%"))
+    if date_from:
+        q = q.filter(RateLimitEvent.created_at >= date_from)
+    if date_to:
+        try:
+            date_to_end = datetime.strptime(date_to, "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59, tzinfo=timezone.utc
+            )
+        except (ValueError, TypeError):
+            date_to_end = date_to
+        q = q.filter(RateLimitEvent.created_at <= date_to_end)
+
+    total = q.count()
+    items = q.offset((page - 1) * per_page).limit(per_page).all()
+
+    return {
+        "items": [
+            {
+                "id": str(item.id),
+                "ip_address": str(item.ip_address) if item.ip_address else None,
+                "user_id": str(item.user_id) if item.user_id else None,
+                "endpoint": item.endpoint,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+            }
+            for item in items
+        ],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
+
+
+@router.delete("/rate-limit-events/clear")
+async def clear_rate_limit_events(
+    older_than_days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Clear rate limit events older than N days (default: 30). Admin only."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+    deleted = db.query(RateLimitEvent).filter(
+        RateLimitEvent.created_at < cutoff
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    logger.info(
+        f"Rate limit events cleanup: {deleted} events older than {older_than_days} days "
+        f"deleted by {current_user.email}"
+    )
+
+    return {"deleted": deleted, "older_than_days": older_than_days}

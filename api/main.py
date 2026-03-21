@@ -1854,41 +1854,17 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-CSRF-Token"],
+    expose_headers=["X-CSRF-Token", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
 )
 
 # --- CSRF + Rate limiting + Request logging middleware ---
-from api.middleware import CSRFMiddleware, RateLimitMiddleware, RequestLoggingMiddleware
+from api.middleware import CSRFMiddleware, RequestLoggingMiddleware
+from api.rate_limit import RateLimitMiddleware
 
 app.add_middleware(CSRFMiddleware)
 app.add_middleware(RateLimitMiddleware)
 if IS_PRODUCTION:
     app.add_middleware(RequestLoggingMiddleware)
-
-
-# --- Global exception handler ---
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled error: {exc}", exc_info=True)
-
-    if IS_PRODUCTION:
-        # Never expose internals in production
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "Internal server error"},
-        )
-
-    # Dev mode — include details for debugging
-    import traceback
-    tb = traceback.format_exc()
-    return JSONResponse(
-        status_code=500,
-        content={
-            "detail": f"{type(exc).__name__}: {exc}",
-            "path": str(request.url.path),
-            "traceback": tb[-1000:] if tb else None,
-        },
-    )
 
 
 # --- Mount routers ---

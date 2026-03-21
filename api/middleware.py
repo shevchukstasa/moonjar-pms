@@ -1,19 +1,18 @@
 """
-Moonjar PMS — Middleware: CSRF validation + rate limiting.
+Moonjar PMS — Middleware: CSRF validation + request logging.
+Rate limiting has moved to api/rate_limit.py.
 """
 
 import time
 import logging
-from collections import defaultdict
 
-from fastapi import Request, Response
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from api.config import get_settings
 
 settings = get_settings()
-_rate_limit_logger = logging.getLogger("moonjar.ratelimit")
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):
@@ -106,88 +105,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             response.headers["X-CSRF-Token"] = csrf_token
 
         return response
-
-
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    """
-    In-memory rate limiter per IP address.
-    Limits (per spec):
-      - Login:   5/min
-      - API:     100/min
-      - Webhook: 30/min
-      - Upload:  10/min
-    """
-
-    TIERS = {
-        "login":   {"paths": ("/api/auth/login", "/api/auth/google"), "max": 5, "window": 60},
-        "webhook": {"prefix": "/api/integration/webhook", "max": 30, "window": 60},
-        "upload":  {"prefix": "/api/packing-photos", "max": 10, "window": 60},
-        "api":     {"prefix": "/api/", "max": 100, "window": 60},
-    }
-
-    def __init__(self, app):
-        super().__init__(app)
-        # Buckets: tier -> ip -> [timestamps]
-        self._buckets: dict[str, dict[str, list[float]]] = {
-            tier: defaultdict(list) for tier in self.TIERS
-        }
-
-    def _classify(self, request: Request) -> str | None:
-        """Classify request into a rate-limit tier."""
-        path = request.url.path
-        method = request.method
-
-        # Login: only POST
-        if method == "POST" and path in self.TIERS["login"]["paths"]:
-            return "login"
-        # Webhook: only POST
-        if method == "POST" and path.startswith(self.TIERS["webhook"]["prefix"]):
-            return "webhook"
-        # Upload: POST to packing-photos
-        if method == "POST" and path.startswith(self.TIERS["upload"]["prefix"]):
-            return "upload"
-        # General API (all methods)
-        if path.startswith(self.TIERS["api"]["prefix"]):
-            return "api"
-        return None
-
-    async def dispatch(self, request: Request, call_next):
-        tier = self._classify(request)
-        if tier:
-            cfg = self.TIERS[tier]
-            client_ip = request.client.host if request.client else "unknown"
-            now = time.time()
-            window_start = now - cfg["window"]
-            bucket = self._buckets[tier]
-
-            # Clean old entries
-            bucket[client_ip] = [t for t in bucket[client_ip] if t > window_start]
-
-            if len(bucket[client_ip]) >= cfg["max"]:
-                _rate_limit_logger.warning(
-                    f"Rate limit [{tier}] exceeded for {client_ip} on {request.url.path}"
-                )
-                msg = {
-                    "login": "Too many login attempts. Try again later.",
-                    "webhook": "Webhook rate limit exceeded.",
-                    "upload": "Upload rate limit exceeded.",
-                    "api": "API rate limit exceeded.",
-                }
-                return JSONResponse(
-                    status_code=429,
-                    content={"detail": msg.get(tier, "Rate limit exceeded")},
-                    headers={"Retry-After": str(cfg["window"])},
-                )
-
-            bucket[client_ip].append(now)
-
-            # Periodic cleanup per tier
-            if len(bucket) > 1000:
-                stale = [ip for ip, ts in bucket.items() if not ts or ts[-1] < window_start]
-                for ip in stale:
-                    del bucket[ip]
-
-        return await call_next(request)
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):

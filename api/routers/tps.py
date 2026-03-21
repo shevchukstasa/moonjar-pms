@@ -17,6 +17,11 @@ from api.models import (
     OperationLog, Operation, OrderPosition,
 )
 from api.enums import TpsStatus, TpsDeviationType
+from business.services.tps_metrics import (
+    collect_shift_metrics as _collect_shift_metrics,
+    record_shift_metric as _record_shift_metric,
+    evaluate_signal as _evaluate_signal,
+)
 
 router = APIRouter()
 
@@ -197,40 +202,39 @@ async def create_shift_metric(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
-    """Record a shift metric."""
-    planned = float(data.planned_output)
-    actual = float(data.actual_output)
-    deviation = ((actual - planned) / planned * 100) if planned > 0 else 0
+    """Record a shift metric using the TPS metrics service.
 
-    # Determine status
-    if abs(deviation) <= 5:
-        status = TpsStatus.NORMAL
-    elif abs(deviation) <= 15:
-        status = TpsStatus.WARNING
-    else:
-        status = TpsStatus.CRITICAL
+    The service calculates OEE, takt time, cycle time, deviation status,
+    and auto-creates deviation records + PM notifications on critical deviations.
+    """
+    try:
+        result = _record_shift_metric(
+            db=db,
+            factory_id=data.factory_id,
+            shift=data.shift,
+            metric_date=data.date,
+            stage=data.stage,
+            planned_output=float(data.planned_output),
+            actual_output=float(data.actual_output),
+            actual_output_pcs=data.actual_output_pcs,
+            defect_count=int(data.defect_rate) if data.defect_rate else 0,
+            downtime_minutes=float(data.downtime_minutes),
+            available_minutes=480.0,
+        )
+    except Exception as e:
+        raise HTTPException(400, f"Failed to record shift metric: {e}")
 
-    metric = TpsShiftMetric(
-        factory_id=data.factory_id,
-        shift=data.shift,
-        date=data.date,
-        stage=data.stage,
-        planned_output=data.planned_output,
-        actual_output=data.actual_output,
-        actual_output_pcs=data.actual_output_pcs,
-        deviation_percent=round(deviation, 2),
-        defect_rate=data.defect_rate,
-        downtime_minutes=data.downtime_minutes,
-        cycle_time_minutes=data.cycle_time_minutes,
-        oee_percent=data.oee_percent,
-        takt_time_minutes=data.takt_time_minutes,
-        status=status,
-        notes=data.notes,
-    )
-    db.add(metric)
-    db.commit()
-    db.refresh(metric)
-    return _serialize_metric(metric)
+    # Re-fetch the persisted metric to return full serialized data
+    metric = db.query(TpsShiftMetric).filter(
+        TpsShiftMetric.factory_id == data.factory_id,
+        TpsShiftMetric.shift == data.shift,
+        TpsShiftMetric.date == data.date,
+        TpsShiftMetric.stage == data.stage,
+    ).first()
+
+    if metric:
+        return _serialize_metric(metric)
+    return result
 
 
 # ── TPS Dashboard Summary ──────────────────────────────────────────────
@@ -331,6 +335,46 @@ async def get_dashboard_summary(
         "bottleneck_stages": bottlenecks,
         "cycle_times_per_stage": cycle_times,
     }
+
+
+# ── TPS Shift Collection & Signal ─────────────────────────────────────
+
+@router.get("/shift-summary")
+async def get_shift_summary(
+    factory_id: UUID,
+    shift_date: date | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Collect and return all shift metrics for a factory on a given date.
+
+    Uses the TPS metrics service to aggregate data by shift and stage.
+    Defaults to today if shift_date is not provided.
+    """
+    target_date = shift_date or date.today()
+    try:
+        return _collect_shift_metrics(db, factory_id, target_date)
+    except Exception as e:
+        raise HTTPException(400, f"Failed to collect shift metrics: {e}")
+
+
+@router.get("/signal")
+async def get_signal(
+    factory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Evaluate the TPS signal (green/yellow/red) for a factory today.
+
+    - green: all normal or no data
+    - yellow: some warnings but no critical
+    - red: any critical deviation or >50% warnings
+    """
+    try:
+        signal = _evaluate_signal(db, factory_id)
+        return {"factory_id": str(factory_id), "signal": signal, "date": str(date.today())}
+    except Exception as e:
+        raise HTTPException(400, f"Failed to evaluate signal: {e}")
 
 
 # ── TPS Deviations ──────────────────────────────────────────────────────

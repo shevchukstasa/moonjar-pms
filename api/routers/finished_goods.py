@@ -3,18 +3,15 @@
 import uuid as uuid_mod
 from datetime import datetime, timezone
 from uuid import UUID
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 from api.database import get_db
-from api.auth import get_current_user, apply_factory_filter
+from api.auth import get_current_user
 from api.roles import require_management
-from api.models import FinishedGoodsStock, Factory
-from api.enums import ProductType
+from api.models import FinishedGoodsStock
 
 router = APIRouter()
 

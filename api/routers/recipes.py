@@ -457,6 +457,17 @@ async def create_recipes_item(
 
     db.commit()
     db.refresh(item)
+
+    # RAG indexing (best-effort)
+    try:
+        import os
+        if os.getenv("OPENAI_API_KEY"):
+            from business.rag.embeddings import index_recipe
+            await index_recipe(db, item.id)
+            db.commit()
+    except Exception:
+        pass
+
     return item
 
 
@@ -477,6 +488,17 @@ async def update_recipes_item(
         item.glaze_settings = {}
     db.commit()
     db.refresh(item)
+
+    # RAG indexing (best-effort)
+    try:
+        import os
+        if os.getenv("OPENAI_API_KEY"):
+            from business.rag.embeddings import index_recipe
+            await index_recipe(db, item.id)
+            db.commit()
+    except Exception:
+        pass
+
     return item
 
 

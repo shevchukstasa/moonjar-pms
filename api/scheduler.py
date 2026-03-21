@@ -14,11 +14,6 @@ scheduler = AsyncIOScheduler()
 _last_backup_status: dict | None = None
 
 
-def get_last_backup_status() -> dict | None:
-    """Return the last backup result (used by /api/health/backup endpoint)."""
-    return _last_backup_status
-
-
 def _get_db_session():
     """Get a new database session for scheduled tasks."""
     from api.database import SessionLocal
@@ -114,29 +109,25 @@ async def daily_material_balance():
     logger.info("Running material balance recalculation")
     db = _get_db_session()
     try:
-        from api.models import MaterialStock, MaterialTransaction
-        from sqlalchemy import func as sa_func
-        from datetime import date, timedelta
+        from business.services.min_balance import recalculate_min_balance_recommendations
 
-        cutoff = date.today() - timedelta(days=30)
-        stocks = db.query(MaterialStock).filter(MaterialStock.min_balance_auto.is_(True)).all()
+        factory_ids = _get_all_factory_ids(db)
+        total_updated = 0
+        all_alerts = []
 
-        for stock in stocks:
-            total_consumed = db.query(
-                sa_func.sum(MaterialTransaction.quantity)
-            ).filter(
-                MaterialTransaction.material_id == stock.material_id,
-                MaterialTransaction.factory_id == stock.factory_id,
-                MaterialTransaction.type == 'consume',
-                MaterialTransaction.created_at >= cutoff,
-            ).scalar()
-
-            avg_daily = float(total_consumed or 0) / 30.0
-            stock.avg_daily_consumption = abs(avg_daily)
-            stock.min_balance_recommended = abs(avg_daily * 7)
+        for fid in factory_ids:
+            try:
+                result = recalculate_min_balance_recommendations(db, fid)
+                total_updated += result.get("updated", 0)
+                all_alerts.extend(result.get("alerts", []))
+            except Exception as e:
+                logger.error("Min balance recalc failed for factory %s: %s", fid, e)
 
         db.commit()
-        logger.info("Material balance updated for %d stocks", len(stocks))
+        logger.info(
+            "Material balance updated: %d stocks across %d factories, %d low-stock alerts",
+            total_updated, len(factory_ids), len(all_alerts),
+        )
     except Exception as e:
         logger.error("Material balance job failed: %s", e)
         db.rollback()

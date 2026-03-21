@@ -3,13 +3,11 @@ TPS Lean Metrics service.
 Business Logic: §23
 """
 from uuid import UUID
-from datetime import date, datetime, timedelta
-from math import ceil, floor
+from datetime import date, timedelta
 from typing import Optional
 import logging
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sa_func
 
 from api.models import (
     TpsShiftMetric, TpsDeviation, TpsParameter,

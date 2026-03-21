@@ -217,6 +217,14 @@ class TransactionInput(BaseModel):
     reason: Optional[str] = None
     notes: Optional[str] = None
     supplier_id: Optional[UUID] = None  # for receive: auto-match purchase requests
+    defect_percent: Optional[float] = 0.0  # for receive: defect percentage
+    quality_notes: Optional[str] = None  # for receive: quality notes
+
+
+class ReceiptApprovalInput(BaseModel):
+    decision: str  # "accept" | "reject" | "partial"
+    accepted_quantity: Optional[float] = None
+    notes: Optional[str] = None
 
 
 class PurchaseRequestInput(BaseModel):
@@ -1319,56 +1327,109 @@ async def create_transaction(
     elif data.type == "inventory":
         # Inventory adjustment: qty is the difference (actual − system), can be negative
         stock.balance += qty
-    else:
-        # receive
-        stock.balance += qty
-
-    stock.updated_at = datetime.now(timezone.utc)
-
-    t = MaterialTransaction(
-        material_id=data.material_id,
-        factory_id=data.factory_id,
-        type=data.type,
-        quantity=qty,
-        reason=data.reason,
-        notes=data.notes,
-        created_by=current_user.id,
-    )
-    db.add(t)
-    db.commit()
-    db.refresh(t)
-
-    # Auto-update purchase requests on material receive
-    if data.type == "receive":
+    elif data.type == "receive":
+        # Delegate to warehouse receiving service (handles approval workflow)
+        import logging
+        _logger = logging.getLogger("moonjar.materials")
         try:
-            from business.services.purchaser_lifecycle import on_material_received
-            on_material_received(
+            from business.services.warehouse import receive_material
+            result = receive_material(
                 db=db,
-                material_id=data.material_id,
-                supplier_id=data.supplier_id,
                 factory_id=data.factory_id,
-                quantity=qty,
+                material_id=data.material_id,
+                quantity=data.quantity,
+                quality_notes=data.quality_notes or data.notes,
+                defect_percent=data.defect_percent or 0.0,
+                received_by_user_id=current_user.id,
             )
-            db.commit()
-        except Exception as e:
-            import logging
-            logging.getLogger("moonjar").warning(f"purchaser_lifecycle hook failed: {e}")
 
-        # Auto-unblock positions that were waiting for this material
-        try:
-            from business.services.material_reservation import check_and_unblock_positions_after_receive
-            unblocked = check_and_unblock_positions_after_receive(
-                db=db,
-                material_id=data.material_id,
-                factory_id=data.factory_id,
-            )
-            if unblocked:
+            # Auto-update purchase requests on material receive
+            try:
+                from business.services.purchaser_lifecycle import on_material_received
+                on_material_received(
+                    db=db,
+                    material_id=data.material_id,
+                    supplier_id=data.supplier_id,
+                    factory_id=data.factory_id,
+                    quantity=qty,
+                )
                 db.commit()
-        except Exception as e:
-            import logging
-            logging.getLogger("moonjar").warning(f"auto-unblock hook failed: {e}")
+            except Exception as e:
+                _logger.warning("purchaser_lifecycle hook failed: %s", e)
 
-    return _serialize_transaction(t, db)
+            # Auto-unblock positions that were waiting for this material
+            if result.get("auto_approved"):
+                try:
+                    from business.services.material_reservation import check_and_unblock_positions_after_receive
+                    unblocked = check_and_unblock_positions_after_receive(
+                        db=db,
+                        material_id=data.material_id,
+                        factory_id=data.factory_id,
+                    )
+                    if unblocked:
+                        db.commit()
+                except Exception as e:
+                    _logger.warning("auto-unblock hook failed: %s", e)
+
+            return {
+                "transaction_id": str(result["transaction_id"]),
+                "auto_approved": result["auto_approved"],
+                "task_id": str(result["task_id"]) if result.get("task_id") else None,
+            }
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception as e:
+            _logger.error("Warehouse receive_material failed: %s", e)
+            raise HTTPException(500, "Material receiving failed")
+
+    if data.type != "receive":
+        stock.updated_at = datetime.now(timezone.utc)
+
+        t = MaterialTransaction(
+            material_id=data.material_id,
+            factory_id=data.factory_id,
+            type=data.type,
+            quantity=qty,
+            reason=data.reason,
+            notes=data.notes,
+            created_by=current_user.id,
+        )
+        db.add(t)
+        db.commit()
+        db.refresh(t)
+        return _serialize_transaction(t, db)
+
+
+@router.post("/transactions/{transaction_id}/approve")
+async def approve_receipt(
+    transaction_id: UUID,
+    data: ReceiptApprovalInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """PM approves/rejects/partially accepts a pending material receipt."""
+    import logging
+    _logger = logging.getLogger("moonjar.materials")
+    try:
+        from business.services.warehouse import pm_approve_receipt
+        txn = pm_approve_receipt(
+            db=db,
+            transaction_id=transaction_id,
+            user_id=current_user.id,
+            decision=data.decision,
+            accepted_quantity=data.accepted_quantity,
+            notes=data.notes,
+        )
+        return {
+            "transaction_id": str(txn.id),
+            "approval_status": txn.approval_status,
+            "accepted_quantity": float(txn.accepted_quantity) if txn.accepted_quantity else None,
+        }
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        _logger.error("Receipt approval failed for transaction %s: %s", transaction_id, e)
+        raise HTTPException(500, "Receipt approval failed")
 
 
 @router.post("/purchase-requests", status_code=201)
@@ -1405,3 +1466,82 @@ async def create_purchase_request(
         "notes": pr.notes,
         "created_at": pr.created_at.isoformat() if pr.created_at else None,
     }
+
+
+# ── Partial Delivery ────────────────────────────────────────────────────
+
+class PartialDeliveryItem(BaseModel):
+    material_id: UUID
+    received_qty: float
+    defect_qty: float = 0
+    notes: Optional[str] = None
+
+
+class PartialDeliveryInput(BaseModel):
+    received_items: list[PartialDeliveryItem]
+
+
+class PartialDeliveryResolveInput(BaseModel):
+    decision: str  # "reorder_same" | "reorder_other" | "skip"
+    alt_supplier_id: Optional[UUID] = None
+
+
+@router.post("/purchase-requests/{pr_id}/receive-partial", status_code=200)
+async def receive_partial_delivery(
+    pr_id: UUID,
+    data: PartialDeliveryInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Record a partial delivery for a purchase request.
+
+    When a supplier delivers less than ordered, this endpoint:
+    - Updates stock with received good quantities
+    - Records material transactions
+    - Creates a PM task for deficit resolution if items are short
+    - Marks the purchase request as PARTIALLY_RECEIVED or RECEIVED
+    """
+    try:
+        from business.services.partial_delivery import handle_partial_delivery
+        result = handle_partial_delivery(
+            db=db,
+            purchase_request_id=pr_id,
+            received_items=[item.model_dump() for item in data.received_items],
+            pm_user_id=current_user.id,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Failed to process partial delivery: {e}")
+
+
+@router.post("/purchase-requests/{pr_id}/resolve-deficit", status_code=200)
+async def resolve_partial_delivery_deficit(
+    pr_id: UUID,
+    task_id: UUID,
+    data: PartialDeliveryResolveInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """PM resolves a partial delivery deficit.
+
+    After a partial delivery creates a deficit task, the PM decides:
+    - reorder_same: re-order deficit from the same supplier
+    - reorder_other: re-order deficit from an alternative supplier (requires alt_supplier_id)
+    - skip: accept the loss and close the deficit
+    """
+    try:
+        from business.services.partial_delivery import pm_resolve_partial_delivery
+        result = pm_resolve_partial_delivery(
+            db=db,
+            task_id=task_id,
+            decision=data.decision,
+            pm_user_id=current_user.id,
+            alt_supplier_id=data.alt_supplier_id,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Failed to resolve partial delivery: {e}")

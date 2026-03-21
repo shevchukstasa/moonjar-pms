@@ -1,12 +1,10 @@
 """CRUD router for suppliers — with subgroup links and safe delete."""
 
 from uuid import UUID
-from typing import Optional
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sa_func
 
 from api.database import get_db
 from api.auth import get_current_user
@@ -15,7 +13,7 @@ from api.models import (
     DefectRecord, StoneDefectCoefficient, SupplierDefectReport,
     MaterialSubgroup, MaterialGroup,
 )
-from api.schemas import SupplierCreate, SupplierUpdate, SupplierResponse
+from api.schemas import SupplierCreate, SupplierUpdate
 
 router = APIRouter()
 

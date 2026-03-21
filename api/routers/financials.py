@@ -10,11 +10,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func as sa_func
 
 from api.database import get_db
-from api.auth import get_current_user
 from api.roles import require_role
 from api.models import FinancialEntry, OrderFinancial, ProductionOrder
 from api.schemas import FinancialEntryCreate, FinancialEntryUpdate, FinancialEntryResponse
-from api.enums import ExpenseType, ExpenseCategory, OrderStatus
+from api.enums import ExpenseType
 
 router = APIRouter()
 

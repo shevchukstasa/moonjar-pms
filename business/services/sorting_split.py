@@ -4,8 +4,7 @@ Business Logic: §8-9
 """
 from uuid import UUID
 import uuid as uuid_mod
-from datetime import date, datetime, timedelta, timezone
-from math import ceil, floor
+from datetime import date, datetime, timezone
 from typing import Optional
 import logging
 

@@ -15,14 +15,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func as sa_func
 
 from api.database import get_db
-from api.auth import get_current_user
 from api.roles import require_management, require_owner
 from api.models import (
     ProductionOrder, OrderPosition, ProductionOrderItem,
     FinancialEntry, OrderFinancial,
     Material, MaterialStock, QualityCheck, User,
 )
-from api.enums import OrderStatus, PositionStatus, ExpenseType
 
 router = APIRouter()
 

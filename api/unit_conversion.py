@@ -19,7 +19,6 @@ Conversion matrix (all intermediated through ml):
   L  → kg  = L × specific_gravity
 """
 
-from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 
@@ -123,40 +122,3 @@ def _from_ml(ml: float, unit: str, sg: Optional[float]) -> float:
         raise UnitConversionError(f"Unsupported unit: {unit}")
 
 
-def calculate_material_consumption(
-    area_sqm: float,
-    consumption_ml_per_sqm: float,
-    material_unit: str,
-    specific_gravity: Optional[float] = None,
-) -> float:
-    """
-    Calculate how much material to consume/reserve for a given area.
-
-    Example:
-        Recipe says 850 ml/m², area is 2.5 m², material stored in kg, SG=1.45
-        → 850 × 2.5 = 2125 ml → 2125 × 1.45 / 1000 = 3.08125 kg
-
-    Args:
-        area_sqm: Area in square meters
-        consumption_ml_per_sqm: Recipe consumption rate (ml per m²)
-        material_unit: Unit the material is stored in ('kg', 'g', 'ml', 'l')
-        specific_gravity: Required for weight-based materials
-
-    Returns:
-        Amount of material needed in material_unit
-    """
-    total_ml = area_sqm * consumption_ml_per_sqm
-    return convert_units(total_ml, "ml", material_unit, specific_gravity)
-
-
-def format_conversion_info(
-    from_value: float,
-    from_unit: str,
-    to_value: float,
-    to_unit: str,
-    precision: int = 3,
-) -> str:
-    """Format a human-readable conversion string."""
-    fv = round(from_value, precision)
-    tv = round(to_value, precision)
-    return f"{fv} {from_unit} = {tv} {to_unit}"

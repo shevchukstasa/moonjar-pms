@@ -3,14 +3,12 @@ See API_CONTRACTS.md for full specification.
 """
 
 from uuid import UUID
-from datetime import date, timedelta
-from typing import Optional
+from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.auth import get_current_user
 from api.roles import require_management, require_owner
 
 from business.services.daily_kpi import (
@@ -25,8 +23,7 @@ from business.services.buffer_health import calculate_buffer_health
 from business.services.anomaly_detection import (
     run_all_anomaly_checks, anomaly_to_dict,
 )
-from api.models import Factory, BottleneckConfig, Resource, MaterialTransaction, Material, User
-from api.enums import ResourceType
+from api.models import Factory, Resource, MaterialTransaction, Material, User
 
 router = APIRouter()
 
@@ -191,7 +188,6 @@ async def inventory_report(
     """
     from datetime import datetime as dt, timezone as tz
     from calendar import monthrange
-    from sqlalchemy import func, extract
 
     start = dt(year, month, 1, tzinfo=tz.utc)
     _, last_day = monthrange(year, month)

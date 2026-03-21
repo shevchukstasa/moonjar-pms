@@ -67,10 +67,3 @@ def get_kiln_constants(db: Session, factory_id: Optional[UUID] = None) -> dict:
     return result
 
 
-def invalidate_cache(factory_id: Optional[UUID] = None) -> None:
-    """Call after any kiln_constants UPDATE to clear stale values."""
-    if factory_id is None:
-        _cache.clear()
-    else:
-        _cache.pop(str(factory_id), None)
-        _cache.pop("global", None)

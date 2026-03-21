@@ -1,19 +1,18 @@
 """Schedule router — resources, batches, section schedules."""
 
-from datetime import date, datetime, timezone
+from datetime import date
 from uuid import UUID
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
-from api.models import Resource, Batch, OrderPosition, ScheduleSlot, ProductionOrder
-from api.enums import ResourceType, ResourceStatus, BatchStatus, BatchCreator, PositionStatus
+from api.models import Resource, Batch, OrderPosition, ProductionOrder
+from api.enums import ResourceType, BatchStatus, BatchCreator, PositionStatus
 
 router = APIRouter()
 

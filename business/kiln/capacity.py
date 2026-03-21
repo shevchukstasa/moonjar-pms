@@ -53,11 +53,6 @@ def parse_size(size_str: str) -> dict:
     return {"width_cm": w, "height_cm": h}
 
 
-def get_sqm_per_piece(size_str: str) -> float:
-    d = parse_size(size_str)
-    return (d["width_cm"] * d["height_cm"]) / 10000.0
-
-
 def _product_area(product: dict) -> float:
     """Face area of one piece in m², respecting shape."""
     shape = product.get("shape", "rectangle")

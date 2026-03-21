@@ -13,7 +13,7 @@ from sqlalchemy import or_, func
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
-from api.models import ProductionOrder, ProductionOrderItem, OrderPosition, Factory, FinishedGoodsStock, Task
+from api.models import ProductionOrder, ProductionOrderItem, OrderPosition, Factory, FinishedGoodsStock, Task, ProductionOrderStatusLog
 from api.enums import OrderStatus, OrderSource, PositionStatus, TaskStatus, is_stock_collection, ChangeRequestStatus
 
 router = APIRouter()
@@ -684,6 +684,17 @@ async def create_order(
     db.add(order)
     db.flush()
 
+    # Log initial order status
+    try:
+        db.add(ProductionOrderStatusLog(
+            order_id=order.id,
+            old_status=None,
+            new_status=OrderStatus.NEW,
+            changed_by=current_user.id,
+        ))
+    except Exception:
+        pass
+
     # Lazy import to avoid circular dependency
     from business.services.order_intake import process_order_item
 
@@ -715,6 +726,17 @@ async def create_order(
 
     db.commit()
     db.refresh(order)
+
+    # RAG indexing (background, best-effort)
+    try:
+        import os
+        if os.getenv("OPENAI_API_KEY"):
+            from business.rag.embeddings import index_order
+            await index_order(db, order.id)
+            db.commit()
+    except Exception:
+        pass
+
     return _order_detail(order, db)
 
 
@@ -742,31 +764,21 @@ async def cancel_order(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
-    from business.services.material_reservation import unreserve_materials_for_position
+    from business.services.order_cancellation import process_order_cancellation
     import logging
     _logger = logging.getLogger("moonjar.orders")
 
     order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
     if not order:
         raise HTTPException(404, "Order not found")
-    order.status = OrderStatus.CANCELLED
-    order.updated_at = datetime.now(timezone.utc)
 
-    # Fetch positions before bulk update so we can unreserve materials
-    positions = db.query(OrderPosition).filter(
-        OrderPosition.order_id == order_id,
-        OrderPosition.status != PositionStatus.CANCELLED,
-    ).all()
-
-    for p in positions:
-        p.status = PositionStatus.CANCELLED
-        try:
-            unreserve_materials_for_position(db, p.id)
-        except Exception as e:
-            _logger.warning("Failed to unreserve materials for position %s: %s", p.id, e)
-
-    _cancel_order_tasks(db, order_id)
-    db.commit()
+    try:
+        process_order_cancellation(db, order_id, confirmed_by=current_user.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        _logger.error("Order cancellation failed for %s: %s", order_id, e)
+        raise HTTPException(500, "Order cancellation failed")
 
 
 @router.patch("/{order_id}/ship")
@@ -794,9 +806,22 @@ async def mark_order_shipped(
     for p in positions:
         p.status = PositionStatus.SHIPPED
 
+    old_status = order.status
     order.status = OrderStatus.SHIPPED
     order.shipped_at = datetime.now(timezone.utc)
     order.updated_at = datetime.now(timezone.utc)
+
+    # Log order status change
+    try:
+        db.add(ProductionOrderStatusLog(
+            order_id=order.id,
+            old_status=old_status,
+            new_status=OrderStatus.SHIPPED,
+            changed_by=current_user.id,
+        ))
+    except Exception:
+        pass
+
     db.commit()
 
     # Notify Sales app if order has external_id (with retry)
@@ -843,34 +868,22 @@ async def accept_cancellation(
     if not order.cancellation_requested or order.cancellation_decision != "pending":
         raise HTTPException(400, "No pending cancellation request for this order")
 
-    # Apply decision
+    # Apply decision metadata
     order.cancellation_decision = "accepted"
     order.cancellation_decided_at = datetime.now(timezone.utc)
     order.cancellation_decided_by = current_user.id
-    order.status = OrderStatus.CANCELLED
-    order.updated_at = datetime.now(timezone.utc)
 
-    # Cancel all positions and unreserve their materials
-    from business.services.material_reservation import unreserve_materials_for_position
+    # Delegate full cancellation logic to service
+    from business.services.order_cancellation import process_order_cancellation
     import logging
     _logger = logging.getLogger("moonjar.orders")
 
-    positions = db.query(OrderPosition).filter(
-        OrderPosition.order_id == order_id,
-        OrderPosition.status != PositionStatus.CANCELLED,
-    ).all()
-
-    for p in positions:
-        p.status = PositionStatus.CANCELLED
-        try:
-            unreserve_materials_for_position(db, p.id)
-        except Exception as e:
-            _logger.warning("Failed to unreserve materials for position %s: %s", p.id, e)
-
-    # Cancel all pending/in-progress tasks linked to this order
-    # (records stay in DB — only status changes, for full audit trail)
-    tasks_cancelled = _cancel_order_tasks(db, order_id)
-    db.commit()
+    try:
+        result = process_order_cancellation(db, order_id, confirmed_by=current_user.id)
+        tasks_cancelled = result.get("tasks_cancelled", 0)
+    except Exception as e:
+        _logger.error("Order cancellation service failed for %s: %s", order_id, e)
+        raise HTTPException(500, "Order cancellation failed")
 
     # Notify Sales App of cancellation (with retry)
     if order.external_id:

@@ -21,6 +21,7 @@ from sqlalchemy import func as sa_func
 
 from api.models import (
     Batch,
+    KilnActualLoad,
     KilnCalculationLog,
     OrderPosition,
     Resource,
@@ -1197,154 +1198,6 @@ def _build_batches_for_group(
     return created_batches
 
 
-def build_batch_proposals(
-    db: Session,
-    factory_id: UUID,
-    positions: list[OrderPosition],
-) -> list[dict]:
-    """
-    Group positions into optimal batch proposals without creating DB records.
-    Returns list of proposal dicts for PM review.
-
-    Uses geometry-based kiln capacity when available, with area-based fallback.
-
-    Steps:
-    1. Group by temperature using firing_profiles.group_positions_by_temperature()
-    2. Within each temperature bucket:
-       a. Match to compatible kilns
-       b. Fill kiln capacity (geometry-based when possible)
-       c. Select firing profile using get_batch_firing_profile() (slowest wins)
-    3. Return list of batch proposals with assigned positions + profiles
-    """
-    from business.services.firing_profiles import (
-        group_positions_by_temperature,
-        get_batch_firing_profile,
-    )
-
-    batch_date = date.today() + timedelta(days=1)
-    available_kilns = _get_available_kilns(db, factory_id, batch_date)
-    temp_groups = group_positions_by_temperature(db, positions)
-
-    proposals = []
-    for group_id, group_positions in temp_groups.items():
-        # Sub-split by co-firing compatibility (two-stage type, gold, etc.)
-        cofiring_subgroups = _split_by_cofiring_compatibility(group_positions)
-
-        for cofiring_key, sub_positions in cofiring_subgroups.items():
-            remaining = list(sub_positions)
-
-            while remaining:
-                first_pos = remaining[0]
-                first_area = _get_position_area_sqm(first_pos)
-                kiln = _find_best_kiln_for_batch(
-                    db, available_kilns, batch_date, first_area, first_pos,
-                    cofiring_key=cofiring_key,
-                )
-                if kiln is None:
-                    break
-
-                kiln_capacity = _get_kiln_capacity_sqm(kiln)
-                constants, loading_rules = _get_kiln_constants_and_rules(db, kiln)
-
-                batch_positions: list[OrderPosition] = []
-                loading_entries: list[dict] = []
-                total_area = Decimal("0")
-                geometry_used = False
-                still_remaining = []
-
-                for pos in remaining:
-                    pos_area = _get_position_area_sqm(pos)
-
-                    # Try geometry-based calculation
-                    if _position_has_geometry(pos):
-                        cap_result = _calculate_position_loading(
-                            pos, kiln, constants, loading_rules,
-                        )
-                    else:
-                        cap_result = None
-
-                    if cap_result is not None:
-                        optimal = cap_result.get("optimal", {})
-                        calc_pieces = optimal.get("total_pieces", 0)
-
-                        if calc_pieces == 0:
-                            still_remaining.append(pos)
-                            continue
-
-                        if total_area + pos_area <= kiln_capacity:
-                            batch_positions.append(pos)
-                            total_area += pos_area
-                            loading_entries.append(
-                                _build_loading_plan_entry(pos, cap_result)
-                            )
-                            geometry_used = True
-                        else:
-                            still_remaining.append(pos)
-                    else:
-                        if total_area + pos_area <= kiln_capacity:
-                            batch_positions.append(pos)
-                            total_area += pos_area
-                            loading_entries.append({
-                                "position_id": str(pos.id),
-                                "loading_method": "flat",
-                                "pieces_per_level": pos.quantity,
-                                "levels_used": 1,
-                                "total_pieces": pos.quantity,
-                                "area_sqm": float(pos_area),
-                                "geometry_fallback": True,
-                            })
-                        else:
-                            still_remaining.append(pos)
-
-                remaining = still_remaining
-
-                if not batch_positions:
-                    if remaining:
-                        batch_positions = [remaining.pop(0)]
-                        total_area = _get_position_area_sqm(batch_positions[0])
-                    else:
-                        break
-
-                # Run co-firing validation on the proposal
-                cofiring_result = _validate_batch_cofiring(
-                    db, batch_positions, kiln.id, constants,
-                )
-
-                kiln_cap_float = float(kiln_capacity)
-                loading_plan = _build_loading_plan(loading_entries, kiln_cap_float)
-
-                profile = get_batch_firing_profile(db, batch_positions)
-                proposals.append({
-                    "kiln_id": str(kiln.id),
-                    "kiln_name": kiln.name,
-                    "temperature_group_id": str(group_id) if group_id else None,
-                    "cofiring_group": cofiring_key,
-                    "positions_count": len(batch_positions),
-                    "total_area_sqm": float(total_area),
-                    "kiln_capacity_sqm": kiln_cap_float,
-                    "fill_percentage": float(
-                        (total_area / kiln_capacity * 100) if kiln_capacity > 0 else 0,
-                    ),
-                    "firing_profile_name": profile.name if profile else None,
-                    "target_temperature": profile.target_temperature if profile else None,
-                    "firing_duration_hours": (
-                        float(profile.total_duration_hours) if profile else None
-                    ),
-                    "position_ids": [str(p.id) for p in batch_positions],
-                    "loading_plan": loading_plan.get("loading_plan"),
-                    "geometry_used": geometry_used,
-                    "cofiring_validation": {
-                        "ok": cofiring_result["ok"],
-                        "errors": cofiring_result["errors"],
-                        "warnings": cofiring_result["warnings"],
-                        "min_temperature": cofiring_result["min_temperature"],
-                        "max_temperature": cofiring_result["max_temperature"],
-                    },
-                })
-
-    return proposals
-
-
 # ────────────────────────────────────────────────────────────────
 # §5  Assign firing profile to an existing batch
 # ────────────────────────────────────────────────────────────────
@@ -1632,6 +1485,28 @@ def complete_batch(db: Session, batch_id: UUID) -> Batch:
                 pos.id, old_status,
             )
 
+    # ── Record actual kiln load vs calculated capacity ──────────
+    try:
+        kiln = db.query(Resource).filter(Resource.id == batch.resource_id).first()
+        actual_pieces = len(positions)
+        actual_area = sum(_get_position_area_sqm(p) for p in positions)
+        calculated_cap = int(_get_kiln_capacity_sqm(kiln)) if kiln else 0
+        loading_type = "auto" if batch.created_by == BatchCreator.AUTO else "manual"
+
+        db.add(KilnActualLoad(
+            kiln_id=batch.resource_id,
+            batch_id=batch.id,
+            actual_pieces=actual_pieces,
+            actual_area_sqm=actual_area,
+            calculated_capacity=calculated_cap,
+            loading_type=loading_type,
+        ))
+    except Exception:
+        logger.warning(
+            "Failed to record KilnActualLoad for batch %s", batch_id,
+            exc_info=True,
+        )
+
     db.commit()
     db.refresh(batch)
 
@@ -1639,49 +1514,47 @@ def complete_batch(db: Session, batch_id: UUID) -> Batch:
         "BATCH_COMPLETED | batch=%s | %d positions fired in kiln %s",
         batch_id, len(positions), batch.resource_id,
     )
+
+    # --- Post-completion: assign QC checks for fired positions ---
+    try:
+        from business.services.quality_control import assign_qc_checks
+        qc_tasks = assign_qc_checks(db, batch_id, batch.factory_id)
+        if qc_tasks:
+            db.commit()
+            logger.info(
+                "BATCH_QC_ASSIGNED | batch=%s | %d QC tasks created",
+                batch_id, len(qc_tasks),
+            )
+    except Exception as e:
+        logger.error(
+            "BATCH_QC_FAILED | batch=%s | Failed to assign QC checks: %s",
+            batch_id, e,
+        )
+
+    # --- Post-completion: reconcile stage transition (kiln exit) ---
+    try:
+        from business.services.reconciliation import reconcile_stage_transition
+        fired_count = sum(
+            1 for p in positions
+            if (hasattr(p.status, 'value') and p.status.value == PositionStatus.FIRED.value)
+            or str(p.status) == PositionStatus.FIRED.value
+        )
+        reconcile_stage_transition(
+            db=db,
+            factory_id=batch.factory_id,
+            batch_id=batch_id,
+            stage_from="in_kiln",
+            stage_to="fired",
+            input_count=len(positions),
+            outputs={"good": fired_count, "defect": 0, "write_off": len(positions) - fired_count},
+        )
+        db.commit()
+    except Exception as e:
+        logger.error(
+            "BATCH_RECONCILIATION_FAILED | batch=%s | %s",
+            batch_id, e,
+        )
+
     return batch
 
 
-# ────────────────────────────────────────────────────────────────
-# §8  Fill remaining space with filler tiles
-# ────────────────────────────────────────────────────────────────
-
-def fill_with_filler_tiles(db: Session, factory_id: UUID) -> None:
-    """
-    Fill remaining space in PLANNED batches with filler tiles.
-    Filler tiles are positions from stock collections or non-urgent orders.
-
-    This is a placeholder -- full implementation depends on factory-specific
-    filler tile inventory which will be configured in a later iteration.
-    """
-    batches = db.query(Batch).filter(
-        Batch.factory_id == factory_id,
-        Batch.status == BatchStatus.PLANNED,
-    ).all()
-
-    for batch in batches:
-        kiln = db.query(Resource).get(batch.resource_id)
-        if not kiln:
-            continue
-
-        kiln_capacity = _get_kiln_capacity_sqm(kiln)
-
-        # Calculate current fill
-        batch_positions = db.query(OrderPosition).filter(
-            OrderPosition.batch_id == batch.id,
-        ).all()
-        current_area = sum(
-            _get_position_area_sqm(p) for p in batch_positions
-        )
-
-        remaining_capacity = kiln_capacity - current_area
-        if remaining_capacity <= Decimal("0.01"):
-            continue  # Already full
-
-        logger.info(
-            "FILLER_CHECK | batch=%s | %.3f sqm remaining of %.3f sqm capacity",
-            batch.id, remaining_capacity, kiln_capacity,
-        )
-        # Future: find filler tiles from stock and add them to this batch
-
-    db.commit()

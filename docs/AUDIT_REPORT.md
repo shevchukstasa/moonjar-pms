@@ -1,5 +1,5 @@
 # Moonjar PMS — Architecture Audit Report
-Generated: 2026-03-21 13:36
+Generated: 2026-03-21 13:42
 
 ## A. Backend есть — Frontend нет
 

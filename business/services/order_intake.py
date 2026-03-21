@@ -22,6 +22,7 @@ from api.models import (
     Factory,
     SalesWebhookEvent,
     Material,
+    ProductionOrderStatusLog,
 )
 from api.enums import (
     PositionStatus,
@@ -225,6 +226,7 @@ def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
         logger.warning("Failed to schedule order %s: %s", order.order_number, e)
 
     # 8. Update order status
+    old_status = order.status
     if any(
         p.status == PositionStatus.INSUFFICIENT_MATERIALS
         or p.status == PositionStatus.AWAITING_RECIPE
@@ -236,6 +238,17 @@ def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
         order.status = OrderStatus.NEW
     else:
         order.status = OrderStatus.IN_PRODUCTION
+
+    # Log order status change
+    if order.status != old_status:
+        try:
+            db.add(ProductionOrderStatusLog(
+                order_id=order.id,
+                old_status=old_status,
+                new_status=order.status,
+            ))
+        except Exception:
+            pass
 
     db.commit()
 

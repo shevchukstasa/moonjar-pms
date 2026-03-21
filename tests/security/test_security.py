@@ -45,7 +45,8 @@ from api.roles import (
     require_sorting,
     require_purchaser,
 )
-from api.middleware import CSRFMiddleware, RateLimitMiddleware
+from api.middleware import CSRFMiddleware
+from api.rate_limit import RateLimitMiddleware, TIERS as RATE_LIMIT_TIERS
 from api.models import User, Factory, UserFactory, ActiveSession
 from api.enums import UserRole
 
@@ -979,12 +980,12 @@ class TestRateLimiting:
 
     def test_rate_limit_tiers_have_correct_limits(self):
         """Verify the tier configuration constants."""
-        assert RateLimitMiddleware.TIERS["login"]["max"] == 5
-        assert RateLimitMiddleware.TIERS["login"]["window"] == 60
-        assert RateLimitMiddleware.TIERS["api"]["max"] == 100
-        assert RateLimitMiddleware.TIERS["api"]["window"] == 60
-        assert RateLimitMiddleware.TIERS["webhook"]["max"] == 30
-        assert RateLimitMiddleware.TIERS["upload"]["max"] == 10
+        assert RATE_LIMIT_TIERS["login"]["max"] == 5
+        assert RATE_LIMIT_TIERS["login"]["window"] == 60
+        assert RATE_LIMIT_TIERS["authenticated"]["max"] == 100
+        assert RATE_LIMIT_TIERS["authenticated"]["window"] == 60
+        assert RATE_LIMIT_TIERS["webhook"]["max"] == 30
+        assert RATE_LIMIT_TIERS["upload"]["max"] == 10
 
 
 # ===================================================================

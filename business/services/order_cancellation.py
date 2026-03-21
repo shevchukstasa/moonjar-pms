@@ -12,7 +12,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 import logging
 
-from api.models import ProductionOrder, OrderPosition, Task
+from api.models import ProductionOrder, OrderPosition, Task, ProductionOrderStatusLog
 from api.enums import OrderStatus, PositionStatus, TaskStatus
 
 logger = logging.getLogger("moonjar.order_cancellation")
@@ -53,8 +53,20 @@ def process_order_cancellation(db: Session, order_id: UUID, confirmed_by: UUID) 
         task.status = TaskStatus.CANCELLED
 
     # Update order status
+    old_status = order.status
     order.status = OrderStatus.CANCELLED
     order.updated_at = datetime.now(timezone.utc)
+
+    # Log order status change
+    try:
+        db.add(ProductionOrderStatusLog(
+            order_id=order.id,
+            old_status=old_status,
+            new_status=OrderStatus.CANCELLED,
+            changed_by=confirmed_by,
+        ))
+    except Exception:
+        pass
 
     logger.info(
         "ORDER_CANCELLED | order=%s | positions=%d | tasks=%d | by=%s",

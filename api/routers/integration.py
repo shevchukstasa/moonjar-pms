@@ -19,7 +19,7 @@ from api.roles import require_admin
 from api.config import get_settings
 from api.models import (
     ProductionOrder, ProductionOrderItem, OrderPosition,
-    SalesWebhookEvent, Factory, Task,
+    SalesWebhookEvent, Factory, Task, ProductionOrderStatusLog,
 )
 from api.enums import (
     OrderStatus, OrderSource, PositionStatus, TaskType, TaskStatus,
@@ -1112,6 +1112,7 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
                     break
 
     # Update order status based on position statuses (same as order_intake pipeline)
+    old_status = order.status
     if tile_positions and any(
         pos.status in (
             PositionStatus.INSUFFICIENT_MATERIALS,
@@ -1125,6 +1126,17 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
         order.status = OrderStatus.NEW
     elif tile_positions:
         order.status = OrderStatus.IN_PRODUCTION
+
+    # Log order status change
+    if order.status != old_status:
+        try:
+            db.add(ProductionOrderStatusLog(
+                order_id=order.id,
+                old_status=old_status,
+                new_status=order.status,
+            ))
+        except Exception:
+            pass
 
     return order
 

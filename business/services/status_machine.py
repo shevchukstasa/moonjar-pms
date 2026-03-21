@@ -10,7 +10,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from api.models import OrderPosition
+from api.models import OrderPosition, OrderStageHistory, ProductionStage
 from api.enums import PositionStatus
 
 
@@ -104,6 +104,28 @@ _UNIVERSAL_TARGETS = {PositionStatus.BLOCKED_BY_QM, PositionStatus.CANCELLED}
 
 
 # ────────────────────────────────────────────────────────────────
+# Position status → production stage name mapping
+# ────────────────────────────────────────────────────────────────
+_STATUS_TO_STAGE: dict[PositionStatus, str] = {
+    PositionStatus.PLANNED: "incoming_inspection",
+    PositionStatus.ENGOBE_APPLIED: "engobe",
+    PositionStatus.ENGOBE_CHECK: "engobe",
+    PositionStatus.GLAZED: "glazing",
+    PositionStatus.SENT_TO_GLAZING: "glazing",
+    PositionStatus.PRE_KILN_CHECK: "pre_kiln_inspection",
+    PositionStatus.LOADED_IN_KILN: "kiln_loading",
+    PositionStatus.FIRED: "firing",
+    PositionStatus.REFIRE: "firing",
+    PositionStatus.TRANSFERRED_TO_SORTING: "sorting",
+    PositionStatus.AWAITING_REGLAZE: "sorting",
+    PositionStatus.PACKED: "packing",
+    PositionStatus.SENT_TO_QUALITY_CHECK: "quality_check",
+    PositionStatus.QUALITY_CHECK_DONE: "quality_check",
+    PositionStatus.READY_FOR_SHIPMENT: "ready_for_shipment",
+}
+
+
+# ────────────────────────────────────────────────────────────────
 # Public API
 # ────────────────────────────────────────────────────────────────
 
@@ -141,6 +163,56 @@ def get_allowed_transitions(current: str) -> list[str]:
     # Always add universal targets
     allowed |= _UNIVERSAL_TARGETS
     return sorted([s.value for s in allowed])
+
+
+def _track_stage_history(
+    db: Session,
+    position: OrderPosition,
+    old_status_str: str,
+    new_status: PositionStatus,
+) -> None:
+    """Record stage enter/exit times in OrderStageHistory.
+
+    Best-effort: never raises — failures are logged and swallowed.
+    """
+    try:
+        old_stage_name = _STATUS_TO_STAGE.get(PositionStatus(old_status_str)) if old_status_str else None
+        new_stage_name = _STATUS_TO_STAGE.get(new_status)
+
+        # If the stage changed, close the old entry and open a new one
+        if old_stage_name and old_stage_name != new_stage_name:
+            old_stage = db.query(ProductionStage).filter(
+                ProductionStage.name == old_stage_name
+            ).first()
+            if old_stage:
+                prev_entry = (
+                    db.query(OrderStageHistory)
+                    .filter(
+                        OrderStageHistory.order_id == position.order_id,
+                        OrderStageHistory.stage_id == old_stage.id,
+                        OrderStageHistory.exited_at.is_(None),
+                    )
+                    .order_by(OrderStageHistory.entered_at.desc())
+                    .first()
+                )
+                if prev_entry:
+                    prev_entry.exited_at = datetime.now(timezone.utc)
+
+        if new_stage_name and new_stage_name != old_stage_name:
+            new_stage = db.query(ProductionStage).filter(
+                ProductionStage.name == new_stage_name
+            ).first()
+            if new_stage:
+                db.add(OrderStageHistory(
+                    order_id=position.order_id,
+                    stage_id=new_stage.id,
+                ))
+    except Exception:
+        import logging
+        logging.getLogger("moonjar.status_machine").warning(
+            "Failed to track stage history for position %s", position.id,
+            exc_info=True,
+        )
 
 
 def transition_position_status(
@@ -200,6 +272,9 @@ def transition_position_status(
 
     position.status = new_ps
     position.updated_at = datetime.now(timezone.utc)
+
+    # ── Track stage history ────────────────────────────────────
+    _track_stage_history(db, position, old_status, new_ps)
 
     # ── Batch assignment check for LOADED_IN_KILN ──────────────
     # When a position transitions to LOADED_IN_KILN, it should

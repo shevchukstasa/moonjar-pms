@@ -842,6 +842,21 @@ async def repair_sla_monitor():
         db.close()
 
 
+async def monthly_retention_cleanup():
+    """Monthly data retention cleanup per docs/DATA_RETENTION_POLICY.md."""
+    logger.info("Running monthly retention cleanup")
+    db = _get_db_session()
+    try:
+        from api.retention import run_retention_cleanup
+        results = await run_retention_cleanup(db)
+        logger.info("Retention cleanup results: %s", results)
+    except Exception as e:
+        logger.error("Retention cleanup failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 # --- Scheduler setup ---
 
 def setup_scheduler():
@@ -886,6 +901,9 @@ def setup_scheduler():
 
     # Every 2 hours — anomaly detection
     scheduler.add_job(anomaly_detection_job, IntervalTrigger(hours=2), id="anomaly_detection")
+
+    # Monthly (1st of month at 03:00 UTC) — data retention cleanup
+    scheduler.add_job(monthly_retention_cleanup, CronTrigger(day=1, hour=3, minute=0), id="retention_cleanup")
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

@@ -1386,17 +1386,23 @@ class Notification(Base):
 
 
 class AuditLog(Base):
-    """Audit trail for all DELETE operations and other destructive actions."""
+    """Audit trail for all database mutations (INSERT, UPDATE, DELETE).
+
+    Populated automatically by the SQLAlchemy event-based audit system
+    (api/audit.py) and also by the legacy log_delete() calls.
+    """
     __tablename__ = 'audit_logs'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    action = Column(sa.String(20), nullable=False)  # DELETE, DEACTIVATE, etc.
+    action = Column(sa.String(20), nullable=False)  # INSERT, UPDATE, DELETE, DEACTIVATE
     table_name = Column(sa.String(100), nullable=False)
     record_id = Column(UUID(as_uuid=True), nullable=False)
-    old_data = Column(JSONB, nullable=True)  # snapshot of deleted record
+    old_data = Column(JSONB, nullable=True)  # snapshot before change (update/delete)
+    new_data = Column(JSONB, nullable=True)  # snapshot after change (insert/update)
     user_id = Column(UUID(as_uuid=True), nullable=True)
     user_email = Column(sa.String(255), nullable=True)
     ip_address = Column(sa.String(45), nullable=True)
+    request_path = Column(sa.String(255), nullable=True)  # API endpoint that triggered the change
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 

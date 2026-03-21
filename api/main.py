@@ -1808,6 +1808,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Schema patches warning (non-fatal): {e}")
 
+    # Initialize automatic audit logging (SQLAlchemy event listeners)
+    from api.audit import init_audit_listeners
+    init_audit_listeners()
+
     # Start background scheduler
     from api.scheduler import setup_scheduler
     sched = setup_scheduler()
@@ -1857,12 +1861,13 @@ app.add_middleware(
     expose_headers=["X-CSRF-Token", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
 )
 
-# --- CSRF + Rate limiting + Request logging middleware ---
-from api.middleware import CSRFMiddleware, RequestLoggingMiddleware
+# --- CSRF + Rate limiting + Request logging + Audit context middleware ---
+from api.middleware import CSRFMiddleware, RequestLoggingMiddleware, AuditContextMiddleware
 from api.rate_limit import RateLimitMiddleware
 
 app.add_middleware(CSRFMiddleware)
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(AuditContextMiddleware)
 if IS_PRODUCTION:
     app.add_middleware(RequestLoggingMiddleware)
 

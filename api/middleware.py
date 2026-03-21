@@ -1,5 +1,5 @@
 """
-Moonjar PMS — Middleware: CSRF validation + request logging.
+Moonjar PMS — Middleware: CSRF validation + request logging + audit context.
 Rate limiting has moved to api/rate_limit.py.
 """
 
@@ -13,6 +13,7 @@ from starlette.responses import JSONResponse
 from api.config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger("moonjar.middleware")
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):
@@ -111,12 +112,64 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Log request method, path, status, and duration."""
 
     async def dispatch(self, request: Request, call_next):
-        logger = logging.getLogger("moonjar.access")
+        access_logger = logging.getLogger("moonjar.access")
         start = time.time()
         response = await call_next(request)
         duration = time.time() - start
-        logger.info(
+        access_logger.info(
             f"{request.method} {request.url.path} "
             f"status={response.status_code} duration={duration:.3f}s"
         )
         return response
+
+
+class AuditContextMiddleware(BaseHTTPMiddleware):
+    """Extract current user from JWT and set audit context variables.
+
+    This middleware reads the access_token cookie, decodes the JWT (without
+    raising on failure), and sets contextvars that the automatic audit logger
+    (api/audit.py) reads during SQLAlchemy flush events.
+
+    Placed AFTER auth-related middleware so the cookie is already available.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        from api.audit import audit_user_id, audit_user_email, audit_request_path, audit_ip_address
+
+        # Set request path and IP unconditionally
+        tok_path = audit_request_path.set(request.url.path)
+        tok_ip = audit_ip_address.set(
+            request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            or request.client.host if request.client else None
+        )
+
+        # Try to extract user from JWT cookie (best-effort, never fail)
+        tok_uid = audit_user_id.set(None)
+        tok_email = audit_user_email.set(None)
+        try:
+            access_token = request.cookies.get("access_token")
+            if access_token:
+                from api.auth import decode_token
+                payload = decode_token(access_token)
+                user_id = payload.get("sub")
+                if user_id:
+                    tok_uid = audit_user_id.set(user_id)
+                    # Email is not in JWT; look up lazily only if we have a user_id
+                    # For performance, we store just the user_id and skip the DB lookup.
+                    # The email will be filled from the JWT "email" claim if present,
+                    # or left None (the audit_after_flush can fill it from the ORM object).
+                    email = payload.get("email")
+                    if email:
+                        tok_email = audit_user_email.set(email)
+        except Exception:
+            pass  # JWT decode failure — proceed without user context
+
+        try:
+            response = await call_next(request)
+            return response
+        finally:
+            # Reset context vars to avoid leaking between requests
+            audit_user_id.reset(tok_uid)
+            audit_user_email.reset(tok_email)
+            audit_request_path.reset(tok_path)
+            audit_ip_address.reset(tok_ip)

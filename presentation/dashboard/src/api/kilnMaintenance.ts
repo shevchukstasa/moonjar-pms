@@ -78,6 +78,9 @@ export const kilnMaintenanceApi = {
   updateType: (id: string, data: Partial<MaintenanceTypeInput>): Promise<MaintenanceType> =>
     apiClient.put(`/kiln-maintenance/types/${id}`, data).then((r) => r.data),
 
+  deleteType: (id: string): Promise<void> =>
+    apiClient.delete(`/kiln-maintenance/types/${id}`).then(() => undefined),
+
   // --- Upcoming (factory-wide) ---
   listUpcoming: (params?: { factory_id?: string; days?: number }): Promise<{
     items: MaintenanceSchedule[];

@@ -1432,6 +1432,35 @@ async def approve_receipt(
         raise HTTPException(500, "Receipt approval failed")
 
 
+@router.delete("/transactions/{transaction_id}", status_code=204)
+async def delete_transaction(
+    transaction_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Delete a material transaction and reverse its stock effect."""
+    txn = db.query(MaterialTransaction).filter(
+        MaterialTransaction.id == transaction_id
+    ).first()
+    if not txn:
+        raise HTTPException(404, "Transaction not found")
+
+    # Reverse stock effect
+    stock = db.query(MaterialStock).filter(
+        MaterialStock.material_id == txn.material_id,
+        MaterialStock.factory_id == txn.factory_id,
+    ).first()
+    if stock:
+        if txn.type in ("receive",):
+            stock.balance -= txn.quantity
+        elif txn.type in ("manual_write_off",):
+            stock.balance += txn.quantity
+        stock.updated_at = datetime.now(timezone.utc)
+
+    db.delete(txn)
+    db.commit()
+
+
 @router.post("/purchase-requests", status_code=201)
 async def create_purchase_request(
     data: PurchaseRequestInput,

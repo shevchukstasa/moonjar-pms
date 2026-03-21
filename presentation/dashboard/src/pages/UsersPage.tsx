@@ -1,11 +1,12 @@
 import { useState, useMemo } from 'react';
-import { useUsers, type UserItem } from '@/hooks/useUsers';
+import { useUsers, useToggleUserActive, type UserItem } from '@/hooks/useUsers';
 import { DataTable } from '@/components/ui/Table';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 import { Pagination } from '@/components/ui/Pagination';
 import { SearchInput } from '@/components/ui/SearchInput';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { UserCreateDialog } from '@/components/users/UserCreateDialog';
 import { UserEditDialog } from '@/components/users/UserEditDialog';
 import { ROLE_OPTIONS } from '@/types/forms';
@@ -23,6 +24,8 @@ export default function UsersPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [editUser, setEditUser] = useState<UserItem | null>(null);
+  const [toggleUser, setToggleUser] = useState<UserItem | null>(null);
+  const toggleMut = useToggleUserActive();
 
   const params = useMemo(() => {
     const p: Record<string, unknown> = { page, per_page: 50 };
@@ -78,9 +81,19 @@ export default function UsersPage() {
         key: 'actions',
         header: '',
         render: (u: UserItem) => (
-          <Button variant="ghost" size="sm" onClick={() => setEditUser(u)}>
-            Edit
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" onClick={() => setEditUser(u)}>
+              Edit
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={u.is_active ? 'text-red-600 hover:bg-red-50 hover:text-red-700' : 'text-green-600 hover:bg-green-50 hover:text-green-700'}
+              onClick={() => setToggleUser(u)}
+            >
+              {u.is_active ? 'Deactivate' : 'Activate'}
+            </Button>
+          </div>
         ),
       },
     ],
@@ -168,6 +181,15 @@ export default function UsersPage() {
       {/* Dialogs */}
       <UserCreateDialog open={createOpen} onClose={() => setCreateOpen(false)} />
       <UserEditDialog open={!!editUser} onClose={() => setEditUser(null)} user={editUser} />
+      <ConfirmDialog
+        open={!!toggleUser}
+        onClose={() => setToggleUser(null)}
+        onConfirm={() => toggleUser && toggleMut.mutate(toggleUser.id)}
+        title={toggleUser?.is_active ? 'Deactivate User' : 'Activate User'}
+        message={toggleUser?.is_active
+          ? `Deactivate "${toggleUser.name}"? They will lose access and all sessions will be revoked.`
+          : `Activate "${toggleUser?.name}"? They will be able to log in again.`}
+      />
     </div>
   );
 }

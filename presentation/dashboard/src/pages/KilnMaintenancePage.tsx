@@ -13,6 +13,7 @@ import {
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { Dialog } from '@/components/ui/Dialog';
 import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
 import { FactorySelector } from '@/components/layout/FactorySelector';
@@ -123,6 +124,7 @@ function UpcomingTab({ factoryId }: { factoryId: string | null }) {
   const [showSchedule, setShowSchedule] = useState(false);
   const [completeTarget, setCompleteTarget] = useState<MaintenanceSchedule | null>(null);
   const [completeNotes, setCompleteNotes] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<MaintenanceSchedule | null>(null);
 
   const params: { factory_id?: string; days?: number } = { days: 90 };
   if (factoryId) params.factory_id = factoryId;
@@ -317,17 +319,10 @@ function UpcomingTab({ factoryId }: { factoryId: string | null }) {
                         <Button
                           variant="ghost"
                           className="text-xs text-red-600 hover:bg-red-50"
-                          onClick={() => {
-                            if (confirm('Cancel this maintenance?')) {
-                              cancelMutation.mutate({
-                                kilnId: item.resource_id,
-                                scheduleId: item.id,
-                              });
-                            }
-                          }}
+                          onClick={() => setDeleteTarget(item)}
                           disabled={cancelMutation.isPending}
                         >
-                          Cancel
+                          Delete
                         </Button>
                       </div>
                     </td>
@@ -338,6 +333,32 @@ function UpcomingTab({ factoryId }: { factoryId: string | null }) {
           </table>
         </div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete Scheduled Maintenance">
+        <p className="text-sm text-gray-600">
+          Are you sure you want to delete this scheduled maintenance
+          {deleteTarget ? ` (${deleteTarget.maintenance_type} - ${deleteTarget.kiln_name})` : ''}? This action will be logged.
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+          <Button
+            variant="danger"
+            onClick={() => {
+              if (deleteTarget) {
+                cancelMutation.mutate({
+                  kilnId: deleteTarget.resource_id,
+                  scheduleId: deleteTarget.id,
+                });
+                setDeleteTarget(null);
+              }
+            }}
+            disabled={cancelMutation.isPending}
+          >
+            {cancelMutation.isPending ? 'Deleting...' : 'Delete'}
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }
@@ -653,6 +674,15 @@ function TypesTab() {
   const qc = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState<MaintenanceType | null>(null);
+  const [deleteTypeId, setDeleteTypeId] = useState<string | null>(null);
+
+  const deleteTypeMut = useMutation({
+    mutationFn: (id: string) => kilnMaintenanceApi.deleteType(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['kiln-maintenance-types'] });
+      setDeleteTypeId(null);
+    },
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ['kiln-maintenance-types'],
@@ -736,13 +766,22 @@ function TypesTab() {
                     {t.default_interval_days ?? '---'}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Button
-                      variant="ghost"
-                      className="text-xs"
-                      onClick={() => { setEditTarget(t); setShowAdd(false); }}
-                    >
-                      Edit
-                    </Button>
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        className="text-xs"
+                        onClick={() => { setEditTarget(t); setShowAdd(false); }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="text-xs text-red-600"
+                        onClick={() => setDeleteTypeId(t.id)}
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -750,6 +789,17 @@ function TypesTab() {
           </table>
         </div>
       )}
+
+      {/* Delete Type Confirmation Dialog */}
+      <Dialog open={!!deleteTypeId} onClose={() => setDeleteTypeId(null)} title="Delete Maintenance Type">
+        <p className="text-sm text-gray-600">Are you sure you want to delete this maintenance type? This action will be logged.</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setDeleteTypeId(null)}>Cancel</Button>
+          <Button variant="danger" onClick={() => deleteTypeId && deleteTypeMut.mutate(deleteTypeId)} disabled={deleteTypeMut.isPending}>
+            {deleteTypeMut.isPending ? 'Deleting...' : 'Delete'}
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }

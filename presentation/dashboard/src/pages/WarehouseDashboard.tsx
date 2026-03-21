@@ -6,10 +6,12 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
 import { useUiStore } from '@/stores/uiStore';
 import { formatDateTime, formatDate } from '@/lib/format';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import {
   useMaterials,
   useLowStock,
   useCreateTransaction,
+  useDeleteTransaction,
   useMaterialTransactions,
   type MaterialItem,
   type TransactionItem,
@@ -211,6 +213,8 @@ function TransactionsTab({
   const [error, setError] = useState('');
 
   const createTransaction = useCreateTransaction();
+  const deleteTxMut = useDeleteTransaction();
+  const [deleteTxId, setDeleteTxId] = useState<string | null>(null);
   const { data: txData, isLoading: txLoading } = useMaterialTransactions(selectedMaterialId);
   const transactions = txData?.items || [];
 
@@ -394,19 +398,37 @@ function TransactionsTab({
                       <p className="mt-0.5 text-xs text-gray-400">by {tx.created_by_name}</p>
                     )}
                   </div>
-                  <span
-                    className={`text-lg font-bold ${
-                      tx.type === 'receive' ? 'text-green-600' : 'text-red-600'
-                    }`}
-                  >
-                    {tx.type === 'receive' ? '+' : '-'}{tx.quantity}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`text-lg font-bold ${
+                        tx.type === 'receive' ? 'text-green-600' : 'text-red-600'
+                      }`}
+                    >
+                      {tx.type === 'receive' ? '+' : '-'}{tx.quantity}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={deleteTxMut.isPending}
+                      onClick={() => setDeleteTxId(tx.id)}
+                    >
+                      Delete
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTxId}
+        onClose={() => setDeleteTxId(null)}
+        onConfirm={() => { if (deleteTxId) deleteTxMut.mutate(deleteTxId); setDeleteTxId(null); }}
+        title="Delete Transaction"
+        message="Are you sure you want to delete this transaction? The stock balance will be reversed. This action cannot be undone."
+      />
     </div>
   );
 }

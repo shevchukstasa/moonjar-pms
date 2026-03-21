@@ -32,9 +32,19 @@ const STATUS_BADGES: Record<string, { label: string; className: string }> = {
 /* ──────────────────────────────────────────────────── */
 
 export default function ReconciliationsPage() {
+  const qc = useQueryClient();
   const factoryId = useUiStore((s) => s.activeFactoryId);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [showNewDialog, setShowNewDialog] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => reconciliationsApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['reconciliations'] });
+      setDeleteId(null);
+    },
+  });
 
   const params: Record<string, string> = {};
   if (factoryId) params.factory_id = factoryId;
@@ -130,11 +140,16 @@ export default function ReconciliationsPage() {
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Notes</th>
                 <th className="px-4 py-3">Completed</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {filtered.map((r) => (
-                <ReconciliationRow key={r.id} reconciliation={r} />
+                <ReconciliationRow key={r.id} reconciliation={r} onDelete={
+                  (r.status === 'draft' || r.status === 'in_progress' || r.status === 'scheduled')
+                    ? () => setDeleteId(r.id)
+                    : undefined
+                } />
               ))}
             </tbody>
           </table>
@@ -147,6 +162,17 @@ export default function ReconciliationsPage() {
           onClose={() => setShowNewDialog(false)}
         />
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} title="Delete Reconciliation">
+        <p className="text-sm text-gray-600">Are you sure you want to delete this reconciliation? This action will be logged.</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setDeleteId(null)}>Cancel</Button>
+          <Button variant="danger" onClick={() => deleteId && deleteMut.mutate(deleteId)} disabled={deleteMut.isPending}>
+            {deleteMut.isPending ? 'Deleting...' : 'Delete'}
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }
@@ -155,7 +181,7 @@ export default function ReconciliationsPage() {
 /*  Reconciliation Row (expandable)                     */
 /* ──────────────────────────────────────────────────── */
 
-function ReconciliationRow({ reconciliation: r }: { reconciliation: Reconciliation }) {
+function ReconciliationRow({ reconciliation: r, onDelete }: { reconciliation: Reconciliation; onDelete?: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const { data: factoriesData } = useFactories();
   const factories = factoriesData?.items || [];
@@ -190,11 +216,23 @@ function ReconciliationRow({ reconciliation: r }: { reconciliation: Reconciliati
         <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
           {r.completed_at ? new Date(r.completed_at).toLocaleDateString() : '\u2014'}
         </td>
+        <td className="px-4 py-3 text-right">
+          {onDelete && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-red-600"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            >
+              Delete
+            </Button>
+          )}
+        </td>
       </tr>
 
       {expanded && (
         <tr>
-          <td colSpan={6} className="bg-gray-50 px-6 py-4">
+          <td colSpan={7} className="bg-gray-50 px-6 py-4">
             <ReconciliationDetail reconciliation={r} />
           </td>
         </tr>

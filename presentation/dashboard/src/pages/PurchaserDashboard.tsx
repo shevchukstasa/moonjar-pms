@@ -12,6 +12,7 @@ import {
   usePurchaserStats,
   useDeliveries,
   useChangeRequestStatus,
+  useDeletePurchaseRequest,
   type PurchaseRequestItem,
 } from '@/hooks/usePurchaseRequests';
 import { useLowStock, type MaterialItem } from '@/hooks/useMaterials';
@@ -149,12 +150,14 @@ function ActiveRequestsTab({
   isLoading: boolean;
 }) {
   const changeStatus = useChangeRequestStatus();
+  const deleteMut = useDeletePurchaseRequest();
   const [confirmAction, setConfirmAction] = useState<{
     id: string;
     status: string;
     title: string;
     message: string;
   } | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   if (isLoading) return <div className="flex justify-center py-8"><Spinner className="h-8 w-8" /></div>;
   if (requests.length === 0) {
@@ -257,6 +260,14 @@ function ActiveRequestsTab({
                   Mark Received
                 </Button>
               )}
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={deleteMut.isPending}
+                onClick={() => setDeleteId(r.id)}
+              >
+                Delete
+              </Button>
             </div>
           </div>
         ))}
@@ -268,6 +279,14 @@ function ActiveRequestsTab({
         onConfirm={handleConfirm}
         title={confirmAction?.title || ''}
         message={confirmAction?.message || ''}
+      />
+
+      <ConfirmDialog
+        open={!!deleteId}
+        onClose={() => setDeleteId(null)}
+        onConfirm={() => { if (deleteId) deleteMut.mutate(deleteId); setDeleteId(null); }}
+        title="Delete Purchase Request"
+        message="Are you sure you want to delete this purchase request? This action cannot be undone."
       />
     </>
   );

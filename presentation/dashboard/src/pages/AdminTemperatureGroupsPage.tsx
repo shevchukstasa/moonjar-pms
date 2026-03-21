@@ -6,6 +6,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import apiClient from '@/api/client';
 import { Thermometer, Plus, Pencil, Trash2, X, Save } from 'lucide-react';
+import { Dialog } from '@/components/ui/Dialog';
 import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
 import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 
@@ -49,6 +50,7 @@ export default function AdminTemperatureGroupsPage() {
   const [form, setForm] = useState<FormData>(emptyForm);
   const [error, setError] = useState('');
   const [csvOpen, setCsvOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const { data: groups, isLoading } = useQuery<TemperatureGroup[]>({
     queryKey: ['temperature-groups'],
@@ -81,6 +83,18 @@ export default function AdminTemperatureGroupsPage() {
     },
     onError: (err: unknown) => {
       setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed');
+    },
+  });
+
+  const deleteGroup = useMutation({
+    mutationFn: (id: string) =>
+      apiClient.delete(`/reference/temperature-groups/${id}`).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['temperature-groups'] });
+      setDeleteId(null);
+    },
+    onError: (err: unknown) => {
+      setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to delete');
     },
   });
 
@@ -238,9 +252,14 @@ export default function AdminTemperatureGroupsPage() {
                   )}
                 </div>
 
-                <Button variant="ghost" size="sm" onClick={() => startEdit(group)}>
-                  <Pencil className="h-4 w-4" />
-                </Button>
+                <div className="flex gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => startEdit(group)}>
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="sm" className="text-red-600" onClick={() => setDeleteId(group.id)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             )}
           </Card>
@@ -254,6 +273,17 @@ export default function AdminTemperatureGroupsPage() {
           No temperature groups configured. Click &quot;Add Group&quot; to create one.
         </div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} title="Delete Temperature Group">
+        <p className="text-sm text-gray-600">Are you sure you want to delete this temperature group? This action will be logged.</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setDeleteId(null)}>Cancel</Button>
+          <Button variant="danger" onClick={() => deleteId && deleteGroup.mutate(deleteId)} disabled={deleteGroup.isPending}>
+            {deleteGroup.isPending ? 'Deleting...' : 'Delete'}
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }

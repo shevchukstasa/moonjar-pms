@@ -41,4 +41,6 @@ export const purchaseRequestsApi = {
     apiClient.get('/purchaser/stats', { params }).then((r) => r.data),
   listDeliveries: (params?: { factory_id?: string; page?: number; per_page?: number }) =>
     apiClient.get('/purchaser/deliveries', { params }).then((r) => r.data),
+  delete: (id: string) =>
+    apiClient.delete(`/purchaser/${id}`).then((r) => r.data),
 };

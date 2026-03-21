@@ -8,6 +8,7 @@ import { kilnInspectionsApi, type Inspection, type InspectionItem, type RepairLo
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { Dialog } from '@/components/ui/Dialog';
 import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
 import { FactorySelector } from '@/components/layout/FactorySelector';
@@ -68,6 +69,8 @@ export default function KilnInspectionsPage() {
 /* ──────────────────────────────────────────────────── */
 
 function InspectionsTab({ factoryId }: { factoryId: string | null }) {
+  const qc = useQueryClient();
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   const params: Record<string, string> = {};
   if (factoryId) params.factory_id = factoryId;
 
@@ -77,6 +80,14 @@ function InspectionsTab({ factoryId }: { factoryId: string | null }) {
   });
 
   const inspections: Inspection[] = data?.items || [];
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => kilnInspectionsApi.deleteInspection(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['kiln-inspections'] });
+      setDeleteId(null);
+    },
+  });
 
   if (isLoading) return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
 
@@ -117,20 +128,32 @@ function InspectionsTab({ factoryId }: { factoryId: string | null }) {
               <th className="px-4 py-3 text-center">Issues</th>
               <th className="px-4 py-3 text-center">N/A</th>
               <th className="px-4 py-3">Notes</th>
+              <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {inspections.map((insp) => (
-              <InspectionRow key={insp.id} inspection={insp} />
+              <InspectionRow key={insp.id} inspection={insp} onDelete={() => setDeleteId(insp.id)} />
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} title="Delete Inspection">
+        <p className="text-sm text-gray-600">Are you sure you want to delete this inspection? This action will be logged.</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setDeleteId(null)}>Cancel</Button>
+          <Button variant="danger" onClick={() => deleteId && deleteMut.mutate(deleteId)} disabled={deleteMut.isPending}>
+            {deleteMut.isPending ? 'Deleting...' : 'Delete'}
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }
 
-function InspectionRow({ inspection: i }: { inspection: Inspection }) {
+function InspectionRow({ inspection: i, onDelete }: { inspection: Inspection; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const hasIssues = i.summary.issues > 0;
 
@@ -159,12 +182,22 @@ function InspectionRow({ inspection: i }: { inspection: Inspection }) {
         </td>
         <td className="px-4 py-3 text-center text-gray-400">{i.summary.not_applicable}</td>
         <td className="px-4 py-3 text-xs text-gray-500 max-w-[200px] truncate">{i.notes || '—'}</td>
+        <td className="px-4 py-3 text-right">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-red-600"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          >
+            Delete
+          </Button>
+        </td>
       </tr>
 
       {/* Expanded detail */}
       {expanded && (
         <tr>
-          <td colSpan={7} className="bg-gray-50 px-6 py-4">
+          <td colSpan={8} className="bg-gray-50 px-6 py-4">
             <div className="space-y-3">
               {/* Group results by category */}
               {Object.entries(
@@ -434,6 +467,7 @@ function NewInspectionForm({ factoryId, onDone }: { factoryId: string | null; on
 function RepairsTab({ factoryId }: { factoryId: string | null }) {
   const qc = useQueryClient();
   const [showNew, setShowNew] = useState(false);
+  const [deleteRepairId, setDeleteRepairId] = useState<string | null>(null);
 
   const params: Record<string, string> = {};
   if (factoryId) params.factory_id = factoryId;
@@ -449,6 +483,14 @@ function RepairsTab({ factoryId }: { factoryId: string | null }) {
     mutationFn: ({ id, data: d }: { id: string; data: Record<string, unknown> }) =>
       kilnInspectionsApi.updateRepair(id, d),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['kiln-repairs'] }),
+  });
+
+  const deleteRepairMut = useMutation({
+    mutationFn: (id: string) => kilnInspectionsApi.deleteRepair(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['kiln-repairs'] });
+      setDeleteRepairId(null);
+    },
   });
 
   if (isLoading) return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
@@ -485,6 +527,7 @@ function RepairsTab({ factoryId }: { factoryId: string | null }) {
                 <th className="px-4 py-3">Technician</th>
                 <th className="px-4 py-3">Completed</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -514,12 +557,33 @@ function RepairsTab({ factoryId }: { factoryId: string | null }) {
                       ))}
                     </select>
                   </td>
+                  <td className="px-4 py-3 text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-red-600"
+                      onClick={() => setDeleteRepairId(r.id)}
+                    >
+                      Delete
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      {/* Delete Repair Confirmation Dialog */}
+      <Dialog open={!!deleteRepairId} onClose={() => setDeleteRepairId(null)} title="Delete Repair Log">
+        <p className="text-sm text-gray-600">Are you sure you want to delete this repair log entry? This action will be logged.</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setDeleteRepairId(null)}>Cancel</Button>
+          <Button variant="danger" onClick={() => deleteRepairId && deleteRepairMut.mutate(deleteRepairId)} disabled={deleteRepairMut.isPending}>
+            {deleteRepairMut.isPending ? 'Deleting...' : 'Delete'}
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }

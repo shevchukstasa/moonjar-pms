@@ -37,3 +37,11 @@ export function useUpdateFactory() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['factories'] }); },
   });
 }
+
+export function useDeleteFactory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => factoriesApi.remove(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['factories'] }); },
+  });
+}

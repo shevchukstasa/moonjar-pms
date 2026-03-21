@@ -1,7 +1,9 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
 import { useMaterials, useCreateMaterial, useUpdateMaterial, useCreateTransaction, useMaterialTransactions, type MaterialItem } from '@/hooks/useMaterials';
+import apiClient from '@/api/client';
 import { useMaterialHierarchy, type MaterialGroup } from '@/hooks/useMaterialGroups';
 import { useFactories } from '@/hooks/useFactories';
 import { useSuppliers } from '@/hooks/useSuppliers';
@@ -12,6 +14,7 @@ import { Input } from '@/components/ui/Input';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { Select } from '@/components/ui/Select';
 import { Dialog } from '@/components/ui/Dialog';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 
@@ -139,6 +142,15 @@ export default function ManagerMaterialsPage() {
   const [historyDialog, setHistoryDialog] = useState<{ open: boolean; item: MaterialItem | null }>({ open: false, item: null });
   const { data: txHistoryData, isLoading: txHistoryLoading } = useMaterialTransactions(historyDialog.item?.id);
   const txHistoryItems = txHistoryData?.items ?? [];
+
+  // Delete material (owner/admin only)
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const matQc = useQueryClient();
+  const canDelete = user?.role === 'owner' || user?.role === 'administrator';
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => apiClient.delete(`/materials/${id}`).then((r) => r.data),
+    onSuccess: () => { matQc.invalidateQueries({ queryKey: ['materials'] }); setDeleteId(null); },
+  });
 
   // ── Edit/create dialog ──────────────────────────────────────────────────
 
@@ -458,11 +470,13 @@ export default function ManagerMaterialsPage() {
           isAggregate={isAggregateMode}
           isPM={isPM}
           hideNames={isPM}
+          canDelete={canDelete}
           onEdit={openEdit}
           onReceive={(item) => openTx(item, 'receive')}
           onInventoryAudit={(item) => openTx(item, 'inventory')}
           onTransaction={isPM ? undefined : (item) => openTx(item, 'receive')}
           onHistory={openHistory}
+          onDelete={(item) => setDeleteId(item.id)}
         />
       )}
 
@@ -801,6 +815,14 @@ export default function ManagerMaterialsPage() {
           <Button variant="secondary" onClick={closeHistory}>Close</Button>
         </div>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteId}
+        onClose={() => setDeleteId(null)}
+        onConfirm={() => deleteId && deleteMut.mutate(deleteId)}
+        title="Delete Material"
+        message="Are you sure you want to delete this material? This action cannot be undone."
+      />
     </div>
   );
 }
@@ -813,14 +835,16 @@ interface MaterialsTableProps {
   isAggregate?: boolean;
   isPM?: boolean;
   hideNames?: boolean;
+  canDelete?: boolean;
   onEdit: (item: MaterialItem) => void;
   onReceive?: (item: MaterialItem) => void;
   onInventoryAudit?: (item: MaterialItem) => void;
   onTransaction?: (item: MaterialItem) => void;
   onHistory: (item: MaterialItem) => void;
+  onDelete?: (item: MaterialItem) => void;
 }
 
-function MaterialsTable({ items, subgroups, isAggregate, isPM, hideNames, onEdit, onReceive, onInventoryAudit, onTransaction, onHistory }: MaterialsTableProps) {
+function MaterialsTable({ items, subgroups, isAggregate, isPM, hideNames, canDelete, onEdit, onReceive, onInventoryAudit, onTransaction, onHistory, onDelete }: MaterialsTableProps) {
   const typeLabel = (code: string) => subgroups.find((s) => s.value === code)?.label ?? code;
   const typeIcon = (code: string) => subgroups.find((s) => s.value === code)?.icon ?? '';
 
@@ -909,6 +933,11 @@ function MaterialsTable({ items, subgroups, isAggregate, isPM, hideNames, onEdit
                   <Button size="sm" variant="ghost" onClick={() => onEdit(m)}>
                     Edit
                   </Button>
+                  {canDelete && onDelete && (
+                    <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700" onClick={() => onDelete(m)}>
+                      Del
+                    </Button>
+                  )}
                 </div>
               </td>
             </tr>

@@ -37,6 +37,18 @@ export function useCreatePurchaseRequestPurchaser() {
   });
 }
 
+export function useDeletePurchaseRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => purchaseRequestsApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchase-requests'] });
+      qc.invalidateQueries({ queryKey: ['purchaser-stats'] });
+      qc.invalidateQueries({ queryKey: ['deliveries'] });
+    },
+  });
+}
+
 export function useChangeRequestStatus() {
   const qc = useQueryClient();
   return useMutation({

@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useKilns, type KilnItem } from '@/hooks/useKilns';
 import { useFactories } from '@/hooks/useFactories';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -11,6 +13,7 @@ import { KilnEditDialog } from '@/components/kilns/KilnEditDialog';
 import { LoadingRulesDialog } from '@/components/kilns/LoadingRulesDialog';
 import { KilnConstantsTable } from '@/components/kilns/KilnConstantsTable';
 import { KilnBreakdownDialog, KilnRestoreDialog } from '@/components/kilns/KilnBreakdownDialog';
+import apiClient from '@/api/client';
 
 const GLOBAL_ROLES = new Set(['owner', 'administrator', 'ceo']);
 
@@ -55,6 +58,15 @@ export default function ManagerKilnsPage() {
   const [rulesKiln, setRulesKiln] = useState<KilnItem | null>(null);
   const [breakdownKiln, setBreakdownKiln] = useState<KilnItem | null>(null);
   const [restoreKiln, setRestoreKiln] = useState<KilnItem | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  // Delete mutation (owner/admin only)
+  const qc = useQueryClient();
+  const canDelete = currentUser?.role === 'owner' || currentUser?.role === 'administrator';
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => apiClient.delete(`/kilns/${id}`).then((r) => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kilns'] }); setDeleteId(null); },
+  });
 
   const factoryOptions = [
     ...(isGlobalRole && factories.length > 1 ? [{ value: '', label: 'All Factories' }] : []),
@@ -116,10 +128,12 @@ export default function ManagerKilnsPage() {
               key={kiln.id}
               kiln={kiln}
               showFactory={!factoryId}
+              canDelete={canDelete}
               onEdit={() => setEditKiln(kiln)}
               onRules={() => setRulesKiln(kiln)}
               onBreakdown={() => setBreakdownKiln(kiln)}
               onRestore={() => setRestoreKiln(kiln)}
+              onDelete={() => setDeleteId(kiln.id)}
             />
           ))}
         </div>
@@ -157,6 +171,13 @@ export default function ManagerKilnsPage() {
         onClose={() => setRestoreKiln(null)}
         kiln={restoreKiln}
       />
+      <ConfirmDialog
+        open={!!deleteId}
+        onClose={() => setDeleteId(null)}
+        onConfirm={() => deleteId && deleteMut.mutate(deleteId)}
+        title="Delete Kiln"
+        message="Are you sure you want to delete this kiln? This action cannot be undone."
+      />
     </div>
   );
 }
@@ -166,17 +187,21 @@ export default function ManagerKilnsPage() {
 function KilnCard({
   kiln,
   showFactory,
+  canDelete,
   onEdit,
   onRules,
   onBreakdown,
   onRestore,
+  onDelete,
 }: {
   kiln: KilnItem;
   showFactory: boolean;
+  canDelete?: boolean;
   onEdit: () => void;
   onRules: () => void;
   onBreakdown: () => void;
   onRestore: () => void;
+  onDelete?: () => void;
 }) {
   const hasRules = !!kiln.loading_rules;
   const rules = kiln.loading_rules as Record<string, unknown> | null;
@@ -273,6 +298,11 @@ function KilnCard({
         <Button size="sm" variant="ghost" onClick={onRules}>
           Rules
         </Button>
+        {canDelete && onDelete && (
+          <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700" onClick={onDelete}>
+            Delete
+          </Button>
+        )}
         {kiln.status !== 'maintenance_emergency' && kiln.status !== 'inactive' ? (
           <Button
             size="sm"

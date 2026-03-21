@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useFactories, type Factory } from '@/hooks/useFactories';
+import { useFactories, useDeleteFactory, type Factory } from '@/hooks/useFactories';
 import { useUsers } from '@/hooks/useUsers';
 import { useBotStatus, useRefreshBotStatus, useTestChat, useRecentChats } from '@/hooks/useTelegramBot';
 import { Card } from '@/components/ui/Card';
@@ -10,6 +10,7 @@ import { DataTable } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { FactoryDialog } from '@/components/admin/FactoryDialog';
 import { AuditLogViewer } from '@/components/admin/AuditLogViewer';
 import { ActiveSessionsViewer } from '@/components/admin/ActiveSessionsViewer';
@@ -30,6 +31,8 @@ export default function AdminPanelPage() {
   const [factoryDialogOpen, setFactoryDialogOpen] = useState(false);
   const [editFactory, setEditFactory] = useState<Factory | null>(null);
   const [securityTab, setSecurityTab] = useState('audit');
+  const deleteFactoryMut = useDeleteFactory();
+  const [deleteFactoryId, setDeleteFactoryId] = useState<string | null>(null);
 
   // Owner chat ID management
   const { data: ownerChatData } = useQuery<{ chat_id: string | null; source: string }>({
@@ -122,20 +125,30 @@ export default function AdminPanelPage() {
         key: 'actions',
         header: '',
         render: (f: Factory) => (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setEditFactory(f);
-              setFactoryDialogOpen(true);
-            }}
-          >
-            Edit
-          </Button>
+          <div className="flex gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setEditFactory(f);
+                setFactoryDialogOpen(true);
+              }}
+            >
+              Edit
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={deleteFactoryMut.isPending}
+              onClick={() => setDeleteFactoryId(f.id)}
+            >
+              Delete
+            </Button>
+          </div>
         ),
       },
     ],
-    [],
+    [deleteFactoryMut.isPending],
   );
 
   return (
@@ -426,6 +439,14 @@ export default function AdminPanelPage() {
           setEditFactory(null);
         }}
         factory={editFactory}
+      />
+
+      <ConfirmDialog
+        open={!!deleteFactoryId}
+        onClose={() => setDeleteFactoryId(null)}
+        onConfirm={() => { if (deleteFactoryId) deleteFactoryMut.mutate(deleteFactoryId); setDeleteFactoryId(null); }}
+        title="Delete Factory"
+        message="Are you sure you want to delete this factory? This action cannot be undone."
       />
     </div>
   );

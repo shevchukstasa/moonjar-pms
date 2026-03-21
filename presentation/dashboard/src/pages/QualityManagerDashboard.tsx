@@ -1,6 +1,6 @@
 import { formatDate } from "@/lib/format";
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -315,6 +315,12 @@ function ProblemCardsTab({
   const [description, setDescription] = useState('');
   const [error, setError] = useState('');
   const [confirmCloseId, setConfirmCloseId] = useState<string | null>(null);
+  const [deleteCardId, setDeleteCardId] = useState<string | null>(null);
+  const pcQc = useQueryClient();
+  const deleteCardMut = useMutation({
+    mutationFn: (id: string) => apiClient.delete(`/problem-cards/${id}`).then((r) => r.data),
+    onSuccess: () => { pcQc.invalidateQueries({ queryKey: ['problem-cards'] }); pcQc.invalidateQueries({ queryKey: ['quality-stats'] }); setDeleteCardId(null); },
+  });
 
   const SC: Record<string, string> = { open: 'bg-yellow-100 text-yellow-700', in_progress: 'bg-blue-100 text-blue-700', resolved: 'bg-green-100 text-green-700', closed: 'bg-gray-100 text-gray-600' };
 
@@ -398,11 +404,16 @@ function ProblemCardsTab({
                     {c.location ? `${c.location} · ` : ''}{formatDate(c.created_at)}
                   </p>
                 </div>
-                {(c.status === 'open' || c.status === 'in_progress') && (
-                  <Button size="sm" variant="secondary" onClick={() => setConfirmCloseId(c.id)} disabled={updateMutation.isPending}>
-                    Close
+                <div className="flex items-center gap-1">
+                  {(c.status === 'open' || c.status === 'in_progress') && (
+                    <Button size="sm" variant="secondary" onClick={() => setConfirmCloseId(c.id)} disabled={updateMutation.isPending}>
+                      Close
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700" onClick={() => setDeleteCardId(c.id)}>
+                    Delete
                   </Button>
-                )}
+                </div>
               </div>
             ))}
           </div>
@@ -414,6 +425,13 @@ function ProblemCardsTab({
         onConfirm={() => confirmCloseId && handleClose(confirmCloseId)}
         title="Close Problem Card"
         message="Close this problem card? It will be marked as resolved."
+      />
+      <ConfirmDialog
+        open={!!deleteCardId}
+        onClose={() => setDeleteCardId(null)}
+        onConfirm={() => deleteCardId && deleteCardMut.mutate(deleteCardId)}
+        title="Delete Problem Card"
+        message="Are you sure you want to delete this problem card? This action cannot be undone."
       />
     </>
   );

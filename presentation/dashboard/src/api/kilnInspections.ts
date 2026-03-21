@@ -70,6 +70,9 @@ export const kilnInspectionsApi = {
   getInspection: (id: string) =>
     apiClient.get(`/kiln-inspections/${id}`).then((r) => r.data),
 
+  deleteInspection: (id: string) =>
+    apiClient.delete(`/kiln-inspections/${id}`).then((r) => r.data),
+
   createInspection: (data: {
     resource_id: string;
     factory_id: string;

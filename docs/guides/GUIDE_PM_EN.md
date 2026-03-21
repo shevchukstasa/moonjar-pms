@@ -1,6 +1,6 @@
 # Production Manager (PM) Guide -- Moonjar PMS
 
-> Version: 1.0 | Date: 2026-03-20
+> Version: 1.1 | Date: 2026-03-21
 > Moonjar Production Management System
 
 ---
@@ -16,7 +16,22 @@
 7. [Schedule Management](#7-schedule-management)
 8. [Kiln Inspections](#8-kiln-inspections)
 9. [Consumption Measurement Tasks](#9-consumption-measurement-tasks)
-10. [Tips and Best Practices](#10-tips-and-best-practices)
+11. [Kiln Maintenance](#11-kiln-maintenance)
+12. [Grinding Decisions](#12-grinding-decisions)
+13. [Finished Goods](#13-finished-goods)
+14. [Reconciliations](#14-reconciliations)
+15. [Reports and Analytics](#15-reports-and-analytics)
+16. [Factory Calendar](#16-factory-calendar)
+17. [Recipes Management](#17-recipes-management)
+18. [Firing Profiles](#18-firing-profiles)
+19. [Temperature Groups](#19-temperature-groups)
+20. [Stages Management](#20-stages-management)
+21. [Firing Schedules](#21-firing-schedules)
+22. [Warehouses Management](#22-warehouses-management)
+23. [Packaging Management](#23-packaging-management)
+24. [Sizes Management](#24-sizes-management)
+25. [Tablo (Production Display)](#25-tablo-production-display)
+26. [Tips and Best Practices](#26-tips-and-best-practices)
 
 ---
 
@@ -48,9 +63,24 @@ As a Production Manager, you have access to the following pages:
 | PM Dashboard | `/manager` | Main control panel with tabs for orders, tasks, materials, defects, and more |
 | Schedule | `/manager/schedule` | Production schedule by section (Glazing, Firing, Sorting, QC, Kilns) |
 | Kilns | `/manager/kilns` | Kiln management, maintenance, loading rules |
+| Kiln Inspections | `/manager/kiln-inspections` | Weekly checklist-based kiln condition assessments |
+| Kiln Maintenance | `/manager/kiln-maintenance` | Scheduled preventive and corrective maintenance |
+| Grinding | `/manager/grinding` | Grinding decisions for defective products |
 | Materials | `/manager/materials` | Material inventory, receiving, audit, transaction history |
-| Consumption Rules | `/consumption-rules` | Glaze/engobe consumption rates per square meter |
+| Recipes | `/admin/recipes` | Glaze, engobe, and product recipe management |
+| Firing Profiles | `/admin/firing-profiles` | Multi-interval heating/cooling curves for kilns |
+| Temp Groups | `/admin/temperature-groups` | Temperature group definitions for co-firing |
+| Warehouses | `/admin/warehouses` | Warehouse section management |
+| Packaging | `/admin/packaging` | Box types, capacities, and spacer definitions |
+| Sizes | `/admin/sizes` | Product size definitions with shape-specific dimensions |
+| Consumption Rules | `/admin/consumption-rules` | Glaze/engobe consumption rates per square meter |
+| Factory Calendar | `/admin/factory-calendar` | Working days, holidays, and non-working days per factory |
+| Finished Goods | `/warehouse/finished-goods` | Finished product inventory and availability checks |
+| Reconciliations | `/warehouse/reconciliations` | Formal multi-material inventory check sessions |
+| Reports | `/reports` | Orders summary, kiln utilization, and production analytics |
+| Tablo | `/tablo` | Full-screen production display board for workshop monitors |
 | Order Details | `/orders/:id` | Detailed view of a specific order and its positions |
+| Guide | `/manager/guide` | This PM guide (in-app) |
 
 The top navigation bar also includes:
 
@@ -650,13 +680,13 @@ To delete a position:
 
 Regular kiln inspections are essential to maintaining safe and efficient firing operations. The Kiln Inspections feature provides a structured checklist-based workflow for documenting kiln condition and tracking repairs.
 
-### 10.1. Overview
+### 8.1. Overview
 
 The weekly kiln inspection covers **8 categories with 35 inspection items** in total. Each inspection is tied to a specific kiln and performed by a Production Manager.
 
 **Path**: `/manager/kiln-inspections`
 
-### 10.2. Inspection Categories
+### 8.2. Inspection Categories
 
 | # | Category | Items | What to Check |
 |---|---|---|---|
@@ -669,7 +699,7 @@ The weekly kiln inspection covers **8 categories with 35 inspection items** in t
 | 7 | Safety Equipment | 3-4 | Emergency shutoff, warning labels, fire extinguisher proximity, PPE availability |
 | 8 | Operational Readiness | 3-4 | Kiln furniture inventory, loading tools, logbook up to date, cleaning status |
 
-### 10.3. How to Perform an Inspection
+### 8.3. How to Perform an Inspection
 
 1. Go to **Kiln Inspections** page (`/manager/kiln-inspections`).
 2. Click the **New Inspection** tab.
@@ -689,14 +719,14 @@ The weekly kiln inspection covers **8 categories with 35 inspection items** in t
 
 > **Important**: Items marked as **Damaged** or **Needs Repair** are automatically highlighted in the inspection report and generate entries in the Repair Log for tracking.
 
-### 10.4. Reviewing Past Inspections
+### 8.4. Reviewing Past Inspections
 
 - The **Inspection History** tab shows all completed inspections sorted by date.
 - Click any inspection to view the full report with all ratings and notes.
 - Use the filter to view inspections for a specific kiln.
 - Compare inspections over time to track deterioration trends.
 
-### 10.5. Repair Log
+### 8.5. Repair Log
 
 The Repair Log tracks every issue identified during inspections from report to resolution.
 
@@ -787,9 +817,552 @@ After you enter the consumption rate:
 
 ---
 
-## 10. Tips and Best Practices
 
-### 10.1. Daily Routine
+## 11. Kiln Maintenance
+
+### 11.1. Overview
+
+The Kiln Maintenance page provides a structured workflow for scheduling, tracking, and completing preventive and corrective maintenance on kilns. Unlike Kiln Inspections (Section 8), which focus on weekly condition assessments, Kiln Maintenance manages scheduled work: element replacements, thermocouple calibrations, brick repairs, deep cleans, and more.
+
+**Path**: `/manager/kiln-maintenance`
+
+### 11.2. Page Tabs
+
+| Tab | Purpose |
+|---|---|
+| **Upcoming** | Shows all planned maintenance items sorted by date, with overdue items highlighted in red |
+| **History** | Completed and cancelled maintenance records |
+| **Maintenance Types** | Manage the catalogue of maintenance type definitions (e.g., "Element replacement", "Deep clean") |
+
+### 11.3. Scheduling Maintenance
+
+1. On the **Upcoming** tab, click **"+ Schedule Maintenance"**.
+2. Fill in the form:
+   - **Kiln** -- select the kiln (filtered by factory if a factory is selected).
+   - **Maintenance Type** -- choose from predefined types.
+   - **Scheduled Date** -- when the maintenance should be performed.
+   - **Notes** -- any additional instructions.
+3. Requirements are set automatically based on the maintenance type:
+   - **Requires empty kiln** -- the kiln must be unloaded before work begins.
+   - **Requires cooled kiln** -- the kiln must be at room temperature.
+   - **Requires power off** -- electrical supply must be disconnected.
+4. For recurring maintenance, set the **Recurrence Interval** (in days). The system automatically schedules the next occurrence after each completion.
+
+### 11.4. Completing Maintenance
+
+1. Find the maintenance item on the **Upcoming** tab.
+2. Click **"Complete"**.
+3. Optionally add **Completion Notes** describing what was done.
+4. Click **"Confirm"**. The item moves to the History tab.
+5. If the item is recurring, a new scheduled item is automatically created for the next interval.
+
+### 11.5. Summary Cards
+
+The Upcoming tab shows four summary cards at the top:
+
+| Card | Description |
+|---|---|
+| Total Scheduled | All planned maintenance items in the next 90 days |
+| Overdue | Items past their scheduled date (highlighted red) |
+| Today | Items due today (highlighted yellow) |
+| + Schedule | Quick-action button to add new maintenance |
+
+### 11.6. Managing Maintenance Types
+
+On the **Maintenance Types** tab you can create, edit, and delete type definitions. Each type has:
+- **Name** -- e.g., "Element replacement", "Thermocouple calibration"
+- **Default requirements** -- whether the kiln must be empty, cooled, or powered off
+- **Default recurrence interval** -- automatic repeat period in days
+
+---
+
+## 12. Grinding Decisions
+
+### 12.1. Overview
+
+The Grinding Decisions page manages products that were sorted into the "grinding" category during the Sorting stage. These items have minor surface defects that can potentially be recovered by grinding or, alternatively, sent to Mana (an external party) for disposal or rework.
+
+**Path**: `/manager/grinding`
+
+### 12.2. Status Workflow
+
+Each grinding stock item has one of three statuses:
+
+| Status | Meaning |
+|---|---|
+| **Pending** | Awaiting PM decision |
+| **Grinding** | Decided: will be ground and reused |
+| **Sent to Mana** | Decided: sent to external party for processing |
+
+### 12.3. Making Decisions
+
+For each pending item you see three action buttons:
+
+- **Grind** (green) -- mark the item for internal grinding and reuse.
+- **Hold** (amber) -- keep the item in pending status for later decision.
+- **Mana** (red) -- send to Mana. A confirmation dialog appears before this action is finalised.
+
+### 12.4. Summary Cards
+
+Four KPI cards are displayed at the top:
+
+| Card | Description |
+|---|---|
+| Total Items | All grinding stock items |
+| Pending Decision | Items awaiting PM action |
+| Decided (Grind) | Items approved for grinding |
+| Sent to Mana | Items sent to external party |
+
+### 12.5. Filters
+
+- **Status tabs**: All / Pending / Decided (Grind) / Sent to Mana
+- **Factory selector**: Filter by factory
+- **Pagination**: 50 items per page
+
+---
+
+## 13. Finished Goods
+
+### 13.1. Overview
+
+The Finished Goods page tracks the inventory of completed products that are ready for shipment or storage. It records stock by colour, size, collection, product type, and factory.
+
+**Path**: `/warehouse/finished-goods`
+
+### 13.2. Key Actions
+
+- **+ Add Stock** -- add a new finished goods record (factory, colour, size, collection, product type, quantity, reserved quantity).
+- **Edit** -- update quantity or reserved quantity for an existing item.
+- **Check Availability** -- query across all factories to see if a specific colour/size combination is available in the required quantity. The system shows which factories hold matching stock and how many pieces are available.
+
+### 13.3. Understanding the Table
+
+| Column | Description |
+|---|---|
+| **Color** | Product colour name |
+| **Size** | Product size |
+| **Collection** | Product collection |
+| **Type** | Product type (tile, sink, pebble) |
+| **Factory** | Which factory holds the stock |
+| **Quantity** | Total pieces in stock |
+| **Reserved** | Pieces reserved for orders |
+| **Available** | Quantity minus reserved (colour-coded: red if zero, yellow if low, green if sufficient) |
+
+### 13.4. Filters
+
+- **Factory** dropdown -- filter by a specific factory or view all.
+- **Color search** -- search by colour name (debounced).
+- **Pagination** -- 50 items per page.
+
+### 13.5. Totals
+
+Summary totals at the bottom of the page show aggregate Quantity, Reserved, and Available across all visible items.
+
+---
+
+## 14. Reconciliations
+
+### 14.1. Overview
+
+The Reconciliations page manages formal inventory check sessions. Unlike the single-material Inventory Audit (Section 3.6), a Reconciliation is a structured event that can cover multiple materials at once. It is used for periodic full or partial stock-takes.
+
+**Path**: `/warehouse/reconciliations`
+
+### 14.2. Reconciliation Statuses
+
+| Status | Meaning |
+|---|---|
+| **Scheduled** | Planned for a future date |
+| **Draft** | Created but not yet started |
+| **In Progress** | Currently being counted |
+| **Completed** | All items counted and adjustments applied |
+| **Cancelled** | Reconciliation cancelled |
+
+### 14.3. Creating a Reconciliation
+
+1. Click **"+ New Reconciliation"**.
+2. Select the **Factory**.
+3. Add optional **Notes** (e.g., "Monthly stock-take -- warehouse A").
+4. Click **"Create"**.
+
+### 14.4. Working with a Reconciliation
+
+1. Click on a reconciliation row to expand it.
+2. **Add items** -- select materials to include in the count.
+3. For each item, enter the **actual counted quantity**.
+4. The system shows the **system balance** alongside the counted quantity and calculates the **difference**.
+5. When all items are counted, click **"Complete"**.
+6. On completion the system applies the balance adjustments as inventory audit transactions.
+
+### 14.5. Summary Cards
+
+| Card | Description |
+|---|---|
+| Total | All reconciliations |
+| In Progress | Active reconciliations being counted |
+| Completed | Finished reconciliations |
+| Scheduled | Reconciliations planned for the future |
+
+### 14.6. Filters
+
+- **Factory Selector** -- filter by factory.
+- **Status tabs** -- All / In Progress / Completed / Scheduled / Cancelled.
+
+---
+
+## 15. Reports and Analytics
+
+### 15.1. Overview
+
+The Reports page provides aggregated production metrics with date-range and factory filters.
+
+**Path**: `/reports`
+
+### 15.2. Filters
+
+- **Factory** -- select a specific factory or "All Factories".
+- **Date range** -- From / To date pickers (defaults to the last 30 days).
+
+### 15.3. Orders Summary
+
+Four KPI cards at the top:
+
+| Card | Description |
+|---|---|
+| **Total Orders** | Number of orders in the selected period (with in-progress count as subtitle) |
+| **Completed** | Orders that reached shipped status (with on-time count as subtitle) |
+| **On-time %** | Percentage of completed orders delivered by their deadline. Green >= 80%, Yellow >= 50%, Red < 50% |
+| **Avg Days to Complete** | Average number of days from order creation to shipped status |
+
+### 15.4. Kiln Utilization
+
+For each kiln, a card displays:
+
+- **Kiln name** and utilization percentage badge (green >= 80%, yellow >= 50%, red < 50%).
+- A **progress bar** showing visual utilization.
+- **Total firings** count for the period.
+- **Average load** (m2 per firing).
+
+This section helps you identify under-utilized kilns that could take additional batches and over-loaded kilns that may need scheduling adjustments.
+
+---
+
+## 16. Factory Calendar
+
+### 16.1. Overview
+
+The Factory Calendar manages working days, holidays, and non-working days for each factory. The schedule engine uses this calendar to calculate accurate production timelines and deadlines.
+
+**Path**: `/admin/factory-calendar`
+
+### 16.2. Calendar View
+
+The page displays a visual monthly calendar grid. Each day is colour-coded:
+
+| Colour | Meaning |
+|---|---|
+| **White** | Normal working day |
+| **Red / marked** | Non-working day (holiday, day off) |
+
+Click any day to add or remove a holiday entry. Click and drag to select a range of dates.
+
+### 16.3. Navigation
+
+- **Month arrows** -- move forward or backward by month.
+- **Year arrows** -- move forward or backward by year.
+- **Factory selector** -- choose which factory's calendar to manage.
+
+### 16.4. Bulk Holiday Presets
+
+Two quick-import presets are available:
+
+- **Indonesian National Holidays** -- imports major government holidays (New Year, Eid, Independence Day, Christmas, etc.).
+- **Balinese Holidays** -- imports Nyepi, Galungan, Kuningan, and other Balinese ceremony days.
+
+Click a preset to preview the dates, then confirm to add them all at once. Existing entries are not duplicated.
+
+### 16.5. Adding and Removing Holidays
+
+**Add**: Click a day on the calendar, enter a name (e.g., "Nyepi"), and save.
+
+**Remove**: Click an existing holiday day and confirm deletion.
+
+> **Important**: Changes to the factory calendar may affect scheduled production timelines. After significant calendar changes, consider triggering a reschedule from the Schedule page.
+
+---
+
+## 17. Recipes Management
+
+### 17.1. Overview
+
+The Recipes page allows PM to view and manage glaze, engobe, and product recipes. Each recipe defines its ingredients with quantities, application rates (spray, brush, splash, silk screen), and links to temperature groups for firing.
+
+**Path**: `/admin/recipes`
+
+### 17.2. Recipe Fields
+
+| Field | Description |
+|---|---|
+| **Name** | Recipe name (e.g., "Moonjar White Glaze M-01") |
+| **Type** | Product, Glaze, or Engobe |
+| **Color Collection** | Which colour collection this recipe belongs to |
+| **Client** | Client name (if recipe is client-specific) |
+| **Specific Gravity** | Density of the mixed glaze/engobe (g/ml) |
+| **Spray Rate** | Consumption rate for spray application (ml/m2) |
+| **Brush Rate** | Consumption rate for brush application (ml/m2) |
+| **Default** | Whether this recipe is the default for its type |
+| **Active** | Whether the recipe is currently in use |
+
+### 17.3. Ingredients
+
+Each recipe has a list of ingredients grouped by material type (Frits, Pigments, Oxides/Carbonates, Other). For each ingredient:
+- **Material** -- selected from the materials catalogue.
+- **Quantity** -- weight in the recipe formula.
+- **Per-ingredient rates** -- spray, brush, splash, and silk screen rates can be set individually.
+
+### 17.4. Key Actions
+
+- **Create** -- add a new recipe with ingredients.
+- **Edit** -- modify recipe fields or ingredient list.
+- **Duplicate** -- copy an existing recipe to create a variant.
+- **CSV Import** -- bulk import recipes from a CSV file.
+
+### 17.5. Temperature Group Links
+
+Recipes can be linked to one or more temperature groups. This determines which kiln temperatures are compatible with the recipe and is used by the batch formation algorithm when grouping positions for co-firing.
+
+---
+
+## 18. Firing Profiles
+
+### 18.1. Overview
+
+Firing Profiles define the heating and cooling curves used during kiln firing. Each profile specifies multi-interval temperature stages: how fast the kiln heats from one temperature to another, and how it cools down afterward.
+
+**Path**: `/admin/firing-profiles`
+
+### 18.2. Profile Fields
+
+| Field | Description |
+|---|---|
+| **Name** | Profile name (e.g., "Standard 1012°C -- 14h") |
+| **Temperature Group** | Which temperature group this profile is for |
+| **Total Duration** | Expected total firing time in hours |
+| **Active** | Whether this profile is available for use |
+
+### 18.3. Heating and Cooling Stages
+
+Each profile has two lists of temperature stages:
+
+**Heating stages** (type = heating):
+- **Start Temp** -- starting temperature in °C (first stage typically starts at ~20°C).
+- **End Temp** -- target temperature for this stage.
+- **Rate** -- heating rate in °C per hour.
+
+**Cooling stages** (type = cooling):
+- **Start Temp** -- temperature at the start of cooling (typically the peak firing temperature).
+- **End Temp** -- temperature at the end of this cooling stage.
+- **Rate** -- cooling rate in °C per hour.
+
+You can add multiple intervals to create complex curves. For example:
+- Stage 1: 20°C -> 600°C at 100°C/h (slow initial heating)
+- Stage 2: 600°C -> 1012°C at 50°C/h (slow approach to target)
+- Cooling 1: 1012°C -> 600°C at 80°C/h (controlled initial cooling)
+- Cooling 2: 600°C -> 20°C at 120°C/h (natural cooling)
+
+### 18.4. Key Actions
+
+- **Create** -- define a new profile with heating and cooling stages.
+- **Edit** -- modify stages, rates, or duration.
+- **Activate / Deactivate** -- toggle profile availability.
+
+---
+
+## 19. Temperature Groups
+
+### 19.1. Overview
+
+Temperature Groups categorise firing temperatures. Each group has a name, a target temperature (°C), and a display order. Recipes and firing profiles are linked to temperature groups, allowing the system to automatically group compatible positions for co-firing.
+
+**Path**: `/admin/temperature-groups`
+
+### 19.2. Fields
+
+| Field | Description |
+|---|---|
+| **Name** | Group name (e.g., "Standard 1012°C", "Low-fire 800°C") |
+| **Temperature** | Target firing temperature in °C |
+| **Description** | Optional notes |
+| **Display Order** | Sort position in lists |
+
+### 19.3. Recipe Links
+
+Each temperature group shows its linked recipes. This makes it easy to see which glazes and engobes fire at the same temperature and can share a kiln batch.
+
+### 19.4. Key Actions
+
+- **Create** -- add a new temperature group.
+- **Edit** (inline) -- modify name, temperature, description, or display order.
+- **Delete** -- remove a temperature group (only if no recipes are linked).
+- **CSV Import** -- bulk import from a CSV file.
+
+---
+
+## 20. Stages Management
+
+### 20.1. Overview
+
+The Stages page manages the production stage definitions that positions move through. Each stage has a name and a sort order that determines its sequence in the production pipeline.
+
+**Path**: `/admin/stages`
+
+### 20.2. Fields
+
+| Field | Description |
+|---|---|
+| **Name** | Stage name (e.g., "Glazing", "Firing", "Sorting", "QC") |
+| **Order** | Numeric position in the production sequence |
+
+### 20.3. Key Actions
+
+- **Create** -- add a new production stage.
+- **Edit** -- modify name or order.
+- **Delete** -- remove a stage (only if not referenced by active positions).
+
+> **Note**: Stage definitions are used by the schedule engine and the position lifecycle. Changing stage order or names may affect how positions are displayed on the Schedule page.
+
+---
+
+## 21. Firing Schedules
+
+### 21.1. Overview
+
+The Firing Schedules page manages per-kiln firing schedule templates. A firing schedule defines the planned firing parameters for a specific kiln, including timing and configuration data.
+
+**Path**: `/admin/firing-schedules`
+
+### 21.2. Fields
+
+| Field | Description |
+|---|---|
+| **Kiln** | Which kiln this schedule applies to |
+| **Name** | Schedule name (e.g., "Standard weekday firing") |
+| **Schedule Data** | JSON configuration with firing parameters |
+| **Default** | Whether this is the default schedule for the kiln |
+
+### 21.3. Filters
+
+- **Kiln dropdown** -- filter schedules by kiln.
+
+### 21.4. Key Actions
+
+- **Create** -- add a new firing schedule for a kiln.
+- **Edit** -- modify schedule parameters.
+- **Set as Default** -- mark a schedule as the default for its kiln.
+- **Delete** -- remove a schedule.
+
+---
+
+## 22. Warehouses Management
+
+### 22.1. Overview
+
+The Warehouses page manages warehouse sections where materials are stored. Each section belongs to a factory and can be assigned to a specific user.
+
+**Path**: `/admin/warehouses`
+
+### 22.2. Fields
+
+| Field | Description |
+|---|---|
+| **Name** | Section name (e.g., "Raw Materials Store A") |
+| **Code** | Short identifier code |
+| **Factory** | Which factory this section belongs to |
+| **Type** | Section (physical), Warehouse (full warehouse), or Virtual |
+| **Managed By** | User responsible for this section |
+| **Display Order** | Sort position |
+| **Default** | Whether this is the default section for its factory |
+| **Active** | Whether the section is currently in use |
+
+### 22.3. Key Actions
+
+- **Create** -- add a new warehouse section.
+- **Edit** -- modify section details.
+- **Delete** -- remove a section.
+- **CSV Import** -- bulk import from a CSV file.
+
+---
+
+## 23. Packaging Management
+
+### 23.1. Overview
+
+The Packaging page manages box type definitions and their capacities. Each box type specifies how many pieces of each size fit per box, and which spacer materials are used.
+
+**Path**: `/admin/packaging`
+
+### 23.2. Key Concepts
+
+- **Box Type** -- a specific packaging box linked to a material (the box itself is a material in the inventory).
+- **Capacity** -- for each product size, defines the number of pieces per box and the area (m2) per box.
+- **Spacers** -- for each product size, defines which spacer material is used and how many spacers go in each box.
+
+### 23.3. Key Actions
+
+- **Create** -- add a new box type with capacities and spacer definitions.
+- **Edit** -- modify capacities or spacer configurations.
+- **CSV Import** -- bulk import packaging definitions.
+
+---
+
+## 24. Sizes Management
+
+### 24.1. Overview
+
+The Sizes page manages product size definitions. Each size has dimensions, a shape, and an automatically calculated area used for material consumption calculations.
+
+**Path**: `/admin/sizes`
+
+### 24.2. Fields
+
+| Field | Description |
+|---|---|
+| **Name** | Size name (e.g., "30x60", "20x20 round") |
+| **Width** | Width in mm |
+| **Height** | Height in mm |
+| **Thickness** | Default thickness in mm |
+| **Shape** | Rectangle, Round, Triangle, Octagon, Freeform |
+| **Shape Dimensions** | Additional dimension parameters for non-rectangular shapes |
+| **Area** | Calculated area in cm2 (automatic based on shape and dimensions) |
+| **Custom** | Whether this is a one-off custom size |
+
+### 24.3. Key Actions
+
+- **Create** -- add a new size definition with shape-specific dimension editors.
+- **Edit** -- modify dimensions or shape.
+- **Delete** -- remove a size (only if not used by active positions).
+- **CSV Import** -- bulk import sizes.
+
+---
+
+## 25. Tablo (Production Display)
+
+### 25.1. Overview
+
+The Tablo page is a full-screen production display board designed to be shown on a workshop TV or monitor. It provides a real-time overview of production status without requiring interaction.
+
+**Path**: `/tablo`
+
+### 25.2. Usage
+
+- Open the Tablo page on a dedicated screen in the production area.
+- The display auto-refreshes to show current production status.
+- No authentication actions are needed on this page -- it is a read-only view.
+
+---
+## 26. Tips and Best Practices
+
+### 26.1. Daily Routine
 
 **Morning (start of shift)**:
 1. Check the **Orders** tab -- any new orders?
@@ -817,27 +1390,27 @@ After you enter the consumption rate:
 17. Review and update consumption rules if needed.
 18. Consider a full factory reschedule if significant changes have occurred.
 
-### 10.2. Factory Selector Best Practices
+### 26.2. Factory Selector Best Practices
 
 - Always select a **specific factory** before performing operations that modify data (creating orders, forming batches, receiving materials).
 - Use "All Factories" mode only for overview and monitoring.
 - If you are assigned to one factory, the selector is hidden and your factory is always active.
 
-### 10.3. Handling Material Shortages
+### 26.3. Handling Material Shortages
 
 1. First, check the transaction history to understand consumption trends.
 2. Verify the min_balance setting is still accurate -- adjust via Edit if needed.
 3. Coordinate with the Purchaser to place orders for critical materials.
 4. Only use force-unblock for material shortages as a last resort -- it creates negative balances.
 
-### 10.4. Inventory Audit Best Practices
+### 26.4. Inventory Audit Best Practices
 
 - Perform regular audits (weekly or monthly) for high-turnover materials.
 - Always enter a clear, specific reason -- "recount" is not helpful; "Recount after spillage on March 15" is.
 - Compare the audit difference with recent transaction history to identify patterns.
 - If you consistently see discrepancies, review the consumption rules -- the rates may need adjustment.
 
-### 10.5. Notifications
+### 26.5. Notifications
 
 PM receives notifications for:
 - New orders arriving from Sales webhook
@@ -849,7 +1422,7 @@ The **Telegram bot** sends a daily summary at 21:00 (Indonesian language) with:
 - Full task list for the next day
 - KPI for the current day
 
-### 10.6. Keyboard and Interface Tips
+### 26.6. Keyboard and Interface Tips
 
 - Use the **search box** on the Materials page to quickly find materials by name or code.
 - On the Schedule page, the **Status Dropdown** shows only valid transitions -- you cannot accidentally select an invalid status.

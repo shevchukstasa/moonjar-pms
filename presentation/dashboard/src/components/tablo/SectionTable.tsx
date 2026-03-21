@@ -117,6 +117,7 @@ export function SectionTable({ positions: rawPositions, section, onSplitPosition
                   <th className="px-3 py-2">Collection</th>
                   <th className="px-3 py-2 text-right">Qty</th>
                   <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">Materials</th>
                   <th className="px-3 py-2">Type</th>
                   <th className="px-3 py-2 text-right">Delay</th>
                   {onSplitPosition && <th className="w-10 px-2 py-2" />}
@@ -135,7 +136,7 @@ export function SectionTable({ positions: rawPositions, section, onSplitPosition
               </tbody>
               <tfoot className="border-t bg-gray-50">
                 <tr>
-                  <td colSpan={11} className="px-3 py-2 text-xs font-semibold text-gray-600">
+                  <td colSpan={12} className="px-3 py-2 text-xs font-semibold text-gray-600">
                     Total: {filtered.length} positions
                   </td>
                   <td className="px-3 py-2 text-right text-xs font-semibold text-gray-600">

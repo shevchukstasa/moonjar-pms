@@ -13,7 +13,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { DataTable } from '@/components/ui/Table';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { StatusDropdown } from '@/components/tablo/StatusDropdown';
-import { formatEdgeProfile, formatPlaceOfApplication, formatShape } from '@/components/tablo/PositionRow';
+import { formatEdgeProfile, formatPlaceOfApplication, formatShape, MaterialStatusBadge } from '@/components/tablo/PositionRow';
 
 const VALID_STATUSES = [
   { value: 'new', label: 'New' },
@@ -138,6 +138,11 @@ export default function OrderDetailPage() {
         ) : (
           <Badge status={p.status} />
         ),
+    },
+    {
+      key: 'material_status',
+      header: 'Materials',
+      render: (p) => <MaterialStatusBadge status={p.material_status} />,
     },
     { key: 'product_type', header: 'Type' },
     {

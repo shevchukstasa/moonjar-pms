@@ -24,6 +24,20 @@ def _ev(val):
     return val.value if hasattr(val, "value") else str(val) if val else None
 
 
+def _compute_material_status(p) -> str:
+    """Derive material status from position fields (no extra DB queries)."""
+    if getattr(p, "materials_written_off_at", None):
+        return "consumed"
+    if getattr(p, "reservation_at", None):
+        return "reserved"
+    status_val = p.status.value if hasattr(p.status, "value") else str(p.status) if p.status else ""
+    if status_val == "insufficient_materials":
+        return "insufficient"
+    if status_val == "awaiting_consumption_data":
+        return "awaiting_data"
+    return "not_reserved"
+
+
 # --- Input schemas ---
 
 class OrderItemInput(BaseModel):
@@ -191,6 +205,8 @@ def _order_detail(order, db: Session) -> dict:
                 "estimated_kiln_id": str(p.estimated_kiln_id) if p.estimated_kiln_id else None,
                 "schedule_version": getattr(p, "schedule_version", None),
                 "created_at": p.created_at.isoformat() if p.created_at else None,
+                # Material tracking
+                "material_status": _compute_material_status(p),
             }
             for p in positions
         ],

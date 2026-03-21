@@ -35,6 +35,7 @@ export interface PositionItem {
   edge_profile_notes?: string | null;
   width_cm?: number | null;
   length_cm?: number | null;
+  material_status?: string | null;
 }
 
 /** Human-readable labels for place_of_application enum */
@@ -79,6 +80,25 @@ export function formatShape(shape?: string | null, widthCm?: number | null, leng
   // Default based on dimensions
   if (widthCm && lengthCm && widthCm === lengthCm) return 'Square';
   return 'Rectangle';
+}
+
+/** Material status badge configuration */
+const MATERIAL_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  reserved: { label: 'Reserved', color: 'bg-green-100 text-green-700' },
+  ordered: { label: 'Ordered', color: 'bg-yellow-100 text-yellow-700' },
+  insufficient: { label: 'Insufficient', color: 'bg-red-100 text-red-700' },
+  not_reserved: { label: 'Not Reserved', color: 'bg-gray-100 text-gray-600' },
+  consumed: { label: 'Consumed', color: 'bg-blue-100 text-blue-700' },
+  awaiting_data: { label: 'Awaiting Data', color: 'bg-orange-100 text-orange-700' },
+};
+
+export function MaterialStatusBadge({ status }: { status?: string | null }) {
+  const cfg = MATERIAL_STATUS_CONFIG[status ?? 'not_reserved'] ?? MATERIAL_STATUS_CONFIG['not_reserved'];
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${cfg.color}`}>
+      {cfg.label}
+    </span>
+  );
 }
 
 const NON_SPLITTABLE_STATUSES = ['in_kiln', 'fired'];
@@ -204,6 +224,7 @@ export function PositionRow({ position, index, section, onSplit, onMerge, mobile
             currentStatus={position.status}
             section={section}
           />
+          <MaterialStatusBadge status={position.material_status} />
           <span className="text-xs text-gray-500">{position.product_type}</span>
           <div className="ml-auto flex items-center gap-1">
             {onSplit && !NON_SPLITTABLE_STATUSES.includes(position.status) && (
@@ -289,6 +310,9 @@ export function PositionRow({ position, index, section, onSplit, onMerge, mobile
           currentStatus={position.status}
           section={section}
         />
+      </td>
+      <td className="px-3 py-2">
+        <MaterialStatusBadge status={position.material_status} />
       </td>
       <td className="px-3 py-2 text-sm">{position.product_type}</td>
       <td className={`px-3 py-2 text-xs text-right ${delay > 72 ? 'font-semibold text-red-600' : delay > 24 ? 'text-yellow-600' : 'text-gray-500'}`}>

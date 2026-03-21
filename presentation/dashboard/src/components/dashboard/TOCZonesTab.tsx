@@ -54,7 +54,11 @@ export function TOCZonesTab({ factoryId }: TOCZonesTabProps) {
     );
   }
 
-  if (!data || data.zones.length === 0) {
+  // API returns {items: [], summary: {}} but interface expects {zones: []}
+  const zones = (data as any)?.zones ?? (data as any)?.items ?? [];
+  const summary = data?.summary ?? { green: 0, yellow: 0, red: 0, total: 0 };
+
+  if (!data || zones.length === 0) {
     return (
       <EmptyState
         title="No buffer zone data"
@@ -63,10 +67,9 @@ export function TOCZonesTab({ factoryId }: TOCZonesTabProps) {
     );
   }
 
-  const { summary, zones } = data;
-  const greenOrders = zones.filter((z) => z.zone === 'green');
-  const yellowOrders = zones.filter((z) => z.zone === 'yellow');
-  const redOrders = zones.filter((z) => z.zone === 'red');
+  const greenOrders = zones.filter((z: any) => z.zone === 'green');
+  const yellowOrders = zones.filter((z: any) => z.zone === 'yellow');
+  const redOrders = zones.filter((z: any) => z.zone === 'red');
 
   return (
     <div className="space-y-6">

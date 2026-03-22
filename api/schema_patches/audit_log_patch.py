@@ -17,7 +17,7 @@ def apply(conn):
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             action VARCHAR(20) NOT NULL,
             table_name VARCHAR(100) NOT NULL,
-            record_id UUID NOT NULL,
+            record_id VARCHAR(100),
             old_data JSONB,
             user_id UUID,
             user_email VARCHAR(255),
@@ -55,5 +55,8 @@ def apply(conn):
         CREATE INDEX IF NOT EXISTS idx_audit_logs_action
         ON audit_logs (action)
     """))
-    conn.commit()
+    try:
+        conn.commit()
+    except Exception:
+        pass  # Transaction may already be committed by prior patches
     logger.info("Schema patch applied: audit_logs table (with new_data, request_path)")

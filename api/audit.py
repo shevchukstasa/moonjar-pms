@@ -222,10 +222,11 @@ def _audit_after_commit(session: Session):
             VALUES
                 (:id, :action, :table_name, :record_id,
                  CAST(:old_data AS JSONB), CAST(:new_data AS JSONB),
-                 CAST(:user_id AS UUID), :user_email, :ip_address, :request_path, :created_at)
+                 CAST(NULLIF(:user_id, '') AS UUID), :user_email,
+                 :ip_address, :request_path, :created_at)
         """)
 
-        with engine.connect() as conn:
+        with engine.begin() as conn:
             for rec in records:
                 try:
                     conn.execute(insert_sql, {
@@ -235,7 +236,7 @@ def _audit_after_commit(session: Session):
                         "record_id": rec["record_id"],
                         "old_data": json.dumps(rec["old_data"], default=str) if rec["old_data"] else None,
                         "new_data": json.dumps(rec["new_data"], default=str) if rec["new_data"] else None,
-                        "user_id": rec["user_id"],
+                        "user_id": rec["user_id"] or "",
                         "user_email": rec["user_email"],
                         "ip_address": rec["ip_address"],
                         "request_path": rec["request_path"],
@@ -244,7 +245,6 @@ def _audit_after_commit(session: Session):
                 except Exception as e:
                     logger.warning("Audit: failed to write %s on %s.%s: %s",
                                    rec["action"], rec["table_name"], rec["record_id"], e)
-            conn.commit()
 
         logger.debug("Audit: wrote %d records", len(records))
 

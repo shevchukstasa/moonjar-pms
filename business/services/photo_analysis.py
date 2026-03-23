@@ -55,10 +55,27 @@ _PACKING_PROMPT = (
     '"other_text": "<any other visible text>"}'
 )
 
+_DELIVERY_PROMPT = (
+    "You are analyzing a delivery note (surat jalan / накладная) photo from a stone/ceramic "
+    "factory. Read ALL information visible on the document.\n\n"
+    "Extract:\n"
+    "- Supplier name\n"
+    "- Delivery date\n"
+    "- Document/reference number\n"
+    "- List of items: material name, quantity, unit (kg/pcs/bags/liters)\n"
+    "- Any notes or remarks\n\n"
+    "Return ONLY valid JSON (no markdown, no code fences):\n"
+    '{"supplier": "<name or null>", "delivery_date": "<YYYY-MM-DD or null>", '
+    '"reference_number": "<string or null>", '
+    '"items": [{"material_name": "<name>", "quantity": <number>, "unit": "<unit>"}], '
+    '"notes": "<any additional text>"}'
+)
+
 PROMPTS = {
     "scale": _SCALE_PROMPT,
     "quality": _QUALITY_PROMPT,
     "packing": _PACKING_PROMPT,
+    "delivery": _DELIVERY_PROMPT,
 }
 
 
@@ -244,6 +261,15 @@ async def analyze_photo(
             if not readings.get("order_number"):
                 result["issues"].append("Could not read order number from label")
                 result["confidence"] = 0.5
+        elif analysis_type == "delivery":
+            items = readings.get("items", [])
+            if not items:
+                result["issues"].append("Could not read any items from delivery note")
+                result["confidence"] = 0.3
+            else:
+                result["confidence"] = 0.85
+            if not readings.get("supplier"):
+                result["issues"].append("Could not read supplier name")
 
         logger.info(
             f"Photo analysis complete: type={analysis_type}, "
@@ -318,5 +344,67 @@ def format_analysis_message(result: dict, position_ref: str | None = None) -> st
 
     if position_ref:
         lines.append(f"\nTersimpan untuk posisi {position_ref}")
+
+    return "\n".join(lines)
+
+
+def format_delivery_message(
+    result: dict,
+    matched_items: list[dict] | None = None,
+    unmatched_items: list[dict] | None = None,
+) -> str:
+    """
+    Format delivery analysis result as a Telegram message in Indonesian (Bahasa).
+
+    Args:
+        result: Analysis result from analyze_photo(analysis_type="delivery").
+        matched_items: List of dicts with keys: material_name, quantity, unit, new_balance, material_db_name.
+        unmatched_items: List of dicts with keys: material_name, quantity, unit.
+
+    Returns:
+        Formatted message string.
+    """
+    readings = result.get("readings", {})
+    supplier = readings.get("supplier") or "Tidak diketahui"
+    delivery_date = readings.get("delivery_date") or "Tidak diketahui"
+    reference = readings.get("reference_number") or "-"
+    notes = readings.get("notes") or ""
+
+    lines = [
+        f"Penerimaan Material — {delivery_date}",
+        f"Pemasok: {supplier}",
+        f"No. Ref: {reference}",
+        "",
+    ]
+
+    total_received = 0
+
+    if matched_items:
+        for item in matched_items:
+            lines.append(
+                f"  {item['material_name']}: +{item['quantity']} {item['unit']} "
+                f"(stok: {item.get('new_balance', '?')})"
+            )
+            total_received += 1
+
+    if unmatched_items:
+        for item in unmatched_items:
+            lines.append(
+                f"  {item['material_name']}: +{item['quantity']} {item['unit']} — "
+                f"tidak ditemukan di database"
+            )
+
+    lines.append("")
+    lines.append(f"Total: {total_received} item diterima")
+
+    if unmatched_items:
+        lines.append(f"{len(unmatched_items)} item tidak ditemukan di database")
+
+    if notes:
+        lines.append(f"\nCatatan: {notes}")
+
+    issues = result.get("issues", [])
+    if issues:
+        lines.append(f"\nPeringatan: {', '.join(issues)}")
 
     return "\n".join(lines)

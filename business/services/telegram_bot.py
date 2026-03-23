@@ -22,8 +22,12 @@ from api.models import (
     Factory, UserFactory, PositionPhoto,
     Recipe, RecipeMaterial, RecipeKilnConfig, Material,
     Batch, Resource, DailyTaskDistribution,
+    MaterialTransaction, MaterialStock, MaterialPurchaseRequest,
 )
-from api.enums import TaskStatus, PositionStatus, ResourceType, BatchStatus
+from api.enums import (
+    TaskStatus, PositionStatus, ResourceType, BatchStatus,
+    TransactionType, PurchaseStatus,
+)
 
 logger = logging.getLogger("moonjar.telegram_bot")
 
@@ -237,6 +241,20 @@ async def handle_photo(db: Session, message: dict) -> None:
         pos_label = _format_position_label(linked_position)
         ack_msg += f" Terhubung ke posisi {pos_label}."
     await _send_message(chat_id, ack_msg)
+
+    # ── Delivery Photo — special handler ─────────────────────────
+    if photo_type == "delivery":
+        try:
+            image_bytes_for_delivery = await download_telegram_photo(file_id)
+            if image_bytes_for_delivery:
+                await _handle_delivery_photo(
+                    db, chat_id, factory, user,
+                    image_bytes_for_delivery, photo, caption,
+                )
+        except Exception as e:
+            logger.error(f"Delivery photo handler failed: {e}", exc_info=True)
+            await _send_message(chat_id, "Gagal memproses foto pengiriman. Foto tetap tersimpan.")
+        return
 
     # ── LLM Photo Analysis ───────────────────────────────────────
     # Determine if this photo type warrants LLM analysis
@@ -1311,12 +1329,283 @@ def _extract_position_ref(caption: str) -> Optional[str]:
     return None
 
 
+def _fuzzy_match_material(db: Session, name: str) -> Optional[Material]:
+    """
+    Fuzzy-match a material name from a delivery note against the DB.
+
+    Strategy:
+      1. Exact match (case-insensitive)
+      2. Contains match (material name contains the query or vice versa)
+      3. Word-overlap match (at least 50% of words match)
+
+    Returns the best-matching Material or None.
+    """
+    if not name or not name.strip():
+        return None
+
+    name_lower = name.strip().lower()
+
+    # 1) Exact match (case-insensitive)
+    all_materials = db.query(Material).all()
+    for m in all_materials:
+        if m.name.lower() == name_lower:
+            return m
+
+    # 2) Contains match
+    for m in all_materials:
+        m_lower = m.name.lower()
+        if name_lower in m_lower or m_lower in name_lower:
+            return m
+
+    # 3) Word-overlap: at least 50% of query words found in material name
+    query_words = set(name_lower.split())
+    best_match = None
+    best_overlap = 0.0
+    for m in all_materials:
+        m_words = set(m.name.lower().split())
+        if not query_words:
+            continue
+        overlap = len(query_words & m_words) / len(query_words)
+        if overlap > best_overlap and overlap >= 0.5:
+            best_overlap = overlap
+            best_match = m
+
+    return best_match
+
+
+async def _handle_delivery_photo(
+    db: Session,
+    chat_id: int,
+    factory: Factory,
+    user: Optional[User],
+    image_bytes: bytes,
+    photo: PositionPhoto,
+    caption: str,
+) -> None:
+    """
+    Process a delivery note photo:
+    1. Analyze with Claude Vision to extract items
+    2. Fuzzy-match each item to materials in DB
+    3. Create MaterialTransaction records and update stock
+    4. Try to link with open purchase requests
+    5. Send formatted confirmation
+    """
+    from business.services.photo_analysis import analyze_photo, format_delivery_message
+    from decimal import Decimal
+
+    # ── Step 1: Analyze the delivery note photo ───────────────────
+    analysis_result = await analyze_photo(
+        image_bytes=image_bytes,
+        analysis_type="delivery",
+    )
+
+    if not analysis_result or not analysis_result.get("readings"):
+        await _send_message(
+            chat_id,
+            "Foto pengiriman diterima, tetapi tidak bisa membaca isi dokumen. "
+            "Silakan input penerimaan secara manual.",
+            parse_mode="",
+        )
+        return
+
+    readings = analysis_result.get("readings", {})
+    items = readings.get("items", [])
+
+    if not items:
+        await _send_message(
+            chat_id,
+            "Foto pengiriman diterima, tetapi tidak ditemukan daftar material. "
+            "Silakan input penerimaan secara manual.",
+            parse_mode="",
+        )
+        return
+
+    # ── Step 2-3: Match items and create transactions ─────────────
+    matched_items = []
+    unmatched_items = []
+
+    for item in items:
+        material_name = item.get("material_name", "")
+        try:
+            quantity = Decimal(str(item.get("quantity", 0)))
+        except Exception:
+            quantity = Decimal("0")
+        unit = item.get("unit", "")
+
+        if quantity <= 0:
+            continue
+
+        matched_material = _fuzzy_match_material(db, material_name)
+
+        if matched_material:
+            try:
+                # Create receive transaction
+                txn = MaterialTransaction(
+                    material_id=matched_material.id,
+                    factory_id=factory.id,
+                    type=TransactionType.RECEIVE,
+                    quantity=quantity,
+                    notes=f"Telegram delivery photo. Ref: {readings.get('reference_number', '-')}. "
+                          f"Supplier: {readings.get('supplier', '-')}",
+                    created_by=user.id if user else None,
+                )
+                db.add(txn)
+
+                # Update or create stock record
+                stock = (
+                    db.query(MaterialStock)
+                    .filter(
+                        MaterialStock.material_id == matched_material.id,
+                        MaterialStock.factory_id == factory.id,
+                    )
+                    .first()
+                )
+                if stock:
+                    stock.balance = (stock.balance or Decimal("0")) + quantity
+                    new_balance = stock.balance
+                else:
+                    stock = MaterialStock(
+                        material_id=matched_material.id,
+                        factory_id=factory.id,
+                        balance=quantity,
+                    )
+                    db.add(stock)
+                    new_balance = quantity
+
+                db.flush()  # ensure IDs are assigned
+
+                matched_items.append({
+                    "material_name": matched_material.name,
+                    "quantity": str(quantity),
+                    "unit": unit or matched_material.unit or "pcs",
+                    "new_balance": str(new_balance),
+                    "material_db_name": matched_material.name,
+                })
+
+                # ── Step 4: Try to link with purchase requests ────
+                _try_link_purchase_request(db, matched_material, factory, quantity)
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to create transaction for {material_name}: {e}",
+                    exc_info=True,
+                )
+                unmatched_items.append({
+                    "material_name": material_name,
+                    "quantity": str(quantity),
+                    "unit": unit,
+                })
+        else:
+            unmatched_items.append({
+                "material_name": material_name,
+                "quantity": str(quantity),
+                "unit": unit,
+            })
+
+    # Commit all transactions at once
+    try:
+        db.commit()
+    except Exception as e:
+        logger.error(f"Failed to commit delivery transactions: {e}", exc_info=True)
+        db.rollback()
+        await _send_message(
+            chat_id,
+            "Gagal menyimpan transaksi penerimaan ke database. "
+            "Silakan coba lagi atau input secara manual.",
+            parse_mode="",
+        )
+        return
+
+    # ── Step 5: Send formatted confirmation ───────────────────────
+    msg = format_delivery_message(analysis_result, matched_items, unmatched_items)
+    await _send_message(chat_id, msg, parse_mode="")
+
+    logger.info(
+        f"Delivery photo processed: {len(matched_items)} matched, "
+        f"{len(unmatched_items)} unmatched, factory={factory.name}"
+    )
+
+
+def _try_link_purchase_request(
+    db: Session,
+    material: Material,
+    factory: Factory,
+    received_qty,
+) -> None:
+    """
+    Try to find an open MaterialPurchaseRequest for this material and update it.
+    Looks for requests with status in (PENDING, APPROVED, SENT, IN_TRANSIT)
+    that contain this material in their materials_json.
+    """
+    from decimal import Decimal
+
+    open_statuses = [
+        PurchaseStatus.PENDING,
+        PurchaseStatus.APPROVED,
+        PurchaseStatus.SENT,
+        PurchaseStatus.IN_TRANSIT,
+    ]
+    try:
+        requests = (
+            db.query(MaterialPurchaseRequest)
+            .filter(
+                MaterialPurchaseRequest.factory_id == factory.id,
+                MaterialPurchaseRequest.status.in_(open_statuses),
+            )
+            .order_by(MaterialPurchaseRequest.created_at.desc())
+            .all()
+        )
+
+        material_id_str = str(material.id)
+        for pr in requests:
+            materials_json = pr.materials_json or []
+            for mat_entry in materials_json:
+                entry_mat_id = str(mat_entry.get("material_id", ""))
+                if entry_mat_id == material_id_str:
+                    # Found a matching purchase request — update status
+                    pr.actual_delivery_date = date.today()
+                    # Update received quantities
+                    received_json = pr.received_quantity_json or []
+                    received_json.append({
+                        "material_id": material_id_str,
+                        "quantity": float(received_qty),
+                        "source": "telegram_delivery_photo",
+                    })
+                    pr.received_quantity_json = received_json
+
+                    # Check if all items are received to update status
+                    total_items = len(materials_json)
+                    total_received = len(set(
+                        r.get("material_id") for r in received_json
+                    ))
+                    if total_received >= total_items:
+                        pr.status = PurchaseStatus.RECEIVED
+                    elif total_received > 0:
+                        pr.status = PurchaseStatus.PARTIALLY_RECEIVED
+
+                    logger.info(
+                        f"Linked delivery to purchase request {pr.id}, "
+                        f"status → {pr.status.value}"
+                    )
+                    return  # Link to the first matching request only
+
+    except Exception as e:
+        logger.warning(f"Failed to link purchase request: {e}", exc_info=True)
+
+
 def _detect_photo_type(caption: str) -> str:
     """Detect photo type from caption keywords."""
     if not caption:
         return "other"
     caption_lower = caption.lower()
 
+    # Delivery / material receiving — check BEFORE generic "material" matches
+    if any(kw in caption_lower for kw in (
+        "delivery", "arriving", "arrived", "raw material", "receiving", "receipt",
+        "barang", "tiba", "kirim", "kiriman", "surat jalan", "terima", "penerimaan",
+        "приход", "поставка", "накладная", "доставка",
+    )):
+        return "delivery"
     if any(kw in caption_lower for kw in ("scale", "timbang", "berat", "weight")):
         return "scale"
     if any(kw in caption_lower for kw in ("glaz", "glasir", "engobe")):
@@ -1329,6 +1618,9 @@ def _detect_photo_type(caption: str) -> str:
         return "packing"
     if any(kw in caption_lower for kw in ("quality", "qc", "kualitas")):
         return "quality"
+    # "материал" alone (Russian) — treat as delivery context
+    if "материал" in caption_lower or "material" in caption_lower:
+        return "delivery"
     return "other"
 
 

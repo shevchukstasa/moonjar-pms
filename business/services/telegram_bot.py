@@ -9,7 +9,10 @@ Processes incoming Telegram webhook updates:
 """
 
 import logging
+import time
+import uuid as _uuid
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -32,6 +35,38 @@ from api.enums import (
 logger = logging.getLogger("moonjar.telegram_bot")
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}"
+
+# ────────────────────────────────────────────────────────────────
+# Pending delivery confirmations (in-memory, expires after 30 min)
+# ────────────────────────────────────────────────────────────────
+
+_DELIVERY_TTL_SECONDS = 30 * 60  # 30 minutes
+
+_pending_deliveries: dict[str, dict] = {}
+# key   = unique delivery_id (short UUID)
+# value = {
+#     "created_at": float (time.time()),
+#     "chat_id": int,
+#     "factory_id": UUID,
+#     "user_id": UUID | None,
+#     "photo_id": UUID,
+#     "readings": dict,         # raw Vision output
+#     "matched_items": list,    # [{material_id, material_name, quantity, unit, ...}]
+#     "unmatched_items": list,  # [{index, original_name, quantity, unit}]
+# }
+
+
+def _cleanup_expired_deliveries() -> None:
+    """Remove pending deliveries older than TTL."""
+    now = time.time()
+    expired = [
+        did for did, d in _pending_deliveries.items()
+        if now - d["created_at"] > _DELIVERY_TTL_SECONDS
+    ]
+    for did in expired:
+        del _pending_deliveries[did]
+    if expired:
+        logger.info(f"Cleaned up {len(expired)} expired pending deliveries")
 
 
 # ────────────────────────────────────────────────────────────────
@@ -328,6 +363,23 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
             await answer_callback_query(callback_id, response_text)
         except Exception as e:
             logger.error(f"Callback handler error for data={data}: {e}", exc_info=True)
+            await answer_callback_query(callback_id, "Terjadi kesalahan")
+        return
+
+    # Delivery confirmation callbacks
+    if action in ("delivery_confirm", "delivery_cancel", "delivery_match", "delivery_new"):
+        try:
+            # Resolve chat_id from the callback_query message
+            cb_message = callback_query.get("message", {})
+            cb_chat_id = cb_message.get("chat", {}).get("id")
+            if not cb_chat_id:
+                await answer_callback_query(callback_id, "Terjadi kesalahan")
+                return
+            await _handle_delivery_callback(
+                db, data, callback_id, cb_chat_id, telegram_user_id,
+            )
+        except Exception as e:
+            logger.error(f"Delivery callback error for data={data}: {e}", exc_info=True)
             await answer_callback_query(callback_id, "Terjadi kesalahan")
         return
 
@@ -1383,15 +1435,16 @@ async def _handle_delivery_photo(
     caption: str,
 ) -> None:
     """
-    Process a delivery note photo:
+    Process a delivery note photo — TWO-STEP confirmation flow:
     1. Analyze with Claude Vision to extract items
     2. Fuzzy-match each item to materials in DB
-    3. Create MaterialTransaction records and update stock
-    4. Try to link with open purchase requests
-    5. Send formatted confirmation
+    3. Store pending delivery and send PREVIEW with inline buttons
+    4. Actual transactions are created only after PM clicks "Konfirmasi"
     """
-    from business.services.photo_analysis import analyze_photo, format_delivery_message
-    from decimal import Decimal
+    from business.services.photo_analysis import analyze_photo
+
+    # Cleanup expired pending deliveries on each new photo
+    _cleanup_expired_deliveries()
 
     # ── Step 1: Analyze the delivery note photo ───────────────────
     analysis_result = await analyze_photo(
@@ -1420,11 +1473,11 @@ async def _handle_delivery_photo(
         )
         return
 
-    # ── Step 2-3: Match items and create transactions ─────────────
-    matched_items = []
-    unmatched_items = []
+    # ── Step 2: Match items against DB materials ──────────────────
+    matched_items = []   # [{index, original_name, material_id, material_name, quantity, unit}]
+    unmatched_items = [] # [{index, original_name, quantity, unit}]
 
-    for item in items:
+    for idx, item in enumerate(items):
         material_name = item.get("material_name", "")
         try:
             quantity = Decimal(str(item.get("quantity", 0)))
@@ -1438,91 +1491,112 @@ async def _handle_delivery_photo(
         matched_material = _fuzzy_match_material(db, material_name)
 
         if matched_material:
-            try:
-                # Create receive transaction
-                txn = MaterialTransaction(
-                    material_id=matched_material.id,
-                    factory_id=factory.id,
-                    type=TransactionType.RECEIVE,
-                    quantity=quantity,
-                    notes=f"Telegram delivery photo. Ref: {readings.get('reference_number', '-')}. "
-                          f"Supplier: {readings.get('supplier', '-')}",
-                    created_by=user.id if user else None,
-                )
-                db.add(txn)
-
-                # Update or create stock record
-                stock = (
-                    db.query(MaterialStock)
-                    .filter(
-                        MaterialStock.material_id == matched_material.id,
-                        MaterialStock.factory_id == factory.id,
-                    )
-                    .first()
-                )
-                if stock:
-                    stock.balance = (stock.balance or Decimal("0")) + quantity
-                    new_balance = stock.balance
-                else:
-                    stock = MaterialStock(
-                        material_id=matched_material.id,
-                        factory_id=factory.id,
-                        balance=quantity,
-                    )
-                    db.add(stock)
-                    new_balance = quantity
-
-                db.flush()  # ensure IDs are assigned
-
-                matched_items.append({
-                    "material_name": matched_material.name,
-                    "quantity": str(quantity),
-                    "unit": unit or matched_material.unit or "pcs",
-                    "new_balance": str(new_balance),
-                    "material_db_name": matched_material.name,
-                })
-
-                # ── Step 4: Try to link with purchase requests ────
-                _try_link_purchase_request(db, matched_material, factory, quantity)
-
-            except Exception as e:
-                logger.error(
-                    f"Failed to create transaction for {material_name}: {e}",
-                    exc_info=True,
-                )
-                unmatched_items.append({
-                    "material_name": material_name,
-                    "quantity": str(quantity),
-                    "unit": unit,
-                })
+            matched_items.append({
+                "index": idx,
+                "original_name": material_name,
+                "material_id": str(matched_material.id),
+                "material_name": matched_material.name,
+                "quantity": str(quantity),
+                "unit": unit or matched_material.unit or "pcs",
+            })
         else:
             unmatched_items.append({
-                "material_name": material_name,
+                "index": idx,
+                "original_name": material_name,
                 "quantity": str(quantity),
                 "unit": unit,
             })
 
-    # Commit all transactions at once
-    try:
-        db.commit()
-    except Exception as e:
-        logger.error(f"Failed to commit delivery transactions: {e}", exc_info=True)
-        db.rollback()
-        await _send_message(
-            chat_id,
-            "Gagal menyimpan transaksi penerimaan ke database. "
-            "Silakan coba lagi atau input secara manual.",
-            parse_mode="",
-        )
-        return
+    # ── Step 3: Store pending delivery ────────────────────────────
+    delivery_id = _uuid.uuid4().hex[:12]
 
-    # ── Step 5: Send formatted confirmation ───────────────────────
-    msg = format_delivery_message(analysis_result, matched_items, unmatched_items)
-    await _send_message(chat_id, msg, parse_mode="")
+    _pending_deliveries[delivery_id] = {
+        "created_at": time.time(),
+        "chat_id": chat_id,
+        "factory_id": str(factory.id),
+        "user_id": str(user.id) if user else None,
+        "photo_id": str(photo.id),
+        "readings": readings,
+        "matched_items": matched_items,
+        "unmatched_items": unmatched_items,
+    }
+
+    # ── Step 4: Send preview message with inline buttons ──────────
+    supplier = readings.get("supplier", "Tidak diketahui")
+    ref_number = readings.get("reference_number", "-")
+    delivery_date = readings.get("date", "-")
+    total_items = len(matched_items) + len(unmatched_items)
+
+    lines = [
+        f"\U0001f4e6 Penerimaan Material — {supplier}",
+        f"\U0001f4cb Ref: {ref_number} | Tanggal: {delivery_date}",
+        "",
+        f"Ditemukan {total_items} item:",
+    ]
+
+    item_num = 0
+    for mi in matched_items:
+        item_num += 1
+        lines.append(
+            f"{item_num}. \u2705 {mi['original_name']} — {mi['quantity']} {mi['unit']}"
+            f" (\u2192 {mi['material_name']})"
+        )
+
+    for ui in unmatched_items:
+        item_num += 1
+        lines.append(
+            f"{item_num}. \u26a0\ufe0f \"{ui['original_name']}\" — {ui['quantity']} {ui['unit']}"
+            f" (TIDAK DITEMUKAN)"
+        )
+
+    preview_text = "\n".join(lines)
+
+    # Main confirm / cancel buttons
+    keyboard = [
+        [
+            {"text": "\u2705 Konfirmasi Penerimaan", "callback_data": f"delivery_confirm:{delivery_id}"},
+            {"text": "\u274c Batal", "callback_data": f"delivery_cancel:{delivery_id}"},
+        ]
+    ]
+
+    await send_message_with_buttons(chat_id, preview_text, keyboard, parse_mode="")
+
+    # ── Step 5: For each unmatched item, send suggestion buttons ──
+    for ui in unmatched_items:
+        suggestions = _suggest_materials(db, ui["original_name"], limit=5)
+        ui_idx = ui["index"]
+
+        suggestion_text = (
+            f"\u26a0\ufe0f Material tidak ditemukan: \"{ui['original_name']}\"\n"
+            f"Pilih material yang sesuai atau tambah baru:"
+        )
+
+        suggestion_rows = []
+        row: list[dict] = []
+        for sug in suggestions:
+            btn = {
+                "text": sug.name,
+                "callback_data": f"delivery_match:{delivery_id}:{ui_idx}:{sug.id}",
+            }
+            row.append(btn)
+            if len(row) >= 3:
+                suggestion_rows.append(row)
+                row = []
+        if row:
+            suggestion_rows.append(row)
+
+        # "Create New" button on its own row
+        suggestion_rows.append([{
+            "text": "\u2795 Buat Baru",
+            "callback_data": f"delivery_new:{delivery_id}:{ui_idx}",
+        }])
+
+        await send_message_with_buttons(chat_id, suggestion_text, suggestion_rows, parse_mode="")
 
     logger.info(
-        f"Delivery photo processed: {len(matched_items)} matched, "
-        f"{len(unmatched_items)} unmatched, factory={factory.name}"
+        f"Delivery photo preview sent: delivery_id={delivery_id}, "
+        f"{len(matched_items)} matched, {len(unmatched_items)} unmatched, "
+        f"factory={factory.name}"
     )
 
 
@@ -1591,6 +1665,313 @@ def _try_link_purchase_request(
 
     except Exception as e:
         logger.warning(f"Failed to link purchase request: {e}", exc_info=True)
+
+
+def _suggest_materials(db: Session, query: str, limit: int = 5) -> list:
+    """Find materials similar to the query string for unmatched delivery items."""
+    if not query or not query.strip():
+        return db.query(Material).order_by(Material.name).limit(limit).all()
+
+    query_lower = query.strip().lower()
+
+    # Search by ILIKE (contains)
+    results = (
+        db.query(Material)
+        .filter(Material.name.ilike(f"%{query_lower}%"))
+        .limit(limit)
+        .all()
+    )
+    if results:
+        return results
+
+    # Try individual words
+    words = query_lower.split()
+    for word in words:
+        if len(word) < 3:
+            continue
+        results = (
+            db.query(Material)
+            .filter(Material.name.ilike(f"%{word}%"))
+            .limit(limit)
+            .all()
+        )
+        if results:
+            return results
+
+    # Fallback: return most common materials
+    return db.query(Material).order_by(Material.name).limit(limit).all()
+
+
+async def _handle_delivery_callback(
+    db: Session,
+    callback_data: str,
+    callback_id: str,
+    chat_id: int,
+    telegram_user_id: int,
+) -> None:
+    """
+    Handle delivery confirmation inline button callbacks.
+
+    Callback data formats:
+      delivery_confirm:{id}
+      delivery_cancel:{id}
+      delivery_match:{id}:{item_index}:{material_id}
+      delivery_new:{id}:{item_index}
+    """
+    _cleanup_expired_deliveries()
+
+    parts = callback_data.split(":")
+    action = parts[0]
+    delivery_id = parts[1] if len(parts) > 1 else ""
+
+    pending = _pending_deliveries.get(delivery_id)
+    if not pending:
+        await answer_callback_query(callback_id, "Penerimaan sudah kedaluwarsa atau tidak ditemukan.")
+        await _send_message(chat_id, "Penerimaan ini sudah kedaluwarsa (>30 menit) atau sudah diproses.")
+        return
+
+    # ── delivery_cancel ───────────────────────────────────────────
+    if action == "delivery_cancel":
+        del _pending_deliveries[delivery_id]
+        await answer_callback_query(callback_id, "Dibatalkan")
+        await _send_message(chat_id, "\u274c Penerimaan dibatalkan.", parse_mode="")
+        logger.info(f"Delivery {delivery_id} cancelled by user {telegram_user_id}")
+        return
+
+    # ── delivery_match:{id}:{item_index}:{material_id} ───────────
+    if action == "delivery_match":
+        item_index = int(parts[2]) if len(parts) > 2 else -1
+        material_id = parts[3] if len(parts) > 3 else ""
+
+        # Find the unmatched item and move it to matched
+        target_item = None
+        for ui in pending["unmatched_items"]:
+            if ui["index"] == item_index:
+                target_item = ui
+                break
+
+        if not target_item:
+            await answer_callback_query(callback_id, "Item tidak ditemukan.")
+            return
+
+        # Look up the selected material
+        try:
+            material = db.query(Material).filter(Material.id == material_id).first()
+        except Exception:
+            material = None
+
+        if not material:
+            await answer_callback_query(callback_id, "Material tidak ditemukan.")
+            return
+
+        # Move from unmatched to matched
+        pending["unmatched_items"].remove(target_item)
+        pending["matched_items"].append({
+            "index": target_item["index"],
+            "original_name": target_item["original_name"],
+            "material_id": str(material.id),
+            "material_name": material.name,
+            "quantity": target_item["quantity"],
+            "unit": target_item.get("unit") or material.unit or "pcs",
+        })
+
+        await answer_callback_query(
+            callback_id,
+            f"\"{target_item['original_name']}\" \u2192 {material.name}",
+        )
+        await _send_message(
+            chat_id,
+            f"\u2705 \"{target_item['original_name']}\" dipetakan ke *{material.name}*",
+        )
+        logger.info(
+            f"Delivery {delivery_id}: matched \"{target_item['original_name']}\" "
+            f"-> {material.name} (id={material.id})"
+        )
+        return
+
+    # ── delivery_new:{id}:{item_index} ────────────────────────────
+    if action == "delivery_new":
+        item_index = int(parts[2]) if len(parts) > 2 else -1
+
+        target_item = None
+        for ui in pending["unmatched_items"]:
+            if ui["index"] == item_index:
+                target_item = ui
+                break
+
+        if not target_item:
+            await answer_callback_query(callback_id, "Item tidak ditemukan.")
+            return
+
+        # Create new material with the Vision-extracted name
+        try:
+            new_material = Material(
+                name=target_item["original_name"].strip(),
+                unit=target_item.get("unit") or "pcs",
+                is_active=True,
+            )
+            db.add(new_material)
+            db.flush()
+
+            # Move from unmatched to matched
+            pending["unmatched_items"].remove(target_item)
+            pending["matched_items"].append({
+                "index": target_item["index"],
+                "original_name": target_item["original_name"],
+                "material_id": str(new_material.id),
+                "material_name": new_material.name,
+                "quantity": target_item["quantity"],
+                "unit": target_item.get("unit") or new_material.unit or "pcs",
+            })
+
+            db.commit()
+
+            await answer_callback_query(callback_id, f"Material \"{new_material.name}\" dibuat")
+            await _send_message(
+                chat_id,
+                f"\u2795 Material baru dibuat: *{new_material.name}*\n"
+                f"\"{target_item['original_name']}\" dipetakan ke material baru ini.",
+            )
+            logger.info(
+                f"Delivery {delivery_id}: created new material \"{new_material.name}\" "
+                f"(id={new_material.id}) for \"{target_item['original_name']}\""
+            )
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to create new material: {e}", exc_info=True)
+            await answer_callback_query(callback_id, "Gagal membuat material baru")
+            await _send_message(chat_id, f"Gagal membuat material baru: {e}", parse_mode="")
+        return
+
+    # ── delivery_confirm:{id} ─────────────────────────────────────
+    if action == "delivery_confirm":
+        if pending["unmatched_items"]:
+            unmatched_names = ", ".join(
+                f"\"{ui['original_name']}\"" for ui in pending["unmatched_items"]
+            )
+            await answer_callback_query(
+                callback_id,
+                "Masih ada item belum dipetakan!",
+                show_alert=True,
+            )
+            await _send_message(
+                chat_id,
+                f"\u26a0\ufe0f Masih ada item yang belum dipetakan: {unmatched_names}\n"
+                f"Petakan terlebih dahulu atau batalkan penerimaan.",
+                parse_mode="",
+            )
+            return
+
+        # All items matched — execute transactions
+        try:
+            await _execute_delivery_transactions(db, pending)
+
+            del _pending_deliveries[delivery_id]
+
+            await answer_callback_query(callback_id, "Penerimaan dikonfirmasi!")
+
+            # Build confirmation message
+            readings = pending["readings"]
+            supplier = readings.get("supplier", "Tidak diketahui")
+            ref_number = readings.get("reference_number", "-")
+
+            lines = [
+                f"\u2705 Penerimaan Dikonfirmasi — {supplier}",
+                f"Ref: {ref_number}",
+                "",
+            ]
+            for mi in pending["matched_items"]:
+                lines.append(
+                    f"  \u2022 {mi['material_name']} — {mi['quantity']} {mi['unit']}"
+                )
+            lines.append("")
+            lines.append(f"Total: {len(pending['matched_items'])} material diterima dan stok diperbarui.")
+
+            await _send_message(chat_id, "\n".join(lines), parse_mode="")
+
+            logger.info(
+                f"Delivery {delivery_id} confirmed: "
+                f"{len(pending['matched_items'])} items committed"
+            )
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to commit delivery {delivery_id}: {e}", exc_info=True)
+            await answer_callback_query(callback_id, "Gagal menyimpan transaksi!")
+            await _send_message(
+                chat_id,
+                f"Gagal menyimpan transaksi penerimaan: {e}\n"
+                f"Silakan coba lagi atau input secara manual.",
+                parse_mode="",
+            )
+        return
+
+    # Unknown action
+    await answer_callback_query(callback_id, "OK")
+
+
+async def _execute_delivery_transactions(db: Session, pending: dict) -> None:
+    """
+    Execute the actual DB transactions for a confirmed delivery.
+    Creates MaterialTransaction records, updates MaterialStock,
+    and links to open purchase requests.
+    """
+    factory_id = pending["factory_id"]
+    user_id = pending["user_id"]
+    readings = pending["readings"]
+
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory:
+        raise ValueError(f"Factory {factory_id} not found")
+
+    for mi in pending["matched_items"]:
+        material = db.query(Material).filter(Material.id == mi["material_id"]).first()
+        if not material:
+            logger.warning(f"Material {mi['material_id']} not found, skipping")
+            continue
+
+        quantity = Decimal(mi["quantity"])
+
+        # Create receive transaction
+        txn = MaterialTransaction(
+            material_id=material.id,
+            factory_id=factory.id,
+            type=TransactionType.RECEIVE,
+            quantity=quantity,
+            notes=(
+                f"Telegram delivery photo. "
+                f"Ref: {readings.get('reference_number', '-')}. "
+                f"Supplier: {readings.get('supplier', '-')}"
+            ),
+            created_by=user_id,
+        )
+        db.add(txn)
+
+        # Update or create stock record
+        stock = (
+            db.query(MaterialStock)
+            .filter(
+                MaterialStock.material_id == material.id,
+                MaterialStock.factory_id == factory.id,
+            )
+            .first()
+        )
+        if stock:
+            stock.balance = (stock.balance or Decimal("0")) + quantity
+        else:
+            stock = MaterialStock(
+                material_id=material.id,
+                factory_id=factory.id,
+                balance=quantity,
+            )
+            db.add(stock)
+
+        db.flush()
+
+        # Try to link with purchase requests
+        _try_link_purchase_request(db, material, factory, quantity)
+
+    db.commit()
 
 
 def _detect_photo_type(caption: str) -> str:

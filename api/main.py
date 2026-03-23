@@ -1797,26 +1797,17 @@ async def lifespan(app: FastAPI):
     ]
 
     patch_ok = 0
+    import importlib
     for name, module_path, func_name in _patches:
         try:
-            import importlib
             mod = importlib.import_module(module_path)
             fn = getattr(mod, func_name)
-            # Each patch gets a completely fresh connection from the pool
-            conn = engine.connect()
-            try:
-                trans = conn.begin()
+            # Each patch gets its own fresh connection + transaction via context manager.
+            # This avoids "closed transaction" errors when a prior patch commits/closes.
+            with engine.connect() as conn:
                 fn(conn)
-                trans.commit()
-                patch_ok += 1
-            except Exception as inner_e:
-                try:
-                    trans.rollback()
-                except Exception:
-                    pass
-                raise inner_e
-            finally:
-                conn.close()
+                conn.commit()
+            patch_ok += 1
         except Exception as e:
             logger.warning("Schema patch '%s' warning (non-fatal): %s", name, e)
 

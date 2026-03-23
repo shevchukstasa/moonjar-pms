@@ -21,6 +21,7 @@ export interface FinishedGoodsListParams {
   color?: string;
   size?: string;
   collection?: string;
+  product_type?: string;
 }
 
 export interface FinishedGoodsListResponse {

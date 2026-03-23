@@ -242,6 +242,72 @@ INDO_TO_EN: dict[str, str] = {
 # Number of terms: 170+ covering stones, chemicals, packaging, colors,
 # units, product types, shapes, tools, minerals, consumables.
 
+# ────────────────────────────────────────────────────────────────
+# Supplier → Material Type mapping
+# ────────────────────────────────────────────────────────────────
+
+# Known suppliers and what they deliver — everything from them is this type
+SUPPLIER_MATERIAL_TYPE: dict[str, str] = {
+    "bestone": "stone",
+    "cv bestone": "stone",
+    "cv. bestone": "stone",
+    "bestone indonesia": "stone",
+    "cv bestone indonesia": "stone",
+    "cv. bestone indonesia": "stone",
+    # Add more suppliers as they appear
+}
+
+# ────────────────────────────────────────────────────────────────
+# Color variants → strip to base material
+# ────────────────────────────────────────────────────────────────
+
+# Colors that appear in stone names but don't change the base material
+# "Grey Lava" → base material is "Lava", color is "Grey"
+STRIP_COLORS = {
+    "grey", "gray", "black", "white", "red", "green", "blue",
+    "brown", "dark", "light", "cream", "beige", "pink", "yellow",
+    "abu", "abu-abu", "hitam", "putih", "merah", "hijau", "biru",
+    "coklat", "gelap", "terang", "kuning", "krem",
+}
+
+# Size ranges → product subtype
+def guess_subtype_from_size(size_str: str) -> str | None:
+    """Guess product subtype from size dimensions.
+    Small tiles (<25cm) → tiles, large (>25cm) → table_top, round → sinks"""
+    if not size_str:
+        return None
+    # Check for round/diameter indicator
+    if "ø" in size_str.lower() or "dia" in size_str.lower():
+        return "sinks"
+    m = re.match(r'(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)', size_str)
+    if m:
+        w, h = float(m.group(1)), float(m.group(2))
+        # Sizes in cm
+        if w >= 25 or h >= 25:
+            return "table_top"
+        return "tiles"
+    return "tiles"  # default
+
+
+def strip_color_from_name(name: str) -> str:
+    """Remove color words to get base material name.
+    'Grey Lava 5x20' → 'Lava 5x20'"""
+    words = name.split()
+    filtered = [w for w in words if w.lower() not in STRIP_COLORS]
+    return " ".join(filtered) if filtered else name
+
+
+def get_supplier_material_type(supplier_name: str | None) -> str | None:
+    """If we know the supplier, return their default material type."""
+    if not supplier_name:
+        return None
+    key = supplier_name.lower().strip()
+    # Try progressively shorter prefixes
+    for known, mtype in SUPPLIER_MATERIAL_TYPE.items():
+        if known in key:
+            return mtype
+    return None
+
 
 # ────────────────────────────────────────────────────────────────
 # Size normalization
@@ -375,6 +441,7 @@ async def find_best_match(
     delivery_unit: str,
     db_materials: list[dict],
     threshold: float = 0.4,
+    supplier_name: str | None = None,
 ) -> dict:
     """
     Find the best matching material from the database.
@@ -405,18 +472,30 @@ async def find_best_match(
     translated = translate_material_name(delivery_name)
     # Translate the unit too
     translated_unit = INDO_TO_EN.get(delivery_unit.lower().strip(), delivery_unit)
+
+    # Strip color to get base material name for better matching
+    # "Grey Lava 5x20" → "Lava 5x20" → matches "Lava Stone" in DB
+    base_name = strip_color_from_name(translated)
     delivery_tokens = tokenize_for_matching(delivery_name)
+    base_tokens = tokenize_for_matching(base_name)
+
+    # Supplier context: if we know supplier type, filter/boost relevant materials
+    supplier_type = get_supplier_material_type(supplier_name)
 
     logger.debug(
-        "Matching delivery item: original=%r, translated=%r, tokens=%s",
-        delivery_name, translated, delivery_tokens,
+        "Matching delivery item: original=%r, translated=%r, base=%r, tokens=%s, supplier_type=%s",
+        delivery_name, translated, base_name, delivery_tokens, supplier_type,
     )
 
     # Score all DB materials
     scored: list[tuple[float, dict]] = []
     for mat in db_materials:
         db_tokens = tokenize_for_matching(mat["name"])
-        score = calculate_match_score(delivery_tokens, db_tokens)
+
+        # Score with both full name and base name (without color), take best
+        score_full = calculate_match_score(delivery_tokens, db_tokens)
+        score_base = calculate_match_score(base_tokens, db_tokens)
+        score = max(score_full, score_base)
 
         # ── Bonus: exact size match ────────────────────────────
         delivery_sizes = re.findall(r'\d+(?:\.\d+)?x\d+(?:\.\d+)?', normalize_size(delivery_name))
@@ -429,14 +508,14 @@ async def find_best_match(
         if mat_unit and mat_unit == translated_unit.lower():
             score += 0.05
 
-        # ── Bonus: material type match (guessed) ──────────────
-        guessed_type = _guess_material_type(translated)
+        # ── Bonus: material type match (guessed or from supplier) ──
+        guessed_type = supplier_type or _guess_material_type(translated)
         if mat.get("material_type") and mat["material_type"] == guessed_type:
-            score += 0.05
+            score += 0.1  # bigger bonus when supplier confirms type
 
-        # ── Penalty: size mismatch ─────────────────────────────
-        if delivery_sizes and db_sizes and delivery_sizes[0] != db_sizes[0]:
-            score -= 0.2
+        # ── Bonus: supplier confirms this is stone and material is stone ──
+        if supplier_type == "stone" and mat.get("material_type") == "stone":
+            score += 0.1  # strong boost for matching supplier type
 
         score = max(0.0, min(1.0, score))
 

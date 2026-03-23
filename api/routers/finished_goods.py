@@ -42,6 +42,7 @@ async def list_finished_goods(
     color: str | None = None,
     size: str | None = None,
     collection: str | None = None,
+    product_type: str | None = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -55,6 +56,8 @@ async def list_finished_goods(
         query = query.filter(FinishedGoodsStock.size == size)
     if collection:
         query = query.filter(FinishedGoodsStock.collection.ilike(f"%{collection}%"))
+    if product_type:
+        query = query.filter(FinishedGoodsStock.product_type == product_type)
 
     total = query.count()
     items = query.order_by(FinishedGoodsStock.updated_at.desc()).offset(

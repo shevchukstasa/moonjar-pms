@@ -22,6 +22,14 @@ function availabilityColor(available: number, quantity: number): string {
 
 const PER_PAGE = 50;
 
+const PRODUCT_TYPE_TABS = [
+  { value: '', label: 'All' },
+  { value: 'tile', label: 'Tiles' },
+  { value: 'sink', label: 'Sinks' },
+  { value: 'table_top', label: 'Table Top' },
+  { value: 'custom', label: 'Custom' },
+] as const;
+
 // ── Main Page ────────────────────────────────────────────────────────────
 
 export default function FinishedGoodsPage() {
@@ -30,6 +38,7 @@ export default function FinishedGoodsPage() {
   // Filters
   const [page, setPage] = useState(1);
   const [factoryFilter, setFactoryFilter] = useState('');
+  const [productTypeFilter, setProductTypeFilter] = useState('');
   const [colorSearch, setColorSearch] = useState('');
   const [debouncedColor, setDebouncedColor] = useState('');
 
@@ -63,12 +72,13 @@ export default function FinishedGoodsPage() {
 
   // Data query
   const { data, isLoading } = useQuery({
-    queryKey: ['finished-goods', page, factoryFilter, debouncedColor],
+    queryKey: ['finished-goods', page, factoryFilter, productTypeFilter, debouncedColor],
     queryFn: () =>
       finishedGoodsApi.list({
         page,
         per_page: PER_PAGE,
         factory_id: factoryFilter || undefined,
+        product_type: productTypeFilter || undefined,
         color: debouncedColor || undefined,
       }),
     placeholderData: keepPreviousData,
@@ -156,6 +166,24 @@ export default function FinishedGoodsPage() {
         </div>
       </div>
 
+      {/* Product type tabs */}
+      <div className="flex gap-1 border-b border-gray-200">
+        {PRODUCT_TYPE_TABS.map((tab) => (
+          <button
+            key={tab.value}
+            onClick={() => { setProductTypeFilter(tab.value); setPage(1); }}
+            className={cn(
+              'px-4 py-2 text-sm font-medium rounded-t-lg transition-colors',
+              productTypeFilter === tab.value
+                ? 'bg-white border border-b-white border-gray-200 text-gray-900 -mb-px'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* Filters */}
       <Card className="p-4">
         <div className="flex flex-wrap items-end gap-4">
@@ -196,6 +224,7 @@ export default function FinishedGoodsPage() {
                   <th className="px-4 py-3">Color</th>
                   <th className="px-4 py-3">Size</th>
                   <th className="px-4 py-3">Collection</th>
+                  <th className="px-4 py-3">Type</th>
                   <th className="px-4 py-3">Factory</th>
                   <th className="px-4 py-3 text-right">Qty</th>
                   <th className="px-4 py-3 text-right">Reserved</th>
@@ -209,6 +238,7 @@ export default function FinishedGoodsPage() {
                     <td className="px-4 py-3 font-medium text-gray-900">{item.color}</td>
                     <td className="px-4 py-3 text-gray-700">{item.size}</td>
                     <td className="px-4 py-3 text-gray-600">{item.collection || '-'}</td>
+                    <td className="px-4 py-3 text-gray-600">{item.product_type || '-'}</td>
                     <td className="px-4 py-3 text-gray-600">{item.factory_name || '-'}</td>
                     <td className="px-4 py-3 text-right font-mono text-gray-900">{item.quantity}</td>
                     <td className="px-4 py-3 text-right font-mono text-gray-600">{item.reserved_quantity}</td>
@@ -228,7 +258,7 @@ export default function FinishedGoodsPage() {
               </tbody>
               <tfoot>
                 <tr className="border-t-2 bg-gray-50 font-semibold">
-                  <td className="px-4 py-3" colSpan={4}>Totals (this page)</td>
+                  <td className="px-4 py-3" colSpan={5}>Totals (this page)</td>
                   <td className="px-4 py-3 text-right font-mono">{totals.qty}</td>
                   <td className="px-4 py-3 text-right font-mono">{totals.reserved}</td>
                   <td className="px-4 py-3 text-right">
@@ -282,9 +312,11 @@ export default function FinishedGoodsPage() {
             label="Product Type"
             options={[
               { value: 'tile', label: 'Tile' },
-              { value: 'brick', label: 'Brick' },
-              { value: 'slab', label: 'Slab' },
-              { value: 'other', label: 'Other' },
+              { value: 'sink', label: 'Sink' },
+              { value: 'table_top', label: 'Table Top' },
+              { value: 'countertop', label: 'Countertop' },
+              { value: '3d', label: '3D' },
+              { value: 'custom', label: 'Custom' },
             ]}
             value={form.product_type}
             onChange={(e) => setForm((p) => ({ ...p, product_type: e.target.value }))}

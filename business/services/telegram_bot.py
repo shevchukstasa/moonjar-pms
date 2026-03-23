@@ -70,6 +70,24 @@ def _cleanup_expired_deliveries() -> None:
 
 
 # ────────────────────────────────────────────────────────────────
+# Pending delivery edit sessions (in-memory)
+# ────────────────────────────────────────────────────────────────
+# key = chat_id (int)
+# value = {
+#     "delivery_id": str,
+#     "current_index": int,         # index into the combined items list
+#     "awaiting": str | None,       # "material_name" | "material_type" | "material_subtype" | "qty" | None
+#     "new_material_name": str,     # temp storage for Add New flow
+#     "new_material_type": str,     # temp storage for Add New flow
+#     "items": list[dict],          # ALL items (matched + unmatched), each has:
+#         # "index": int, "original_name": str, "quantity": str, "unit": str,
+#         # "material_id": str | None, "material_name": str | None,
+#         # "status": "matched" | "unmatched" | "skipped"
+# }
+_pending_edits: dict[int, dict] = {}
+
+
+# ────────────────────────────────────────────────────────────────
 # Public API
 # ────────────────────────────────────────────────────────────────
 
@@ -103,6 +121,14 @@ async def handle_update(db: Session, update_data: dict) -> None:
         if text.startswith("/"):
             await handle_command(db, message)
             return
+
+        # Check if this chat has an active delivery edit session awaiting text input
+        msg_chat_id = message.get("chat", {}).get("id")
+        if msg_chat_id and msg_chat_id in _pending_edits and text:
+            edit_session = _pending_edits[msg_chat_id]
+            if edit_session.get("awaiting"):
+                await _handle_edit_text_input(db, msg_chat_id, text)
+                return
 
         # Plain text in private chat — could be email for linking flow
         chat_type = message.get("chat", {}).get("type", "")
@@ -367,7 +393,10 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
         return
 
     # Delivery confirmation callbacks
-    if action in ("delivery_confirm", "delivery_cancel", "delivery_match", "delivery_new"):
+    if action in (
+        "delivery_confirm", "delivery_cancel", "delivery_match", "delivery_new",
+        "delivery_edit", "dedit",
+    ):
         try:
             # Resolve chat_id from the callback_query message
             cb_message = callback_query.get("message", {})
@@ -1718,12 +1747,15 @@ async def _handle_delivery_photo(
 
     preview_text = "\n".join(lines)
 
-    # Main confirm / cancel buttons
+    # Main confirm / cancel / edit buttons
     keyboard = [
         [
             {"text": "\u2705 Konfirmasi Penerimaan", "callback_data": f"delivery_confirm:{delivery_id}"},
+        ],
+        [
+            {"text": "\u270f\ufe0f Edit Items", "callback_data": f"delivery_edit:{delivery_id}"},
             {"text": "\u274c Batal", "callback_data": f"delivery_cancel:{delivery_id}"},
-        ]
+        ],
     ]
 
     await send_message_with_buttons(chat_id, preview_text, keyboard, parse_mode="")
@@ -1900,6 +1932,9 @@ async def _handle_delivery_callback(
     # ── delivery_cancel ───────────────────────────────────────────
     if action == "delivery_cancel":
         del _pending_deliveries[delivery_id]
+        # Clean up any active edit session for this chat
+        if chat_id in _pending_edits and _pending_edits[chat_id].get("delivery_id") == delivery_id:
+            del _pending_edits[chat_id]
         await answer_callback_query(callback_id, "Dibatalkan")
         await _send_message(chat_id, "\u274c Penerimaan dibatalkan.", parse_mode="")
         logger.info(f"Delivery {delivery_id} cancelled by user {telegram_user_id}")
@@ -2039,6 +2074,9 @@ async def _handle_delivery_callback(
             await _execute_delivery_transactions(db, pending)
 
             del _pending_deliveries[delivery_id]
+            # Clean up any active edit session
+            if chat_id in _pending_edits and _pending_edits[chat_id].get("delivery_id") == delivery_id:
+                del _pending_edits[chat_id]
 
             await answer_callback_query(callback_id, "Penerimaan dikonfirmasi!")
 
@@ -2076,6 +2114,33 @@ async def _handle_delivery_callback(
                 f"Silakan coba lagi atau input secara manual.",
                 parse_mode="",
             )
+        return
+
+    # ── delivery_edit:{id} — start editing items ────────────────
+    if action == "delivery_edit":
+        # Build edit items list from pending delivery
+        items = _build_edit_items_list(pending)
+        _pending_edits[chat_id] = {
+            "delivery_id": delivery_id,
+            "current_index": 0,
+            "awaiting": None,
+            "new_material_name": "",
+            "new_material_type": "",
+            "items": items,
+        }
+        await answer_callback_query(callback_id, "Mode edit aktif")
+        await _send_message(
+            chat_id,
+            f"\u270f\ufe0f Mode edit aktif — {len(items)} item.\n"
+            f"Edit satu per satu atau tekan Selesai Edit kapan saja.",
+            parse_mode="",
+        )
+        await _send_edit_item_prompt(chat_id, delivery_id, _pending_edits[chat_id])
+        return
+
+    # ── dedit:* — edit session callbacks ──────────────────────────
+    if action == "dedit":
+        await _handle_dedit_callback(db, callback_data, callback_id, chat_id, telegram_user_id)
         return
 
     # Unknown action
@@ -2210,6 +2275,600 @@ async def _send_message(
     except Exception as e:
         logger.warning(f"sendMessage failed (chat={chat_id}): {e}")
         return None
+
+
+# ────────────────────────────────────────────────────────────────
+# Delivery Edit Flow
+# ────────────────────────────────────────────────────────────────
+
+async def _edit_telegram_message(
+    chat_id: int,
+    message_id: int,
+    text: str,
+    inline_keyboard: Optional[list[list[dict]]] = None,
+    parse_mode: str = "",
+) -> Optional[dict]:
+    """Edit an existing Telegram message (text + optional inline keyboard)."""
+    settings = get_settings()
+    token = settings.TELEGRAM_BOT_TOKEN
+    if not token:
+        return None
+
+    url = f"{TELEGRAM_API.format(token=token)}/editMessageText"
+    payload: dict = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": parse_mode,
+    }
+    if inline_keyboard is not None:
+        payload["reply_markup"] = {"inline_keyboard": inline_keyboard}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json=payload, timeout=10.0)
+            data = resp.json()
+            if not data.get("ok"):
+                logger.warning(f"editMessageText failed: {data.get('description')}")
+            return data
+    except Exception as e:
+        logger.warning(f"editMessageText failed: {e}")
+        return None
+
+
+def _build_edit_items_list(pending: dict) -> list[dict]:
+    """Build a unified items list from matched + unmatched items in a pending delivery."""
+    items = []
+    for mi in pending["matched_items"]:
+        items.append({
+            "index": mi["index"],
+            "original_name": mi["original_name"],
+            "quantity": mi["quantity"],
+            "unit": mi.get("unit", "pcs"),
+            "material_id": mi["material_id"],
+            "material_name": mi["material_name"],
+            "status": "matched",
+        })
+    for ui in pending["unmatched_items"]:
+        items.append({
+            "index": ui["index"],
+            "original_name": ui["original_name"],
+            "quantity": ui["quantity"],
+            "unit": ui.get("unit", "pcs"),
+            "material_id": None,
+            "material_name": None,
+            "status": "unmatched",
+        })
+    # Sort by original index
+    items.sort(key=lambda x: x["index"])
+    return items
+
+
+async def _send_edit_item_prompt(chat_id: int, delivery_id: str, edit_session: dict) -> None:
+    """Send the prompt for editing the current item in the edit session."""
+    items = edit_session["items"]
+    current_idx = edit_session["current_index"]
+
+    # Find the next non-skipped item starting from current_index
+    while current_idx < len(items) and items[current_idx]["status"] == "skipped":
+        current_idx += 1
+    edit_session["current_index"] = current_idx
+
+    if current_idx >= len(items):
+        # All items processed — show done
+        await _send_edit_summary(chat_id, delivery_id, edit_session)
+        return
+
+    item = items[current_idx]
+    total = len(items)
+    num = current_idx + 1
+
+    status_icon = "\u2705" if item["status"] == "matched" else "\u26a0\ufe0f"
+    match_info = ""
+    if item["status"] == "matched":
+        match_info = f"\n\u2192 {item['material_name']}"
+
+    text = (
+        f"{status_icon} Item {num}/{total}: {item['original_name']}\n"
+        f"Jumlah: {item['quantity']} {item['unit']}"
+        f"{match_info}\n\n"
+        f"Pilih aksi:"
+    )
+
+    # Use compact callback prefix "dedit" to stay within 64-byte Telegram limit
+    # Format: dedit:{delivery_id}:{action}:{item_list_pos}
+    pos = str(current_idx)
+    keyboard = [
+        [
+            {"text": "\U0001f50d Cari di DB", "callback_data": f"dedit:{delivery_id}:match:{pos}"},
+            {"text": "\u2795 Buat Baru", "callback_data": f"dedit:{delivery_id}:new:{pos}"},
+        ],
+        [
+            {"text": "\u270f\ufe0f Ubah Qty", "callback_data": f"dedit:{delivery_id}:qty:{pos}"},
+            {"text": "\u23ed Lewati", "callback_data": f"dedit:{delivery_id}:skip:{pos}"},
+        ],
+        [
+            {"text": "\u2705 Selesai Edit", "callback_data": f"dedit:{delivery_id}:done:0"},
+        ],
+    ]
+
+    await send_message_with_buttons(chat_id, text, keyboard, parse_mode="")
+
+
+async def _send_edit_summary(chat_id: int, delivery_id: str, edit_session: dict) -> None:
+    """Show updated summary after editing, with Konfirmasi/Batal buttons."""
+    pending = _pending_deliveries.get(delivery_id)
+    if not pending:
+        await _send_message(chat_id, "Penerimaan sudah kedaluwarsa.", parse_mode="")
+        return
+
+    # Sync edit_session items back to pending
+    _sync_edit_to_pending(delivery_id, edit_session)
+
+    # Remove edit session
+    if chat_id in _pending_edits:
+        del _pending_edits[chat_id]
+
+    # Re-render preview
+    readings = pending["readings"]
+    supplier = readings.get("supplier", "Tidak diketahui")
+    ref_number = readings.get("reference_number", "-")
+    delivery_date = readings.get("date", "-")
+
+    matched = pending["matched_items"]
+    unmatched = pending["unmatched_items"]
+    total_items = len(matched) + len(unmatched)
+
+    lines = [
+        f"\U0001f4e6 Penerimaan Material (DIEDIT) — {supplier}",
+        f"\U0001f4cb Ref: {ref_number} | Tanggal: {delivery_date}",
+        "",
+        f"Ditemukan {total_items} item:",
+    ]
+
+    item_num = 0
+    for mi in matched:
+        item_num += 1
+        lines.append(
+            f"{item_num}. \u2705 {mi['original_name']} — {mi['quantity']} {mi['unit']}"
+            f" (\u2192 {mi['material_name']})"
+        )
+    for ui in unmatched:
+        item_num += 1
+        lines.append(
+            f"{item_num}. \u26a0\ufe0f \"{ui['original_name']}\" — {ui['quantity']} {ui['unit']}"
+            f" (TIDAK DITEMUKAN)"
+        )
+
+    # Count skipped items from the edit session
+    skipped_count = sum(
+        1 for it in edit_session["items"] if it["status"] == "skipped"
+    )
+    if skipped_count:
+        lines.append(f"\n\u23ed {skipped_count} item dilewati (tidak akan diterima)")
+
+    preview_text = "\n".join(lines)
+
+    keyboard = [
+        [
+            {"text": "\u2705 Konfirmasi Penerimaan", "callback_data": f"delivery_confirm:{delivery_id}"},
+        ],
+        [
+            {"text": "\u270f\ufe0f Edit Items", "callback_data": f"delivery_edit:{delivery_id}"},
+            {"text": "\u274c Batal", "callback_data": f"delivery_cancel:{delivery_id}"},
+        ],
+    ]
+
+    await send_message_with_buttons(chat_id, preview_text, keyboard, parse_mode="")
+
+
+def _sync_edit_to_pending(delivery_id: str, edit_session: dict) -> None:
+    """Sync the edit session items back to the pending delivery's matched/unmatched lists."""
+    pending = _pending_deliveries.get(delivery_id)
+    if not pending:
+        return
+
+    new_matched = []
+    new_unmatched = []
+
+    for item in edit_session["items"]:
+        if item["status"] == "skipped":
+            continue  # Skipped items are excluded entirely
+        if item["status"] == "matched" and item["material_id"]:
+            new_matched.append({
+                "index": item["index"],
+                "original_name": item["original_name"],
+                "material_id": item["material_id"],
+                "material_name": item["material_name"],
+                "quantity": item["quantity"],
+                "unit": item["unit"],
+            })
+        else:
+            new_unmatched.append({
+                "index": item["index"],
+                "original_name": item["original_name"],
+                "quantity": item["quantity"],
+                "unit": item["unit"],
+            })
+
+    pending["matched_items"] = new_matched
+    pending["unmatched_items"] = new_unmatched
+
+
+async def _handle_edit_text_input(db: Session, chat_id: int, text: str) -> None:
+    """Handle text input during a delivery edit session (material name, qty, etc.)."""
+    edit_session = _pending_edits.get(chat_id)
+    if not edit_session:
+        return
+
+    awaiting = edit_session.get("awaiting")
+    delivery_id = edit_session["delivery_id"]
+    current_idx = edit_session["current_index"]
+    items = edit_session["items"]
+
+    if current_idx >= len(items):
+        edit_session["awaiting"] = None
+        return
+
+    item = items[current_idx]
+
+    # ── Awaiting new quantity ─────────────────────────────────────
+    if awaiting == "qty":
+        text = text.strip()
+        try:
+            new_qty = Decimal(text)
+            if new_qty <= 0:
+                raise ValueError("non-positive")
+        except Exception:
+            await _send_message(chat_id, "Masukkan angka yang valid (contoh: 500):", parse_mode="")
+            return
+
+        item["quantity"] = str(new_qty)
+        edit_session["awaiting"] = None
+        await _send_message(
+            chat_id,
+            f"\u2705 Jumlah diubah: {item['original_name']} — {new_qty} {item['unit']}",
+            parse_mode="",
+        )
+        # Show item prompt again
+        await _send_edit_item_prompt(chat_id, delivery_id, edit_session)
+        return
+
+    # ── Awaiting material name for Add New ────────────────────────
+    if awaiting == "material_name":
+        mat_name = text.strip()
+        if not mat_name:
+            await _send_message(chat_id, "Masukkan nama material:", parse_mode="")
+            return
+        edit_session["new_material_name"] = mat_name
+        edit_session["awaiting"] = "material_type"
+
+        # Show type selection buttons
+        keyboard = [
+            [
+                {"text": "Stone", "callback_data": f"dedit:{delivery_id}:type:stone"},
+                {"text": "Frit", "callback_data": f"dedit:{delivery_id}:type:frit"},
+            ],
+            [
+                {"text": "Pigment", "callback_data": f"dedit:{delivery_id}:type:pigment"},
+                {"text": "Other", "callback_data": f"dedit:{delivery_id}:type:other"},
+            ],
+        ]
+        await send_message_with_buttons(
+            chat_id,
+            f"Material: {mat_name}\nPilih tipe material:",
+            keyboard,
+            parse_mode="",
+        )
+        return
+
+    # Unknown awaiting state — clear it
+    edit_session["awaiting"] = None
+
+
+async def _handle_dedit_callback(
+    db: Session,
+    callback_data: str,
+    callback_id: str,
+    chat_id: int,
+    telegram_user_id: int,
+) -> None:
+    """
+    Handle delivery edit inline button callbacks.
+
+    Callback data format: dedit:{delivery_id}:{action}:{param}
+    Actions: match, new, qty, skip, done, sel (select material), type, subtype
+    """
+    parts = callback_data.split(":")
+    if len(parts) < 4:
+        await answer_callback_query(callback_id, "Data tidak valid")
+        return
+
+    delivery_id = parts[1]
+    action = parts[2]
+    param = parts[3]
+
+    pending = _pending_deliveries.get(delivery_id)
+    if not pending:
+        await answer_callback_query(callback_id, "Penerimaan sudah kedaluwarsa.")
+        if chat_id in _pending_edits:
+            del _pending_edits[chat_id]
+        return
+
+    edit_session = _pending_edits.get(chat_id)
+
+    # ── Start edit session (delivery_edit:{delivery_id}) ──────────
+    # This is handled below via action routing
+
+    # ── "done" — finish editing ───────────────────────────────────
+    if action == "done":
+        if edit_session:
+            await answer_callback_query(callback_id, "Selesai edit")
+            await _send_edit_summary(chat_id, delivery_id, edit_session)
+        else:
+            await answer_callback_query(callback_id, "Tidak ada sesi edit aktif")
+        return
+
+    # Ensure we have an active edit session for other actions
+    if not edit_session or edit_session["delivery_id"] != delivery_id:
+        await answer_callback_query(callback_id, "Sesi edit tidak ditemukan. Tekan Edit Items lagi.")
+        return
+
+    items = edit_session["items"]
+
+    # ── "skip" — skip current item ────────────────────────────────
+    if action == "skip":
+        idx = int(param)
+        if 0 <= idx < len(items):
+            items[idx]["status"] = "skipped"
+            await answer_callback_query(callback_id, f"Item dilewati: {items[idx]['original_name']}")
+            await _send_message(
+                chat_id,
+                f"\u23ed Dilewati: {items[idx]['original_name']}",
+                parse_mode="",
+            )
+        edit_session["current_index"] = idx + 1
+        edit_session["awaiting"] = None
+        await _send_edit_item_prompt(chat_id, delivery_id, edit_session)
+        return
+
+    # ── "qty" — change quantity ───────────────────────────────────
+    if action == "qty":
+        idx = int(param)
+        edit_session["current_index"] = idx
+        edit_session["awaiting"] = "qty"
+        await answer_callback_query(callback_id, "Masukkan jumlah baru")
+        await _send_message(
+            chat_id,
+            f"Masukkan jumlah baru untuk \"{items[idx]['original_name']}\" "
+            f"(saat ini: {items[idx]['quantity']} {items[idx]['unit']}):",
+            parse_mode="",
+        )
+        return
+
+    # ── "match" — search DB for materials ─────────────────────────
+    if action == "match":
+        idx = int(param)
+        edit_session["current_index"] = idx
+        edit_session["awaiting"] = None
+        item = items[idx]
+
+        # Search materials by first significant word
+        suggestions = _suggest_materials(db, item["original_name"], limit=5)
+
+        if not suggestions:
+            await answer_callback_query(callback_id, "Tidak ada material ditemukan")
+            await _send_message(
+                chat_id,
+                f"Tidak ada material ditemukan untuk \"{item['original_name']}\".\n"
+                f"Gunakan \"\u2795 Buat Baru\" untuk membuat material baru.",
+                parse_mode="",
+            )
+            await _send_edit_item_prompt(chat_id, delivery_id, edit_session)
+            return
+
+        await answer_callback_query(callback_id, "Pilih material")
+
+        # Build suggestion buttons
+        keyboard_rows = []
+        for sug in suggestions:
+            # Use compact format: dedit:{did}:sel:{item_pos}:{material_id_short}
+            # Material ID might be long UUID - use first 12 chars
+            mat_id_short = str(sug.id).replace("-", "")[:12]
+            cb_data = f"dedit:{delivery_id}:sel:{idx}:{mat_id_short}"
+            # Store full ID mapping in edit session for lookup
+            if "mat_id_map" not in edit_session:
+                edit_session["mat_id_map"] = {}
+            edit_session["mat_id_map"][mat_id_short] = str(sug.id)
+
+            keyboard_rows.append([{
+                "text": f"{sug.name}",
+                "callback_data": cb_data,
+            }])
+
+        # Back button
+        keyboard_rows.append([{
+            "text": "\u2b05 Kembali",
+            "callback_data": f"dedit:{delivery_id}:back:{idx}",
+        }])
+
+        await send_message_with_buttons(
+            chat_id,
+            f"\U0001f50d Material cocok untuk \"{item['original_name']}\":",
+            keyboard_rows,
+            parse_mode="",
+        )
+        return
+
+    # ── "sel" — select a material from search results ─────────────
+    if action == "sel":
+        # Full format: dedit:{did}:sel:{idx}:{mat_id_short}
+        if len(parts) >= 5:
+            idx = int(parts[3])
+            mat_id_short = parts[4]
+        else:
+            await answer_callback_query(callback_id, "Data tidak valid")
+            return
+
+        full_mat_id = edit_session.get("mat_id_map", {}).get(mat_id_short)
+        if not full_mat_id:
+            await answer_callback_query(callback_id, "Material tidak ditemukan")
+            return
+
+        material = db.query(Material).filter(Material.id == full_mat_id).first()
+        if not material:
+            await answer_callback_query(callback_id, "Material tidak ditemukan di DB")
+            return
+
+        if 0 <= idx < len(items):
+            items[idx]["material_id"] = str(material.id)
+            items[idx]["material_name"] = material.name
+            items[idx]["status"] = "matched"
+
+        await answer_callback_query(callback_id, f"Dipetakan ke {material.name}")
+        await _send_message(
+            chat_id,
+            f"\u2705 \"{items[idx]['original_name']}\" \u2192 {material.name}",
+            parse_mode="",
+        )
+
+        # Move to next item
+        edit_session["current_index"] = idx + 1
+        edit_session["awaiting"] = None
+        await _send_edit_item_prompt(chat_id, delivery_id, edit_session)
+        return
+
+    # ── "back" — go back to current item prompt ───────────────────
+    if action == "back":
+        idx = int(param)
+        edit_session["current_index"] = idx
+        edit_session["awaiting"] = None
+        await answer_callback_query(callback_id, "Kembali")
+        await _send_edit_item_prompt(chat_id, delivery_id, edit_session)
+        return
+
+    # ── "new" — start Add New material flow ───────────────────────
+    if action == "new":
+        idx = int(param)
+        edit_session["current_index"] = idx
+        edit_session["awaiting"] = "material_name"
+        edit_session["new_material_name"] = ""
+        edit_session["new_material_type"] = ""
+        await answer_callback_query(callback_id, "Buat material baru")
+        await _send_message(
+            chat_id,
+            f"Masukkan nama material (EN) untuk \"{items[idx]['original_name']}\":",
+            parse_mode="",
+        )
+        return
+
+    # ── "type" — material type selected in Add New flow ───────────
+    if action == "type":
+        mat_type = param  # "stone", "frit", "pigment", "other"
+        edit_session["new_material_type"] = mat_type
+        mat_name = edit_session.get("new_material_name", "")
+
+        if mat_type in ("stone",):
+            # Ask for subtype
+            edit_session["awaiting"] = "material_subtype"
+            keyboard = [
+                [
+                    {"text": "Tiles", "callback_data": f"dedit:{delivery_id}:sub:tiles"},
+                    {"text": "Sinks", "callback_data": f"dedit:{delivery_id}:sub:sink"},
+                ],
+                [
+                    {"text": "Table Top", "callback_data": f"dedit:{delivery_id}:sub:tabletop"},
+                    {"text": "Other", "callback_data": f"dedit:{delivery_id}:sub:other"},
+                ],
+            ]
+            await answer_callback_query(callback_id, mat_type)
+            await send_message_with_buttons(
+                chat_id,
+                f"Material: {mat_name}\nTipe: {mat_type}\nPilih subtipe:",
+                keyboard,
+                parse_mode="",
+            )
+        else:
+            # Create material directly
+            await answer_callback_query(callback_id, mat_type)
+            await _create_new_material_from_edit(db, chat_id, delivery_id, edit_session)
+        return
+
+    # ── "sub" — material subtype selected ─────────────────────────
+    if action == "sub":
+        edit_session["new_material_subtype"] = param
+        await answer_callback_query(callback_id, param)
+        await _create_new_material_from_edit(db, chat_id, delivery_id, edit_session)
+        return
+
+    # Unknown action
+    await answer_callback_query(callback_id, "OK")
+
+
+async def _create_new_material_from_edit(
+    db: Session,
+    chat_id: int,
+    delivery_id: str,
+    edit_session: dict,
+) -> None:
+    """Create a new material from the edit session's Add New flow."""
+    items = edit_session["items"]
+    current_idx = edit_session["current_index"]
+    item = items[current_idx]
+
+    mat_name = edit_session.get("new_material_name", item["original_name"]).strip()
+    mat_unit = item.get("unit") or "pcs"
+
+    try:
+        subgroup_id, material_type = _auto_classify_material(db, mat_name)
+
+        # Override type if user selected one
+        user_type = edit_session.get("new_material_type", "")
+        if user_type and user_type != "other":
+            material_type = user_type
+
+        new_material = Material(
+            name=mat_name,
+            unit=mat_unit,
+            material_type=material_type,
+            subgroup_id=subgroup_id,
+        )
+        db.add(new_material)
+        db.flush()
+        db.commit()
+
+        # Update edit session item
+        item["material_id"] = str(new_material.id)
+        item["material_name"] = new_material.name
+        item["status"] = "matched"
+
+        await _send_message(
+            chat_id,
+            f"\u2795 Material baru dibuat: {new_material.name}\n"
+            f"\"{item['original_name']}\" dipetakan ke material baru ini.",
+            parse_mode="",
+        )
+        logger.info(
+            f"Edit flow: created material \"{new_material.name}\" "
+            f"(id={new_material.id}) for \"{item['original_name']}\""
+        )
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to create material in edit flow: {e}", exc_info=True)
+        await _send_message(
+            chat_id,
+            f"Gagal membuat material baru: {e}",
+            parse_mode="",
+        )
+
+    # Clear temp state and move to next item
+    edit_session["awaiting"] = None
+    edit_session["new_material_name"] = ""
+    edit_session["new_material_type"] = ""
+    edit_session.pop("new_material_subtype", None)
+    edit_session["current_index"] = current_idx + 1
+    await _send_edit_item_prompt(chat_id, delivery_id, edit_session)
 
 
 def _safe_summary(update_data: dict) -> str:

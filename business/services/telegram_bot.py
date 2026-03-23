@@ -1381,6 +1381,45 @@ def _extract_position_ref(caption: str) -> Optional[str]:
     return None
 
 
+def _auto_classify_material(db: Session, name: str) -> tuple:
+    """Auto-classify a new material into a subgroup based on name keywords.
+
+    Returns (subgroup_id, material_type) or (None, 'other').
+
+    Keyword mapping:
+    - frit/fritt → Frits subgroup
+    - oxide/carbonate/iron/copper/cobalt/manganese → Oxides & Carbonates
+    - pigment/color/warna → Pigments
+    - stone/batu/tile → Stone
+    - kaolin/clay/bentonite/cmc/silicate/zircosil → Other Bulk (additives)
+    - box/kardus/label/sticker/tape → Packaging
+    """
+    from api.models import MaterialSubgroup
+
+    name_lower = name.lower()
+
+    # (keywords, subgroup_code, material_type)
+    rules = [
+        (["frit", "fritt"], "frit", "frit"),
+        (["oxide", "carbonate", "iron", "copper", "cobalt", "manganese", "chrome"], "oxide_carbonate", "oxide"),
+        (["pigment", "color", "warna", "stain"], "pigment", "pigment"),
+        (["stone", "batu", "tile", "biscuit", "bisque"], "stone", "stone"),
+        (["kaolin", "clay", "bentonite", "cmc", "silicate", "zircosil", "sodium"], "other_bulk", "additive"),
+        (["box", "kardus", "label", "sticker", "tape", "pallet", "wrap"], "packaging", "packaging"),
+        (["sink", "wash", "basin"], "sink", "finished_product"),
+    ]
+
+    for keywords, subgroup_code, mat_type in rules:
+        if any(kw in name_lower for kw in keywords):
+            sg = db.query(MaterialSubgroup).filter(MaterialSubgroup.code == subgroup_code).first()
+            if sg:
+                return sg.id, mat_type
+
+    # Fallback: "Other" subgroup
+    sg = db.query(MaterialSubgroup).filter(MaterialSubgroup.code == "other").first()
+    return (sg.id if sg else None), "other"
+
+
 def _fuzzy_match_material(db: Session, name: str) -> Optional[Material]:
     """
     Fuzzy-match a material name from a delivery note against the DB.
@@ -1803,12 +1842,17 @@ async def _handle_delivery_callback(
             await answer_callback_query(callback_id, "Item tidak ditemukan.")
             return
 
-        # Create new material with the Vision-extracted name
+        # Create new material with auto-classification into subgroup
         try:
+            mat_name = target_item["original_name"].strip()
+            mat_unit = target_item.get("unit") or "pcs"
+            subgroup_id, material_type = _auto_classify_material(db, mat_name)
+
             new_material = Material(
-                name=target_item["original_name"].strip(),
-                unit=target_item.get("unit") or "pcs",
-                is_active=True,
+                name=mat_name,
+                unit=mat_unit,
+                material_type=material_type,
+                subgroup_id=subgroup_id,
             )
             db.add(new_material)
             db.flush()

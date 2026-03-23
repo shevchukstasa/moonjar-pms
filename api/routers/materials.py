@@ -90,6 +90,7 @@ def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session)
         "avg_monthly_consumption": float(stock.avg_monthly_consumption) if stock and stock.avg_monthly_consumption else 0,
         "unit": mat.unit,
         "material_type": _ev(mat.material_type),
+        "product_subtype": getattr(mat, 'product_subtype', None),
         "subgroup_id": subgroup_id,
         "subgroup_name": subgroup_name,
         "group_name": group_name,

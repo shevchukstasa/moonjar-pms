@@ -456,6 +456,7 @@ class Material(Base):
     name = Column(sa.String(300), unique=True, nullable=False)
     unit = Column(sa.String(20), nullable=False, default='pcs')
     material_type = Column(sa.String(50), nullable=False)
+    product_subtype = Column(sa.String(30), nullable=True)  # tiles/sinks/table_top/custom — for stone & ready stock
     subgroup_id = Column(UUID(as_uuid=True), ForeignKey('material_subgroups.id'))
     supplier_id = Column(UUID(as_uuid=True), ForeignKey('suppliers.id'))
     size_id = Column(UUID(as_uuid=True), ForeignKey('sizes.id'), nullable=True)

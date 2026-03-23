@@ -1793,6 +1793,7 @@ async def lifespan(app: FastAPI):
         ("firing_profile_temp_group", "api.schema_patches.firing_profile_temp_group_patch", "apply"),
         ("process_steps", "api.schema_patches.process_steps_patch", "apply"),
         ("audit_log", "api.schema_patches.audit_log_patch", "apply"),
+        ("product_subtype", "api.schema_patches.product_subtype_patch", "apply"),
     ]
 
     patch_ok = 0
@@ -1801,9 +1802,21 @@ async def lifespan(app: FastAPI):
             import importlib
             mod = importlib.import_module(module_path)
             fn = getattr(mod, func_name)
-            with engine.begin() as conn:
+            # Each patch gets a completely fresh connection from the pool
+            conn = engine.connect()
+            try:
+                trans = conn.begin()
                 fn(conn)
-            patch_ok += 1
+                trans.commit()
+                patch_ok += 1
+            except Exception as inner_e:
+                try:
+                    trans.rollback()
+                except Exception:
+                    pass
+                raise inner_e
+            finally:
+                conn.close()
         except Exception as e:
             logger.warning("Schema patch '%s' warning (non-fatal): %s", name, e)
 

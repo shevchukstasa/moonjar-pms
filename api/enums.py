@@ -89,7 +89,7 @@ class TaskStatus(str, Enum):
     CANCELLED = 'cancelled'
 
 class MaterialType(str, Enum):
-    STONE = 'stone'               # Камень
+    STONE = 'stone'               # Камень (base bisque)
     PIGMENT = 'pigment'           # Пигменты
     FRIT = 'frit'                 # Фритты
     OXIDE_CARBONATE = 'oxide_carbonate'  # Оксиды и карбонаты
@@ -97,6 +97,13 @@ class MaterialType(str, Enum):
     PACKAGING = 'packaging'       # Упаковка
     CONSUMABLE = 'consumable'     # Расходные материалы
     OTHER = 'other'               # Прочее
+
+class MaterialProductSubtype(str, Enum):
+    """Subtype for stone/ready stock — which product type this material is for."""
+    TILES = 'tiles'
+    SINKS = 'sinks'
+    TABLE_TOP = 'table_top'
+    CUSTOM = 'custom'
 
 class TransactionType(str, Enum):
     RESERVE = 'reserve'
@@ -180,9 +187,11 @@ class DefectOutcome(str, Enum):
 
 class ProductType(str, Enum):
     TILE = 'tile'
-    COUNTERTOP = 'countertop'
+    TABLE_TOP = 'table_top'
     SINK = 'sink'
+    COUNTERTOP = 'countertop'  # legacy alias for table_top
     _3D = '3d'
+    CUSTOM = 'custom'
 
 class ShapeType(str, Enum):
     RECTANGLE = 'rectangle'

@@ -273,12 +273,32 @@ STRIP_COLORS = {
 # Size ranges → product subtype
 def guess_subtype_from_size(size_str: str) -> str | None:
     """Guess product subtype from size dimensions.
-    Small tiles (<25cm) → tiles, large (>25cm) → table_top, round → sinks"""
+
+    Rules:
+    - Rectangular < 25cm both sides → tiles
+    - Rectangular >= 25cm any side → table_top
+    - Round (Ø) 29-40cm → AMBIGUOUS (could be table_top, sink, or tile)
+      → returns None so the user is asked to choose
+    - Round > 40cm → table_top
+    - Round < 29cm → tiles
+    """
     if not size_str:
         return None
-    # Check for round/diameter indicator
-    if "ø" in size_str.lower() or "dia" in size_str.lower():
-        return "sinks"
+
+    # Check for round/diameter indicator (Ø29, dia30, etc.)
+    round_match = re.search(r'[øØ]\s*(\d+(?:\.\d+)?)|dia\w*\s*(\d+(?:\.\d+)?)', size_str.lower())
+    if round_match:
+        diameter = float(round_match.group(1) or round_match.group(2))
+        if diameter >= 29 and diameter <= 40:
+            # Ambiguous range — could be table_top, sink, or tile
+            # Return None to trigger user choice in bot
+            return None
+        elif diameter > 40:
+            return "table_top"
+        else:
+            return "tiles"
+
+    # Rectangular sizes
     m = re.match(r'(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)', size_str)
     if m:
         w, h = float(m.group(1)), float(m.group(2))

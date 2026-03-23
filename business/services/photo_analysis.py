@@ -22,6 +22,13 @@ logger = logging.getLogger("moonjar.photo_analysis")
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_VISION_MODEL = "gpt-4o-mini"  # ~6x cheaper than Claude for OCR/document reading
+
+# Types that prefer cheap OpenAI model (OCR/document reading)
+_CHEAP_VISION_TYPES = {"delivery", "scale", "packing"}
+# Types that prefer Claude (complex visual analysis)
+_SMART_VISION_TYPES = {"quality", "defect"}
 
 # ── Prompts per analysis type ────────────────────────────────────────────
 
@@ -116,84 +123,48 @@ def _parse_llm_json(raw_text: str) -> dict:
         return {}
 
 
-async def analyze_photo(
-    image_bytes: bytes,
-    analysis_type: str = "scale",
-    context: dict | None = None,
-) -> dict | None:
-    """
-    Analyze a photo using Claude Vision API.
-
-    Args:
-        image_bytes: Raw image bytes (JPEG/PNG).
-        analysis_type: "scale" | "quality" | "packing"
-        context: Optional dict with position info, expected weight, etc.
-
-    Returns:
-        {
-            "analysis_type": "scale",
-            "readings": {...},  # parsed JSON from LLM
-            "confidence": float,
-            "issues": [],
-            "raw_description": "..."
-        }
-        or None if API key missing or call fails.
-    """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        logger.warning("ANTHROPIC_API_KEY not set — photo analysis skipped")
+async def _call_openai_vision(system_prompt: str, b64_image: str, media_type: str, api_key: str) -> str | None:
+    """Call OpenAI GPT-4o-mini Vision API. ~6x cheaper than Claude for OCR tasks."""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                OPENAI_API_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": OPENAI_VISION_MODEL,
+                    "max_tokens": 1024,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:{media_type};base64,{b64_image}",
+                                        "detail": "high",
+                                    },
+                                },
+                                {"type": "text", "text": "Analyze this photo and return the JSON result."},
+                            ],
+                        },
+                    ],
+                },
+                timeout=60.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
+    except Exception as e:
+        logger.warning("OpenAI Vision call failed: %s", e)
         return None
 
-    if analysis_type not in PROMPTS:
-        logger.warning(f"Unknown analysis_type '{analysis_type}', falling back to 'quality'")
-        analysis_type = "quality"
 
-    # Encode image
-    b64_image = base64.b64encode(image_bytes).decode("utf-8")
-
-    # Detect media type (simple heuristic)
-    media_type = "image/jpeg"
-    if image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
-        media_type = "image/png"
-    elif image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
-        media_type = "image/webp"
-
-    system_prompt = _build_system_prompt(analysis_type, context)
-
-    # Build Claude Vision API request with prompt caching.
-    # System prompt is cached (same per analysis_type) → up to 90% savings
-    # on repeated calls of same type within 5-minute TTL.
-    payload = {
-        "model": ANTHROPIC_MODEL,
-        "max_tokens": 1024,
-        "system": [
-            {
-                "type": "text",
-                "text": system_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": b64_image,
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": "Analyze this photo and return the JSON result.",
-                    },
-                ],
-            }
-        ],
-    }
-
+async def _call_claude_vision(system_prompt: str, b64_image: str, media_type: str, api_key: str) -> str | None:
+    """Call Claude Vision API with prompt caching."""
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -203,86 +174,139 @@ async def analyze_photo(
                     "anthropic-version": "2023-06-01",
                     "content-type": "application/json",
                 },
-                json=payload,
+                json={
+                    "model": ANTHROPIC_MODEL,
+                    "max_tokens": 1024,
+                    "system": [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64_image}},
+                            {"type": "text", "text": "Analyze this photo and return the JSON result."},
+                        ],
+                    }],
+                },
                 timeout=60.0,
             )
             resp.raise_for_status()
             data = resp.json()
-
-        # Log cache performance
-        usage = data.get("usage", {})
-        cache_read = usage.get("cache_read_input_tokens", 0)
-        cache_write = usage.get("cache_creation_input_tokens", 0)
-        if cache_read > 0:
-            logger.info("Photo analysis cache HIT: %d tokens from cache", cache_read)
-        elif cache_write > 0:
-            logger.info("Photo analysis cache WRITE: %d tokens cached", cache_write)
-
-        # Extract text from response
-        content_blocks = data.get("content", [])
-        text_parts = [
-            block["text"]
-            for block in content_blocks
-            if block.get("type") == "text"
-        ]
-        raw_text = "\n".join(text_parts) if text_parts else ""
-
-        if not raw_text:
-            logger.warning("Claude Vision returned empty response")
-            return None
-
-        # Parse structured data from response
-        readings = _parse_llm_json(raw_text)
-
-        # Build result
-        result = {
-            "analysis_type": analysis_type,
-            "readings": readings,
-            "confidence": 0.9 if readings else 0.0,
-            "issues": [],
-            "raw_description": raw_text,
-        }
-
-        # Detect issues based on analysis type
-        if analysis_type == "scale":
-            if not readings.get("weight_kg"):
-                result["issues"].append("Could not read weight from scale display")
-                result["confidence"] = 0.3
-        elif analysis_type == "quality":
-            defects = readings.get("defects_found", [])
-            if defects:
-                result["issues"] = [
-                    f"{d.get('type', 'unknown')} ({d.get('severity', '?')})"
-                    for d in defects
-                ]
-                if readings.get("overall_quality") == "fail":
-                    result["confidence"] = 0.95
-        elif analysis_type == "packing":
-            if not readings.get("order_number"):
-                result["issues"].append("Could not read order number from label")
-                result["confidence"] = 0.5
-        elif analysis_type == "delivery":
-            items = readings.get("items", [])
-            if not items:
-                result["issues"].append("Could not read any items from delivery note")
-                result["confidence"] = 0.3
-            else:
-                result["confidence"] = 0.85
-            if not readings.get("supplier"):
-                result["issues"].append("Could not read supplier name")
-
-        logger.info(
-            f"Photo analysis complete: type={analysis_type}, "
-            f"confidence={result['confidence']}, issues={len(result['issues'])}"
-        )
-        return result
-
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Claude Vision API HTTP error: {e.response.status_code} — {e.response.text[:200]}")
-        return None
+            content_blocks = data.get("content", [])
+            return "\n".join(b["text"] for b in content_blocks if b.get("type") == "text") or None
     except Exception as e:
-        logger.error(f"Photo analysis failed: {e}", exc_info=True)
+        logger.warning("Claude Vision call failed: %s", e)
         return None
+
+
+async def analyze_photo(
+    image_bytes: bytes,
+    analysis_type: str = "scale",
+    context: dict | None = None,
+) -> dict | None:
+    """
+    Analyze a photo using the best Vision API for the task.
+
+    Auto-selects model:
+    - delivery/scale/packing → GPT-4o-mini (cheap OCR, ~$0.001/photo)
+    - quality/defect → Claude Sonnet (smart analysis, ~$0.006/photo)
+    - Fallback: tries the other provider if primary fails
+
+    Returns:
+        {"analysis_type", "readings", "confidence", "issues", "raw_description"}
+        or None if no API key available.
+    """
+    openai_key = os.getenv("OPENAI_API_KEY")
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+
+    if not openai_key and not anthropic_key:
+        logger.warning("No Vision API key set (OPENAI_API_KEY or ANTHROPIC_API_KEY) — photo analysis skipped")
+        return None
+
+    if analysis_type not in PROMPTS:
+        logger.warning(f"Unknown analysis_type '{analysis_type}', falling back to 'quality'")
+        analysis_type = "quality"
+
+    # Encode image
+    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+
+    # Detect media type
+    media_type = "image/jpeg"
+    if image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+        media_type = "image/png"
+    elif image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
+        media_type = "image/webp"
+
+    system_prompt = _build_system_prompt(analysis_type, context)
+
+    # Smart model selection: cheap for OCR, smart for visual analysis
+    raw_text = None
+    provider = None
+
+    if analysis_type in _CHEAP_VISION_TYPES and openai_key:
+        # Prefer GPT-4o-mini for document reading (6x cheaper)
+        raw_text = await _call_openai_vision(system_prompt, b64_image, media_type, openai_key)
+        provider = "openai"
+
+    if not raw_text and anthropic_key:
+        # Fallback to Claude or primary for quality analysis
+        raw_text = await _call_claude_vision(system_prompt, b64_image, media_type, anthropic_key)
+        provider = "anthropic"
+
+    if not raw_text and openai_key and provider != "openai":
+        # Last resort: try OpenAI if Claude failed
+        raw_text = await _call_openai_vision(system_prompt, b64_image, media_type, openai_key)
+        provider = "openai"
+
+    if not raw_text:
+        logger.warning("All Vision APIs failed for %s analysis", analysis_type)
+        return None
+
+    logger.info("Photo analysis via %s (%s): success", provider, analysis_type)
+
+    # Parse structured data from response
+    readings = _parse_llm_json(raw_text)
+
+    # Build result
+    result = {
+        "analysis_type": analysis_type,
+        "readings": readings,
+        "confidence": 0.9 if readings else 0.0,
+        "issues": [],
+        "raw_description": raw_text,
+    }
+
+    # Detect issues based on analysis type
+    if analysis_type == "scale":
+        if not readings.get("weight_kg"):
+            result["issues"].append("Could not read weight from scale display")
+            result["confidence"] = 0.3
+    elif analysis_type == "quality":
+        defects = readings.get("defects_found", [])
+        if defects:
+            result["issues"] = [
+                f"{d.get('type', 'unknown')} ({d.get('severity', '?')})"
+                for d in defects
+            ]
+            if readings.get("overall_quality") == "fail":
+                result["confidence"] = 0.95
+    elif analysis_type == "packing":
+        if not readings.get("order_number"):
+            result["issues"].append("Could not read order number from label")
+            result["confidence"] = 0.5
+    elif analysis_type == "delivery":
+        items = readings.get("items", [])
+        if not items:
+            result["issues"].append("Could not read any items from delivery note")
+            result["confidence"] = 0.3
+        else:
+            result["confidence"] = 0.85
+        if not readings.get("supplier"):
+            result["issues"].append("Could not read supplier name")
+
+    logger.info(
+        "Photo analysis complete: type=%s, confidence=%s, issues=%d",
+        analysis_type, result["confidence"], len(result["issues"]),
+    )
+    return result
 
 
 def format_analysis_message(result: dict, position_ref: str | None = None) -> str:

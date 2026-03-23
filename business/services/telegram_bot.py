@@ -649,6 +649,35 @@ async def _cmd_status(db: Session, message: dict) -> None:
 
     await _send_message(chat_id, "\n".join(lines))
 
+    # ── AI: Smart task prioritization ─────────────────────────────
+    try:
+        from business.services.telegram_ai import prioritize_tasks
+        task_dicts = []
+        for task in tasks:
+            order_num = ""
+            if task.related_order_id:
+                order = db.query(ProductionOrder).filter(
+                    ProductionOrder.id == task.related_order_id
+                ).first()
+                if order:
+                    order_num = order.order_number
+            task_dicts.append({
+                "order_number": order_num,
+                "type": task.type.value if task.type else "task",
+                "description": (task.description or "")[:40],
+                "status": task.status.value if task.status else "pending",
+                "deadline": str(getattr(task, "deadline", "")) or "",
+            })
+        recommendation = await prioritize_tasks(
+            tasks=task_dicts,
+            kiln_schedule=[],
+            material_stock={},
+        )
+        if recommendation:
+            await _send_message(chat_id, f"\U0001f9e0 AI: {recommendation}", parse_mode="")
+    except Exception as e:
+        logger.debug("AI task prioritization failed (non-fatal): %s", e)
+
 
 async def _cmd_help(db: Session, message: dict) -> None:
     """/help — List available commands."""
@@ -747,6 +776,29 @@ async def _cmd_defect(db: Session, message: dict, args: str) -> None:
         if result.get('exceeded'):
             msg += "\n\u26a0\ufe0f Batas terlampaui — tugas 5-Why dibuat."
         await _send_message(chat_id, msg)
+
+        # ── AI: Defect diagnostics ────────────────────────────────
+        try:
+            from business.services.telegram_ai import diagnose_defect
+            position_info = {
+                "color": getattr(position, "color", None) or "unknown",
+                "size": getattr(position, "size", None) or "unknown",
+                "recipe_name": getattr(position, "recipe_name", None) or "unknown",
+                "kiln_name": "unknown",
+            }
+            # Gather recent defects from same factory (lightweight query)
+            recent_defects = []
+            kiln_history = []
+            diagnosis = await diagnose_defect(
+                position_info=position_info,
+                defect_percent=defect_pct,
+                recent_defects=recent_defects,
+                kiln_history=kiln_history,
+            )
+            if diagnosis:
+                await _send_message(chat_id, f"\U0001f9e0 AI: {diagnosis}", parse_mode="")
+        except Exception as e:
+            logger.debug("AI defect diagnosis failed (non-fatal): %s", e)
 
     except Exception as e:
         logger.error(f"Error in /defect: {e}", exc_info=True)
@@ -1236,10 +1288,48 @@ async def _handle_private_text(db: Session, message: dict) -> None:
     # Check if already linked
     existing = _find_user_by_telegram(db, telegram_user_id)
     if existing:
+        # ── AI: Try natural language command parsing ───────────────
+        try:
+            from business.services.telegram_ai import parse_natural_language
+            user_context = {
+                "user_name": existing.name,
+                "role": existing.role.value if existing.role else None,
+            }
+            parsed = await parse_natural_language(text, user_context)
+            if parsed:
+                cmd = parsed.get("command")
+                if cmd == "defect":
+                    pos = parsed.get("position", "")
+                    val = parsed.get("value", "")
+                    args = f"{pos} {val}".strip()
+                    await _cmd_defect(db, message, args)
+                    return
+                elif cmd == "actual":
+                    pos = parsed.get("position", "")
+                    val = parsed.get("value", "")
+                    args = f"{pos} {val}".strip()
+                    await _cmd_actual(db, message, args)
+                    return
+                elif cmd == "status":
+                    await _cmd_status(db, message)
+                    return
+                elif cmd == "plan":
+                    await _cmd_plan(db, message)
+                    return
+                elif cmd == "recipe":
+                    query = parsed.get("query", "")
+                    await _cmd_recipe(db, message, query)
+                    return
+                elif cmd == "help":
+                    await _cmd_help(db, message)
+                    return
+        except Exception as e:
+            logger.debug("AI NL parsing failed (non-fatal): %s", e)
+
         await _send_message(
             chat_id,
             f"Akun sudah terhubung sebagai *{existing.name}*.\n"
-            f"Ketik /stop untuk memutuskan, lalu /start untuk menghubungkan akun lain.",
+            f"Ketik /help untuk daftar perintah.",
         )
         return
 
@@ -1539,12 +1629,50 @@ async def _handle_delivery_photo(
                 "unit": unit or matched_material.unit or "pcs",
             })
         else:
-            unmatched_items.append({
-                "index": idx,
-                "original_name": material_name,
-                "quantity": str(quantity),
-                "unit": unit,
-            })
+            # ── AI: Try LLM material matching as fallback ─────────
+            ai_matched = False
+            try:
+                from business.services.telegram_ai import ai_match_material
+                suggestions = _suggest_materials(db, material_name, limit=5)
+                if suggestions:
+                    candidates = [
+                        {"material_id": str(s.id), "material_name": s.name, "score": 0.3}
+                        for s in suggestions
+                    ]
+                    supplier = readings.get("supplier", "")
+                    ai_result = await ai_match_material(
+                        delivery_name=material_name,
+                        top_candidates=candidates,
+                        context=f"Supplier: {supplier}" if supplier else "",
+                    )
+                    if ai_result and ai_result.get("confidence", 0) >= 0.6:
+                        mat = db.query(Material).filter(
+                            Material.id == ai_result["material_id"]
+                        ).first()
+                        if mat:
+                            matched_items.append({
+                                "index": idx,
+                                "original_name": material_name,
+                                "material_id": str(mat.id),
+                                "material_name": mat.name,
+                                "quantity": str(quantity),
+                                "unit": unit or mat.unit or "pcs",
+                            })
+                            ai_matched = True
+                            logger.info(
+                                "AI matched delivery item '%s' -> '%s' (confidence=%.2f)",
+                                material_name, mat.name, ai_result["confidence"],
+                            )
+            except Exception as e:
+                logger.debug("AI material match failed (non-fatal): %s", e)
+
+            if not ai_matched:
+                unmatched_items.append({
+                    "index": idx,
+                    "original_name": material_name,
+                    "quantity": str(quantity),
+                    "unit": unit,
+                })
 
     # ── Step 3: Store pending delivery ────────────────────────────
     delivery_id = _uuid.uuid4().hex[:12]

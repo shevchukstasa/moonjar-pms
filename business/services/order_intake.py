@@ -186,9 +186,13 @@ def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
                     _sw, _sh = _dims.get("width_cm"), _dims.get("height_cm")
                 except Exception:
                     _sw = _sh = None
-            _qty_pcs = item_data.get("quantity_pcs", 0)
+            # Support both "quantity_pcs" (PMS native) and "quantity" (Sales)
+            _qty_pcs = item_data.get("quantity_pcs") or item_data.get("quantity", 0)
             if _sw and _sh and _qty_pcs:
                 _qty_sqm_raw = round((float(_sw) * float(_sh) / 10000) * _qty_pcs, 3)
+
+        # Support both "quantity_pcs" (PMS native) and "quantity" (Sales)
+        _final_qty_pcs = item_data.get("quantity_pcs") or item_data.get("quantity", 0)
 
         item = ProductionOrderItem(
             order_id=order.id,
@@ -198,15 +202,33 @@ def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
             application=item_data.get("application"),
             finishing=item_data.get("finishing"),
             thickness=_thickness_val,
-            quantity_pcs=item_data.get("quantity_pcs", 0),
+            quantity_pcs=_final_qty_pcs,
             quantity_sqm=Decimal(str(_qty_sqm_raw)) if _qty_sqm_raw else None,
             collection=item_data.get("collection"),
             application_type=item_data.get("application_type"),
             place_of_application=item_data.get("place_of_application"),
             product_type=item_data.get("product_type", ProductType.TILE.value),
+            # Shape & dimension data (may come from Sales app)
+            shape=item_data.get("shape"),
+            length_cm=item_data.get("length_cm"),
+            width_cm=item_data.get("width_cm"),
+            depth_cm=item_data.get("depth_cm"),
+            bowl_shape=item_data.get("bowl_shape"),
+            shape_dimensions=item_data.get("shape_dimensions"),
+            edge_profile=item_data.get("edge_profile"),
+            edge_profile_sides=item_data.get("edge_profile_sides"),
+            edge_profile_notes=item_data.get("edge_profile_notes"),
         )
         db.add(item)
         db.flush()
+
+        # Store Sales-only fields as transient attributes for process_order_item()
+        item._sales_application_collection = item_data.get("application_collection")
+        item._sales_application_method = item_data.get("application_method")
+        item._sales_colors_for_splashing = item_data.get("colors_for_splashing")
+        item._sales_is_additional_item = item_data.get("is_additional_item")
+        item._sales_description = item_data.get("description")
+
         created_items.append(item)
 
     # 6. Process each item → positions
@@ -485,7 +507,11 @@ def process_order_item(
     # Store application collection and method from Sales webhook.
     # Sales sends: application="SS"/"BS"/"Stencil"/etc. → this IS the application method.
     # Sales sends: collection="Authentic"/"Exclusive"/etc. → this IS the application collection.
-    _app_collection = getattr(item, 'application_collection', None) or getattr(item, 'collection', None)
+    _app_collection = (
+        getattr(item, '_sales_application_collection', None)
+        or getattr(item, 'application_collection', None)
+        or getattr(item, 'collection', None)
+    )
 
     # Map Sales "application" field → application_method_code
     # Sales uses: SS, S, BS, SB, Splashing, Stencil, Silkscreen, Gold, Raku
@@ -497,7 +523,8 @@ def process_order_item(
         'gold': 'gold', 'raku': 'raku',
     }
     _app_method = (
-        getattr(item, 'application_method', None)
+        getattr(item, '_sales_application_method', None)
+        or getattr(item, 'application_method', None)
         or APPLICATION_METHOD_MAP.get(_raw_app.strip().lower())
         or getattr(item, 'application_type', None)
     )

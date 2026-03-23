@@ -1036,10 +1036,6 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
             depth_cm=item_data.get("depth_cm"),
             bowl_shape=item_data.get("bowl_shape"),
             shape_dimensions=item_data.get("shape_dimensions"),
-            # Application method system (from Sales app v2)
-            application_collection=item_data.get("application_collection"),
-            application_method=item_data.get("application_method"),
-            colors_for_splashing=item_data.get("colors_for_splashing"),
             # Edge profile data
             edge_profile=item_data.get("edge_profile"),
             edge_profile_sides=item_data.get("edge_profile_sides"),
@@ -1047,6 +1043,15 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
         )
         db.add(item)
         db.flush()
+
+        # Store Sales-only fields as transient attributes on the item object.
+        # These are NOT model columns, but process_order_item() reads them
+        # via getattr() for application collection/method mapping.
+        item._sales_application_collection = item_data.get("application_collection")
+        item._sales_application_method = item_data.get("application_method")
+        item._sales_colors_for_splashing = item_data.get("colors_for_splashing")
+        item._sales_is_additional_item = item_data.get("is_additional_item")
+        item._sales_description = item_data.get("description")
 
         # --- Route: service item → Task (not a production position) ---
         if _is_service_item(item_data):

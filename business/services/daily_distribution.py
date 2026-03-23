@@ -124,6 +124,37 @@ def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
     language = factory.telegram_language or "id"
     if factory.masters_group_chat_id:
         message = format_daily_message(distribution, language)
+
+        # ── AI: Append smart daily insight ────────────────────────
+        try:
+            import asyncio
+            from business.services.telegram_ai import generate_smart_daily_message
+            coro = generate_smart_daily_message(
+                factory_name=factory.name,
+                glazing_tasks=distribution.get("glazing_tasks", []),
+                kiln_tasks=distribution.get("kiln_loading", []),
+                sorting_tasks=[],
+                kpi_data=distribution.get("kpi_yesterday", {}),
+                language=language,
+            )
+            # Handle both sync and async calling contexts
+            try:
+                loop = asyncio.get_running_loop()
+                # Already in an async context — schedule as a task
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    ai_insight = loop.run_in_executor(
+                        pool, asyncio.run, coro
+                    )
+                    # Can't easily await here in sync code; skip AI
+                    ai_insight = None
+            except RuntimeError:
+                # No running loop — safe to use asyncio.run
+                ai_insight = asyncio.run(coro)
+            if ai_insight:
+                message += f"\n\n\U0001f9e0 *Insight:*\n{ai_insight}"
+        except Exception as e:
+            logger.warning("AI daily insight failed (non-fatal): %s", e)
         chat_id = str(factory.masters_group_chat_id)
         date_str = tomorrow.isoformat()
         fid = str(factory_id)

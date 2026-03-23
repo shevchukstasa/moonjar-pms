@@ -469,7 +469,7 @@ export default function ManagerMaterialsPage() {
           subgroups={subgroups}
           isAggregate={isAggregateMode}
           isPM={isPM}
-          hideNames={isPM}
+          hideNames={false}
           canDelete={canDelete}
           onEdit={openEdit}
           onReceive={(item) => openTx(item, 'receive')}

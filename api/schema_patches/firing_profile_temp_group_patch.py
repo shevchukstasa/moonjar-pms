@@ -30,5 +30,5 @@ def apply(conn):
         CREATE INDEX IF NOT EXISTS ix_firing_profiles_temperature_group_id
         ON firing_profiles(temperature_group_id)
     """))
-    conn.commit()
+    # No explicit commit — engine.begin() auto-commits
     logger.info("Done: temperature_group_id added to firing_profiles")

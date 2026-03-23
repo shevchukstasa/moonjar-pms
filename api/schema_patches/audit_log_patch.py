@@ -55,8 +55,5 @@ def apply(conn):
         CREATE INDEX IF NOT EXISTS idx_audit_logs_action
         ON audit_logs (action)
     """))
-    try:
-        conn.commit()
-    except Exception:
-        pass  # Transaction may already be committed by prior patches
+    # No explicit commit needed — engine.begin() auto-commits
     logger.info("Schema patch applied: audit_logs table (with new_data, request_path)")

@@ -26,5 +26,5 @@ def apply(conn):
             conn.execute(text(stmt))
         except Exception as e:
             logger.debug("process_steps patch: %s — %s", stmt[:60], e)
-    conn.commit()
+    # No explicit commit — engine.begin() auto-commits
     logger.info("Schema patch applied: process_steps productivity norms")

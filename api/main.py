@@ -1777,36 +1777,37 @@ async def lifespan(app: FastAPI):
     _ensure_schema()
 
     # Apply new feature schema patches (idempotent, safe to run every startup)
-    try:
-        from api.database import engine
-        with engine.begin() as conn:
-            from api.schema_patches.change_request_patch import apply_patch as cr_patch
-            from api.schema_patches.defect_coefficients_patch import apply_patch as dc_patch
-            from api.schema_patches.stone_reservation_patch import apply_patch as sr_patch
-            from api.schema_patches.production_split_patch import apply_patch as ps_patch
-            from api.schema_patches.service_blocking_patch import apply_patch as sb_patch
-            from api.schema_patches.rotation_rules_patch import apply_patch as rr_patch
-            from api.schema_patches.application_methods_patch import apply_patch as am_patch
-            from api.schema_patches.shape_dimensions_patch import apply_patch as sd_patch
-            from api.schema_patches.kiln_inspection_patch import apply_patch as ki_patch
-            from api.schema_patches.firing_profile_temp_group_patch import apply as fp_tg_patch
-            from api.schema_patches.process_steps_patch import apply as psteps_patch
-            from api.schema_patches.audit_log_patch import apply as audit_patch
-            cr_patch(conn)
-            dc_patch(conn)
-            sr_patch(conn)
-            ps_patch(conn)
-            sb_patch(conn)
-            rr_patch(conn)
-            am_patch(conn)
-            sd_patch(conn)
-            ki_patch(conn)
-            fp_tg_patch(conn)
-            psteps_patch(conn)
-            audit_patch(conn)
-            logger.info("Schema patches applied successfully")
-    except Exception as e:
-        logger.warning(f"Schema patches warning (non-fatal): {e}")
+    # Each patch runs in its own connection to avoid "closed transaction" errors
+    from api.database import engine
+
+    _patches = [
+        ("change_request", "api.schema_patches.change_request_patch", "apply_patch"),
+        ("defect_coefficients", "api.schema_patches.defect_coefficients_patch", "apply_patch"),
+        ("stone_reservation", "api.schema_patches.stone_reservation_patch", "apply_patch"),
+        ("production_split", "api.schema_patches.production_split_patch", "apply_patch"),
+        ("service_blocking", "api.schema_patches.service_blocking_patch", "apply_patch"),
+        ("rotation_rules", "api.schema_patches.rotation_rules_patch", "apply_patch"),
+        ("application_methods", "api.schema_patches.application_methods_patch", "apply_patch"),
+        ("shape_dimensions", "api.schema_patches.shape_dimensions_patch", "apply_patch"),
+        ("kiln_inspection", "api.schema_patches.kiln_inspection_patch", "apply_patch"),
+        ("firing_profile_temp_group", "api.schema_patches.firing_profile_temp_group_patch", "apply"),
+        ("process_steps", "api.schema_patches.process_steps_patch", "apply"),
+        ("audit_log", "api.schema_patches.audit_log_patch", "apply"),
+    ]
+
+    patch_ok = 0
+    for name, module_path, func_name in _patches:
+        try:
+            import importlib
+            mod = importlib.import_module(module_path)
+            fn = getattr(mod, func_name)
+            with engine.begin() as conn:
+                fn(conn)
+            patch_ok += 1
+        except Exception as e:
+            logger.warning("Schema patch '%s' warning (non-fatal): %s", name, e)
+
+    logger.info("Schema patches: %d/%d applied successfully", patch_ok, len(_patches))
 
     # Initialize automatic audit logging (SQLAlchemy event listeners)
     from api.audit import init_audit_listeners

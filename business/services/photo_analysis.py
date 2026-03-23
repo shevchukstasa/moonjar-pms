@@ -23,7 +23,7 @@ logger = logging.getLogger("moonjar.photo_analysis")
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_VISION_MODEL = "gpt-4o-mini"  # ~6x cheaper than Claude for OCR/document reading
+OPENAI_VISION_MODEL = "gpt-4o"  # Best OCR quality, user has free monthly tokens
 
 # Types that prefer cheap OpenAI model (OCR/document reading)
 _CHEAP_VISION_TYPES = {"delivery", "scale", "packing"}

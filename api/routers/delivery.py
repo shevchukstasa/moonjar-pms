@@ -1,9 +1,11 @@
 """Delivery photo processing endpoint — OCR + smart material matching."""
 
+import hmac as hmac_mod
 import logging
+import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from api.database import get_db
@@ -15,13 +17,38 @@ logger = logging.getLogger("moonjar.delivery")
 router = APIRouter()
 
 
+async def _get_user_or_internal_key(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Authenticate via JWT (get_current_user) OR X-API-Key header.
+
+    X-API-Key is checked against INTERNAL_API_KEY env var (used by Telegram bot
+    for server-to-server calls). Falls back to OWNER_KEY from settings.
+    """
+    # 1. Try X-API-Key (internal / bot calls)
+    x_api_key = request.headers.get("X-API-Key")
+    if x_api_key:
+        from api.config import get_settings
+        settings = get_settings()
+        expected_key = os.getenv("INTERNAL_API_KEY") or settings.OWNER_KEY
+        if expected_key and hmac_mod.compare_digest(x_api_key, expected_key):
+            logger.debug("Delivery endpoint authenticated via X-API-Key (internal)")
+            return None  # No user object for internal calls
+        raise HTTPException(401, "Invalid API key")
+
+    # 2. Fall back to JWT auth
+    return await get_current_user(request=request, db=db)
+
+
 @router.post("/process-photo")
 async def process_delivery_photo(
     file: UploadFile = File(...),
     supplier_hint: Optional[str] = Query(None, description="Optional supplier name hint"),
     date_hint: Optional[str] = Query(None, description="Optional date hint (YYYY-MM-DD)"),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(_get_user_or_internal_key),
 ):
     """
     Process a delivery note photo end-to-end:
@@ -44,7 +71,7 @@ async def process_delivery_photo(
 
     logger.info(
         "DELIVERY_PHOTO | user=%s | file=%s (%d bytes) | supplier_hint=%s",
-        current_user.email if hasattr(current_user, "email") else "unknown",
+        current_user.email if current_user and hasattr(current_user, "email") else "internal-bot",
         file.filename,
         len(image_bytes),
         supplier_hint,

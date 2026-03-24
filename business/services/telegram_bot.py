@@ -1594,35 +1594,74 @@ async def _handle_delivery_photo(
 ) -> None:
     """
     Process a delivery note photo — TWO-STEP confirmation flow:
-    1. Analyze with Claude Vision to extract items
-    2. Fuzzy-match each item to materials in DB
+    1. POST photo to /api/delivery/process-photo (Vision + smart matcher)
+    2. Parse structured result into matched/unmatched items
     3. Store pending delivery and send PREVIEW with inline buttons
     4. Actual transactions are created only after PM clicks "Konfirmasi"
     """
-    from business.services.photo_analysis import analyze_photo
+    import os
 
     # Cleanup expired pending deliveries on each new photo
     _cleanup_expired_deliveries()
 
-    # ── Step 1: Analyze the delivery note photo ───────────────────
-    analysis_result = await analyze_photo(
-        image_bytes=image_bytes,
-        analysis_type="delivery",
-    )
+    # ── Step 1: Call server-side delivery processing endpoint ─────
+    base_url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+    if base_url:
+        # Production: use public domain
+        scheme = "https" if "railway" in base_url else "http"
+        if not base_url.startswith("http"):
+            api_url = f"{scheme}://{base_url}/api/delivery/process-photo"
+        else:
+            api_url = f"{base_url}/api/delivery/process-photo"
+    else:
+        # Local development
+        port = os.getenv("PORT", "8080")
+        api_url = f"http://localhost:{port}/api/delivery/process-photo"
 
-    if not analysis_result or not analysis_result.get("readings"):
+    # Auth: use INTERNAL_API_KEY for server-to-server auth
+    settings = get_settings()
+    api_key = os.getenv("INTERNAL_API_KEY") or settings.OWNER_KEY
+    headers = {}
+    if api_key:
+        headers["X-API-Key"] = api_key
+
+    # Build query params
+    params = {}
+    if caption:
+        params["supplier_hint"] = caption
+
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            files = {"file": ("delivery.jpg", image_bytes, "image/jpeg")}
+            resp = await client.post(
+                api_url, files=files, params=params, headers=headers,
+            )
+    except Exception as e:
+        logger.error("Failed to call delivery API: %s", e, exc_info=True)
         await _send_message(
             chat_id,
-            "Foto pengiriman diterima, tetapi tidak bisa membaca isi dokumen. "
-            "Silakan input penerimaan secara manual.",
+            "Gagal menghubungi server untuk memproses foto. Coba lagi nanti.",
             parse_mode="",
         )
         return
 
-    readings = analysis_result.get("readings", {})
-    items = readings.get("items", [])
+    if resp.status_code != 200:
+        logger.error(
+            "Delivery API returned %d: %s", resp.status_code, resp.text[:500],
+        )
+        await _send_message(
+            chat_id,
+            "Gagal memproses foto pengiriman. Silakan coba lagi atau input secara manual.",
+            parse_mode="",
+        )
+        return
 
-    if not items:
+    result = resp.json()
+    # result = {supplier, delivery_date, reference_number, items, total_items,
+    #           matched_items (count), vision_raw, confidence}
+
+    api_items = result.get("items", [])
+    if not api_items:
         await _send_message(
             chat_id,
             "Foto pengiriman diterima, tetapi tidak ditemukan daftar material. "
@@ -1631,80 +1670,66 @@ async def _handle_delivery_photo(
         )
         return
 
-    # ── Step 2: Match items against DB materials ──────────────────
-    matched_items = []   # [{index, original_name, material_id, material_name, quantity, unit}]
-    unmatched_items = [] # [{index, original_name, quantity, unit}]
+    # ── Step 2: Convert API response into matched/unmatched lists ─
+    matched_items = []   # [{index, original_name, material_id, material_name, quantity, unit, ...}]
+    unmatched_items = [] # [{index, original_name, quantity, unit, suggested_name, ...}]
 
-    for idx, item in enumerate(items):
-        material_name = item.get("material_name", "")
+    for idx, item in enumerate(api_items):
+        delivery_name = item.get("delivery_name", item.get("name", ""))
         try:
             quantity = Decimal(str(item.get("quantity", 0)))
         except Exception:
             quantity = Decimal("0")
-        unit = item.get("unit", "")
+        unit = item.get("unit", "pcs")
 
         if quantity <= 0:
             continue
 
-        matched_material = _fuzzy_match_material(db, material_name)
+        if item.get("matched") and item.get("material_id"):
+            # Size info for display
+            size_label = ""
+            if item.get("suggested_size_name"):
+                if item.get("suggested_size_exists"):
+                    size_label = f" ({item['suggested_size_name']} \u2705)"
+                else:
+                    size_label = f" ({item['suggested_size_name']} \u26a0\ufe0f baru)"
 
-        if matched_material:
             matched_items.append({
                 "index": idx,
-                "original_name": material_name,
-                "material_id": str(matched_material.id),
-                "material_name": matched_material.name,
+                "original_name": delivery_name,
+                "material_id": item["material_id"],
+                "material_name": item.get("material_name", delivery_name),
                 "quantity": str(quantity),
-                "unit": unit or matched_material.unit or "pcs",
+                "unit": unit,
+                "size_label": size_label,
+                "suggested_product_type": item.get("suggested_product_type"),
+                "parsed_base_material": item.get("parsed_base_material"),
             })
         else:
-            # ── AI: Try LLM material matching as fallback ─────────
-            ai_matched = False
-            try:
-                from business.services.telegram_ai import ai_match_material
-                suggestions = _suggest_materials(db, material_name, limit=5)
-                if suggestions:
-                    candidates = [
-                        {"material_id": str(s.id), "material_name": s.name, "score": 0.3}
-                        for s in suggestions
-                    ]
-                    supplier = readings.get("supplier", "")
-                    ai_result = await ai_match_material(
-                        delivery_name=material_name,
-                        top_candidates=candidates,
-                        context=f"Supplier: {supplier}" if supplier else "",
-                    )
-                    if ai_result and ai_result.get("confidence", 0) >= 0.6:
-                        mat = db.query(Material).filter(
-                            Material.id == ai_result["material_id"]
-                        ).first()
-                        if mat:
-                            matched_items.append({
-                                "index": idx,
-                                "original_name": material_name,
-                                "material_id": str(mat.id),
-                                "material_name": mat.name,
-                                "quantity": str(quantity),
-                                "unit": unit or mat.unit or "pcs",
-                            })
-                            ai_matched = True
-                            logger.info(
-                                "AI matched delivery item '%s' -> '%s' (confidence=%.2f)",
-                                material_name, mat.name, ai_result["confidence"],
-                            )
-            except Exception as e:
-                logger.debug("AI material match failed (non-fatal): %s", e)
-
-            if not ai_matched:
-                unmatched_items.append({
-                    "index": idx,
-                    "original_name": material_name,
-                    "quantity": str(quantity),
-                    "unit": unit,
-                })
+            # Unmatched — include candidates for suggestion buttons
+            candidates = item.get("candidates", [])
+            unmatched_items.append({
+                "index": idx,
+                "original_name": delivery_name,
+                "quantity": str(quantity),
+                "unit": unit,
+                "suggested_name": item.get("suggested_name"),
+                "suggested_product_type": item.get("suggested_product_type"),
+                "suggested_size_name": item.get("suggested_size_name"),
+                "suggested_size_exists": item.get("suggested_size_exists", False),
+                "needs_user_choice": item.get("needs_user_choice", False),
+                "parsed_base_material": item.get("parsed_base_material"),
+                "candidates": candidates,
+            })
 
     # ── Step 3: Store pending delivery ────────────────────────────
     delivery_id = _uuid.uuid4().hex[:12]
+
+    # Build readings dict from API response for downstream compatibility
+    readings = result.get("vision_raw", {})
+    readings["supplier"] = result.get("supplier") or readings.get("supplier", "")
+    readings["reference_number"] = result.get("reference_number") or readings.get("reference_number", "")
+    readings["date"] = result.get("delivery_date") or readings.get("date", "")
 
     _pending_deliveries[delivery_id] = {
         "created_at": time.time(),
@@ -1718,13 +1743,13 @@ async def _handle_delivery_photo(
     }
 
     # ── Step 4: Send preview message with inline buttons ──────────
-    supplier = readings.get("supplier", "Tidak diketahui")
-    ref_number = readings.get("reference_number", "-")
-    delivery_date = readings.get("date", "-")
+    supplier = readings.get("supplier") or "Tidak diketahui"
+    ref_number = readings.get("reference_number") or "-"
+    delivery_date = readings.get("date") or "-"
     total_items = len(matched_items) + len(unmatched_items)
 
     lines = [
-        f"\U0001f4e6 Penerimaan Material — {supplier}",
+        f"\U0001f4e6 Penerimaan Material \u2014 {supplier}",
         f"\U0001f4cb Ref: {ref_number} | Tanggal: {delivery_date}",
         "",
         f"Ditemukan {total_items} item:",
@@ -1733,16 +1758,26 @@ async def _handle_delivery_photo(
     item_num = 0
     for mi in matched_items:
         item_num += 1
+        size_info = mi.get("size_label", "")
         lines.append(
-            f"{item_num}. \u2705 {mi['original_name']} — {mi['quantity']} {mi['unit']}"
-            f" (\u2192 {mi['material_name']})"
+            f"{item_num}. \u2705 {mi['original_name']} \u2014 {mi['quantity']} {mi['unit']}"
+            f" (\u2192 {mi['material_name']}{size_info})"
         )
 
     for ui in unmatched_items:
         item_num += 1
+        size_hint = ""
+        if ui.get("suggested_size_name"):
+            if ui.get("suggested_size_exists"):
+                size_hint = f" | size: {ui['suggested_size_name']} \u2705"
+            else:
+                size_hint = f" | size: {ui['suggested_size_name']} \u26a0\ufe0f baru"
+        suggested = ""
+        if ui.get("suggested_name"):
+            suggested = f"\n   \U0001f4a1 Saran: {ui['suggested_name']}"
         lines.append(
-            f"{item_num}. \u26a0\ufe0f \"{ui['original_name']}\" — {ui['quantity']} {ui['unit']}"
-            f" (TIDAK DITEMUKAN)"
+            f"{item_num}. \u26a0\ufe0f \"{ui['original_name']}\" \u2014 {ui['quantity']} {ui['unit']}"
+            f" (TIDAK DITEMUKAN{size_hint}){suggested}"
         )
 
     preview_text = "\n".join(lines)
@@ -1762,25 +1797,47 @@ async def _handle_delivery_photo(
 
     # ── Step 5: For each unmatched item, send suggestion buttons ──
     for ui in unmatched_items:
-        suggestions = _suggest_materials(db, ui["original_name"], limit=5)
         ui_idx = ui["index"]
+
+        # Use candidates from API response if available
+        api_candidates = ui.get("candidates", [])
 
         suggestion_text = (
             f"\u26a0\ufe0f Material tidak ditemukan: \"{ui['original_name']}\"\n"
-            f"Pilih material yang sesuai atau tambah baru:"
         )
+        if ui.get("suggested_name"):
+            suggestion_text += f"\U0001f4a1 Nama standar: {ui['suggested_name']}\n"
+        suggestion_text += "Pilih material yang sesuai atau tambah baru:"
 
         suggestion_rows = []
         row: list[dict] = []
-        for sug in suggestions:
-            btn = {
-                "text": sug.name,
-                "callback_data": f"delivery_match:{delivery_id}:{ui_idx}:{sug.id}",
-            }
-            row.append(btn)
-            if len(row) >= 3:
-                suggestion_rows.append(row)
-                row = []
+
+        if api_candidates:
+            # Use candidates from the smart matcher (already sorted by score)
+            for cand in api_candidates[:5]:
+                cand_id = cand.get("material_id") or cand.get("id", "")
+                cand_name = cand.get("material_name") or cand.get("name", "?")
+                btn = {
+                    "text": cand_name,
+                    "callback_data": f"delivery_match:{delivery_id}:{ui_idx}:{cand_id}",
+                }
+                row.append(btn)
+                if len(row) >= 3:
+                    suggestion_rows.append(row)
+                    row = []
+        else:
+            # Fallback: query DB for suggestions
+            suggestions = _suggest_materials(db, ui["original_name"], limit=5)
+            for sug in suggestions:
+                btn = {
+                    "text": sug.name,
+                    "callback_data": f"delivery_match:{delivery_id}:{ui_idx}:{sug.id}",
+                }
+                row.append(btn)
+                if len(row) >= 3:
+                    suggestion_rows.append(row)
+                    row = []
+
         if row:
             suggestion_rows.append(row)
 
@@ -1793,9 +1850,9 @@ async def _handle_delivery_photo(
         await send_message_with_buttons(chat_id, suggestion_text, suggestion_rows, parse_mode="")
 
     logger.info(
-        f"Delivery photo preview sent: delivery_id={delivery_id}, "
-        f"{len(matched_items)} matched, {len(unmatched_items)} unmatched, "
-        f"factory={factory.name}"
+        "Delivery photo processed via API: delivery_id=%s, "
+        "%d matched, %d unmatched, factory=%s",
+        delivery_id, len(matched_items), len(unmatched_items), factory.name,
     )
 
 

@@ -135,4 +135,7 @@ export const ordersApi = {
   // Reprocess order (re-run position/task generation)
   reprocessOrder: (orderId: string) =>
     apiClient.post(`/orders/${orderId}/reprocess`).then((r) => r.data),
+  // Reschedule order (recalculate dates, assign kilns, reserve materials)
+  rescheduleOrder: (orderId: string) =>
+    apiClient.post(`/orders/${orderId}/reschedule`).then((r) => r.data),
 };

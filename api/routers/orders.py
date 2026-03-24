@@ -203,6 +203,11 @@ def _order_detail(order, db: Session) -> dict:
                 "planned_sorting_date": str(p.planned_sorting_date) if p.planned_sorting_date else None,
                 "planned_completion_date": str(p.planned_completion_date) if p.planned_completion_date else None,
                 "estimated_kiln_id": str(p.estimated_kiln_id) if p.estimated_kiln_id else None,
+                "estimated_kiln_name": (
+                    p.estimated_kiln.name
+                    if p.estimated_kiln_id and hasattr(p, 'estimated_kiln') and p.estimated_kiln
+                    else None
+                ),
                 "schedule_version": getattr(p, "schedule_version", None),
                 "created_at": p.created_at.isoformat() if p.created_at else None,
                 # Material tracking
@@ -653,6 +658,91 @@ async def reprocess_order(
         "order_id": str(order_id),
         "positions_reprocessed": len(results),
         "results": results,
+    }
+
+
+@router.post("/{order_id}/reschedule")
+async def reschedule_order(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Reschedule an order: recalculate planned dates, assign kilns, reserve materials.
+
+    1. Recalculate planned dates for all positions (backward scheduling from deadline)
+    2. Assign estimated_kiln_id for positions that don't have one
+    3. Reserve materials for planned positions that haven't been reserved yet
+
+    Requires management role (PM / Admin / Owner).
+    """
+    import logging as _logging
+    from business.services.production_scheduler import schedule_order as _schedule_order
+    from business.services.production_scheduler import find_best_kiln
+    from business.services.material_reservation import reserve_materials_for_position
+
+    _logger = _logging.getLogger("moonjar.orders.reschedule")
+
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+
+    # 1. Recalculate dates (schedule_order also assigns kilns internally)
+    scheduled_count = _schedule_order(db, order)
+
+    # 2. Double-check kiln assignment for any positions still missing estimated_kiln_id
+    positions = (
+        db.query(OrderPosition)
+        .filter(
+            OrderPosition.order_id == order_id,
+            OrderPosition.status != PositionStatus.CANCELLED.value,
+        )
+        .all()
+    )
+
+    kiln_count = 0
+    for p in positions:
+        if not p.estimated_kiln_id and p.planned_kiln_date:
+            kiln_id = find_best_kiln(db, p, p.planned_kiln_date)
+            if kiln_id:
+                p.estimated_kiln_id = kiln_id
+                kiln_count += 1
+
+    # 3. Reserve materials for planned positions without reservation
+    from api.models import Recipe
+    reserved_count = 0
+    reservation_errors = []
+    for p in positions:
+        if not getattr(p, "reservation_at", None) and _ev(p.status) == "planned" and p.recipe_id:
+            try:
+                recipe = db.query(Recipe).filter(Recipe.id == p.recipe_id).first()
+                if recipe:
+                    result = reserve_materials_for_position(db, p, recipe, order.factory_id)
+                    if result and not result.shortages:
+                        reserved_count += 1
+                    elif result and result.shortages:
+                        reservation_errors.append({
+                            "position": p.position_number,
+                            "reason": "insufficient_materials",
+                        })
+            except Exception as e:
+                _logger.warning(
+                    "RESCHEDULE_RESERVE_FAIL | order=%s position=%s | %s",
+                    order.order_number, p.id, e,
+                )
+                reservation_errors.append({
+                    "position": p.position_number,
+                    "reason": str(e)[:100],
+                })
+
+    db.commit()
+
+    return {
+        "ok": True,
+        "order_id": str(order_id),
+        "scheduled": scheduled_count,
+        "kilns_assigned": kiln_count,
+        "materials_reserved": reserved_count,
+        "reservation_errors": reservation_errors,
     }
 
 

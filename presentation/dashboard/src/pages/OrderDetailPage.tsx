@@ -15,6 +15,15 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { StatusDropdown } from '@/components/tablo/StatusDropdown';
 import { formatEdgeProfile, formatPlaceOfApplication, formatShape, MaterialStatusBadge } from '@/components/tablo/PositionRow';
 
+/** Format ISO date string as DD/MM (short, year omitted). */
+function fmtShortDate(iso: string | null | undefined): string {
+  if (!iso) return '\u2014';
+  const d = new Date(iso + 'T00:00:00'); // treat as local date
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}`;
+}
+
 const VALID_STATUSES = [
   { value: 'new', label: 'New' },
   { value: 'in_production', label: 'In Production' },
@@ -44,6 +53,16 @@ export default function OrderDetailPage() {
     mutationFn: (id: string) => ordersApi.reprocessOrder(id),
     onSuccess: (data) => {
       setReprocessResult(data);
+      queryClient.invalidateQueries({ queryKey: ['orders', orderId] });
+    },
+  });
+
+  // Reschedule order
+  const [rescheduleResult, setRescheduleResult] = useState<{ scheduled?: number; kilns_assigned?: number; materials_reserved?: number } | null>(null);
+  const rescheduleMutation = useMutation({
+    mutationFn: (id: string) => ordersApi.rescheduleOrder(id),
+    onSuccess: (data) => {
+      setRescheduleResult(data);
       queryClient.invalidateQueries({ queryKey: ['orders', orderId] });
     },
   });
@@ -155,6 +174,28 @@ export default function OrderDetailPage() {
       header: 'Delay',
       render: (p) => p.delay_hours ? <span className="text-orange-600">{p.delay_hours}h</span> : '\u2014',
     },
+    {
+      key: 'planned_glazing_date',
+      header: 'Glazing',
+      render: (p) => p.planned_glazing_date ? fmtShortDate(p.planned_glazing_date) : '\u2014',
+    },
+    {
+      key: 'planned_kiln_date',
+      header: 'Kiln Date',
+      render: (p) => p.planned_kiln_date ? fmtShortDate(p.planned_kiln_date) : '\u2014',
+    },
+    {
+      key: 'planned_sorting_date',
+      header: 'Sorting',
+      render: (p) => p.planned_sorting_date ? fmtShortDate(p.planned_sorting_date) : '\u2014',
+    },
+    {
+      key: 'estimated_kiln_name',
+      header: 'Kiln',
+      render: (p) => p.estimated_kiln_name ? (
+        <span className="text-xs font-medium text-indigo-700">{p.estimated_kiln_name}</span>
+      ) : '\u2014',
+    },
   ];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -232,6 +273,18 @@ export default function OrderDetailPage() {
           </div>
         </div>
 
+        {/* Reschedule Order button — PM/Admin only */}
+        {canReprocess && (
+          <Button
+            variant="secondary"
+            onClick={() => orderId && rescheduleMutation.mutate(orderId)}
+            disabled={rescheduleMutation.isPending}
+          >
+            {rescheduleMutation.isPending ? <Spinner className="h-4 w-4 mr-2" /> : null}
+            Reschedule
+          </Button>
+        )}
+
         {/* Reprocess Order button — PM/Admin only */}
         {canReprocess && (
           <Button
@@ -271,6 +324,16 @@ export default function OrderDetailPage() {
       {overrideSuccess && (
         <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">
           Order status overridden manually.
+        </div>
+      )}
+      {rescheduleResult && (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800">
+          Rescheduled: {rescheduleResult.scheduled ?? 0} positions scheduled, {rescheduleResult.kilns_assigned ?? 0} kilns assigned, {rescheduleResult.materials_reserved ?? 0} materials reserved.
+        </div>
+      )}
+      {rescheduleMutation.isError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          Reschedule failed: {(rescheduleMutation.error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || rescheduleMutation.error?.message || 'Unknown error'}
         </div>
       )}
       {reprocessResult && (

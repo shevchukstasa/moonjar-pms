@@ -23,7 +23,8 @@ logger = logging.getLogger("moonjar.photo_analysis")
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_VISION_MODEL = "gpt-4o"  # Best OCR quality, user has free monthly tokens
+OPENAI_VISION_MODEL_OCR = "gpt-4.1-nano"    # Cheap OCR for delivery/scale/packing (~$0.10/1M)
+OPENAI_VISION_MODEL_QUALITY = "gpt-4.1"    # Smart analysis for quality/defect (~$2.00/1M)
 
 # Types that prefer cheap OpenAI model (OCR/document reading)
 _CHEAP_VISION_TYPES = {"delivery", "scale", "packing"}
@@ -123,8 +124,9 @@ def _parse_llm_json(raw_text: str) -> dict:
         return {}
 
 
-async def _call_openai_vision(system_prompt: str, b64_image: str, media_type: str, api_key: str) -> str | None:
-    """Call OpenAI GPT-4o-mini Vision API. ~6x cheaper than Claude for OCR tasks."""
+async def _call_openai_vision(system_prompt: str, b64_image: str, media_type: str, api_key: str, model: str | None = None) -> str | None:
+    """Call OpenAI Vision API. Model selected by caller based on task complexity."""
+    use_model = model or OPENAI_VISION_MODEL_OCR
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -134,7 +136,7 @@ async def _call_openai_vision(system_prompt: str, b64_image: str, media_type: st
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": OPENAI_VISION_MODEL,
+                    "model": use_model,
                     "max_tokens": 1024,
                     "messages": [
                         {"role": "system", "content": system_prompt},
@@ -237,17 +239,22 @@ async def analyze_photo(
 
     system_prompt = _build_system_prompt(analysis_type, context)
 
-    # Smart model selection: cheap for OCR, smart for visual analysis
+    # Smart model selection: cheap nano for OCR, gpt-4.1 for quality analysis
     raw_text = None
     provider = None
 
     if analysis_type in _CHEAP_VISION_TYPES and openai_key:
-        # Prefer GPT-4o-mini for document reading (6x cheaper)
-        raw_text = await _call_openai_vision(system_prompt, b64_image, media_type, openai_key)
-        provider = "openai"
+        # gpt-4.1-nano for OCR tasks (delivery/scale/packing) — $0.10/1M tokens
+        raw_text = await _call_openai_vision(system_prompt, b64_image, media_type, openai_key, model=OPENAI_VISION_MODEL_OCR)
+        provider = "openai-nano"
+
+    if not raw_text and analysis_type in _SMART_VISION_TYPES and openai_key:
+        # gpt-4.1 for quality/defect analysis — $2.00/1M tokens (was Claude $3.00)
+        raw_text = await _call_openai_vision(system_prompt, b64_image, media_type, openai_key, model=OPENAI_VISION_MODEL_QUALITY)
+        provider = "openai-4.1"
 
     if not raw_text and anthropic_key:
-        # Fallback to Claude or primary for quality analysis
+        # Fallback to Claude if OpenAI fails
         raw_text = await _call_claude_vision(system_prompt, b64_image, media_type, anthropic_key)
         provider = "anthropic"
 

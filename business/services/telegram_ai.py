@@ -125,7 +125,7 @@ async def _call_openai(
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
             json={
-                "model": "gpt-4o-mini",
+                "model": "gpt-4.1-nano",
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},

@@ -101,20 +101,20 @@ function getIndonesianHolidays(year: number): HolidayPreset {
 }
 
 function getBalineseHolidays(year: number): HolidayPreset {
-  // Balinese holidays 2026 — Pawukon 210-day cycle
-  // Source: https://www.detik.com/bali/berita/d-8293016/jadwal-lengkap-hari-raya-hindu-sepanjang-tahun-2026
+  // Balinese holidays 2026 — Pawukon 210-day cycle + Saka calendar
+  // Sources: baliinstitute.com, viceroybali.com, detik.com (cross-verified for 2026)
   const holidays2026 = [
-    { date: '2026-01-04', name: 'Hari Raya Saraswati', source: 'balinese' },
-    { date: '2026-01-08', name: 'Pagerwesi', source: 'balinese' },
+    { date: '2026-02-07', name: 'Tumpek Uye (Kandang)', source: 'balinese' },
     { date: '2026-03-18', name: 'Pengerupukan (Nyepi Eve)', source: 'balinese' },
     { date: '2026-03-19', name: 'Nyepi (Tahun Baru Saka 1948)', source: 'balinese' },
     { date: '2026-03-20', name: 'Ngembak Geni', source: 'balinese' },
+    { date: '2026-04-04', name: 'Hari Raya Saraswati', source: 'balinese' },
+    { date: '2026-04-08', name: 'Pagerwesi', source: 'balinese' },
     { date: '2026-04-18', name: 'Tumpek Landep', source: 'balinese' },
-    { date: '2026-05-23', name: 'Tumpek Uduh', source: 'balinese' },
+    { date: '2026-05-23', name: 'Tumpek Uduh (Bubuh)', source: 'balinese' },
     { date: '2026-06-16', name: 'Penampahan Galungan', source: 'balinese' },
     { date: '2026-06-17', name: 'Galungan', source: 'balinese' },
     { date: '2026-06-27', name: 'Kuningan', source: 'balinese' },
-    { date: '2026-08-03', name: 'Hari Raya Saraswati', source: 'balinese' },
   ];
 
   if (year === 2026) {
@@ -241,9 +241,10 @@ export default function FactoryCalendarPage() {
       queryClient.invalidateQueries({ queryKey: ['factory-calendar-working-days'] });
       setBulkDialogOpen(false);
       setBulkPreset(null);
-      if (data.total_skipped > 0) {
-        setFormError(`Created ${data.total_created}, skipped ${data.total_skipped} (duplicates).`);
-      }
+      const parts: string[] = [];
+      if (data.total_created > 0) parts.push(`Added ${data.total_created} holidays for ${year}`);
+      if (data.total_skipped > 0) parts.push(`skipped ${data.total_skipped} (already exist)`);
+      if (parts.length > 0) setFormError(parts.join(', ') + '.');
     },
     onError: (err: unknown) => {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;

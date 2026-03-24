@@ -14,6 +14,7 @@ import { DataTable } from '@/components/ui/Table';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { StatusDropdown } from '@/components/tablo/StatusDropdown';
 import { formatEdgeProfile, formatPlaceOfApplication, formatShape, MaterialStatusBadge } from '@/components/tablo/PositionRow';
+import { PositionEditDialog } from '@/components/orders/PositionEditDialog';
 
 /** Format ISO date string as DD/MM (short, year omitted). */
 function fmtShortDate(iso: string | null | undefined): string {
@@ -43,6 +44,10 @@ export default function OrderDetailPage() {
   const shipOrder = useShipOrder();
   const [showShipConfirm, setShowShipConfirm] = useState(false);
   const [shipSuccess, setShipSuccess] = useState(false);
+
+  // Edit position
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [editingPosition, setEditingPosition] = useState<Record<string, any> | null>(null);
 
   // Reprocess order
   const currentUser = useCurrentUser();
@@ -195,6 +200,18 @@ export default function OrderDetailPage() {
       render: (p) => p.estimated_kiln_name ? (
         <span className="text-xs font-medium text-indigo-700">{p.estimated_kiln_name}</span>
       ) : '\u2014',
+    },
+    {
+      key: '_edit',
+      header: '',
+      render: (p) => p.id ? (
+        <button
+          className="rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-800"
+          onClick={() => setEditingPosition(p)}
+        >
+          Edit
+        </button>
+      ) : null,
     },
   ];
 
@@ -424,6 +441,13 @@ export default function OrderDetailPage() {
         }}
         title="Confirm Shipment"
         message={`Confirm shipment of order #${order.order_number}? This will notify Sales and mark the order as shipped.`}
+      />
+
+      {/* Edit Position Dialog */}
+      <PositionEditDialog
+        open={!!editingPosition}
+        onClose={() => setEditingPosition(null)}
+        position={editingPosition}
       />
 
       {/* Confirm Status Override */}

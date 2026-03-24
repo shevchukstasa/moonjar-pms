@@ -66,6 +66,7 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/warehouse', label: 'Warehouse Dashboard', icon: '📊' },
         { to: '/warehouse/finished-goods', label: 'Finished Goods', icon: '✅' },
         { to: '/warehouse/reconciliations', label: 'Reconciliations', icon: '🔄' },
+        { to: '/warehouse/mana-shipments', label: 'Mana Shipments', icon: '🚚' },
       ],
     },
     {
@@ -166,6 +167,7 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/admin/sizes', label: 'Sizes', icon: '📐' },
         { to: '/warehouse/finished-goods', label: 'Finished Goods', icon: '✅' },
         { to: '/warehouse/reconciliations', label: 'Reconciliations', icon: '🔄' },
+        { to: '/warehouse/mana-shipments', label: 'Mana Shipments', icon: '🚚' },
       ],
     },
     {
@@ -193,6 +195,7 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/warehouse', label: 'Dashboard', icon: '📊' },
         { to: '/warehouse/finished-goods', label: 'Finished Goods', icon: '✅' },
         { to: '/warehouse/reconciliations', label: 'Reconciliations', icon: '🔄' },
+        { to: '/warehouse/mana-shipments', label: 'Mana Shipments', icon: '🚚' },
       ],
     },
   ],

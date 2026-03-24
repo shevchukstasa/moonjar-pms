@@ -76,6 +76,7 @@ from api.routers import guides
 from api.routers import admin_settings
 from api.routers import delivery
 from api.routers import employees
+from api.routers import mana_shipments
 
 
 def _ensure_schema():
@@ -1942,5 +1943,6 @@ def setup_routers():
     app.include_router(guides.router, prefix="/api/guides", tags=["guides"])
     app.include_router(delivery.router, prefix="/api/delivery", tags=["delivery"])
     app.include_router(employees.router, prefix="/api/employees", tags=["employees"])
+    app.include_router(mana_shipments.router, prefix="/api/mana-shipments", tags=["mana-shipments"])
 
 setup_routers()

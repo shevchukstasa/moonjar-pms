@@ -140,6 +140,18 @@ export function useMaterialReservations(positionId?: string) {
   });
 }
 
+export function useUpdatePosition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
+      positionsApi.update(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+    },
+  });
+}
+
 export function useForceUnblock() {
   const qc = useQueryClient();
   return useMutation({

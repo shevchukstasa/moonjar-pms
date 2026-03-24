@@ -45,6 +45,7 @@ import KilnMaintenancePage from '@/pages/KilnMaintenancePage';
 import GrindingDecisionsPage from '@/pages/GrindingDecisionsPage';
 import ReconciliationsPage from '@/pages/ReconciliationsPage';
 import FinishedGoodsPage from '@/pages/FinishedGoodsPage';
+import ManaShipmentsPage from '@/pages/ManaShipmentsPage';
 import ReportsPage from '@/pages/ReportsPage';
 import DashboardAccessPage from '@/pages/DashboardAccessPage';
 import SettingsPage from '@/pages/SettingsPage';
@@ -176,6 +177,7 @@ export default function App() {
             <Route path="/warehouse" element={<WarehouseDashboard />} />
             <Route path="/warehouse/finished-goods" element={<FinishedGoodsPage />} />
             <Route path="/warehouse/reconciliations" element={<ReconciliationsPage />} />
+            <Route path="/warehouse/mana-shipments" element={<ManaShipmentsPage />} />
           </Route>
           <Route element={<RequireRole roles={['sorter_packer', 'owner', 'administrator', 'production_manager']} />}>
             <Route path="/packing" element={<SorterPackerDashboard />} />

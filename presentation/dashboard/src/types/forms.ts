@@ -19,6 +19,30 @@ export const BOWL_SHAPE_OPTIONS = [
   { value: 'other', label: 'Other' },
 ] as const;
 
+export const APPLICATION_OPTIONS = [
+  { value: 'SS', label: 'SS' },
+  { value: 'BS', label: 'BS' },
+  { value: 'SB', label: 'SB' },
+  { value: 'S', label: 'S' },
+  { value: 'Stencil', label: 'Stencil' },
+  { value: 'Silkscreen', label: 'Silkscreen' },
+  { value: 'Raku', label: 'Raku' },
+  { value: 'Splashing', label: 'Splashing' },
+  { value: 'Gold', label: 'Gold' },
+] as const;
+
+export const EDGE_PROFILE_OPTIONS = [
+  { value: 'straight', label: 'Straight' },
+  { value: 'bullnose', label: 'Bullnose' },
+  { value: 'custom', label: 'Custom' },
+] as const;
+
+export const PRIORITY_OPTIONS = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'urgent', label: 'Urgent' },
+  { value: 'critical', label: 'Critical' },
+] as const;
+
 export const orderItemSchema = z.object({
   color: z.string().min(1, 'Color is required'),
   size: z.string().min(1, 'Size is required'),
@@ -36,6 +60,13 @@ export const orderItemSchema = z.object({
   width_cm: z.coerce.number().positive().optional().nullable(),
   depth_cm: z.coerce.number().positive().optional().nullable(),
   bowl_shape: z.string().optional().default(''),
+  // Edge profile
+  edge_profile: z.string().optional().default('straight'),
+  edge_profile_sides: z.coerce.number().int().min(1).max(4).optional().nullable(),
+  // Priority
+  priority: z.string().optional().default('normal'),
+  // Color 2 (for Stencil/Silkscreen)
+  color_2: z.string().optional().default(''),
 });
 export type OrderItemFormData = z.infer<typeof orderItemSchema>;
 

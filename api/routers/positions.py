@@ -222,6 +222,7 @@ def _serialize_position(p) -> dict:
         "edge_profile": getattr(p, 'edge_profile', None),
         "edge_profile_sides": getattr(p, 'edge_profile_sides', None),
         "edge_profile_notes": getattr(p, 'edge_profile_notes', None),
+        "color_2": getattr(p, 'color_2', None),
         # Schedule
         "planned_glazing_date": p.planned_glazing_date.isoformat() if getattr(p, 'planned_glazing_date', None) else None,
         "planned_kiln_date": p.planned_kiln_date.isoformat() if getattr(p, 'planned_kiln_date', None) else None,
@@ -461,7 +462,10 @@ async def update_position(
                "delay_hours", "priority_order", "recipe_id", "mandatory_qc",
                "application_method_code", "application_collection_code",
                "glazeable_sqm", "thickness_mm", "shape", "shape_dimensions",
-               "product_type", "quantity_with_defect_margin", "place_of_application"}
+               "product_type", "quantity_with_defect_margin", "place_of_application",
+               "color", "size", "application", "finishing", "collection",
+               "quantity", "edge_profile", "edge_profile_sides", "edge_profile_notes",
+               "color_2", "application_type"}
     for k, v in data.items():
         if k in allowed:
             setattr(p, k, v)

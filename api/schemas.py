@@ -928,3 +928,22 @@ class RecipeFiringStageResponse(BaseModel):
 class RecipeFiringStagesBulkUpdate(BaseModel):
     """Replace all firing stages for a recipe."""
     stages: list[RecipeFiringStageCreate]
+
+
+# ── ManaShipment ─────────────────────────────────────────────────
+
+class ManaShipmentUpdate(BaseModel):
+    notes: Optional[str] = None
+
+class ManaShipmentResponse(BaseModel):
+    id: UUID
+    factory_id: UUID
+    items_json: list[dict]
+    status: str
+    confirmed_by: Optional[UUID] = None
+    confirmed_at: Optional[datetime] = None
+    shipped_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

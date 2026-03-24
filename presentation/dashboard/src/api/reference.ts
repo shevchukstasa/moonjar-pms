@@ -63,4 +63,8 @@ export const referenceApi = {
     apiClient.get<ApplicationMethodItem[]>('/reference/application-methods').then((r) => r.data),
   getApplicationCollections: () =>
     apiClient.get<ApplicationCollectionItem[]>('/reference/application-collections').then((r) => r.data),
+  getFinishingTypes: () =>
+    apiClient.get<{ id: string; name: string }[]>('/reference/finishing-types').then((r) => r.data),
+  getColors: () =>
+    apiClient.get<ReferenceItem[]>('/reference/colors').then((r) => r.data),
 };

@@ -26,3 +26,19 @@ export function useApplicationMethods() {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+export function useFinishingTypes() {
+  return useQuery<{ id: string; name: string }[]>({
+    queryKey: ['reference', 'finishing-types'],
+    queryFn: () => referenceApi.getFinishingTypes(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useColors() {
+  return useQuery<ReferenceItem[]>({
+    queryKey: ['reference', 'colors'],
+    queryFn: () => referenceApi.getColors(),
+    staleTime: 5 * 60 * 1000,
+  });
+}

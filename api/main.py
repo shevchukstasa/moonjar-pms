@@ -74,6 +74,7 @@ from api.routers import settings as settings_router
 from api.routers import factory_calendar
 from api.routers import guides
 from api.routers import admin_settings
+from api.routers import delivery
 
 
 def _ensure_schema():
@@ -1937,5 +1938,6 @@ def setup_routers():
     app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
     app.include_router(admin_settings.router, prefix="/api/admin-settings", tags=["admin-settings"])
     app.include_router(guides.router, prefix="/api/guides", tags=["guides"])
+    app.include_router(delivery.router, prefix="/api/delivery", tags=["delivery"])
 
 setup_routers()

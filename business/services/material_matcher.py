@@ -462,6 +462,7 @@ async def find_best_match(
     db_materials: list[dict],
     threshold: float = 0.4,
     supplier_name: str | None = None,
+    db_sizes: list[dict] | None = None,
 ) -> dict:
     """
     Find the best matching material from the database.
@@ -501,6 +502,17 @@ async def find_best_match(
 
     # Supplier context: if we know supplier type, filter/boost relevant materials
     supplier_type = get_supplier_material_type(supplier_name)
+
+    # ── Route to smart stone matcher if supplier is stone ────
+    if supplier_type == "stone" and db_sizes is not None:
+        return await smart_match_stone_item(
+            delivery_name=delivery_name,
+            delivery_qty=delivery_qty,
+            delivery_unit=delivery_unit,
+            db_materials=db_materials,
+            db_sizes=db_sizes,
+            supplier_type=supplier_type,
+        )
 
     logger.debug(
         "Matching delivery item: original=%r, translated=%r, base=%r, tokens=%s, supplier_type=%s",
@@ -662,6 +674,7 @@ async def match_delivery_items(
     db_materials: list[dict],
     threshold: float = 0.4,
     supplier_name: str | None = None,
+    db_sizes: list[dict] | None = None,
 ) -> list[dict]:
     """
     Match a list of delivery note items against DB materials.
@@ -671,6 +684,7 @@ async def match_delivery_items(
         db_materials: All materials from DB.
         threshold: Minimum score for auto-match.
         supplier_name: Supplier name from delivery note (for type filtering).
+        db_sizes: All sizes from DB (for smart stone matching).
 
     Returns:
         List of match results (same structure as find_best_match output).
@@ -684,6 +698,7 @@ async def match_delivery_items(
             db_materials=db_materials,
             threshold=threshold,
             supplier_name=supplier_name,
+            db_sizes=db_sizes,
         )
         results.append(result)
 
@@ -767,6 +782,388 @@ def _guess_product_subtype(translated_name: str) -> Optional[str]:
         return "tiles"
 
     return None
+
+
+# ────────────────────────────────────────────────────────────────
+# Stone-specific: base material normalization
+# ────────────────────────────────────────────────────────────────
+
+# Short names → canonical full names for stone base materials
+_STONE_BASE_NORMALIZE: dict[str, str] = {
+    "lava": "Lava Stone",
+    "lava stone": "Lava Stone",
+    "andesite": "Andesite Stone",
+    "andesite stone": "Andesite Stone",
+    "basalt": "Basalt Stone",
+    "basalt stone": "Basalt Stone",
+    "granite": "Granite",
+    "marble": "Marble",
+    "limestone": "Limestone",
+    "sandstone": "Sandstone",
+    "terrazzo": "Terrazzo",
+    "travertine": "Travertine",
+    "onyx": "Onyx",
+    "pumice": "Pumice Stone",
+    "pumice stone": "Pumice Stone",
+    "river stone": "River Stone",
+    "natural stone": "Natural Stone",
+    "porcelain": "Porcelain",
+    "porcelain stone": "Porcelain Stone",
+}
+
+# Regex: size like "5x20", optional thickness like "x1-2" or "x1" or "x1/2"
+_STONE_SIZE_RE = re.compile(
+    r'(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)'
+    r'(?:\s*[xX×]\s*(\d+(?:[.,/\-]\d+)?))?'
+)
+
+# Regex: diameter like "Ø29" or "dia30"
+_DIAMETER_RE = re.compile(r'[øØ]\s*(\d+(?:\.\d+)?)|dia\w*\s*(\d+(?:\.\d+)?)', re.IGNORECASE)
+
+
+def _parse_stone_delivery_name(delivery_name: str) -> dict:
+    """
+    Parse a stone delivery item name into components.
+
+    "Grey Lava 5x20x1-2" →
+        color="Grey", base_material="Lava Stone",
+        size_raw="5x20", thickness_raw="1-2", is_round=False, diameter=None
+
+    "Black Andesite Ø29x2" →
+        color="Black", base_material="Andesite Stone",
+        size_raw=None, thickness_raw="2", is_round=True, diameter=29.0
+    """
+    translated = translate_material_name(delivery_name)
+    normalized = normalize_size(translated.strip())
+
+    # Extract color
+    words = normalized.split()
+    color_parts: list[str] = []
+    rest_parts: list[str] = []
+    for w in words:
+        if w.lower() in STRIP_COLORS and not rest_parts:
+            color_parts.append(w)
+        else:
+            rest_parts.append(w)
+    color = " ".join(color_parts).strip().title() if color_parts else None
+    rest = " ".join(rest_parts)
+
+    # Check for diameter (round shape)
+    dia_match = _DIAMETER_RE.search(rest)
+    is_round = dia_match is not None
+    diameter = None
+    if dia_match:
+        diameter = float(dia_match.group(1) or dia_match.group(2))
+
+    # Extract size and thickness from rest
+    size_raw = None
+    thickness_raw = None
+    size_match = _STONE_SIZE_RE.search(rest)
+    if size_match and not is_round:
+        w_val = size_match.group(1).replace(",", ".")
+        h_val = size_match.group(2).replace(",", ".")
+        size_raw = f"{w_val}x{h_val}"
+        if size_match.group(3):
+            thickness_raw = size_match.group(3).replace(",", ".")
+    elif is_round and size_match:
+        # For round items "Ø29x2", the second number after Ø is thickness
+        # But _STONE_SIZE_RE might catch "29x2" — check if first num == diameter
+        w_val = float(size_match.group(1).replace(",", "."))
+        if dia_match and abs(w_val - diameter) < 0.1:
+            # "Ø29x2" → thickness is group(2)
+            thickness_raw = size_match.group(2).replace(",", ".")
+        else:
+            h_val = size_match.group(2).replace(",", ".")
+            size_raw = f"{size_match.group(1).replace(',', '.')}x{h_val}"
+            if size_match.group(3):
+                thickness_raw = size_match.group(3).replace(",", ".")
+
+    # Determine base material: strip color, size, thickness from rest
+    base_text = rest
+    # Remove size pattern
+    if size_match:
+        base_text = base_text[:size_match.start()] + base_text[size_match.end():]
+    # Remove diameter pattern
+    if dia_match:
+        base_text = base_text[:dia_match.start()] + base_text[dia_match.end():]
+    base_text = re.sub(r'[xX×/\-\d.,]+', ' ', base_text).strip()
+    base_text = re.sub(r'\s+', ' ', base_text).strip()
+
+    # Normalize base material name
+    base_lower = base_text.lower().strip()
+    base_material = _STONE_BASE_NORMALIZE.get(base_lower, base_text.title() if base_text else "Stone")
+
+    return {
+        "color": color,
+        "base_material": base_material,
+        "size_raw": size_raw,
+        "thickness_raw": thickness_raw,
+        "is_round": is_round,
+        "diameter": diameter,
+    }
+
+
+def _determine_product_type(
+    thickness_raw: str | None,
+    size_raw: str | None,
+    is_round: bool,
+    diameter: float | None,
+) -> tuple[str, bool]:
+    """
+    Determine product type from thickness and size.
+
+    Returns:
+        (product_type, needs_user_choice)
+        product_type: "3d" | "tiles" | "sink" | "table_top" | None
+        needs_user_choice: True if ambiguous (user should pick)
+    """
+    # Step 2a: thickness with range → 3D
+    if thickness_raw and re.search(r'[-/]', thickness_raw):
+        return "3d", False
+
+    # Step 2b: single thickness → check size rules
+    if is_round and diameter is not None:
+        if diameter > 40:
+            # Could be sink or table_top — ask user
+            return None, True
+        elif diameter >= 29:
+            # Ambiguous range — could be sink, table_top, or tile
+            return None, True
+        else:
+            return "tiles", False
+
+    if size_raw:
+        m = re.match(r'(\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)', size_raw)
+        if m:
+            w, h = float(m.group(1)), float(m.group(2))
+            if w > 40 or h > 40:
+                # Ø > 40cm equivalent for rect
+                return None, True
+            if (w > 30 and h > 60) or (w > 60 and h > 30):
+                return None, True
+            if (w > 40 and h > 40) or (w > 30 and h > 60) or (h > 30 and w > 60):
+                return None, True
+            return "tiles", False
+
+    # Default for stone with single thickness
+    return "tiles", False
+
+
+async def smart_match_stone_item(
+    delivery_name: str,
+    delivery_qty: float,
+    delivery_unit: str,
+    db_materials: list[dict],
+    db_sizes: list[dict],
+    supplier_type: str | None = None,
+) -> dict:
+    """
+    Smart matching for STONE materials with size DB lookup.
+
+    Flow:
+    1. Parse delivery name → color, base_material, size, thickness
+    2. Determine product type from thickness (3d/tiles/sink/table_top)
+    3. Look up size in DB (convert cm → mm)
+    4. Build standard name: "{base_material} {product_type} {size_name}"
+    5. Match against existing materials
+
+    Returns dict compatible with find_best_match output, plus:
+        - suggested_size_name: str (from DB or proposed new)
+        - suggested_size_exists: bool
+        - suggested_product_type: str (tiles/3d/sink/table_top)
+        - needs_user_choice: bool (ambiguous size → user should pick)
+        - parsed_color: str | None
+        - parsed_base_material: str
+    """
+    translated = translate_material_name(delivery_name)
+    translated_unit = INDO_TO_EN.get(delivery_unit.lower().strip(), delivery_unit)
+
+    # ── Step 1: Parse delivery name ──────────────────────────
+    parsed = _parse_stone_delivery_name(delivery_name)
+    color = parsed["color"]
+    base_material = parsed["base_material"]
+    size_raw = parsed["size_raw"]
+    thickness_raw = parsed["thickness_raw"]
+    is_round = parsed["is_round"]
+    diameter = parsed["diameter"]
+
+    logger.debug(
+        "smart_match_stone: delivery=%r, parsed=%s",
+        delivery_name, parsed,
+    )
+
+    # ── Step 2: Determine product type ───────────────────────
+    product_type, needs_user_choice = _determine_product_type(
+        thickness_raw, size_raw, is_round, diameter,
+    )
+
+    # ── Step 3: Look up size in DB ───────────────────────────
+    suggested_size_name = None
+    suggested_size_exists = False
+    matched_size_id = None
+
+    if is_round and diameter is not None:
+        # Round: search by name pattern "Ø{diameter}"
+        dia_str = f"Ø{int(diameter)}" if diameter == int(diameter) else f"Ø{diameter}"
+        for s in db_sizes:
+            if dia_str.lower() in s["name"].lower():
+                suggested_size_name = s["name"]
+                suggested_size_exists = True
+                matched_size_id = s["id"]
+                break
+        if not suggested_size_name:
+            suggested_size_name = dia_str
+    elif size_raw:
+        # Rectangular: convert cm → mm
+        sm = re.match(r'(\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)', size_raw)
+        if sm:
+            w_cm, h_cm = float(sm.group(1)), float(sm.group(2))
+            w_mm = int(w_cm * 10)
+            h_mm = int(h_cm * 10)
+
+            # Search DB: match both orientations
+            for s in db_sizes:
+                sw = s.get("width_mm", 0)
+                sh = s.get("height_mm", 0)
+                if (sw == w_mm and sh == h_mm) or (sw == h_mm and sh == w_mm):
+                    suggested_size_name = s["name"]
+                    suggested_size_exists = True
+                    matched_size_id = s["id"]
+                    break
+
+            if not suggested_size_name:
+                # Build size name from raw
+                suggested_size_name = size_raw
+
+    # ── Step 4: Build standard name ──────────────────────────
+    type_label = ""
+    if product_type == "3d":
+        type_label = "3D"
+    elif product_type == "tiles":
+        type_label = "Tiles"
+    elif product_type == "sink":
+        type_label = "Sink"
+    elif product_type == "table_top":
+        type_label = "Table Top"
+
+    name_parts = [base_material]
+    if type_label:
+        name_parts.append(type_label)
+    if suggested_size_name:
+        name_parts.append(suggested_size_name)
+    standard_name = " ".join(name_parts)
+
+    logger.debug(
+        "smart_match_stone: standard_name=%r, product_type=%s, size=%s (exists=%s)",
+        standard_name, product_type, suggested_size_name, suggested_size_exists,
+    )
+
+    # ── Step 5: Match against existing materials ─────────────
+    # Filter to stone materials only
+    stone_materials = [m for m in db_materials if m.get("material_type") == "stone"]
+    if not stone_materials:
+        stone_materials = db_materials
+
+    best_match = None
+    best_score = 0.0
+    base_material_matches: list[dict] = []  # Same base, different size
+
+    base_lower = base_material.lower()
+    standard_tokens = tokenize_for_matching(standard_name)
+
+    for mat in stone_materials:
+        db_tokens = tokenize_for_matching(mat["name"])
+        score = calculate_match_score(standard_tokens, db_tokens)
+
+        # Check if same base material
+        mat_lower = mat["name"].lower()
+        has_same_base = base_lower in mat_lower or any(
+            w in mat_lower for w in base_lower.split() if len(w) > 3
+        )
+
+        # Bonus: base material keyword
+        if has_same_base:
+            score += 0.25
+
+        # Bonus: same product type
+        if product_type and mat.get("product_subtype"):
+            if product_type == mat["product_subtype"]:
+                score += 0.15
+            elif product_type == "3d" and "3d" in mat_lower:
+                score += 0.15
+
+        # Bonus: size match
+        if suggested_size_name:
+            size_lower = suggested_size_name.lower()
+            if size_lower in mat_lower:
+                score += 0.2
+
+        # Bonus: same size_id
+        if matched_size_id and mat.get("size_id") == matched_size_id:
+            score += 0.2
+
+        score = max(0.0, min(1.0, score))
+
+        if has_same_base:
+            base_material_matches.append({
+                "material_id": mat["id"],
+                "material_name": mat["name"],
+                "score": round(score, 3),
+            })
+
+        if score > best_score:
+            best_score = score
+            best_match = mat
+
+    # Sort base matches by score
+    base_material_matches.sort(key=lambda x: x["score"], reverse=True)
+
+    # Top 3 candidates
+    candidates = base_material_matches[:3] if base_material_matches else []
+    if not candidates and best_match:
+        candidates = [{"material_id": best_match["id"], "material_name": best_match["name"], "score": round(best_score, 3)}]
+
+    threshold = 0.5  # Higher threshold for smart matching
+    matched = best_match is not None and best_score >= threshold
+
+    # Determine suggestion context
+    suggestion_context = None
+    if not matched and base_material_matches:
+        suggestion_context = "same_base_different_size"
+    elif not matched:
+        suggestion_context = "new_material"
+
+    result = {
+        "matched": matched,
+        "material_id": best_match["id"] if matched and best_match else None,
+        "material_name": best_match["name"] if matched and best_match else None,
+        "score": round(best_score, 3),
+        "translated_name": translated,
+        "delivery_name": delivery_name,
+        "quantity": delivery_qty,
+        "unit": translated_unit,
+        "suggested_name": standard_name if not matched else None,
+        "suggested_type": "stone",
+        "suggested_subtype": product_type,
+        "candidates": candidates,
+        # Stone-specific extras
+        "suggested_size_name": suggested_size_name,
+        "suggested_size_exists": suggested_size_exists,
+        "suggested_product_type": product_type,
+        "needs_user_choice": needs_user_choice,
+        "parsed_color": color,
+        "parsed_base_material": base_material,
+        "suggestion_context": suggestion_context,
+    }
+
+    logger.info(
+        "smart_match_stone: %r → matched=%s, score=%.3f, standard=%r, "
+        "product_type=%s, size_exists=%s, needs_choice=%s",
+        delivery_name, matched, best_score, standard_name,
+        product_type, suggested_size_exists, needs_user_choice,
+    )
+
+    return result
 
 
 def _build_suggested_name(translated_name: str) -> str:

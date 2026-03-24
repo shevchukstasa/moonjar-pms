@@ -11,9 +11,18 @@ import { useFactories } from '@/hooks/useFactories';
 
 const PRODUCT_TYPES = [
   { value: 'tile', label: 'Tile' },
+  { value: 'table_top', label: 'Table Top' },
   { value: 'countertop', label: 'Countertop' },
   { value: 'sink', label: 'Sink' },
   { value: '3d', label: '3D' },
+];
+
+const PLACE_OF_APPLICATION = [
+  { value: 'face', label: 'Face Only' },
+  { value: 'face_edges_1', label: 'Face + 1 Edge' },
+  { value: 'face_edges_2', label: 'Face + 2 Edges' },
+  { value: 'face_edges_all', label: 'Face + All Edges' },
+  { value: 'with_back', label: 'With Back' },
 ];
 
 interface Props {
@@ -49,7 +58,7 @@ export function OrderCreateDialog({ open, onClose }: Props) {
       final_deadline: '',
       notes: '',
       mandatory_qc: false,
-      items: [{ color: '', size: '', application: '', finishing: '', collection: '', quantity_pcs: 1, product_type: 'tile', shape: 'rectangle', length_cm: null, width_cm: null, depth_cm: null, bowl_shape: '' }],
+      items: [{ color: '', size: '', application: '', finishing: '', collection: '', thickness_mm: null, place_of_application: 'face', quantity_pcs: 1, product_type: 'tile', shape: 'rectangle', length_cm: null, width_cm: null, depth_cm: null, bowl_shape: '' }],
     },
   });
 
@@ -115,7 +124,7 @@ export function OrderCreateDialog({ open, onClose }: Props) {
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() => append({ color: '', size: '', application: '', finishing: '', collection: '', quantity_pcs: 1, product_type: 'tile', shape: 'rectangle', length_cm: null, width_cm: null, depth_cm: null, bowl_shape: '' })}
+              onClick={() => append({ color: '', size: '', application: '', finishing: '', collection: '', thickness_mm: null, place_of_application: 'face', quantity_pcs: 1, product_type: 'tile', shape: 'rectangle', length_cm: null, width_cm: null, depth_cm: null, bowl_shape: '' })}
             >
               + Add Item
             </Button>
@@ -133,12 +142,24 @@ export function OrderCreateDialog({ open, onClose }: Props) {
                   )}
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  <Input label="Color" {...register(`items.${idx}.color`)} error={errors.items?.[idx]?.color?.message} placeholder="Red" />
+                  <Input label="Color" {...register(`items.${idx}.color`)} error={errors.items?.[idx]?.color?.message} placeholder="Moss Glaze" />
                   <Input label="Size" {...register(`items.${idx}.size`)} error={errors.items?.[idx]?.size?.message} placeholder="10x10" />
-                  <Input label="Quantity" type="number" {...register(`items.${idx}.quantity_pcs`)} error={errors.items?.[idx]?.quantity_pcs?.message} />
-                  <Input label="Application" {...register(`items.${idx}.application`)} placeholder="Wall" />
-                  <Input label="Finishing" {...register(`items.${idx}.finishing`)} placeholder="Matte" />
-                  <Input label="Collection" {...register(`items.${idx}.collection`)} placeholder="e.g. Stock" />
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">Quantity</label>
+                    <div className="flex gap-1">
+                      <input type="number" step="0.01" {...register(`items.${idx}.quantity_pcs`)} className="w-full rounded-l-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" placeholder="100" />
+                      <select {...register(`items.${idx}.quantity_unit`)} className="rounded-r-md border border-l-0 border-gray-300 bg-gray-50 px-2 py-2 text-xs font-medium text-gray-600">
+                        <option value="pcs">pcs</option>
+                        <option value="sqm">m²</option>
+                      </select>
+                    </div>
+                    {errors.items?.[idx]?.quantity_pcs?.message && <p className="mt-0.5 text-xs text-red-500">{errors.items[idx].quantity_pcs.message}</p>}
+                  </div>
+                  <Input label="Application" {...register(`items.${idx}.application`)} placeholder="SS" />
+                  <Input label="Finishing" {...register(`items.${idx}.finishing`)} placeholder="10/20" />
+                  <Input label="Collection" {...register(`items.${idx}.collection`)} placeholder="e.g. Mix" />
+                  <Input label="Thickness (mm)" type="number" step="0.1" {...register(`items.${idx}.thickness_mm`)} placeholder="10" />
+                  <Select label="Place of Application" {...register(`items.${idx}.place_of_application`)} options={PLACE_OF_APPLICATION} />
                   <Select label="Product Type" {...register(`items.${idx}.product_type`)} options={PRODUCT_TYPES} />
                   <Select label="Shape" {...register(`items.${idx}.shape`)} options={SHAPE_OPTIONS.map(s => ({ value: s.value, label: s.label }))} />
                 </div>

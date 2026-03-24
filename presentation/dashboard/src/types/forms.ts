@@ -25,8 +25,10 @@ export const orderItemSchema = z.object({
   application: z.string().optional().default(''),
   finishing: z.string().optional().default(''),
   collection: z.string().optional().default(''),
-  thickness_mm: z.coerce.number().positive().optional(),
-  quantity_pcs: z.coerce.number().int().positive('Quantity must be > 0'),
+  thickness_mm: z.coerce.number().positive().optional().nullable(),
+  place_of_application: z.string().optional().default('face'),
+  quantity_pcs: z.coerce.number().positive('Quantity must be > 0'),
+  quantity_unit: z.string().optional().default('pcs'),
   product_type: z.string().optional().default('tile'),
   // Shape & dimensions for glaze surface area
   shape: z.string().optional().default('rectangle'),

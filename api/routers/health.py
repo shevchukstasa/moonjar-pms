@@ -1,5 +1,6 @@
 """Health check, backup monitoring & internal cron endpoints."""
 
+import hmac
 import os
 import logging
 from datetime import datetime, timezone, timedelta
@@ -22,8 +23,11 @@ async def health_check():
 
 
 @router.get("/health/seed-status")
-async def seed_status(db: Session = Depends(get_db)):
-    """Public diagnostic: count rows in key reference tables."""
+async def seed_status(
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Admin-only diagnostic: count rows in key reference tables."""
     from sqlalchemy import text
     counts = {}
     for table in ["colors", "sizes", "firing_profiles", "factories", "users",
@@ -62,7 +66,7 @@ def _verify_internal_auth(request: Request) -> None:
     # Check X-Internal-Key header — prefer dedicated INTERNAL_API_KEY, fall back to OWNER_KEY
     internal_key = request.headers.get("X-Internal-Key")
     expected_key = os.getenv("INTERNAL_API_KEY") or settings.OWNER_KEY
-    if internal_key and expected_key and internal_key == expected_key:
+    if internal_key and expected_key and hmac.compare_digest(internal_key, expected_key):
         return
 
     # Check IP allowlist

@@ -1,3 +1,8 @@
+# NOTE: Dependencies use version ranges rather than exact pins. Railway uses
+# pip install which resolves the latest compatible version within each range
+# on every deploy. For fully reproducible builds, run `pip freeze > requirements.lock`
+# and reference that file instead. The ranges below are kept intentionally to
+# receive security patches automatically between deploys.
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.34,<1.0
 websockets>=14,<15

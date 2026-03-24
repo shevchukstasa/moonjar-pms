@@ -18,6 +18,18 @@ logger = logging.getLogger("moonjar.packing_photos")
 
 router = APIRouter()
 
+# Magic-byte validation for image uploads
+ALLOWED_MAGIC = {
+    b'\xff\xd8\xff': 'image/jpeg',
+    b'\x89PNG': 'image/png',
+    b'RIFF': 'image/webp',
+}
+
+
+def _validate_image_magic(data: bytes) -> bool:
+    """Check that image data starts with a known image magic-byte signature."""
+    return any(data.startswith(magic) for magic in ALLOWED_MAGIC)
+
 
 class PackingPhotoCreate(BaseModel):
     order_id: UUID
@@ -176,6 +188,10 @@ async def upload_packing_photo(
 
     if len(image_bytes) > 10 * 1024 * 1024:  # 10 MB limit
         raise HTTPException(400, "File too large (max 10 MB)")
+
+    # Validate magic bytes to prevent non-image uploads
+    if not _validate_image_magic(image_bytes):
+        raise HTTPException(400, "Invalid image file. Only JPEG, PNG, and WebP are allowed.")
 
     # Determine factory_id from order or position
     factory_id = None

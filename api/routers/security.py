@@ -28,24 +28,22 @@ logger = logging.getLogger("moonjar.security")
 # TOTP encryption helpers
 # ---------------------------------------------------------------------------
 
-def _get_fernet() -> Fernet:
-    """Build Fernet cipher from TOTP_ENCRYPTION_KEY.
-
-    The config value is a passphrase-style string. We pad/truncate it to
-    exactly 32 bytes then base64-encode, which is what Fernet expects.
-
-    TODO(security): Replace pad/truncate with a proper KDF (e.g. PBKDF2 or
-    HKDF from cryptography.hazmat.primitives.kdf) to derive the Fernet key
-    from the passphrase. The current approach loses entropy from passphrases
-    longer than 32 bytes and has weak key material for shorter ones.
-    Migration: re-encrypt all existing totp_secret_encrypted values with the
-    new derived key, or support dual-decryption during a transition period.
-    """
+def _derive_fernet_key(passphrase: str) -> bytes:
+    """Derive a 32-byte Fernet key from a passphrase using PBKDF2."""
+    import hashlib
     import base64
-    key_bytes = get_settings().TOTP_ENCRYPTION_KEY.encode("utf-8")
-    # Pad or truncate to 32 bytes
-    key_bytes = key_bytes.ljust(32, b"\0")[:32]
-    return Fernet(base64.urlsafe_b64encode(key_bytes))
+    key = hashlib.pbkdf2_hmac(
+        'sha256',
+        passphrase.encode(),
+        b'moonjar-totp-salt-v1',  # static salt is OK for config-derived keys
+        iterations=100_000,
+    )
+    return base64.urlsafe_b64encode(key)
+
+
+def _get_fernet() -> Fernet:
+    """Build Fernet cipher from TOTP_ENCRYPTION_KEY using PBKDF2 key derivation."""
+    return Fernet(_derive_fernet_key(get_settings().TOTP_ENCRYPTION_KEY))
 
 
 def _encrypt_totp_secret(secret: str) -> str:

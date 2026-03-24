@@ -13,7 +13,7 @@ from sqlalchemy import extract
 from api.database import get_db
 from api.auth import get_current_user
 from api.roles import require_management
-from api.models import Employee, Attendance, Factory
+from api.models import Employee, Attendance, Factory, UserFactory
 
 router = APIRouter()
 
@@ -156,7 +156,12 @@ class PayrollSummaryItem(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────
 
+# Roles that can see salary/financial data
+_SALARY_VISIBLE_ROLES = {"owner", "administrator", "ceo", "production_manager"}
+
+
 def _serialize_employee(emp: Employee, db: Session) -> dict:
+    """Full serializer including salary fields — used by management roles."""
     factory = db.query(Factory).filter(Factory.id == emp.factory_id).first()
     return {
         "id": str(emp.id),
@@ -183,6 +188,27 @@ def _serialize_employee(emp: Employee, db: Session) -> dict:
         "created_at": emp.created_at.isoformat() if emp.created_at else None,
         "updated_at": emp.updated_at.isoformat() if emp.updated_at else None,
     }
+
+
+def _serialize_employee_public(emp: Employee, db: Session) -> dict:
+    """Public serializer — NO salary, allowance, or BPJS fields."""
+    factory = db.query(Factory).filter(Factory.id == emp.factory_id).first()
+    return {
+        "id": str(emp.id),
+        "factory_id": str(emp.factory_id),
+        "factory_name": factory.name if factory else None,
+        "full_name": emp.full_name,
+        "position": emp.position,
+        "department": emp.department or "production",
+        "phone": emp.phone,
+        "is_active": emp.is_active,
+    }
+
+
+def _get_user_factory_ids(user, db: Session) -> set:
+    """Return set of factory UUIDs the user is assigned to."""
+    rows = db.query(UserFactory.factory_id).filter(UserFactory.user_id == user.id).all()
+    return {r.factory_id for r in rows}
 
 
 def _serialize_attendance(att: Attendance, db: Session) -> dict:
@@ -214,7 +240,19 @@ async def list_employees(
     current_user=Depends(get_current_user),
 ):
     """List employees, optionally filtered by factory, active status, department, and category."""
+    role = current_user.role.value if hasattr(current_user.role, 'value') else str(current_user.role)
+
     query = db.query(Employee)
+
+    # MEDIUM #7: Factory scoping — non-global roles only see employees from their factories
+    if role not in ("owner", "administrator"):
+        user_factory_ids = _get_user_factory_ids(current_user, db)
+        if user_factory_ids:
+            query = query.filter(Employee.factory_id.in_(user_factory_ids))
+        else:
+            # User has no factory assignments → empty result
+            return {"items": [], "total": 0, "page": page, "per_page": per_page}
+
     if factory_id:
         query = query.filter(Employee.factory_id == UUID(factory_id))
     if is_active is not None:
@@ -232,8 +270,11 @@ async def list_employees(
         .all()
     )
 
+    # HIGH #1: Only management roles see salary data
+    serializer = _serialize_employee if role in _SALARY_VISIBLE_ROLES else _serialize_employee_public
+
     return {
-        "items": [_serialize_employee(e, db) for e in items],
+        "items": [serializer(e, db) for e in items],
         "total": total,
         "page": page,
         "per_page": per_page,
@@ -337,10 +378,21 @@ async def get_employee(
     current_user=Depends(get_current_user),
 ):
     """Get a single employee by ID."""
+    role = current_user.role.value if hasattr(current_user.role, 'value') else str(current_user.role)
+
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
         raise HTTPException(404, "Employee not found")
-    return _serialize_employee(emp, db)
+
+    # MEDIUM #7: Factory scoping — non-admin users can only view employees in their factories
+    if role not in ("owner", "administrator"):
+        user_factory_ids = _get_user_factory_ids(current_user, db)
+        if emp.factory_id not in user_factory_ids:
+            raise HTTPException(404, "Employee not found")
+
+    # HIGH #1: Only management roles see salary data
+    serializer = _serialize_employee if role in _SALARY_VISIBLE_ROLES else _serialize_employee_public
+    return serializer(emp, db)
 
 
 @router.post("", status_code=201)

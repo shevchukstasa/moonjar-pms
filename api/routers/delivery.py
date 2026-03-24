@@ -16,6 +16,18 @@ logger = logging.getLogger("moonjar.delivery")
 
 router = APIRouter()
 
+# Magic-byte validation for image uploads
+ALLOWED_MAGIC = {
+    b'\xff\xd8\xff': 'image/jpeg',
+    b'\x89PNG': 'image/png',
+    b'RIFF': 'image/webp',
+}
+
+
+def _validate_image_magic(data: bytes) -> bool:
+    """Check that image data starts with a known image magic-byte signature."""
+    return any(data.startswith(magic) for magic in ALLOWED_MAGIC)
+
 
 async def _get_user_or_internal_key(
     request: Request,
@@ -68,6 +80,10 @@ async def process_delivery_photo(
     content_type = file.content_type or ""
     if not content_type.startswith("image/"):
         raise HTTPException(400, f"Expected image file, got {content_type}")
+
+    # Validate magic bytes to prevent non-image uploads
+    if not _validate_image_magic(image_bytes):
+        raise HTTPException(400, "Invalid image file. Only JPEG, PNG, and WebP are allowed.")
 
     logger.info(
         "DELIVERY_PHOTO | user=%s | file=%s (%d bytes) | supplier_hint=%s",

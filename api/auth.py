@@ -89,6 +89,11 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str, 
     cookies from being sent on cross-origin requests, breaking auth entirely.
     To switch to SameSite=Lax, deploy frontend and API on the same origin
     (e.g. via reverse proxy or custom domain).
+
+    TODO(security): Migrate to SameSite=Lax once a custom domain is configured
+    so that the frontend and API share the same origin. SameSite=None exposes
+    cookies to cross-site request forgery vectors that CSRF-token mitigation
+    only partially addresses.
     """
     response.set_cookie(
         key="access_token",

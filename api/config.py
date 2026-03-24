@@ -123,9 +123,9 @@ def get_settings() -> Settings:
         critical_insecure.append("SECRET_KEY")
     if s.OWNER_KEY in _INSECURE_DEFAULTS:
         critical_insecure.append("OWNER_KEY")
-    # TOTP is not yet implemented — warn only, don't block startup
+    # TOTP is implemented — block startup with insecure default
     if s.TOTP_ENCRYPTION_KEY in _INSECURE_DEFAULTS:
-        warn_insecure.append("TOTP_ENCRYPTION_KEY")
+        critical_insecure.append("TOTP_ENCRYPTION_KEY")
 
     if critical_insecure and _is_production:
         raise RuntimeError(

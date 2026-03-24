@@ -1,21 +1,21 @@
 # Moonjar PMS — Отчёт по мёртвому коду
 
-Дата сканирования: 2026-03-21 15:39
+Дата сканирования: 2026-03-24 23:05
 
 ## Сводка
 
 | Категория | Точно мёртвый | Возможно мёртвый |
 |-----------|:---:|:---:|
-| Неиспользуемые импорты | 131 | 0 |
-| Неиспользуемые функции | 46 | 12 |
-| Неиспользуемые классы | 15 | 0 |
-| Неиспользуемые SQLAlchemy-модели | 5 | 0 |
+| Неиспользуемые импорты | 94 | 0 |
+| Неиспользуемые функции | 35 | 15 |
+| Неиспользуемые классы | 18 | 0 |
+| Неиспользуемые SQLAlchemy-модели | 1 | 0 |
 | Неиспользуемые компоненты | 2 | 0 |
-| Неиспользуемые TS-экспорты | 0 | 197 |
-| Мёртвая бизнес-логика | 9 | 0 |
-| Осиротевшие схемы | 177 | 0 |
+| Неиспользуемые TS-экспорты | 0 | 202 |
+| Мёртвая бизнес-логика | 2 | 0 |
+| Осиротевшие схемы | 9 | 0 |
 | Неиспользуемые env-переменные | 0 | 6 |
-| **ИТОГО** | **385** | **215** |
+| **ИТОГО** | **161** | **223** |
 
 ## Неиспользуемые импорты
 
@@ -23,59 +23,25 @@
   - Импортирован, но не используется в файле
 - **[DEAD]** `api/auth.py:281` — `UserFactory`
   - Импортирован, но не используется в файле
+- **[DEAD]** `api/main.py:8` — `JSONResponse`
+  - Импортирован, но не используется в файле
 - **[DEAD]** `api/models.py:18` — `MaterialType`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `api/rate_limit.py:14` — `datetime`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `api/rate_limit.py:14` — `timezone`
   - Импортирован, но не используется в файле
 - **[DEAD]** `api/roles.py:5` — `wraps`
   - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/analytics.py:6` — `timedelta`
+- **[DEAD]** `api/routers/analytics.py:26` — `Resource`
   - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/analytics.py:7` — `Optional`
+- **[DEAD]** `api/routers/employees.py:5` — `datetime`
   - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/analytics.py:9` — `HTTPException`
+- **[DEAD]** `api/routers/employees.py:5` — `timezone`
   - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/analytics.py:13` — `get_current_user`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/analytics.py:28` — `BottleneckConfig`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/analytics.py:29` — `ResourceType`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/analytics.py:194` — `func`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/analytics.py:194` — `extract`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/cleanup.py:10` — `datetime`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/cleanup.py:10` — `timezone`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/cleanup.py:17` — `get_current_user`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/cleanup.py:17` — `apply_factory_filter`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/cleanup.py:38` — `UserRole`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/export.py:18` — `get_current_user`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/export.py:25` — `OrderStatus`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/export.py:25` — `PositionStatus`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/export.py:25` — `ExpenseType`
+- **[DEAD]** `api/routers/employees.py:6` — `Decimal`
   - Импортирован, но не используется в файле
 - **[DEAD]** `api/routers/factories.py:7` — `func`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/financials.py:13` — `get_current_user`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/financials.py:17` — `ExpenseCategory`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/financials.py:17` — `OrderStatus`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/finished_goods.py:6` — `Optional`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/finished_goods.py:14` — `apply_factory_filter`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/finished_goods.py:16` — `Factory`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/finished_goods.py:17` — `ProductType`
   - Импортирован, но не используется в файле
 - **[DEAD]** `api/routers/firing_profiles.py:8` — `and_`
   - Импортирован, но не используется в файле
@@ -91,9 +57,9 @@
   - Импортирован, но не используется в файле
 - **[DEAD]** `api/routers/orders.py:14` — `get_current_user`
   - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/orders.py:838` — `NotificationType`
+- **[DEAD]** `api/routers/orders.py:969` — `NotificationType`
   - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/orders.py:838` — `RelatedEntityType`
+- **[DEAD]** `api/routers/orders.py:969` — `RelatedEntityType`
   - Импортирован, но не используется в файле
 - **[DEAD]** `api/routers/packaging.py:7` — `Query`
   - Импортирован, но не используется в файле
@@ -111,16 +77,6 @@
   - Импортирован, но не используется в файле
 - **[DEAD]** `api/routers/reports.py:13` — `get_current_user`
   - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/schedule.py:3` — `datetime`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/schedule.py:3` — `timezone`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/schedule.py:10` — `func`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/schedule.py:15` — `ScheduleSlot`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/schedule.py:16` — `ResourceStatus`
-  - Импортирован, но не используется в файле
 - **[DEAD]** `api/routers/security.py:22` — `IpScope`
   - Импортирован, но не используется в файле
 - **[DEAD]** `api/routers/settings.py:13` — `text`
@@ -130,12 +86,6 @@
 - **[DEAD]** `api/routers/stone_reservations.py:12` — `func`
   - Импортирован, но не используется в файле
 - **[DEAD]** `api/routers/stone_reservations.py:15` — `StoneReservationAdjustment`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/suppliers.py:4` — `Optional`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/suppliers.py:9` — `sa_func`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/suppliers.py:18` — `SupplierResponse`
   - Импортирован, но не используется в файле
 - **[DEAD]** `api/routers/tasks.py:15` — `ProductionOrderItem`
   - Импортирован, но не используется в файле
@@ -147,15 +97,13 @@
   - Импортирован, но не используется в файле
 - **[DEAD]** `api/routers/toc.py:17` — `BufferStatus`
   - Импортирован, но не используется в файле
+- **[DEAD]** `api/routers/tps.py:19` — `TpsStatus`
+  - Импортирован, но не используется в файле
 - **[DEAD]** `api/routers/users.py:8` — `EmailStr`
   - Импортирован, но не используется в файле
 - **[DEAD]** `api/routers/users.py:13` — `get_current_user`
   - Импортирован, но не используется в файле
 - **[DEAD]** `api/schemas.py:6` — `annotations`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/unit_conversion.py:22` — `Decimal`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/unit_conversion.py:22` — `ROUND_HALF_UP`
   - Импортирован, но не используется в файле
 - **[DEAD]** `business/planning_engine/scheduler.py:6` — `timedelta`
   - Импортирован, но не используется в файле
@@ -201,9 +149,13 @@
   - Импортирован, но не используется в файле
 - **[DEAD]** `business/services/order_cancellation.py:10` — `Optional`
   - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/payroll.py:8` — `Optional`
+  - Импортирован, но не используется в файле
 - **[DEAD]** `business/services/pdf_parser_service.py:12` — `datetime`
   - Импортирован, но не используется в файле
 - **[DEAD]** `business/services/pdf_templates.py:15` — `annotations`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/photo_analysis.py:17` — `Optional`
   - Импортирован, но не используется в файле
 - **[DEAD]** `business/services/photo_storage.py:18` — `datetime`
   - Импортирован, но не используется в файле
@@ -233,43 +185,17 @@
   - Импортирован, но не используется в файле
 - **[DEAD]** `business/services/schedule_estimation.py:8` — `Optional`
   - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/sorting_split.py:7` — `timedelta`
+- **[DEAD]** `business/services/status_machine.py:381` — `create_notification`
   - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/sorting_split.py:8` — `ceil`
+- **[DEAD]** `business/services/status_machine.py:383` — `NotificationType`
   - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/sorting_split.py:8` — `floor`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/status_machine.py:306` — `create_notification`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/status_machine.py:308` — `NotificationType`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/status_machine.py:308` — `RelatedEntityType`
+- **[DEAD]** `business/services/status_machine.py:383` — `RelatedEntityType`
   - Импортирован, но не используется в файле
 - **[DEAD]** `business/services/stone_reservation.py:17` — `math`
   - Импортирован, но не используется в файле
 - **[DEAD]** `business/services/stone_reservation.py:20` — `Decimal`
   - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/surplus_handling.py:21` — `datetime`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/surplus_handling.py:21` — `timedelta`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/surplus_handling.py:21` — `timezone`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/surplus_handling.py:23` — `uuid_mod`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/telegram_bot.py:26` — `ResourceType`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/telegram_bot.py:26` — `BatchStatus`
-  - Импортирован, но не используется в файле
 - **[DEAD]** `business/services/telegram_callbacks.py:300` — `sa_text`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/tps_metrics.py:6` — `datetime`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/tps_metrics.py:7` — `ceil`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/tps_metrics.py:7` — `floor`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/tps_metrics.py:12` — `sa_func`
   - Импортирован, но не используется в файле
 - **[DEAD]** `scripts/architecture_audit_detailed.py:16` — `sys`
   - Импортирован, но не используется в файле
@@ -286,17 +212,7 @@
 
 - **[DEAD]** `api/auth.py:142` — `validate_csrf`
   - Определена, но нигде не вызывается
-- **[DEAD]** `api/main.py:1871` — `global_exception_handler`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `api/scheduler.py:17` — `get_last_backup_status`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `api/unit_conversion.py:126` — `calculate_material_consumption`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `api/unit_conversion.py:152` — `format_conversion_info`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/kiln/capacity.py:56` — `get_sqm_per_piece`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/kiln/constants.py:70` — `invalidate_cache`
+- **[DEAD]** `api/unit_conversion.py:38` — `convert_units`
   - Определена, но нигде не вызывается
 - **[DEAD]** `business/planning_engine/optimizer.py:10` — `optimize_batch_fill`
   - Определена, но нигде не вызывается
@@ -304,15 +220,7 @@
   - Определена, но нигде не вызывается
 - **[DEAD]** `business/planning_engine/scheduler.py:27` — `recalculate_schedule`
   - Определена, но нигде не вызывается
-- **[DEAD]** `business/rag/embeddings.py:78` — `index_order`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/rag/embeddings.py:122` — `index_recipe`
-  - Определена, но нигде не вызывается
 - **[DEAD]** `business/rag/retriever.py:149` — `chat_with_context`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/batch_formation.py:1200` — `build_batch_proposals`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/batch_formation.py:1649` — `fill_with_filler_tiles`
   - Определена, но нигде не вызывается
 - **[DEAD]** `business/services/defect_coefficient.py:197` — `calculate_production_quantity_with_defects`
   - Определена, но нигде не вызывается
@@ -322,25 +230,23 @@
   - Определена, но нигде не вызывается
 - **[DEAD]** `business/services/kiln_breakdown.py:297` — `get_affected_positions`
   - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/min_balance.py:100` — `recalculate_min_balance_recommendations`
+- **[DEAD]** `business/services/material_matcher.py:274` — `guess_subtype_from_size`
+  - Определена, но нигде не вызывается
+- **[DEAD]** `business/services/material_matcher.py:654` — `find_best_match_sync`
   - Определена, но нигде не вызывается
 - **[DEAD]** `business/services/min_balance.py:175` — `pm_override_min_balance`
   - Определена, но нигде не вызывается
 - **[DEAD]** `business/services/notifications.py:332` — `edit_telegram_message_buttons`
   - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/order_cancellation.py:21` — `process_order_cancellation`
+- **[DEAD]** `business/services/order_intake.py:86` — `process_incoming_order`
   - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/order_intake.py:85` — `process_incoming_order`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/order_intake.py:343` — `estimate_factory_lead_time`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/partial_delivery.py:44` — `handle_partial_delivery`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/partial_delivery.py:259` — `pm_resolve_partial_delivery`
+- **[DEAD]** `business/services/order_intake.py:378` — `estimate_factory_lead_time`
   - Определена, но нигде не вызывается
 - **[DEAD]** `business/services/pdf_templates.py:199` — `get_template`
   - Определена, но нигде не вызывается
 - **[DEAD]** `business/services/pdf_templates.py:261` — `list_templates`
+  - Определена, но нигде не вызывается
+- **[DEAD]** `business/services/photo_analysis.py:382` — `format_delivery_message`
   - Определена, но нигде не вызывается
 - **[DEAD]** `business/services/photo_storage.py:196` — `get_public_url`
   - Определена, но нигде не вызывается
@@ -354,17 +260,15 @@
   - Определена, но нигде не вызывается
 - **[DEAD]** `business/services/rotation_rules.py:239` — `validate_batch_rotation`
   - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/status_machine.py:146` — `transition_position_status`
+- **[DEAD]** `business/services/status_machine.py:218` — `transition_position_status`
   - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/surplus_handling.py:148` — `process_surplus_batch`
+- **[DEAD]** `business/services/surplus_handling.py:146` — `process_surplus_batch`
   - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/telegram_bot.py:353` — `send_message_with_buttons`
+- **[DEAD]** `business/services/telegram_ai.py:504` — `detect_language`
   - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/tps_metrics.py:69` — `collect_shift_metrics`
+- **[DEAD]** `business/services/telegram_ai.py:532` — `translate_response`
   - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/tps_metrics.py:129` — `record_shift_metric`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/tps_metrics.py:260` — `evaluate_signal`
+- **[DEAD]** `business/services/telegram_ai.py:582` — `ai_match_material`
   - Определена, но нигде не вызывается
 - **[DEAD]** `scripts/architecture_audit_detailed.py:46` — `count_lines`
   - Определена, но нигде не вызывается
@@ -382,6 +286,8 @@
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `api/routers/integration.py:974` — `_needs_color_matching`
   - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `api/routers/orders.py:240` — `_cancel_order_tasks`
+  - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `api/routers/packaging.py:53` — `_ev`
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `api/routers/positions.py:41` — `_next_position_number`
@@ -396,6 +302,10 @@
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `business/services/purchaser_lifecycle.py:360` — `_notify_on_in_transit`
   - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `business/services/telegram_bot.py:1542` — `_fuzzy_match_material`
+  - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `business/services/telegram_bot.py:2341` — `_edit_telegram_message`
+  - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `scripts/audit_pm.py:165` — `_get_router_prefix`
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `scripts/diff_migration.py:428` — `_parse_main_add_columns`
@@ -403,27 +313,33 @@
 
 ## Неиспользуемые классы
 
-- **[DEAD]** `api/enums.py:287` — `WebhookAuthMode`
+- **[DEAD]** `api/enums.py:296` — `WebhookAuthMode`
   - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:335` — `ReceivingApprovalMode`
+- **[DEAD]** `api/enums.py:344` — `ReceivingApprovalMode`
   - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:339` — `ProblemCardMode`
+- **[DEAD]** `api/enums.py:348` — `ProblemCardMode`
   - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:343` — `ProblemCardStatus`
+- **[DEAD]** `api/enums.py:352` — `ProblemCardStatus`
   - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:400` — `EdgeProfileType`
+- **[DEAD]** `api/enums.py:409` — `EdgeProfileType`
   - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:413` — `ApplicationMethodCode`
+- **[DEAD]** `api/enums.py:422` — `ApplicationMethodCode`
   - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:425` — `ApplicationCollectionCode`
+- **[DEAD]** `api/enums.py:434` — `ApplicationCollectionCode`
   - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:437` — `ConsumptionGroup`
+- **[DEAD]** `api/enums.py:446` — `ConsumptionGroup`
   - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:444` — `EngobeType`
+- **[DEAD]** `api/enums.py:453` — `EngobeType`
   - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:450` — `NightAlertLevel`
+- **[DEAD]** `api/enums.py:459` — `NightAlertLevel`
   - Определён, но нигде не используется
 - **[DEAD]** `api/routers/batches.py:72` — `BatchDetailResponse`
+  - Определён, но нигде не используется
+- **[DEAD]** `api/routers/employees.py:23` — `EmployeeOut`
+  - Определён, но нигде не используется
+- **[DEAD]** `api/routers/employees.py:92` — `AttendanceOut`
+  - Определён, но нигде не используется
+- **[DEAD]** `api/routers/employees.py:117` — `PayrollSummaryItem`
   - Определён, но нигде не используется
 - **[DEAD]** `api/routers/factory_calendar.py:21` — `CalendarEntryOut`
   - Определён, но нигде не используется
@@ -436,15 +352,7 @@
 
 ## Неиспользуемые SQLAlchemy-модели
 
-- **[DEAD]** `api/models.py:357` — `ProductionOrderStatusLog`
-  - Модель определена, но не импортируется ни в одном роутере/сервисе
-- **[DEAD]** `api/models.py:715` — `OrderStageHistory`
-  - Модель определена, но не импортируется ни в одном роутере/сервисе
-- **[DEAD]** `api/models.py:1712` — `KilnActualLoad`
-  - Модель определена, но не импортируется ни в одном роутере/сервисе
-- **[DEAD]** `api/models.py:1792` — `RateLimitEvent`
-  - Модель определена, но не импортируется ни в одном роутере/сервисе
-- **[DEAD]** `api/models.py:2137` — `MasterPermission`
+- **[DEAD]** `api/models.py:2144` — `MasterPermission`
   - Модель определена, но не импортируется ни в одном роутере/сервисе
 
 ## Неиспользуемые компоненты
@@ -484,6 +392,16 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/dashboardAccess.ts:18` — `DashboardAccessCreatePayload`
   - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:31` — `EmployeeListResponse`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:93` — `AttendanceListResponse`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:97` — `AttendanceCreatePayload`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:104` — `AttendanceUpdatePayload`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:165` — `PayrollSummaryResponse`
+  - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/export.ts:3` — `exportApi`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/factoryCalendar.ts:18` — `CalendarListResponse`
@@ -498,13 +416,13 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/finishedGoods.ts:17` — `FinishedGoodsListParams`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/finishedGoods.ts:26` — `FinishedGoodsListResponse`
+- **[MAYBE]** `presentation/dashboard/src/api/finishedGoods.ts:27` — `FinishedGoodsListResponse`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/finishedGoods.ts:43` — `StockUpdateInput`
+- **[MAYBE]** `presentation/dashboard/src/api/finishedGoods.ts:44` — `StockUpdateInput`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/finishedGoods.ts:48` — `AvailabilityParams`
+- **[MAYBE]** `presentation/dashboard/src/api/finishedGoods.ts:49` — `AvailabilityParams`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/finishedGoods.ts:56` — `FactoryAvailability`
+- **[MAYBE]** `presentation/dashboard/src/api/finishedGoods.ts:57` — `FactoryAvailability`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/firingProfiles.ts:18` — `FiringProfileForm`
   - Экспортируется, но не импортируется в других файлах
@@ -582,7 +500,7 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/useMaterials.ts:13` — `useMaterial`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/hooks/useMaterials.ts:80` — `useCreatePurchaseRequest`
+- **[MAYBE]** `presentation/dashboard/src/hooks/useMaterials.ts:91` — `useCreatePurchaseRequest`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/useNotificationPreferences.ts:33` — `useDeletePreference`
   - Экспортируется, но не импортируется в других файлах
@@ -844,7 +762,7 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/types/forms.ts:22` — `orderItemSchema`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/forms.ts:38` — `OrderItemFormData`
+- **[MAYBE]** `presentation/dashboard/src/types/forms.ts:40` — `OrderItemFormData`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/types/models.ts:4` — `OrderPosition`
   - Экспортируется, но не импортируется в других файлах
@@ -857,376 +775,26 @@
   - Модуль business.planning_engine.optimizer нигде не импортируется
 - **[DEAD]** `business/planning_engine/scheduler.py:1` — `scheduler`
   - Модуль business.planning_engine.scheduler нигде не импортируется
-- **[DEAD]** `business/services/min_balance.py:1` — `min_balance`
-  - Модуль business.services.min_balance нигде не импортируется
-- **[DEAD]** `business/services/order_cancellation.py:1` — `order_cancellation`
-  - Модуль business.services.order_cancellation нигде не импортируется
-- **[DEAD]** `business/services/partial_delivery.py:1` — `partial_delivery`
-  - Модуль business.services.partial_delivery нигде не импортируется
-- **[DEAD]** `business/services/quality_control.py:1` — `quality_control`
-  - Модуль business.services.quality_control нигде не импортируется
-- **[DEAD]** `business/services/reconciliation.py:1` — `reconciliation`
-  - Модуль business.services.reconciliation нигде не импортируется
-- **[DEAD]** `business/services/tps_metrics.py:1` — `tps_metrics`
-  - Модуль business.services.tps_metrics нигде не импортируется
-- **[DEAD]** `business/services/warehouse.py:1` — `warehouse`
-  - Модуль business.services.warehouse нигде не импортируется
 
 ## Осиротевшие схемы
 
-- **[DEAD]** `api/schemas.py:17` — `PaginatedResponse`
+- **[DEAD]** `api/schemas.py:71` — `UserCreate`
   - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:80` — `UserCreate`
+- **[DEAD]** `api/schemas.py:85` — `UserUpdate`
   - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:94` — `UserUpdate`
+- **[DEAD]** `api/schemas.py:127` — `SupplierResponse`
   - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:108` — `UserResponse`
+- **[DEAD]** `api/schemas.py:174` — `SizeUpdate`
   - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:127` — `UserFactoryCreate`
+- **[DEAD]** `api/schemas.py:237` — `MaterialCreate`
   - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:132` — `UserFactoryUpdate`
+- **[DEAD]** `api/schemas.py:252` — `MaterialUpdate`
   - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:137` — `UserFactoryResponse`
+- **[DEAD]** `api/schemas.py:267` — `MaterialResponse`
   - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:193` — `SupplierLeadTimeCreate`
+- **[DEAD]** `api/schemas.py:356` — `TaskCreate`
   - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:202` — `SupplierLeadTimeUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:211` — `SupplierLeadTimeResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:231` — `CollectionResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:251` — `ColorResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:261` — `ApplicationTypeCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:265` — `ApplicationTypeUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:269` — `ApplicationTypeResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:277` — `PlacesOfApplicationCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:282` — `PlacesOfApplicationUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:287` — `PlacesOfApplicationResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:304` — `FinishingTypeResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:312` — `SizeCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:319` — `SizeUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:326` — `SizeResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:337` — `ReferenceAuditLogCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:347` — `ReferenceAuditLogUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:357` — `ReferenceAuditLogResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:370` — `ProductionOrderCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:392` — `ProductionOrderUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:414` — `ProductionOrderResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:441` — `ProductionOrderItemCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:456` — `ProductionOrderItemUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:471` — `ProductionOrderItemResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:490` — `SalesWebhookEventCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:497` — `SalesWebhookEventUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:504` — `SalesWebhookEventResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:515` — `ProductionOrderChangeRequestCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:525` — `ProductionOrderChangeRequestUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:535` — `ProductionOrderChangeRequestResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:549` — `ProductionOrderStatusLogCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:558` — `ProductionOrderStatusLogUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:567` — `ProductionOrderStatusLogResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:636` — `MaterialCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:651` — `MaterialUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:666` — `MaterialResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:686` — `RecipeMaterialCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:694` — `RecipeMaterialUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:733` — `RecipeKilnConfigCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:741` — `RecipeKilnConfigUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:749` — `RecipeKilnConfigResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:762` — `ResourceCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:778` — `ResourceUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:794` — `ResourceResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:853` — `ScheduleSlotCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:861` — `ScheduleSlotUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:869` — `ScheduleSlotResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:881` — `OrderPositionCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:917` — `OrderPositionUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:953` — `OrderPositionResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:994` — `TaskCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1009` — `TaskUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1024` — `TaskResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1062` — `OrderStageHistoryCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1069` — `OrderStageHistoryUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1076` — `OrderStageHistoryResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1086` — `MaterialTransactionCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1097` — `MaterialTransactionUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1108` — `MaterialTransactionResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1153` — `MaterialPurchaseRequestResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1198` — `QualityCheckCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1210` — `QualityCheckUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1222` — `QualityCheckResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1238` — `QualityAssignmentConfigCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1246` — `QualityAssignmentConfigUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1254` — `QualityAssignmentConfigResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1298` — `DefectRecordCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1314` — `DefectRecordUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1330` — `DefectRecordResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1350` — `StoneDefectCoefficientCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1360` — `StoneDefectCoefficientUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1370` — `StoneDefectCoefficientResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1393` — `GrindingStockUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1426` — `RepairQueueCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1438` — `RepairQueueUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1450` — `RepairQueueResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1467` — `ManaShipmentCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1477` — `ManaShipmentUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1487` — `ManaShipmentResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1501` — `SurplusDispositionCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1513` — `SurplusDispositionUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1525` — `SurplusDispositionResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1541` — `CastersBoxCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1553` — `CastersBoxUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1565` — `CastersBoxResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1580` — `OrderPackingPhotoCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1589` — `OrderPackingPhotoUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1598` — `OrderPackingPhotoResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1610` — `SupplierDefectReportCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1622` — `SupplierDefectReportUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1634` — `SupplierDefectReportResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1650` — `StageReconciliationLogCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1665` — `StageReconciliationLogUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1680` — `StageReconciliationLogResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1698` — `ShiftCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1708` — `ShiftUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1718` — `ShiftResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1749` — `TpsParameterResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1762` — `TpsShiftMetricCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1780` — `TpsShiftMetricUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1798` — `TpsShiftMetricResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1820` — `TpsDeviationCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1830` — `TpsDeviationUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1840` — `TpsDeviationResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1854` — `ProcessStepCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1861` — `ProcessStepUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1868` — `ProcessStepResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1878` — `StandardWorkCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1884` — `StandardWorkUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1890` — `StandardWorkResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1900` — `BottleneckConfigCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1911` — `BottleneckConfigUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1922` — `BottleneckConfigResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1936` — `BufferStatusCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1943` — `BufferStatusUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1950` — `BufferStatusResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1963` — `KilnMaintenanceTypeCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1974` — `KilnMaintenanceTypeUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:1985` — `KilnMaintenanceTypeResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2003` — `KilnMaintenanceScheduleCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2021` — `KilnMaintenanceScheduleUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2039` — `KilnMaintenanceScheduleResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2064` — `KilnMaintenanceMaterialCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2071` — `KilnMaintenanceMaterialUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2078` — `KilnMaintenanceMaterialResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2116` — `DailyTaskDistributionCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2127` — `DailyTaskDistributionUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2138` — `DailyTaskDistributionResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2152` — `NotificationCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2163` — `NotificationUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2189` — `AiChatHistoryCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2196` — `AiChatHistoryUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2203` — `AiChatHistoryResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2215` — `KilnCalculationLogCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2224` — `KilnCalculationLogUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2233` — `KilnCalculationLogResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2246` — `WorkerMediaCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2257` — `WorkerMediaUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2268` — `WorkerMediaResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2283` — `RagEmbeddingCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2291` — `RagEmbeddingUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2299` — `RagEmbeddingResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2403` — `OrderFinancialCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2411` — `OrderFinancialUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2419` — `OrderFinancialResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2504` — `InventoryReconciliationItemCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2513` — `InventoryReconciliationItemUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2522` — `InventoryReconciliationItemResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2626` — `KilnActualLoadCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2635` — `KilnActualLoadUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2644` — `KilnActualLoadResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2657` — `SecurityAuditLogCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2669` — `SecurityAuditLogUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2681` — `SecurityAuditLogResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2697` — `ActiveSessionCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2709` — `ActiveSessionUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2721` — `ActiveSessionResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2745` — `IpAllowlistUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2753` — `IpAllowlistResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2765` — `TotpBackupCodeCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2772` — `TotpBackupCodeUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2779` — `TotpBackupCodeResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2790` — `RateLimitEventCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2796` — `RateLimitEventUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2802` — `RateLimitEventResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2898` — `StoneReservationResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2914` — `StoneReservationAdjustmentResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2926` — `StoneDefectRateResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2938` — `ProductionDefectResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:2953` — `ServiceLeadTimeResponse`
+- **[DEAD]** `api/schemas.py:371` — `TaskUpdate`
   - Pydantic-схема не используется ни в одном роутере/сервисе
 
 ## Неиспользуемые env-переменные

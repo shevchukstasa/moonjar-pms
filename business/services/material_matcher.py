@@ -507,9 +507,20 @@ async def find_best_match(
         delivery_name, translated, base_name, delivery_tokens, supplier_type,
     )
 
-    # Score all DB materials
+    # ── Filter DB materials by supplier type ──────────────────
+    # If we KNOW the supplier delivers stone → only match against stone materials
+    # This prevents "Grey Lava" matching "Dark Grey G9484" (a pigment!)
+    filtered_materials = db_materials
+    if supplier_type:
+        type_filtered = [m for m in db_materials if m.get("material_type") == supplier_type]
+        if type_filtered:
+            filtered_materials = type_filtered
+            logger.debug("Supplier type=%s → filtered to %d materials (from %d)",
+                        supplier_type, len(type_filtered), len(db_materials))
+
+    # Score filtered DB materials
     scored: list[tuple[float, dict]] = []
-    for mat in db_materials:
+    for mat in filtered_materials:
         db_tokens = tokenize_for_matching(mat["name"])
 
         # Score with both full name and base name (without color), take best
@@ -517,25 +528,37 @@ async def find_best_match(
         score_base = calculate_match_score(base_tokens, db_tokens)
         score = max(score_full, score_base)
 
-        # ── Bonus: exact size match ────────────────────────────
+        # ── Bonus: size match (same base size, ignore thickness) ──
         delivery_sizes = re.findall(r'\d+(?:\.\d+)?x\d+(?:\.\d+)?', normalize_size(delivery_name))
         db_sizes = re.findall(r'\d+(?:\.\d+)?x\d+(?:\.\d+)?', normalize_size(mat["name"]))
-        if delivery_sizes and db_sizes and delivery_sizes[0] == db_sizes[0]:
-            score += 0.15
+        if delivery_sizes and db_sizes:
+            # Extract just WxH (first 2 numbers), ignore thickness
+            d_base = delivery_sizes[0]
+            db_base = db_sizes[0]
+            if d_base == db_base:
+                score += 0.2  # exact size match
+            else:
+                # Same material, different size is FINE — don't penalize
+                # "Lava Stone 5x20" and "Lava Stone 10x10" are same material type
+                pass
 
         # ── Bonus: same unit ───────────────────────────────────
         mat_unit = (mat.get("unit") or "").lower()
         if mat_unit and mat_unit == translated_unit.lower():
             score += 0.05
 
-        # ── Bonus: material type match (guessed or from supplier) ──
-        guessed_type = supplier_type or _guess_material_type(translated)
-        if mat.get("material_type") and mat["material_type"] == guessed_type:
-            score += 0.1  # bigger bonus when supplier confirms type
+        # ── Bonus: base material keyword match ─────────────────
+        # If delivery has "lava" and DB has "lava" → strong signal
+        base_keywords = {"lava", "andesite", "basalt", "granite", "marble",
+                        "limestone", "sandstone", "terrazzo", "onyx", "travertine",
+                        "frit", "kaolin", "bentonite", "feldspar", "silica"}
+        common_base = base_tokens & db_tokens & base_keywords
+        if common_base:
+            score += 0.25  # strong bonus for same base material
 
-        # ── Bonus: supplier confirms this is stone and material is stone ──
-        if supplier_type == "stone" and mat.get("material_type") == "stone":
-            score += 0.1  # strong boost for matching supplier type
+        # ── Bonus: supplier confirms type match ────────────────
+        if supplier_type and mat.get("material_type") == supplier_type:
+            score += 0.1
 
         score = max(0.0, min(1.0, score))
 
@@ -543,8 +566,8 @@ async def find_best_match(
             scored.append((score, mat))
 
         logger.debug(
-            "  vs %r: db_tokens=%s, score=%.3f",
-            mat["name"], db_tokens, score,
+            "  vs %r: db_tokens=%s, score=%.3f, common_base=%s",
+            mat["name"], db_tokens, score, common_base if 'common_base' in dir() else set(),
         )
 
     # Sort by score descending
@@ -638,6 +661,7 @@ async def match_delivery_items(
     items: list[dict],
     db_materials: list[dict],
     threshold: float = 0.4,
+    supplier_name: str | None = None,
 ) -> list[dict]:
     """
     Match a list of delivery note items against DB materials.
@@ -646,6 +670,7 @@ async def match_delivery_items(
         items: List of dicts with keys: name, quantity, unit.
         db_materials: All materials from DB.
         threshold: Minimum score for auto-match.
+        supplier_name: Supplier name from delivery note (for type filtering).
 
     Returns:
         List of match results (same structure as find_best_match output).
@@ -658,6 +683,7 @@ async def match_delivery_items(
             delivery_unit=item.get("unit", "pcs"),
             db_materials=db_materials,
             threshold=threshold,
+            supplier_name=supplier_name,
         )
         results.append(result)
 

@@ -2419,6 +2419,8 @@ class Employee(Base):
     department = Column(sa.String(50), nullable=False, server_default="'production'")  # production, sales, administration
     work_schedule = Column(sa.String(20), nullable=False, server_default="'six_day'")  # five_day (Mon-Fri), six_day (Mon-Sat)
     bpjs_mode = Column(sa.String(20), nullable=False, server_default="'company_pays'")  # company_pays (company pays BPJS) or reimburse (company reimburses employee)
+    employment_category = Column(sa.String(20), nullable=False, server_default="'formal'")  # formal, contractor
+    commission_rate = Column(sa.Numeric(5, 2), nullable=True)  # % commission for sales (e.g., 5.00 = 5%)
 
     # Salary
     base_salary = Column(sa.Numeric(12, 2), nullable=False, server_default='0')  # Monthly base IDR

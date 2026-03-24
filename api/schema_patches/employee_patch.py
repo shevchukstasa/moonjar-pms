@@ -49,6 +49,8 @@ EMPLOYEE_SQL = [
     "ALTER TABLE employees ADD COLUMN IF NOT EXISTS department VARCHAR(50) NOT NULL DEFAULT 'production'",
     "ALTER TABLE employees ADD COLUMN IF NOT EXISTS work_schedule VARCHAR(20) NOT NULL DEFAULT 'six_day'",
     "ALTER TABLE employees ADD COLUMN IF NOT EXISTS bpjs_mode VARCHAR(20) NOT NULL DEFAULT 'company_pays'",
+    "ALTER TABLE employees ADD COLUMN IF NOT EXISTS employment_category VARCHAR(20) NOT NULL DEFAULT 'formal'",
+    "ALTER TABLE employees ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(5,2)",
 ]
 
 

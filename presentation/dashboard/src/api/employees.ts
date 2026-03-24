@@ -12,6 +12,11 @@ export interface Employee {
   hire_date: string | null;
   is_active: boolean;
   employment_type: string;
+  department: string;
+  work_schedule: string;
+  bpjs_mode: string;
+  employment_category: string;
+  commission_rate: number | null;
   base_salary: number;
   allowance_bike: number;
   allowance_housing: number;
@@ -38,6 +43,11 @@ export interface EmployeeCreatePayload {
   hire_date?: string | null;
   is_active?: boolean;
   employment_type?: string;
+  department?: string;
+  work_schedule?: string;
+  bpjs_mode?: string;
+  employment_category?: string;
+  commission_rate?: number | null;
   base_salary?: number;
   allowance_bike?: number;
   allowance_housing?: number;
@@ -54,6 +64,11 @@ export interface EmployeeUpdatePayload {
   hire_date?: string | null;
   is_active?: boolean;
   employment_type?: string;
+  department?: string;
+  work_schedule?: string;
+  bpjs_mode?: string;
+  employment_category?: string;
+  commission_rate?: number | null;
   base_salary?: number;
   allowance_bike?: number;
   allowance_housing?: number;
@@ -92,32 +107,71 @@ export interface AttendanceUpdatePayload {
   notes?: string | null;
 }
 
-export interface PayrollSummaryItem {
+export interface PayrollItem {
   employee_id: string;
   full_name: string;
   position: string;
+  department: string;
+  employment_category: string;
+  work_schedule: string;
+  working_days_in_month: number;
+  present_days: number;
+  absent_days: number;
+  sick_days: number;
+  leave_days: number;
+  half_days: number;
+  effective_days: number;
+  overtime_hours: number;
   base_salary: number;
+  daily_rate: number;
+  hourly_rate: number;
+  prorated_salary: number;
   allowance_bike: number;
   allowance_housing: number;
   allowance_food: number;
   allowance_bpjs: number;
   allowance_other: number;
   total_allowances: number;
-  working_days: number;
-  absent_days: number;
-  sick_days: number;
-  leave_days: number;
-  half_days: number;
-  overtime_hours: number;
-  gross_total: number;
+  prorated_allowances: number;
+  overtime_pay: number;
+  commission_rate: number;
+  commission: number;
+  gross_salary: number;
+  bpjs_employee: number;
+  bpjs_employer: number;
+  pph21: number;
+  contractor_tax: number;
+  absence_deduction: number;
+  total_deductions: number;
+  net_salary: number;
+  total_cost_to_company: number;
+}
+
+export interface PayrollTotals {
+  total_employees: number;
+  formal_count: number;
+  contractor_count: number;
+  total_gross: number;
+  total_bpjs_employer: number;
+  total_bpjs_employee: number;
+  total_pph21: number;
+  total_contractor_tax: number;
+  total_net: number;
+  total_cost: number;
+  total_overtime_pay: number;
+  total_commission: number;
 }
 
 export interface PayrollSummaryResponse {
-  items: PayrollSummaryItem[];
-  factory_id: string;
+  items: PayrollItem[];
+  totals: PayrollTotals;
+  factory_id: string | null;
   year: number;
   month: number;
 }
+
+// Legacy type alias for backward compat
+export type PayrollSummaryItem = PayrollItem;
 
 // ── API client ───────────────────────────────────────────────
 
@@ -125,6 +179,8 @@ export const employeesApi = {
   list: (params: {
     factory_id?: string;
     is_active?: boolean;
+    department?: string;
+    employment_category?: string;
     page?: number;
     per_page?: number;
   }): Promise<EmployeeListResponse> =>
@@ -157,7 +213,7 @@ export const employeesApi = {
 
   // Payroll
   payrollSummary: (params: {
-    factory_id: string;
+    factory_id?: string;
     year: number;
     month: number;
   }): Promise<PayrollSummaryResponse> =>

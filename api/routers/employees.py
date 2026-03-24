@@ -30,6 +30,11 @@ class EmployeeOut(BaseModel):
     hire_date: Optional[str] = None
     is_active: bool
     employment_type: str
+    department: str
+    work_schedule: str
+    bpjs_mode: str
+    employment_category: str
+    commission_rate: Optional[float] = None
     base_salary: float
     allowance_bike: float
     allowance_housing: float
@@ -49,6 +54,11 @@ class EmployeeCreateInput(BaseModel):
     hire_date: Optional[str] = None
     is_active: bool = True
     employment_type: str = "full_time"
+    department: str = "production"
+    work_schedule: str = "six_day"
+    bpjs_mode: str = "company_pays"
+    employment_category: str = "formal"
+    commission_rate: Optional[float] = None
     base_salary: float = 0
     allowance_bike: float = 0
     allowance_housing: float = 0
@@ -65,6 +75,11 @@ class EmployeeUpdateInput(BaseModel):
     hire_date: Optional[str] = None
     is_active: Optional[bool] = None
     employment_type: Optional[str] = None
+    department: Optional[str] = None
+    work_schedule: Optional[str] = None
+    bpjs_mode: Optional[str] = None
+    employment_category: Optional[str] = None
+    commission_rate: Optional[float] = None
     base_salary: Optional[float] = None
     allowance_bike: Optional[float] = None
     allowance_housing: Optional[float] = None
@@ -103,20 +118,40 @@ class PayrollSummaryItem(BaseModel):
     employee_id: str
     full_name: str
     position: str
+    department: str
+    employment_category: str
+    work_schedule: str
+    working_days_in_month: int
+    present_days: int
+    absent_days: int
+    sick_days: int
+    leave_days: int
+    half_days: int
+    effective_days: float
+    overtime_hours: float
     base_salary: float
+    daily_rate: float
+    hourly_rate: float
+    prorated_salary: float
     allowance_bike: float
     allowance_housing: float
     allowance_food: float
     allowance_bpjs: float
     allowance_other: float
     total_allowances: float
-    working_days: int
-    absent_days: int
-    sick_days: int
-    leave_days: int
-    half_days: int
-    overtime_hours: float
-    gross_total: float
+    prorated_allowances: float
+    overtime_pay: float
+    commission_rate: float
+    commission: float
+    gross_salary: float
+    bpjs_employee: float
+    bpjs_employer: float
+    pph21: float
+    contractor_tax: float
+    absence_deduction: float
+    total_deductions: float
+    net_salary: float
+    total_cost_to_company: float
 
 
 # ── Helpers ───────────────────────────────────────────────────
@@ -133,6 +168,11 @@ def _serialize_employee(emp: Employee, db: Session) -> dict:
         "hire_date": str(emp.hire_date) if emp.hire_date else None,
         "is_active": emp.is_active,
         "employment_type": emp.employment_type or "full_time",
+        "department": emp.department or "production",
+        "work_schedule": emp.work_schedule or "six_day",
+        "bpjs_mode": emp.bpjs_mode or "company_pays",
+        "employment_category": emp.employment_category or "formal",
+        "commission_rate": float(emp.commission_rate) if emp.commission_rate is not None else None,
         "base_salary": float(emp.base_salary or 0),
         "allowance_bike": float(emp.allowance_bike or 0),
         "allowance_housing": float(emp.allowance_housing or 0),
@@ -166,17 +206,23 @@ def _serialize_attendance(att: Attendance, db: Session) -> dict:
 async def list_employees(
     factory_id: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(None),
+    department: Optional[str] = Query(None),
+    employment_category: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """List employees, optionally filtered by factory and active status."""
+    """List employees, optionally filtered by factory, active status, department, and category."""
     query = db.query(Employee)
     if factory_id:
         query = query.filter(Employee.factory_id == UUID(factory_id))
     if is_active is not None:
         query = query.filter(Employee.is_active == is_active)
+    if department:
+        query = query.filter(Employee.department == department)
+    if employment_category:
+        query = query.filter(Employee.employment_category == employment_category)
 
     total = query.count()
     items = (
@@ -196,22 +242,46 @@ async def list_employees(
 
 @router.get("/payroll-summary")
 async def payroll_summary(
-    factory_id: str = Query(..., description="Factory UUID"),
+    factory_id: Optional[str] = Query(None, description="Factory UUID (omit for all factories)"),
     year: int = Query(..., description="Year"),
     month: int = Query(..., ge=1, le=12, description="Month 1-12"),
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
-    """Calculate payroll summary for a factory for a given month."""
-    fid = UUID(factory_id)
-    employees = (
-        db.query(Employee)
-        .filter(Employee.factory_id == fid, Employee.is_active == True)
-        .order_by(Employee.full_name)
-        .all()
-    )
+    """Calculate full payroll summary with Indonesian tax/BPJS for a given month."""
+    from business.services.payroll import calculate_monthly_payroll
+    import calendar
+
+    query = db.query(Employee).filter(Employee.is_active == True)
+    if factory_id:
+        fid = UUID(factory_id)
+        query = query.filter(Employee.factory_id == fid)
+
+    employees = query.order_by(Employee.full_name).all()
+
+    # Working days in month (simplified: weekdays for 5-day, Mon-Sat for 6-day)
+    # In production, this should come from factory calendar
+    cal = calendar.Calendar()
+    month_days = cal.itermonthdays2(year, month)
+    weekdays_in_month = sum(1 for day, weekday in month_days if day != 0 and weekday < 5)
+    six_day_working = sum(1 for day, weekday in month_days if day != 0 and weekday < 6)
 
     result = []
+    totals = {
+        "total_employees": 0,
+        "formal_count": 0,
+        "contractor_count": 0,
+        "total_gross": 0.0,
+        "total_bpjs_employer": 0.0,
+        "total_bpjs_employee": 0.0,
+        "total_pph21": 0.0,
+        "total_contractor_tax": 0.0,
+        "total_net": 0.0,
+        "total_cost": 0.0,
+        "total_overtime_pay": 0.0,
+        "total_commission": 0.0,
+    }
+
     for emp in employees:
         attendance_records = (
             db.query(Attendance)
@@ -223,44 +293,41 @@ async def payroll_summary(
             .all()
         )
 
-        working_days = sum(1 for a in attendance_records if a.status == "present")
-        half_days = sum(1 for a in attendance_records if a.status == "half_day")
-        absent_days = sum(1 for a in attendance_records if a.status == "absent")
-        sick_days = sum(1 for a in attendance_records if a.status == "sick")
-        leave_days = sum(1 for a in attendance_records if a.status == "leave")
-        overtime_hours = sum(float(a.overtime_hours or 0) for a in attendance_records)
+        ws = getattr(emp, 'work_schedule', 'six_day') or 'six_day'
+        working_days = six_day_working if ws == 'six_day' else weekdays_in_month
 
-        total_allowances = float(
-            (emp.allowance_bike or 0)
-            + (emp.allowance_housing or 0)
-            + (emp.allowance_food or 0)
-            + (emp.allowance_bpjs or 0)
-            + (emp.allowance_other or 0)
+        payroll = calculate_monthly_payroll(
+            employee=emp,
+            attendance_records=attendance_records,
+            working_days_in_month=working_days,
         )
 
-        gross_total = float(emp.base_salary or 0) + total_allowances
+        result.append(payroll)
 
-        result.append({
-            "employee_id": str(emp.id),
-            "full_name": emp.full_name,
-            "position": emp.position,
-            "base_salary": float(emp.base_salary or 0),
-            "allowance_bike": float(emp.allowance_bike or 0),
-            "allowance_housing": float(emp.allowance_housing or 0),
-            "allowance_food": float(emp.allowance_food or 0),
-            "allowance_bpjs": float(emp.allowance_bpjs or 0),
-            "allowance_other": float(emp.allowance_other or 0),
-            "total_allowances": total_allowances,
-            "working_days": working_days,
-            "absent_days": absent_days,
-            "sick_days": sick_days,
-            "leave_days": leave_days,
-            "half_days": half_days,
-            "overtime_hours": overtime_hours,
-            "gross_total": gross_total,
-        })
+        # Accumulate totals
+        totals["total_employees"] += 1
+        cat = payroll.get("employment_category", "formal")
+        if cat == "formal":
+            totals["formal_count"] += 1
+        else:
+            totals["contractor_count"] += 1
+        totals["total_gross"] += payroll["gross_salary"]
+        totals["total_bpjs_employer"] += payroll["bpjs_employer"]
+        totals["total_bpjs_employee"] += payroll["bpjs_employee"]
+        totals["total_pph21"] += payroll["pph21"]
+        totals["total_contractor_tax"] += payroll["contractor_tax"]
+        totals["total_net"] += payroll["net_salary"]
+        totals["total_cost"] += payroll["total_cost_to_company"]
+        totals["total_overtime_pay"] += payroll["overtime_pay"]
+        totals["total_commission"] += payroll["commission"]
 
-    return {"items": result, "factory_id": factory_id, "year": year, "month": month}
+    return {
+        "items": result,
+        "totals": totals,
+        "factory_id": factory_id,
+        "year": year,
+        "month": month,
+    }
 
 
 @router.get("/{employee_id}")
@@ -296,6 +363,11 @@ async def create_employee(
         hire_date=date.fromisoformat(data.hire_date) if data.hire_date else None,
         is_active=data.is_active,
         employment_type=data.employment_type,
+        department=data.department,
+        work_schedule=data.work_schedule,
+        bpjs_mode=data.bpjs_mode,
+        employment_category=data.employment_category,
+        commission_rate=data.commission_rate,
         base_salary=data.base_salary,
         allowance_bike=data.allowance_bike,
         allowance_housing=data.allowance_housing,

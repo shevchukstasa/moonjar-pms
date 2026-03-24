@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useLocation } from 'react-router-dom';
 import {
   employeesApi,
   type Employee,
@@ -49,6 +50,10 @@ export default function EmployeesPage() {
   const queryClient = useQueryClient();
   const today = new Date();
   const user = useCurrentUser();
+  const location = useLocation();
+
+  // Detect if accessed from PM /manager/staff route — pre-filter to production dept + PM's factory
+  const isStaffView = location.pathname.startsWith('/manager/staff');
 
   // State
   const [activeTab, setActiveTab] = useState('employees');
@@ -78,6 +83,11 @@ export default function EmployeesPage() {
     phone: '',
     hire_date: '',
     employment_type: 'full_time',
+    department: isStaffView ? 'production' : 'production',
+    work_schedule: 'six_day',
+    bpjs_mode: 'company_pays',
+    employment_category: 'formal',
+    commission_rate: null,
     base_salary: 0,
     allowance_bike: 0,
     allowance_housing: 0,
@@ -102,10 +112,11 @@ export default function EmployeesPage() {
   // ── Queries ─────────────────────────────────────────────────
 
   const { data: employeesData, isLoading: employeesLoading } = useQuery({
-    queryKey: ['employees', factoryId, showInactive],
+    queryKey: ['employees', factoryId, showInactive, isStaffView ? 'production' : 'all'],
     queryFn: () => employeesApi.list({
       factory_id: factoryId,
       is_active: showInactive ? undefined : true,
+      department: isStaffView ? 'production' : undefined,
     }),
     enabled: !!factoryId,
   });
@@ -192,6 +203,11 @@ export default function EmployeesPage() {
       phone: '',
       hire_date: '',
       employment_type: 'full_time',
+      department: isStaffView ? 'production' : 'production',
+      work_schedule: 'six_day',
+      bpjs_mode: 'company_pays',
+      employment_category: 'formal',
+      commission_rate: null,
       base_salary: 0,
       allowance_bike: 0,
       allowance_housing: 0,
@@ -200,7 +216,7 @@ export default function EmployeesPage() {
       allowance_other: 0,
       allowance_other_note: '',
     });
-  }, [factoryId]);
+  }, [factoryId, isStaffView]);
 
   const openCreate = useCallback(() => {
     setEditingEmployee(null);
@@ -211,6 +227,11 @@ export default function EmployeesPage() {
       phone: '',
       hire_date: '',
       employment_type: 'full_time',
+      department: isStaffView ? 'production' : 'production',
+      work_schedule: 'six_day',
+      bpjs_mode: 'company_pays',
+      employment_category: 'formal',
+      commission_rate: null,
       base_salary: 0,
       allowance_bike: 0,
       allowance_housing: 0,
@@ -221,7 +242,7 @@ export default function EmployeesPage() {
     });
     setFormError('');
     setDialogOpen(true);
-  }, [factoryId]);
+  }, [factoryId, isStaffView]);
 
   const openEdit = useCallback((emp: Employee) => {
     setEditingEmployee(emp);
@@ -232,6 +253,11 @@ export default function EmployeesPage() {
       phone: emp.phone ?? '',
       hire_date: emp.hire_date ?? '',
       employment_type: emp.employment_type,
+      department: emp.department || 'production',
+      work_schedule: emp.work_schedule || 'six_day',
+      bpjs_mode: emp.bpjs_mode || 'company_pays',
+      employment_category: emp.employment_category || 'formal',
+      commission_rate: emp.commission_rate,
       base_salary: emp.base_salary,
       allowance_bike: emp.allowance_bike,
       allowance_housing: emp.allowance_housing,
@@ -299,8 +325,10 @@ export default function EmployeesPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Employees</h1>
-          <p className="mt-1 text-sm text-gray-500">Manage employees, attendance, and payroll</p>
+          <h1 className="text-2xl font-bold text-gray-900">{isStaffView ? 'Production Staff' : 'Employees'}</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            {isStaffView ? 'Manage production workers, attendance, and payroll' : 'Manage employees, attendance, and payroll'}
+          </p>
         </div>
         <div className="flex gap-2">
           {activeTab === 'employees' && (
@@ -794,15 +822,23 @@ function PayrollTab({
     return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
   }
 
-  const grandTotal = data.reduce((sum, r) => sum + r.gross_total, 0);
+  // Support both old (gross_total) and new (gross_salary) API response format
+  const getGross = (r: any) => r.gross_salary ?? r.gross_total ?? 0;
+  const getNet = (r: any) => r.net_salary ?? 0;
+  const getDays = (r: any) => r.present_days ?? r.working_days ?? 0;
+  const grandGross = data.reduce((sum, r) => sum + getGross(r), 0);
+  const grandNet = data.reduce((sum, r) => sum + getNet(r), 0);
 
   return (
     <Card>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
         <p className="text-sm text-gray-500">
           Payroll for {MONTH_NAMES[month - 1]} {year} -- {data.length} employees
         </p>
-        <p className="text-lg font-bold text-gray-900">Total: {formatIDR(grandTotal)}</p>
+        <div className="flex gap-4 text-sm">
+          <span className="text-gray-700">Gross: <strong>{formatIDR(grandGross)}</strong></span>
+          {grandNet > 0 && <span className="text-green-700">Net: <strong>{formatIDR(grandNet)}</strong></span>}
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -810,34 +846,38 @@ function PayrollTab({
             <tr>
               <th className="px-3 py-2 text-left">Name</th>
               <th className="px-3 py-2 text-left">Position</th>
-              <th className="px-3 py-2 text-right">Base Salary</th>
+              <th className="px-3 py-2 text-right">Base</th>
               <th className="px-3 py-2 text-right">Allowances</th>
-              <th className="px-3 py-2 text-center">Work Days</th>
+              <th className="px-3 py-2 text-center">Days</th>
               <th className="px-3 py-2 text-center">Absent</th>
-              <th className="px-3 py-2 text-center">Sick</th>
-              <th className="px-3 py-2 text-center">Leave</th>
-              <th className="px-3 py-2 text-center">OT Hours</th>
-              <th className="px-3 py-2 text-right">Gross Total</th>
+              <th className="px-3 py-2 text-center">OT</th>
+              <th className="px-3 py-2 text-right">OT Pay</th>
+              <th className="px-3 py-2 text-right">Gross</th>
+              <th className="px-3 py-2 text-right">Deductions</th>
+              <th className="px-3 py-2 text-right font-bold">Net</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {data.map((row) => (
+            {data.map((row: any) => (
               <tr key={row.employee_id} className="bg-white">
                 <td className="px-3 py-2 font-medium text-gray-900">{row.full_name}</td>
                 <td className="px-3 py-2 text-gray-600">{row.position}</td>
-                <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(row.base_salary)}</td>
-                <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(row.total_allowances)}</td>
-                <td className="px-3 py-2 text-center text-emerald-700 font-semibold">{row.working_days}</td>
+                <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(row.prorated_salary ?? row.base_salary)}</td>
+                <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(row.prorated_allowances ?? row.total_allowances)}</td>
+                <td className="px-3 py-2 text-center text-emerald-700 font-semibold">
+                  {getDays(row)}{row.working_days_in_month ? `/${row.working_days_in_month}` : ''}
+                </td>
                 <td className="px-3 py-2 text-center text-red-600">{row.absent_days || '-'}</td>
-                <td className="px-3 py-2 text-center text-yellow-600">{row.sick_days || '-'}</td>
-                <td className="px-3 py-2 text-center text-blue-600">{row.leave_days || '-'}</td>
                 <td className="px-3 py-2 text-center text-gray-600">{row.overtime_hours || '-'}</td>
-                <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{formatIDR(row.gross_total)}</td>
+                <td className="px-3 py-2 text-right font-mono text-gray-700">{(row.overtime_pay ?? 0) > 0 ? formatIDR(row.overtime_pay) : '-'}</td>
+                <td className="px-3 py-2 text-right font-mono font-medium text-gray-800">{formatIDR(getGross(row))}</td>
+                <td className="px-3 py-2 text-right font-mono text-red-600">{(row.total_deductions ?? 0) > 0 ? formatIDR(row.total_deductions) : '-'}</td>
+                <td className="px-3 py-2 text-right font-mono font-bold text-green-700">{formatIDR(getNet(row))}</td>
               </tr>
             ))}
             {data.length === 0 && (
               <tr>
-                <td colSpan={10} className="py-8 text-center text-gray-400">
+                <td colSpan={11} className="py-8 text-center text-gray-400">
                   No payroll data for this period.
                 </td>
               </tr>
@@ -847,29 +887,19 @@ function PayrollTab({
             <tfoot className="border-t-2 border-gray-300">
               <tr className="bg-gray-50 font-semibold">
                 <td className="px-3 py-2 text-gray-700" colSpan={2}>TOTAL</td>
+                <td className="px-3 py-2" colSpan={4}></td>
+                <td className="px-3 py-2" colSpan={1}></td>
                 <td className="px-3 py-2 text-right font-mono text-gray-700">
-                  {formatIDR(data.reduce((s, r) => s + r.base_salary, 0))}
-                </td>
-                <td className="px-3 py-2 text-right font-mono text-gray-700">
-                  {formatIDR(data.reduce((s, r) => s + r.total_allowances, 0))}
-                </td>
-                <td className="px-3 py-2 text-center text-emerald-700">
-                  {data.reduce((s, r) => s + r.working_days, 0)}
-                </td>
-                <td className="px-3 py-2 text-center text-red-600">
-                  {data.reduce((s, r) => s + r.absent_days, 0) || '-'}
-                </td>
-                <td className="px-3 py-2 text-center text-yellow-600">
-                  {data.reduce((s, r) => s + r.sick_days, 0) || '-'}
-                </td>
-                <td className="px-3 py-2 text-center text-blue-600">
-                  {data.reduce((s, r) => s + r.leave_days, 0) || '-'}
-                </td>
-                <td className="px-3 py-2 text-center text-gray-600">
-                  {data.reduce((s, r) => s + r.overtime_hours, 0) || '-'}
+                  {formatIDR(data.reduce((s, r: any) => s + (r.overtime_pay ?? 0), 0))}
                 </td>
                 <td className="px-3 py-2 text-right font-mono font-bold text-gray-900">
-                  {formatIDR(grandTotal)}
+                  {formatIDR(grandGross)}
+                </td>
+                <td className="px-3 py-2 text-right font-mono text-red-600">
+                  {formatIDR(data.reduce((s, r: any) => s + (r.total_deductions ?? 0), 0))}
+                </td>
+                <td className="px-3 py-2 text-right font-mono font-bold text-green-700">
+                  {formatIDR(grandNet)}
                 </td>
               </tr>
             </tfoot>

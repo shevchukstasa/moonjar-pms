@@ -17,6 +17,7 @@ const navByRole: Record<string, NavSection[]> = {
       section: 'Dashboards', icon: '📊', defaultOpen: true, items: [
         { to: '/owner', label: 'Owner', icon: '👑' },
         { to: '/ceo', label: 'CEO', icon: '📈' },
+        { to: '/ceo/employees', label: 'Employees & Payroll', icon: '👷' },
       ],
     },
     {
@@ -92,6 +93,7 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/admin', label: 'Admin Panel', icon: '🛠' },
         { to: '/users', label: 'Users', icon: '👥' },
         { to: '/admin/employees', label: 'Employees', icon: '👷' },
+        { to: '/ceo/employees', label: 'Payroll', icon: '💰' },
         { to: '/admin/dashboard-access', label: 'Dashboard Access', icon: '🔐' },
         { to: '/admin/settings', label: 'Settings', icon: '⚙️' },
       ],
@@ -124,6 +126,7 @@ const navByRole: Record<string, NavSection[]> = {
     {
       section: 'CEO', icon: '📊', defaultOpen: true, items: [
         { to: '/ceo', label: 'Dashboard', icon: '📊' },
+        { to: '/ceo/employees', label: 'Employees', icon: '👷' },
         { to: '/reports', label: 'Reports', icon: '📈' },
         { to: '/tablo', label: 'Tablo', icon: '📺' },
         { to: '/users', label: 'Users', icon: '👥' },
@@ -135,6 +138,7 @@ const navByRole: Record<string, NavSection[]> = {
       section: 'Production', icon: '📊', defaultOpen: true, items: [
         { to: '/manager', label: 'Dashboard', icon: '📋' },
         { to: '/manager/schedule', label: 'Schedule', icon: '📅' },
+        { to: '/manager/staff', label: 'Staff', icon: '👷' },
         { to: '/tablo', label: 'Tablo', icon: '📺' },
       ],
     },

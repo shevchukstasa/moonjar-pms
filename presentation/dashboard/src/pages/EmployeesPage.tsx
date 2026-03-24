@@ -1,0 +1,881 @@
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  employeesApi,
+  type Employee,
+  type EmployeeCreatePayload,
+  type EmployeeUpdatePayload,
+  type AttendanceRecord,
+  type PayrollSummaryItem,
+} from '@/api/employees';
+import { useFactories } from '@/hooks/useFactories';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
+import { Input } from '@/components/ui/Input';
+import { Spinner } from '@/components/ui/Spinner';
+import { Tabs } from '@/components/ui/Tabs';
+import { Badge } from '@/components/ui/Badge';
+
+// ── Constants ────────────────────────────────────────────────
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+const EMPLOYMENT_TYPES = [
+  { value: 'full_time', label: 'Full Time' },
+  { value: 'part_time', label: 'Part Time' },
+  { value: 'contract', label: 'Contract' },
+];
+
+const ATTENDANCE_STATUSES = [
+  { value: 'present', label: 'P', color: 'bg-emerald-100 text-emerald-800' },
+  { value: 'absent', label: 'A', color: 'bg-red-100 text-red-800' },
+  { value: 'sick', label: 'S', color: 'bg-yellow-100 text-yellow-800' },
+  { value: 'leave', label: 'L', color: 'bg-blue-100 text-blue-800' },
+  { value: 'half_day', label: 'H', color: 'bg-orange-100 text-orange-800' },
+];
+
+function pad(n: number) { return n < 10 ? `0${n}` : `${n}`; }
+function toISO(y: number, m: number, d: number) { return `${y}-${pad(m)}-${pad(d)}`; }
+function formatIDR(n: number) { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n); }
+
+// ── Main Component ───────────────────────────────────────────
+
+export default function EmployeesPage() {
+  const queryClient = useQueryClient();
+  const today = new Date();
+  const user = useCurrentUser();
+
+  // State
+  const [activeTab, setActiveTab] = useState('employees');
+  const [factoryId, setFactoryId] = useState('');
+  const [year, setYear] = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth() + 1);
+  const [showInactive, setShowInactive] = useState(false);
+
+  // Dialog state
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [formError, setFormError] = useState('');
+
+  // Attendance dialog
+  const [attDialogOpen, setAttDialogOpen] = useState(false);
+  const [attEmployee, setAttEmployee] = useState<Employee | null>(null);
+  const [attDate, setAttDate] = useState('');
+  const [attStatus, setAttStatus] = useState('present');
+  const [attOvertime, setAttOvertime] = useState('0');
+  const [attNotes, setAttNotes] = useState('');
+
+  // Form state
+  const [formData, setFormData] = useState<EmployeeCreatePayload>({
+    factory_id: '',
+    full_name: '',
+    position: '',
+    phone: '',
+    hire_date: '',
+    employment_type: 'full_time',
+    base_salary: 0,
+    allowance_bike: 0,
+    allowance_housing: 0,
+    allowance_food: 0,
+    allowance_bpjs: 0,
+    allowance_other: 0,
+    allowance_other_note: '',
+  });
+
+  // Factories
+  const { data: factoriesData, isLoading: factoriesLoading } = useFactories();
+  const allFactories = factoriesData?.items ?? [];
+  const GLOBAL_ROLES = new Set(['owner', 'administrator', 'ceo']);
+  const isGlobal = user && GLOBAL_ROLES.has(user.role);
+  const userFactoryIds = user?.factories?.map((f: { id?: string; factory_id?: string }) => f.id || f.factory_id) || [];
+  const factories = isGlobal ? allFactories : allFactories.filter((f) => userFactoryIds.includes(f.id));
+
+  useEffect(() => {
+    if (!factoryId && factories.length > 0) setFactoryId(factories[0].id);
+  }, [factories, factoryId]);
+
+  // ── Queries ─────────────────────────────────────────────────
+
+  const { data: employeesData, isLoading: employeesLoading } = useQuery({
+    queryKey: ['employees', factoryId, showInactive],
+    queryFn: () => employeesApi.list({
+      factory_id: factoryId,
+      is_active: showInactive ? undefined : true,
+    }),
+    enabled: !!factoryId,
+  });
+
+  const employees = employeesData?.items ?? [];
+
+  // Attendance for all employees for this month
+  const { data: attendanceData, isLoading: attendanceLoading } = useQuery({
+    queryKey: ['attendance-grid', factoryId, year, month],
+    queryFn: async () => {
+      if (!employees.length) return {};
+      const results: Record<string, AttendanceRecord[]> = {};
+      for (const emp of employees) {
+        const res = await employeesApi.getAttendance(emp.id, { year, month });
+        results[emp.id] = res.items;
+      }
+      return results;
+    },
+    enabled: !!factoryId && employees.length > 0 && activeTab === 'attendance',
+  });
+
+  // Payroll
+  const { data: payrollData, isLoading: payrollLoading } = useQuery({
+    queryKey: ['payroll-summary', factoryId, year, month],
+    queryFn: () => employeesApi.payrollSummary({ factory_id: factoryId, year, month }),
+    enabled: !!factoryId && activeTab === 'payroll',
+  });
+
+  // ── Mutations ───────────────────────────────────────────────
+
+  const createMutation = useMutation({
+    mutationFn: (data: EmployeeCreatePayload) => employeesApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      closeDialog();
+    },
+    onError: (err: unknown) => {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setFormError(detail ?? 'Failed to create employee');
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: EmployeeUpdatePayload }) => employeesApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      closeDialog();
+    },
+    onError: (err: unknown) => {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setFormError(detail ?? 'Failed to update employee');
+    },
+  });
+
+  const deactivateMutation = useMutation({
+    mutationFn: (id: string) => employeesApi.deactivate(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['employees'] }),
+  });
+
+  const attendanceMutation = useMutation({
+    mutationFn: ({ empId, data }: { empId: string; data: { date: string; status: string; overtime_hours: number; notes?: string } }) =>
+      employeesApi.recordAttendance(empId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['attendance-grid'] });
+      queryClient.invalidateQueries({ queryKey: ['payroll-summary'] });
+      setAttDialogOpen(false);
+    },
+    onError: (err: unknown) => {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setFormError(detail ?? 'Failed to record attendance');
+    },
+  });
+
+  // ── Handlers ────────────────────────────────────────────────
+
+  const closeDialog = useCallback(() => {
+    setDialogOpen(false);
+    setEditingEmployee(null);
+    setFormError('');
+    setFormData({
+      factory_id: factoryId,
+      full_name: '',
+      position: '',
+      phone: '',
+      hire_date: '',
+      employment_type: 'full_time',
+      base_salary: 0,
+      allowance_bike: 0,
+      allowance_housing: 0,
+      allowance_food: 0,
+      allowance_bpjs: 0,
+      allowance_other: 0,
+      allowance_other_note: '',
+    });
+  }, [factoryId]);
+
+  const openCreate = useCallback(() => {
+    setEditingEmployee(null);
+    setFormData({
+      factory_id: factoryId,
+      full_name: '',
+      position: '',
+      phone: '',
+      hire_date: '',
+      employment_type: 'full_time',
+      base_salary: 0,
+      allowance_bike: 0,
+      allowance_housing: 0,
+      allowance_food: 0,
+      allowance_bpjs: 0,
+      allowance_other: 0,
+      allowance_other_note: '',
+    });
+    setFormError('');
+    setDialogOpen(true);
+  }, [factoryId]);
+
+  const openEdit = useCallback((emp: Employee) => {
+    setEditingEmployee(emp);
+    setFormData({
+      factory_id: emp.factory_id,
+      full_name: emp.full_name,
+      position: emp.position,
+      phone: emp.phone ?? '',
+      hire_date: emp.hire_date ?? '',
+      employment_type: emp.employment_type,
+      base_salary: emp.base_salary,
+      allowance_bike: emp.allowance_bike,
+      allowance_housing: emp.allowance_housing,
+      allowance_food: emp.allowance_food,
+      allowance_bpjs: emp.allowance_bpjs,
+      allowance_other: emp.allowance_other,
+      allowance_other_note: emp.allowance_other_note ?? '',
+    });
+    setFormError('');
+    setDialogOpen(true);
+  }, []);
+
+  const handleSubmit = useCallback(() => {
+    if (!formData.full_name || !formData.position) {
+      setFormError('Name and position are required');
+      return;
+    }
+    if (editingEmployee) {
+      const { factory_id, ...rest } = formData;
+      updateMutation.mutate({ id: editingEmployee.id, data: rest });
+    } else {
+      createMutation.mutate({ ...formData, factory_id: factoryId });
+    }
+  }, [formData, editingEmployee, factoryId, createMutation, updateMutation]);
+
+  const openAttendanceDialog = useCallback((emp: Employee, dateStr: string) => {
+    setAttEmployee(emp);
+    setAttDate(dateStr);
+    setAttStatus('present');
+    setAttOvertime('0');
+    setAttNotes('');
+    setFormError('');
+    setAttDialogOpen(true);
+  }, []);
+
+  const handleAttendanceSubmit = useCallback(() => {
+    if (!attEmployee || !attDate) return;
+    attendanceMutation.mutate({
+      empId: attEmployee.id,
+      data: {
+        date: attDate,
+        status: attStatus,
+        overtime_hours: parseFloat(attOvertime) || 0,
+        notes: attNotes || undefined,
+      },
+    });
+  }, [attEmployee, attDate, attStatus, attOvertime, attNotes, attendanceMutation]);
+
+  // Month nav
+  const prevMonth = () => {
+    if (month === 1) { setMonth(12); setYear(year - 1); }
+    else setMonth(month - 1);
+  };
+  const nextMonth = () => {
+    if (month === 12) { setMonth(1); setYear(year + 1); }
+    else setMonth(month + 1);
+  };
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  // ── Render ──────────────────────────────────────────────────
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Employees</h1>
+          <p className="mt-1 text-sm text-gray-500">Manage employees, attendance, and payroll</p>
+        </div>
+        <div className="flex gap-2">
+          {activeTab === 'employees' && (
+            <Button onClick={openCreate}>+ Add Employee</Button>
+          )}
+        </div>
+      </div>
+
+      {/* Factory selector */}
+      <Card>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-gray-700">Factory:</label>
+            {factoriesLoading ? (
+              <Spinner className="h-5 w-5" />
+            ) : (
+              <select
+                value={factoryId}
+                onChange={(e) => setFactoryId(e.target.value)}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+              >
+                {factories.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
+            )}
+          </div>
+          {(activeTab === 'attendance' || activeTab === 'payroll') && (
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={prevMonth}>&larr;</Button>
+              <span className="min-w-[160px] text-center text-lg font-semibold text-gray-900">
+                {MONTH_NAMES[month - 1]} {year}
+              </span>
+              <Button variant="secondary" size="sm" onClick={nextMonth}>&rarr;</Button>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Tabs */}
+      <Tabs
+        tabs={[
+          { id: 'employees', label: 'Employee List' },
+          { id: 'attendance', label: 'Attendance' },
+          { id: 'payroll', label: 'Payroll Summary' },
+        ]}
+        activeTab={activeTab}
+        onChange={setActiveTab}
+      />
+
+      {/* Tab Content */}
+      {activeTab === 'employees' && (
+        <EmployeeListTab
+          employees={employees}
+          loading={employeesLoading}
+          showInactive={showInactive}
+          onToggleInactive={() => setShowInactive(!showInactive)}
+          onEdit={openEdit}
+          onDeactivate={(emp) => deactivateMutation.mutate(emp.id)}
+        />
+      )}
+
+      {activeTab === 'attendance' && (
+        <AttendanceTab
+          employees={employees}
+          attendanceData={attendanceData ?? {}}
+          loading={attendanceLoading || employeesLoading}
+          year={year}
+          month={month}
+          daysInMonth={daysInMonth}
+          onCellClick={openAttendanceDialog}
+        />
+      )}
+
+      {activeTab === 'payroll' && (
+        <PayrollTab
+          data={payrollData?.items ?? []}
+          loading={payrollLoading}
+          year={year}
+          month={month}
+        />
+      )}
+
+      {/* Employee Create/Edit Dialog */}
+      <Dialog
+        open={dialogOpen}
+        onClose={closeDialog}
+        title={editingEmployee ? 'Edit Employee' : 'Add Employee'}
+        className="w-full max-w-lg"
+      >
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2">
+              <Input
+                label="Full Name *"
+                value={formData.full_name}
+                onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+              />
+            </div>
+            <Input
+              label="Position *"
+              placeholder="e.g. Glazer, Kiln Operator"
+              value={formData.position}
+              onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+            />
+            <Input
+              label="Phone"
+              value={formData.phone ?? ''}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+            />
+            <Input
+              label="Hire Date"
+              type="date"
+              value={formData.hire_date ?? ''}
+              onChange={(e) => setFormData({ ...formData, hire_date: e.target.value })}
+            />
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Employment Type</label>
+              <select
+                value={formData.employment_type}
+                onChange={(e) => setFormData({ ...formData, employment_type: e.target.value })}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+              >
+                {EMPLOYMENT_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <hr className="my-2" />
+          <p className="text-sm font-medium text-gray-700">Salary & Allowances (IDR/month)</p>
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Base Salary"
+              type="number"
+              value={String(formData.base_salary ?? 0)}
+              onChange={(e) => setFormData({ ...formData, base_salary: parseFloat(e.target.value) || 0 })}
+            />
+            <Input
+              label="Bike Allowance"
+              type="number"
+              value={String(formData.allowance_bike ?? 0)}
+              onChange={(e) => setFormData({ ...formData, allowance_bike: parseFloat(e.target.value) || 0 })}
+            />
+            <Input
+              label="Housing Allowance"
+              type="number"
+              value={String(formData.allowance_housing ?? 0)}
+              onChange={(e) => setFormData({ ...formData, allowance_housing: parseFloat(e.target.value) || 0 })}
+            />
+            <Input
+              label="Food Allowance"
+              type="number"
+              value={String(formData.allowance_food ?? 0)}
+              onChange={(e) => setFormData({ ...formData, allowance_food: parseFloat(e.target.value) || 0 })}
+            />
+            <Input
+              label="BPJS"
+              type="number"
+              value={String(formData.allowance_bpjs ?? 0)}
+              onChange={(e) => setFormData({ ...formData, allowance_bpjs: parseFloat(e.target.value) || 0 })}
+            />
+            <Input
+              label="Other Allowance"
+              type="number"
+              value={String(formData.allowance_other ?? 0)}
+              onChange={(e) => setFormData({ ...formData, allowance_other: parseFloat(e.target.value) || 0 })}
+            />
+            <div className="col-span-2">
+              <Input
+                label="Other Allowance Note"
+                placeholder="Description for other allowance"
+                value={formData.allowance_other_note ?? ''}
+                onChange={(e) => setFormData({ ...formData, allowance_other_note: e.target.value })}
+              />
+            </div>
+          </div>
+
+          {formError && <p className="text-sm text-red-600">{formError}</p>}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={closeDialog}>Cancel</Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={createMutation.isPending || updateMutation.isPending}
+            >
+              {(createMutation.isPending || updateMutation.isPending) ? 'Saving...' : editingEmployee ? 'Update' : 'Create'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Attendance Record Dialog */}
+      <Dialog
+        open={attDialogOpen}
+        onClose={() => setAttDialogOpen(false)}
+        title="Record Attendance"
+        className="w-full max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
+            <span className="font-medium text-gray-700">Employee:</span>{' '}
+            <span className="text-gray-900">{attEmployee?.full_name}</span>
+            {' | '}
+            <span className="font-medium text-gray-700">Date:</span>{' '}
+            <span className="text-gray-900">{attDate}</span>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Status</label>
+            <div className="flex gap-2">
+              {ATTENDANCE_STATUSES.map((s) => (
+                <button
+                  key={s.value}
+                  onClick={() => setAttStatus(s.value)}
+                  className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                    attStatus === s.value
+                      ? s.color + ' ring-2 ring-offset-1 ring-gray-400'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {s.value.replace('_', ' ')}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Input
+            label="Overtime Hours"
+            type="number"
+            value={attOvertime}
+            onChange={(e) => setAttOvertime(e.target.value)}
+          />
+          <Input
+            label="Notes"
+            value={attNotes}
+            onChange={(e) => setAttNotes(e.target.value)}
+          />
+          {formError && <p className="text-sm text-red-600">{formError}</p>}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={() => setAttDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={handleAttendanceSubmit}
+              disabled={attendanceMutation.isPending}
+            >
+              {attendanceMutation.isPending ? 'Saving...' : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+    </div>
+  );
+}
+
+// ── Employee List Tab ────────────────────────────────────────
+
+function EmployeeListTab({
+  employees,
+  loading,
+  showInactive,
+  onToggleInactive,
+  onEdit,
+  onDeactivate,
+}: {
+  employees: Employee[];
+  loading: boolean;
+  showInactive: boolean;
+  onToggleInactive: () => void;
+  onEdit: (emp: Employee) => void;
+  onDeactivate: (emp: Employee) => void;
+}) {
+  if (loading) {
+    return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
+  }
+
+  return (
+    <Card>
+      <div className="mb-4 flex items-center justify-between">
+        <p className="text-sm text-gray-500">{employees.length} employee{employees.length !== 1 ? 's' : ''}</p>
+        <label className="flex items-center gap-2 text-sm text-gray-600">
+          <input
+            type="checkbox"
+            checked={showInactive}
+            onChange={onToggleInactive}
+            className="rounded border-gray-300"
+          />
+          Show inactive
+        </label>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="border-b bg-gray-50 text-xs font-medium uppercase text-gray-500">
+            <tr>
+              <th className="px-3 py-2 text-left">Name</th>
+              <th className="px-3 py-2 text-left">Position</th>
+              <th className="px-3 py-2 text-left">Phone</th>
+              <th className="px-3 py-2 text-left">Type</th>
+              <th className="px-3 py-2 text-left">Hire Date</th>
+              <th className="px-3 py-2 text-right">Base Salary</th>
+              <th className="px-3 py-2 text-right">Total Allow.</th>
+              <th className="px-3 py-2 text-center">Status</th>
+              <th className="px-3 py-2 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {employees.map((emp) => {
+              const totalAllow = emp.allowance_bike + emp.allowance_housing + emp.allowance_food + emp.allowance_bpjs + emp.allowance_other;
+              return (
+                <tr key={emp.id} className={emp.is_active ? 'bg-white' : 'bg-gray-50 opacity-60'}>
+                  <td className="px-3 py-2 font-medium text-gray-900">{emp.full_name}</td>
+                  <td className="px-3 py-2 text-gray-600">{emp.position}</td>
+                  <td className="px-3 py-2 text-gray-600">{emp.phone || '-'}</td>
+                  <td className="px-3 py-2 text-gray-600 capitalize">{emp.employment_type.replace('_', ' ')}</td>
+                  <td className="px-3 py-2 text-gray-600">{emp.hire_date || '-'}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(emp.base_salary)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(totalAllow)}</td>
+                  <td className="px-3 py-2 text-center">
+                    <Badge variant={emp.is_active ? 'green' : 'gray'}>
+                      {emp.is_active ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button variant="secondary" size="sm" onClick={() => onEdit(emp)}>Edit</Button>
+                      {emp.is_active && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="text-red-600 hover:text-red-700"
+                          onClick={() => onDeactivate(emp)}
+                        >
+                          Deactivate
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {employees.length === 0 && (
+              <tr>
+                <td colSpan={9} className="py-8 text-center text-gray-400">
+                  No employees found. Add one to get started.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+// ── Attendance Tab ───────────────────────────────────────────
+
+function AttendanceTab({
+  employees,
+  attendanceData,
+  loading,
+  year,
+  month,
+  daysInMonth,
+  onCellClick,
+}: {
+  employees: Employee[];
+  attendanceData: Record<string, AttendanceRecord[]>;
+  loading: boolean;
+  year: number;
+  month: number;
+  daysInMonth: number;
+  onCellClick: (emp: Employee, dateStr: string) => void;
+}) {
+  if (loading) {
+    return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
+  }
+
+  // Build attendance lookup: employeeId -> date -> record
+  const lookup = useMemo(() => {
+    const map: Record<string, Record<string, AttendanceRecord>> = {};
+    for (const [empId, records] of Object.entries(attendanceData)) {
+      map[empId] = {};
+      for (const rec of records) {
+        map[empId][rec.date] = rec;
+      }
+    }
+    return map;
+  }, [attendanceData]);
+
+  const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  return (
+    <Card>
+      <div className="mb-3 flex items-center gap-4 text-xs text-gray-500">
+        <span>Click a cell to record attendance.</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded bg-emerald-100" /> Present</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded bg-red-100" /> Absent</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded bg-yellow-100" /> Sick</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded bg-blue-100" /> Leave</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded bg-orange-100" /> Half</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="sticky left-0 z-10 bg-gray-50 px-2 py-1.5 text-left font-medium text-gray-600 min-w-[140px]">
+                Employee
+              </th>
+              {days.map((d) => {
+                const dateObj = new Date(year, month - 1, d);
+                const isSunday = dateObj.getDay() === 0;
+                return (
+                  <th
+                    key={d}
+                    className={`px-0.5 py-1.5 text-center font-medium min-w-[28px] ${
+                      isSunday ? 'text-red-400' : 'text-gray-500'
+                    }`}
+                  >
+                    {d}
+                  </th>
+                );
+              })}
+              <th className="px-2 py-1.5 text-center font-medium text-gray-600">Total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {employees.filter((e) => e.is_active).map((emp) => {
+              const empRecords = lookup[emp.id] ?? {};
+              let presentCount = 0;
+              return (
+                <tr key={emp.id}>
+                  <td className="sticky left-0 z-10 bg-white px-2 py-1 font-medium text-gray-900 border-r">
+                    {emp.full_name}
+                  </td>
+                  {days.map((d) => {
+                    const dateStr = toISO(year, month, d);
+                    const record = empRecords[dateStr];
+                    if (record?.status === 'present') presentCount++;
+                    if (record?.status === 'half_day') presentCount += 0.5;
+                    const statusInfo = record
+                      ? ATTENDANCE_STATUSES.find((s) => s.value === record.status)
+                      : null;
+
+                    return (
+                      <td key={d} className="px-0.5 py-1 text-center">
+                        <button
+                          onClick={() => !record && onCellClick(emp, dateStr)}
+                          className={`inline-flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold transition-colors ${
+                            statusInfo
+                              ? statusInfo.color
+                              : 'bg-gray-50 text-gray-300 hover:bg-gray-100'
+                          }`}
+                          title={record ? `${record.status}${record.overtime_hours ? ` +${record.overtime_hours}h OT` : ''}` : 'Click to record'}
+                        >
+                          {statusInfo?.label ?? '-'}
+                        </button>
+                      </td>
+                    );
+                  })}
+                  <td className="px-2 py-1 text-center font-semibold text-gray-700">
+                    {presentCount}
+                  </td>
+                </tr>
+              );
+            })}
+            {employees.filter((e) => e.is_active).length === 0 && (
+              <tr>
+                <td colSpan={daysInMonth + 2} className="py-8 text-center text-gray-400">
+                  No active employees.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+// ── Payroll Tab ──────────────────────────────────────────────
+
+function PayrollTab({
+  data,
+  loading,
+  year,
+  month,
+}: {
+  data: PayrollSummaryItem[];
+  loading: boolean;
+  year: number;
+  month: number;
+}) {
+  if (loading) {
+    return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
+  }
+
+  const grandTotal = data.reduce((sum, r) => sum + r.gross_total, 0);
+
+  return (
+    <Card>
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-sm text-gray-500">
+          Payroll for {MONTH_NAMES[month - 1]} {year} -- {data.length} employees
+        </p>
+        <p className="text-lg font-bold text-gray-900">Total: {formatIDR(grandTotal)}</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="border-b bg-gray-50 text-xs font-medium uppercase text-gray-500">
+            <tr>
+              <th className="px-3 py-2 text-left">Name</th>
+              <th className="px-3 py-2 text-left">Position</th>
+              <th className="px-3 py-2 text-right">Base Salary</th>
+              <th className="px-3 py-2 text-right">Allowances</th>
+              <th className="px-3 py-2 text-center">Work Days</th>
+              <th className="px-3 py-2 text-center">Absent</th>
+              <th className="px-3 py-2 text-center">Sick</th>
+              <th className="px-3 py-2 text-center">Leave</th>
+              <th className="px-3 py-2 text-center">OT Hours</th>
+              <th className="px-3 py-2 text-right">Gross Total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {data.map((row) => (
+              <tr key={row.employee_id} className="bg-white">
+                <td className="px-3 py-2 font-medium text-gray-900">{row.full_name}</td>
+                <td className="px-3 py-2 text-gray-600">{row.position}</td>
+                <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(row.base_salary)}</td>
+                <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(row.total_allowances)}</td>
+                <td className="px-3 py-2 text-center text-emerald-700 font-semibold">{row.working_days}</td>
+                <td className="px-3 py-2 text-center text-red-600">{row.absent_days || '-'}</td>
+                <td className="px-3 py-2 text-center text-yellow-600">{row.sick_days || '-'}</td>
+                <td className="px-3 py-2 text-center text-blue-600">{row.leave_days || '-'}</td>
+                <td className="px-3 py-2 text-center text-gray-600">{row.overtime_hours || '-'}</td>
+                <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{formatIDR(row.gross_total)}</td>
+              </tr>
+            ))}
+            {data.length === 0 && (
+              <tr>
+                <td colSpan={10} className="py-8 text-center text-gray-400">
+                  No payroll data for this period.
+                </td>
+              </tr>
+            )}
+          </tbody>
+          {data.length > 0 && (
+            <tfoot className="border-t-2 border-gray-300">
+              <tr className="bg-gray-50 font-semibold">
+                <td className="px-3 py-2 text-gray-700" colSpan={2}>TOTAL</td>
+                <td className="px-3 py-2 text-right font-mono text-gray-700">
+                  {formatIDR(data.reduce((s, r) => s + r.base_salary, 0))}
+                </td>
+                <td className="px-3 py-2 text-right font-mono text-gray-700">
+                  {formatIDR(data.reduce((s, r) => s + r.total_allowances, 0))}
+                </td>
+                <td className="px-3 py-2 text-center text-emerald-700">
+                  {data.reduce((s, r) => s + r.working_days, 0)}
+                </td>
+                <td className="px-3 py-2 text-center text-red-600">
+                  {data.reduce((s, r) => s + r.absent_days, 0) || '-'}
+                </td>
+                <td className="px-3 py-2 text-center text-yellow-600">
+                  {data.reduce((s, r) => s + r.sick_days, 0) || '-'}
+                </td>
+                <td className="px-3 py-2 text-center text-blue-600">
+                  {data.reduce((s, r) => s + r.leave_days, 0) || '-'}
+                </td>
+                <td className="px-3 py-2 text-center text-gray-600">
+                  {data.reduce((s, r) => s + r.overtime_hours, 0) || '-'}
+                </td>
+                <td className="px-3 py-2 text-right font-mono font-bold text-gray-900">
+                  {formatIDR(grandTotal)}
+                </td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </Card>
+  );
+}

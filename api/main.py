@@ -75,6 +75,7 @@ from api.routers import factory_calendar
 from api.routers import guides
 from api.routers import admin_settings
 from api.routers import delivery
+from api.routers import employees
 
 
 def _ensure_schema():
@@ -1795,6 +1796,7 @@ async def lifespan(app: FastAPI):
         ("process_steps", "api.schema_patches.process_steps_patch", "apply"),
         ("audit_log", "api.schema_patches.audit_log_patch", "apply"),
         ("product_subtype", "api.schema_patches.product_subtype_patch", "apply"),
+        ("employee", "api.schema_patches.employee_patch", "apply_patch"),
     ]
 
     patch_ok = 0
@@ -1939,5 +1941,6 @@ def setup_routers():
     app.include_router(admin_settings.router, prefix="/api/admin-settings", tags=["admin-settings"])
     app.include_router(guides.router, prefix="/api/guides", tags=["guides"])
     app.include_router(delivery.router, prefix="/api/delivery", tags=["delivery"])
+    app.include_router(employees.router, prefix="/api/employees", tags=["employees"])
 
 setup_routers()

@@ -2397,3 +2397,60 @@ class ApplicationCollection(Base):
     sort_order = Column(sa.Integer, nullable=False, default=0)
     is_active = Column(sa.Boolean, nullable=False, default=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+
+# ── HR Module ────────────────────────────────────────────────────────
+
+class Employee(Base):
+    __tablename__ = 'employees'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+
+    # Personal
+    full_name = Column(sa.String(200), nullable=False)
+    position = Column(sa.String(100), nullable=False)  # e.g. "Glazer", "Kiln Operator", "Sorter"
+    phone = Column(sa.String(50), nullable=True)
+
+    # Employment
+    hire_date = Column(sa.Date, nullable=True)
+    is_active = Column(sa.Boolean, nullable=False, server_default='true')
+    employment_type = Column(sa.String(50), nullable=False, server_default="'full_time'")  # full_time, part_time, contract
+
+    # Salary
+    base_salary = Column(sa.Numeric(12, 2), nullable=False, server_default='0')  # Monthly base IDR
+
+    # Allowances (monthly fixed amounts IDR)
+    allowance_bike = Column(sa.Numeric(10, 2), nullable=False, server_default='0')
+    allowance_housing = Column(sa.Numeric(10, 2), nullable=False, server_default='0')
+    allowance_food = Column(sa.Numeric(10, 2), nullable=False, server_default='0')
+    allowance_bpjs = Column(sa.Numeric(10, 2), nullable=False, server_default='0')
+    allowance_other = Column(sa.Numeric(10, 2), nullable=False, server_default='0')
+    allowance_other_note = Column(sa.String(200), nullable=True)
+
+    # Timestamps
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), onupdate=sa.func.now())
+
+    # Relationships
+    factory = relationship('Factory', backref='employees')
+
+
+class Attendance(Base):
+    __tablename__ = 'attendance'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    employee_id = Column(UUID(as_uuid=True), ForeignKey('employees.id'), nullable=False)
+    date = Column(sa.Date, nullable=False)
+    status = Column(sa.String(20), nullable=False)  # present, absent, sick, leave, half_day
+    overtime_hours = Column(sa.Numeric(4, 1), nullable=False, server_default='0')
+    notes = Column(sa.Text, nullable=True)
+    recorded_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('employee_id', 'date', name='uq_attendance_employee_date'),
+    )
+
+    employee = relationship('Employee', backref='attendance_records')
+    recorded_by_rel = relationship('User', foreign_keys=[recorded_by])

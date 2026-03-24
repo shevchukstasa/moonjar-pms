@@ -78,6 +78,7 @@ const navByRole: Record<string, NavSection[]> = {
     {
       section: 'System', icon: '⚙️', items: [
         { to: '/users', label: 'Users', icon: '👥' },
+        { to: '/admin/employees', label: 'Employees', icon: '👷' },
         { to: '/admin', label: 'Admin Panel', icon: '🛠' },
         { to: '/admin/dashboard-access', label: 'Dashboard Access', icon: '🔐' },
         { to: '/admin/settings', label: 'Settings', icon: '⚙️' },
@@ -90,6 +91,7 @@ const navByRole: Record<string, NavSection[]> = {
       section: 'Admin', icon: '🛠', defaultOpen: true, items: [
         { to: '/admin', label: 'Admin Panel', icon: '🛠' },
         { to: '/users', label: 'Users', icon: '👥' },
+        { to: '/admin/employees', label: 'Employees', icon: '👷' },
         { to: '/admin/dashboard-access', label: 'Dashboard Access', icon: '🔐' },
         { to: '/admin/settings', label: 'Settings', icon: '⚙️' },
       ],

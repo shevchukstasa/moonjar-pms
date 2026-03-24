@@ -149,6 +149,8 @@ export default function FactoryCalendarPage() {
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
   const [bulkPreset, setBulkPreset] = useState<HolidayPreset | null>(null);
   const [deleteConfirmEntry, setDeleteConfirmEntry] = useState<CalendarEntry | null>(null);
+  const [sundayOverrideDate, setSundayOverrideDate] = useState<string>('');
+  const [sundayOverrideOpen, setSundayOverrideOpen] = useState(false);
 
   // Factories — filter by user's assigned factories for PM
   const user = useCurrentUser();
@@ -263,20 +265,48 @@ export default function FactoryCalendarPage() {
     (dateStr: string) => {
       const entry = entryMap.get(dateStr);
       if (entry) {
-        // Entry exists -- confirm deletion
+        // Entry exists (holiday or working-override) -- confirm deletion to revert to default
         setDeleteConfirmEntry(entry);
       } else {
-        // No entry -- open create dialog
-        setSelectedDate(dateStr);
-        setHolidayName('');
-        setHolidaySource('manual');
-        setNotes('');
-        setFormError('');
-        setDialogOpen(true);
+        // No entry — check if it's a Sunday
+        const dateObj = new Date(dateStr + 'T00:00:00');
+        const dow = (dateObj.getDay() + 6) % 7; // 0=Mon, 6=Sun
+        if (dow === 6) {
+          // Sunday — offer to make it a working day (overtime)
+          setSundayOverrideDate(dateStr);
+          setSundayOverrideOpen(true);
+          setFormError('');
+        } else {
+          // Regular working day — open create dialog to mark as non-working
+          setSelectedDate(dateStr);
+          setHolidayName('');
+          setHolidaySource('manual');
+          setNotes('');
+          setFormError('');
+          setDialogOpen(true);
+        }
       }
     },
     [entryMap],
   );
+
+  const handleSundayOvertime = useCallback(() => {
+    if (!sundayOverrideDate) return;
+    setFormError('');
+    createMutation.mutate({
+      factory_id: factoryId,
+      date: sundayOverrideDate,
+      is_working_day: true,
+      holiday_name: 'Overtime / Lembur',
+      holiday_source: 'manual',
+      notes: 'Sunday overtime',
+    }, {
+      onSuccess: () => {
+        setSundayOverrideOpen(false);
+        setSundayOverrideDate('');
+      },
+    });
+  }, [factoryId, sundayOverrideDate, createMutation]);
 
   const handleCreateSubmit = useCallback(() => {
     if (!selectedDate) return;
@@ -623,37 +653,98 @@ export default function FactoryCalendarPage() {
       <Dialog
         open={!!deleteConfirmEntry}
         onClose={() => setDeleteConfirmEntry(null)}
-        title="Remove Calendar Entry"
+        title={deleteConfirmEntry?.is_working_day ? 'Revert to Default (Sunday Off)' : 'Make This a Working Day'}
         className="w-full max-w-md"
       >
         {deleteConfirmEntry && (
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
-              Remove the calendar override for{' '}
-              <span className="font-semibold">{deleteConfirmEntry.date}</span>
-              {deleteConfirmEntry.holiday_name && (
+              {deleteConfirmEntry.is_working_day ? (
                 <>
-                  {' ('}
-                  <span className="font-medium">{deleteConfirmEntry.holiday_name}</span>
-                  {')'}
+                  Remove the working-day override for{' '}
+                  <span className="font-semibold">{deleteConfirmEntry.date}</span>
+                  {deleteConfirmEntry.holiday_name && (
+                    <>
+                      {' ('}
+                      <span className="font-medium">{deleteConfirmEntry.holiday_name}</span>
+                      {')'}
+                    </>
+                  )}
+                  ? The day will revert to its default (Sunday off).
+                </>
+              ) : (
+                <>
+                  Remove the holiday/non-working entry for{' '}
+                  <span className="font-semibold">{deleteConfirmEntry.date}</span>
+                  {deleteConfirmEntry.holiday_name && (
+                    <>
+                      {' ('}
+                      <span className="font-medium">{deleteConfirmEntry.holiday_name}</span>
+                      {')'}
+                    </>
+                  )}
+                  ? The day will become a regular working day.
                 </>
               )}
-              ? The day will revert to its default schedule (Mon-Sat working, Sunday off).
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setDeleteConfirmEntry(null)}>
                 Cancel
               </Button>
               <Button
-                className="bg-red-600 hover:bg-red-700 focus:ring-red-500"
+                className={deleteConfirmEntry.is_working_day
+                  ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500'
+                  : 'bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500'}
                 onClick={() => deleteMutation.mutate(deleteConfirmEntry.id)}
                 disabled={deleteMutation.isPending}
               >
-                {deleteMutation.isPending ? 'Removing...' : 'Remove'}
+                {deleteMutation.isPending
+                  ? 'Removing...'
+                  : deleteConfirmEntry.is_working_day
+                    ? 'Revert to Sunday Off'
+                    : 'Make Working Day'}
               </Button>
             </div>
           </div>
         )}
+      </Dialog>
+
+      {/* Sunday Overtime Dialog */}
+      <Dialog
+        open={sundayOverrideOpen}
+        onClose={() => { setSundayOverrideOpen(false); setSundayOverrideDate(''); }}
+        title="Add Sunday as Working Day"
+        className="w-full max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
+            <span className="font-medium text-gray-700">Date:</span>{' '}
+            <span className="text-gray-900">{sundayOverrideDate}</span>
+            {factoryName && (
+              <>
+                {' | '}
+                <span className="font-medium text-gray-700">Factory:</span>{' '}
+                <span className="text-gray-900">{factoryName}</span>
+              </>
+            )}
+          </div>
+          <p className="text-sm text-gray-600">
+            This Sunday is currently a default day off. Add it as an overtime working day?
+          </p>
+          {formError && <p className="text-sm text-red-600">{formError}</p>}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={() => { setSundayOverrideOpen(false); setSundayOverrideDate(''); }}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500"
+              onClick={handleSundayOvertime}
+              disabled={createMutation.isPending}
+            >
+              {createMutation.isPending ? 'Saving...' : 'Add as Overtime Working Day'}
+            </Button>
+          </div>
+        </div>
       </Dialog>
 
       {/* Bulk Holidays Dialog */}

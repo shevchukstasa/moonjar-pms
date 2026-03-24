@@ -11,6 +11,9 @@ EMPLOYEE_SQL = [
         hire_date DATE,
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
         employment_type VARCHAR(50) NOT NULL DEFAULT 'full_time',
+        department VARCHAR(50) NOT NULL DEFAULT 'production',
+        work_schedule VARCHAR(20) NOT NULL DEFAULT 'six_day',
+        bpjs_mode VARCHAR(20) NOT NULL DEFAULT 'company_pays',
         base_salary NUMERIC(12,2) NOT NULL DEFAULT 0,
         allowance_bike NUMERIC(10,2) NOT NULL DEFAULT 0,
         allowance_housing NUMERIC(10,2) NOT NULL DEFAULT 0,
@@ -38,8 +41,14 @@ EMPLOYEE_SQL = [
     # Indexes
     "CREATE INDEX IF NOT EXISTS idx_employees_factory ON employees(factory_id)",
     "CREATE INDEX IF NOT EXISTS idx_employees_active ON employees(factory_id, is_active)",
+    "CREATE INDEX IF NOT EXISTS idx_employees_department ON employees(department)",
     "CREATE INDEX IF NOT EXISTS idx_attendance_employee ON attendance(employee_id)",
     "CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(employee_id, date)",
+
+    # Add new columns if not exist (safe for existing tables)
+    "ALTER TABLE employees ADD COLUMN IF NOT EXISTS department VARCHAR(50) NOT NULL DEFAULT 'production'",
+    "ALTER TABLE employees ADD COLUMN IF NOT EXISTS work_schedule VARCHAR(20) NOT NULL DEFAULT 'six_day'",
+    "ALTER TABLE employees ADD COLUMN IF NOT EXISTS bpjs_mode VARCHAR(20) NOT NULL DEFAULT 'company_pays'",
 ]
 
 

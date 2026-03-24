@@ -2416,6 +2416,9 @@ class Employee(Base):
     hire_date = Column(sa.Date, nullable=True)
     is_active = Column(sa.Boolean, nullable=False, server_default='true')
     employment_type = Column(sa.String(50), nullable=False, server_default="'full_time'")  # full_time, part_time, contract
+    department = Column(sa.String(50), nullable=False, server_default="'production'")  # production, sales, administration
+    work_schedule = Column(sa.String(20), nullable=False, server_default="'six_day'")  # five_day (Mon-Fri), six_day (Mon-Sat)
+    bpjs_mode = Column(sa.String(20), nullable=False, server_default="'company_pays'")  # company_pays (company pays BPJS) or reimburse (company reimburses employee)
 
     # Salary
     base_salary = Column(sa.Numeric(12, 2), nullable=False, server_default='0')  # Monthly base IDR

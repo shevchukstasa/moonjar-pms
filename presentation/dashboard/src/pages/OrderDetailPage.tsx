@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useOrder, useShipOrder, useUpdateOrder } from '@/hooks/useOrders';
 import { ordersApi } from '@/api/orders';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useFactories } from '@/hooks/useFactories';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -25,6 +26,18 @@ function fmtShortDate(iso: string | null | undefined): string {
   return `${day}/${month}`;
 }
 
+/** Format position label from position data. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function posLabel(p: any): string {
+  if (p.position_label) return p.position_label;
+  if (p.position_number != null) {
+    return p.split_index != null
+      ? `#${p.position_number}.${p.split_index}`
+      : `#${p.position_number}`;
+  }
+  return '#?';
+}
+
 const VALID_STATUSES = [
   { value: 'new', label: 'New' },
   { value: 'in_production', label: 'In Production' },
@@ -39,6 +52,10 @@ export default function OrderDetailPage() {
   const navigate = useNavigate();
   const { data: order, isLoading, isError } = useOrder(orderId);
   const [tab, setTab] = useState('positions');
+
+  // Factories for edit dropdown
+  const { data: factoriesData } = useFactories();
+  const factories = factoriesData?.items || [];
 
   // Ship order
   const shipOrder = useShipOrder();
@@ -79,6 +96,44 @@ export default function OrderDetailPage() {
   const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
   const [overrideSuccess, setOverrideSuccess] = useState(false);
 
+  // Edit order header
+  const [isEditing, setIsEditing] = useState(false);
+  const [editClient, setEditClient] = useState('');
+  const [editDeadline, setEditDeadline] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editFactoryId, setEditFactoryId] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  function startEditing() {
+    if (!order) return;
+    setEditClient(order.client || '');
+    setEditDeadline(order.final_deadline || '');
+    setEditNotes(order.notes || '');
+    setEditFactoryId(order.factory_id || '');
+    setIsEditing(true);
+  }
+
+  async function saveEdits() {
+    if (!orderId) return;
+    setEditSaving(true);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: Record<string, any> = {};
+      if (editClient !== (order?.client || '')) payload.client = editClient;
+      if (editDeadline !== (order?.final_deadline || '')) payload.final_deadline = editDeadline || null;
+      if (editNotes !== (order?.notes || '')) payload.notes = editNotes;
+      if (editFactoryId !== (order?.factory_id || '')) payload.factory_id = editFactoryId;
+
+      if (Object.keys(payload).length > 0) {
+        await updateOrder.mutateAsync({ id: orderId, data: payload });
+        queryClient.invalidateQueries({ queryKey: ['orders', orderId] });
+      }
+      setIsEditing(false);
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   if (isLoading) {
     return <div className="flex justify-center py-20"><Spinner className="h-10 w-10" /></div>;
   }
@@ -108,112 +163,6 @@ export default function OrderDetailPage() {
   const items = order.items || [];
   const isReadyForShipment = order.status === 'ready_for_shipment';
   const isShipped = order.status === 'shipped';
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const positionColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
-    {
-      key: 'position_label',
-      header: '#',
-      render: (p) => (
-        <span className="font-mono text-xs font-semibold text-gray-700">
-          {p.position_label ?? (p.position_number != null
-            ? (p.split_index != null ? `#${p.position_number}.${p.split_index}` : `#${p.position_number}`)
-            : '—')}
-        </span>
-      ),
-    },
-    { key: 'color', header: 'Color' },
-    { key: 'size', header: 'Size' },
-    {
-      key: 'thickness_mm',
-      header: 'Thickness',
-      render: (p) => p.thickness_mm ? `${p.thickness_mm} mm` : '10 mm',
-    },
-    {
-      key: 'shape',
-      header: 'Shape',
-      render: (p) => formatShape(p.shape, p.width_cm, p.length_cm),
-    },
-    {
-      key: 'place_of_application',
-      header: 'Glaze Place',
-      render: (p) => formatPlaceOfApplication(p.place_of_application),
-    },
-    {
-      key: 'edge_profile',
-      header: 'Edge',
-      render: (p) => {
-        const edge = formatEdgeProfile(p.edge_profile, p.edge_profile_sides);
-        const isNonDefault = p.edge_profile && p.edge_profile !== 'straight';
-        return isNonDefault ? (
-          <span className="inline-flex items-center rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
-            {edge}
-          </span>
-        ) : edge;
-      },
-    },
-    { key: 'quantity', header: 'Qty' },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (p) =>
-        p.id ? (
-          <StatusDropdown positionId={p.id} currentStatus={p.status} section="" />
-        ) : (
-          <Badge status={p.status} />
-        ),
-    },
-    {
-      key: 'material_status',
-      header: 'Materials',
-      render: (p) => <MaterialStatusBadge status={p.material_status} />,
-    },
-    { key: 'product_type', header: 'Type' },
-    {
-      key: 'batch_id',
-      header: 'Batch',
-      render: (p) => p.batch_id ? <span className="text-xs text-gray-500">{p.batch_id.slice(0, 8)}...</span> : '\u2014',
-    },
-    {
-      key: 'delay_hours',
-      header: 'Delay',
-      render: (p) => p.delay_hours ? <span className="text-orange-600">{p.delay_hours}h</span> : '\u2014',
-    },
-    {
-      key: 'planned_glazing_date',
-      header: 'Glazing',
-      render: (p) => p.planned_glazing_date ? fmtShortDate(p.planned_glazing_date) : '\u2014',
-    },
-    {
-      key: 'planned_kiln_date',
-      header: 'Kiln Date',
-      render: (p) => p.planned_kiln_date ? fmtShortDate(p.planned_kiln_date) : '\u2014',
-    },
-    {
-      key: 'planned_sorting_date',
-      header: 'Sorting',
-      render: (p) => p.planned_sorting_date ? fmtShortDate(p.planned_sorting_date) : '\u2014',
-    },
-    {
-      key: 'estimated_kiln_name',
-      header: 'Kiln',
-      render: (p) => p.estimated_kiln_name ? (
-        <span className="text-xs font-medium text-indigo-700">{p.estimated_kiln_name}</span>
-      ) : '\u2014',
-    },
-    {
-      key: '_edit',
-      header: '',
-      render: (p) => p.id ? (
-        <button
-          className="rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-800"
-          onClick={() => setEditingPosition(p)}
-        >
-          Edit
-        </button>
-      ) : null,
-    },
-  ];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const itemColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
@@ -287,10 +236,20 @@ export default function OrderDetailPage() {
                 </div>
               )}
             </div>
+
+            {/* Edit button */}
+            {!isEditing && (
+              <button
+                className="text-xs text-blue-500 hover:text-blue-700 underline ml-1"
+                onClick={startEditing}
+              >
+                Edit
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Reschedule Order button — PM/Admin only */}
+        {/* Reschedule Order button -- PM/Admin only */}
         {canReprocess && (
           <Button
             variant="secondary"
@@ -302,7 +261,7 @@ export default function OrderDetailPage() {
           </Button>
         )}
 
-        {/* Reprocess Order button — PM/Admin only */}
+        {/* Reprocess Order button -- PM/Admin only */}
         {canReprocess && (
           <Button
             variant="secondary"
@@ -314,7 +273,7 @@ export default function OrderDetailPage() {
           </Button>
         )}
 
-        {/* Ship Order button — only when ready for shipment */}
+        {/* Ship Order button -- only when ready for shipment */}
         {isReadyForShipment && !isShipped && (
           <Button
             className="bg-green-600 hover:bg-green-700 text-white"
@@ -369,38 +328,106 @@ export default function OrderDetailPage() {
         </div>
       )}
 
-      {/* Order Info */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Card>
-          <div className="text-xs text-gray-500">Client</div>
-          <div className="mt-1 font-medium text-gray-900">{order.client || '\u2014'}</div>
-        </Card>
-        <Card>
-          <div className="text-xs text-gray-500">Deadline</div>
-          <div className="mt-1 font-medium text-gray-900">
-            {order.final_deadline ? formatDate(order.final_deadline) : '\u2014'}
+      {/* Order Info -- editable / read-only */}
+      {isEditing ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <Card>
+              <label className="text-xs text-gray-500">Client</label>
+              <input
+                type="text"
+                value={editClient}
+                onChange={(e) => setEditClient(e.target.value)}
+                className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </Card>
+            <Card>
+              <label className="text-xs text-gray-500">Deadline</label>
+              <input
+                type="date"
+                value={editDeadline}
+                onChange={(e) => setEditDeadline(e.target.value)}
+                className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </Card>
+            <Card>
+              <label className="text-xs text-gray-500">Factory</label>
+              <select
+                value={editFactoryId}
+                onChange={(e) => setEditFactoryId(e.target.value)}
+                className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">-- Select --</option>
+                {factories.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
+            </Card>
+            <Card>
+              <div className="text-xs text-gray-500">Positions</div>
+              <div className="mt-1 font-medium text-gray-900">
+                <span className="text-green-600">{order.positions_ready || 0}</span>
+                <span className="text-gray-400"> / </span>
+                <span>{order.positions_count || 0}</span>
+                <span className="ml-1 text-xs text-gray-400">ready</span>
+              </div>
+            </Card>
           </div>
-        </Card>
-        <Card>
-          <div className="text-xs text-gray-500">Factory</div>
-          <div className="mt-1 font-medium text-gray-900">{order.factory_name || order.factory_id || '\u2014'}</div>
-        </Card>
-        <Card>
-          <div className="text-xs text-gray-500">Positions</div>
-          <div className="mt-1 font-medium text-gray-900">
-            <span className="text-green-600">{order.positions_ready || 0}</span>
-            <span className="text-gray-400"> / </span>
-            <span>{order.positions_count || 0}</span>
-            <span className="ml-1 text-xs text-gray-400">ready</span>
+          <Card>
+            <label className="text-xs text-gray-500">Notes</label>
+            <input
+              type="text"
+              value={editNotes}
+              onChange={(e) => setEditNotes(e.target.value)}
+              placeholder="Add notes..."
+              className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </Card>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={saveEdits} disabled={editSaving}>
+              {editSaving ? <Spinner className="h-4 w-4 mr-2" /> : null}
+              Save
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setIsEditing(false)} disabled={editSaving}>
+              Cancel
+            </Button>
           </div>
-        </Card>
-      </div>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <Card>
+              <div className="text-xs text-gray-500">Client</div>
+              <div className="mt-1 font-medium text-gray-900">{order.client || '\u2014'}</div>
+            </Card>
+            <Card>
+              <div className="text-xs text-gray-500">Deadline</div>
+              <div className="mt-1 font-medium text-gray-900">
+                {order.final_deadline ? formatDate(order.final_deadline) : '\u2014'}
+              </div>
+            </Card>
+            <Card>
+              <div className="text-xs text-gray-500">Factory</div>
+              <div className="mt-1 font-medium text-gray-900">{order.factory_name || order.factory_id || '\u2014'}</div>
+            </Card>
+            <Card>
+              <div className="text-xs text-gray-500">Positions</div>
+              <div className="mt-1 font-medium text-gray-900">
+                <span className="text-green-600">{order.positions_ready || 0}</span>
+                <span className="text-gray-400"> / </span>
+                <span>{order.positions_count || 0}</span>
+                <span className="ml-1 text-xs text-gray-400">ready</span>
+              </div>
+            </Card>
+          </div>
 
-      {order.notes && (
-        <Card>
-          <div className="text-xs text-gray-500">Notes</div>
-          <div className="mt-1 text-sm text-gray-700">{order.notes}</div>
-        </Card>
+          {order.notes && (
+            <Card>
+              <div className="text-xs text-gray-500">Notes</div>
+              <div className="mt-1 text-sm text-gray-700">{order.notes}</div>
+            </Card>
+          )}
+        </>
       )}
 
       {/* Tabs */}
@@ -416,7 +443,16 @@ export default function OrderDetailPage() {
       {/* Content */}
       {tab === 'positions' && (
         positions.length > 0 ? (
-          <DataTable columns={positionColumns} data={positions} />
+          <div className="space-y-3">
+            {positions.map((p: Record<string, unknown>, idx: number) => (
+              <PositionCard
+                key={(p.id as string) || idx}
+                position={p}
+                index={idx}
+                onEdit={() => setEditingPosition(p)}
+              />
+            ))}
+          </div>
         ) : (
           <div className="py-8 text-center text-gray-400">No positions yet</div>
         )
@@ -465,6 +501,103 @@ export default function OrderDetailPage() {
         title="Override Order Status"
         message={`Manually set order #${order.order_number} status to "${VALID_STATUSES.find((s) => s.value === overrideStatus)?.label ?? overrideStatus}"? This bypasses automatic status calculation.`}
       />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Position Card Component                                            */
+/* ------------------------------------------------------------------ */
+
+function PositionCard({
+  position: p,
+  index,
+  onEdit,
+}: {
+  position: Record<string, unknown>;
+  index: number;
+  onEdit: () => void;
+}) {
+  const label = posLabel(p);
+  const color = (p.color as string) || '\u2014';
+  const size = (p.size as string) || '';
+  const quantity = p.quantity as number | undefined;
+  const thicknessMm = (p.thickness_mm as number) || 10;
+  const shape = formatShape(p.shape as string, p.width_cm as number, p.length_cm as number);
+  const glazePlace = formatPlaceOfApplication(p.place_of_application as string);
+  const edgeRaw = formatEdgeProfile(p.edge_profile as string, p.edge_profile_sides as number);
+  const isNonDefaultEdge = p.edge_profile && p.edge_profile !== 'straight';
+  const productType = (p.product_type as string) || '\u2014';
+  const application = (p.application as string) || (p.application_method as string) || '\u2014';
+  const collection = (p.collection as string) || '\u2014';
+  const finishing = (p.finishing as string) || '\u2014';
+  const priority = (p.priority_order as number) ?? '\u2014';
+
+  const hasPlanningDates = p.planned_glazing_date || p.planned_kiln_date || p.planned_sorting_date || p.estimated_kiln_name;
+
+  return (
+    <div className="rounded-lg border bg-white p-4 shadow-sm">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-lg font-bold text-gray-400">{label}</span>
+          <span className="text-lg font-semibold">{color}</span>
+          {size && <span className="text-sm text-gray-500">{size}</span>}
+          {quantity != null && (
+            <span className="font-mono font-bold">{quantity} pcs</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {p.id ? (
+            <StatusDropdown positionId={p.id as string} currentStatus={p.status as string} section="" />
+          ) : (
+            <Badge status={p.status as string} />
+          )}
+          <MaterialStatusBadge status={p.material_status as string} />
+          <button
+            className="rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-800"
+            onClick={onEdit}
+          >
+            Edit
+          </button>
+        </div>
+      </div>
+
+      {/* Details grid */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1 text-sm text-gray-600">
+        <div><span className="text-gray-400">Shape:</span> {shape}</div>
+        <div><span className="text-gray-400">Thickness:</span> {thicknessMm} mm</div>
+        <div>
+          <span className="text-gray-400">Edge:</span>{' '}
+          {isNonDefaultEdge ? (
+            <span className="inline-flex items-center rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
+              {edgeRaw}
+            </span>
+          ) : (
+            edgeRaw
+          )}
+        </div>
+        <div><span className="text-gray-400">Glaze:</span> {glazePlace}</div>
+        <div><span className="text-gray-400">Application:</span> {application}</div>
+        <div><span className="text-gray-400">Collection:</span> {collection}</div>
+        <div><span className="text-gray-400">Type:</span> {productType}</div>
+        <div><span className="text-gray-400">Finishing:</span> {finishing}</div>
+        <div><span className="text-gray-400">Priority:</span> {typeof priority === 'number' ? priority : '\u2014'}</div>
+      </div>
+
+      {/* Planning row */}
+      {hasPlanningDates && (
+        <div className="mt-3 flex gap-4 flex-wrap text-xs border-t pt-2 text-gray-600">
+          <span>Glazing: <b>{fmtShortDate(p.planned_glazing_date as string)}</b></span>
+          <span>Kiln: <b>{fmtShortDate(p.planned_kiln_date as string)}</b></span>
+          <span>Sorting: <b>{fmtShortDate(p.planned_sorting_date as string)}</b></span>
+          {p.estimated_kiln_name && (
+            <span>Kiln: <b className="text-indigo-600">{p.estimated_kiln_name as string}</b></span>
+          )}
+          <span>Batch: {p.batch_id ? <span className="text-gray-500">{(p.batch_id as string).slice(0, 8)}...</span> : '\u2014'}</span>
+          <span>Delay: {p.delay_hours ? <span className="text-orange-600">{p.delay_hours as number}h</span> : '\u2014'}</span>
+        </div>
+      )}
     </div>
   );
 }

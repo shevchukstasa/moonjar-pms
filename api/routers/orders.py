@@ -83,6 +83,8 @@ class OrderUpdateInput(BaseModel):
     desired_delivery_date: Optional[date] = None
     mandatory_qc: Optional[bool] = None
     notes: Optional[str] = None
+    factory_id: Optional[str] = None
+    status: Optional[str] = None
     status_override: Optional[bool] = None
 
 
@@ -864,7 +866,11 @@ async def update_order(
     order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
     if not order:
         raise HTTPException(404, "Order not found")
-    for k, v in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    # Convert factory_id string to UUID if provided
+    if "factory_id" in updates and updates["factory_id"] is not None:
+        updates["factory_id"] = UUID(updates["factory_id"])
+    for k, v in updates.items():
         setattr(order, k, v)
     order.updated_at = datetime.now(timezone.utc)
     db.commit()

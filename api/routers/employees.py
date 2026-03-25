@@ -78,8 +78,12 @@ class EmployeeCreateInput(BaseModel):
 
 class EmployeeUpdateInput(BaseModel):
     full_name: Optional[str] = None
+    short_name: Optional[str] = None
     position: Optional[str] = None
     phone: Optional[str] = None
+    email: Optional[str] = None
+    birth_date: Optional[str] = None
+    has_own_bpjs: Optional[bool] = None
     hire_date: Optional[str] = None
     is_active: Optional[bool] = None
     employment_type: Optional[str] = None
@@ -467,6 +471,8 @@ async def update_employee(
     update_data = data.model_dump(exclude_unset=True)
     if "hire_date" in update_data and update_data["hire_date"]:
         update_data["hire_date"] = date.fromisoformat(update_data["hire_date"])
+    if "birth_date" in update_data and update_data["birth_date"]:
+        update_data["birth_date"] = date.fromisoformat(update_data["birth_date"])
 
     for key, value in update_data.items():
         setattr(emp, key, value)

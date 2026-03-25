@@ -27,6 +27,9 @@ class EmployeeOut(BaseModel):
     full_name: str
     position: str
     phone: Optional[str] = None
+    email: Optional[str] = None
+    birth_date: Optional[str] = None
+    has_own_bpjs: bool = False
     hire_date: Optional[str] = None
     is_active: bool
     employment_type: str
@@ -51,6 +54,9 @@ class EmployeeCreateInput(BaseModel):
     full_name: str
     position: str
     phone: Optional[str] = None
+    email: Optional[str] = None
+    birth_date: Optional[str] = None
+    has_own_bpjs: bool = False
     hire_date: Optional[str] = None
     is_active: bool = True
     employment_type: str = "full_time"
@@ -170,6 +176,9 @@ def _serialize_employee(emp: Employee, db: Session) -> dict:
         "full_name": emp.full_name,
         "position": emp.position,
         "phone": emp.phone,
+        "email": emp.email,
+        "birth_date": str(emp.birth_date) if emp.birth_date else None,
+        "has_own_bpjs": bool(emp.has_own_bpjs) if hasattr(emp, 'has_own_bpjs') else False,
         "hire_date": str(emp.hire_date) if emp.hire_date else None,
         "is_active": emp.is_active,
         "employment_type": emp.employment_type or "full_time",
@@ -201,6 +210,7 @@ def _serialize_employee_public(emp: Employee, db: Session) -> dict:
         "position": emp.position,
         "department": emp.department or "production",
         "phone": emp.phone,
+        "email": emp.email,
         "is_active": emp.is_active,
     }
 
@@ -412,6 +422,9 @@ async def create_employee(
         full_name=data.full_name,
         position=data.position,
         phone=data.phone,
+        email=data.email,
+        birth_date=date.fromisoformat(data.birth_date) if data.birth_date else None,
+        has_own_bpjs=data.has_own_bpjs,
         hire_date=date.fromisoformat(data.hire_date) if data.hire_date else None,
         is_active=data.is_active,
         employment_type=data.employment_type,

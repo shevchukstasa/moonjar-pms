@@ -2411,6 +2411,9 @@ class Employee(Base):
     full_name = Column(sa.String(200), nullable=False)
     position = Column(sa.String(100), nullable=False)  # e.g. "Glazer", "Kiln Operator", "Sorter"
     phone = Column(sa.String(50), nullable=True)
+    email = Column(sa.String(255), nullable=True)
+    birth_date = Column(sa.Date, nullable=True)
+    has_own_bpjs = Column(sa.Boolean, nullable=False, server_default='false')  # Employee has personal BPJS
 
     # Employment
     hire_date = Column(sa.Date, nullable=True)

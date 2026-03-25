@@ -93,7 +93,7 @@ export function CancellationRequestsPanel({ factoryId }: Props) {
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColor(item.status)}`}
                     >
-                      {item.status.replace(/_/g, ' ')}
+                      {(item.status ?? '').replace(/_/g, ' ')}
                     </span>
                   </div>
                   <p className="text-sm text-gray-600">{item.client}</p>

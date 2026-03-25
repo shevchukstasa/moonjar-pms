@@ -51,6 +51,9 @@ EMPLOYEE_SQL = [
     "ALTER TABLE employees ADD COLUMN IF NOT EXISTS bpjs_mode VARCHAR(20) NOT NULL DEFAULT 'company_pays'",
     "ALTER TABLE employees ADD COLUMN IF NOT EXISTS employment_category VARCHAR(20) NOT NULL DEFAULT 'formal'",
     "ALTER TABLE employees ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(5,2)",
+    "ALTER TABLE employees ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
+    "ALTER TABLE employees ADD COLUMN IF NOT EXISTS birth_date DATE",
+    "ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_own_bpjs BOOLEAN NOT NULL DEFAULT FALSE",
 ]
 
 

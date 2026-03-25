@@ -27,7 +27,8 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Cancelled',
 };
 
-export function formatStatus(s: string) {
+export function formatStatus(s: string | undefined | null) {
+  if (!s) return '—';
   return STATUS_LABELS[s] || s.replace(/_/g, ' ');
 }
 

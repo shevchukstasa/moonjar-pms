@@ -286,23 +286,25 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
 
           {/* Quantity + Unit toggle */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Quantity</label>
-            <div className="flex gap-2">
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Quantity ({form.quantity_unit === 'sqm' ? 'm²' : 'pcs'})
+            </label>
+            <div className="relative">
               <input
                 type="number"
-                className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 pr-16 text-sm focus:border-blue-500 focus:outline-none"
                 value={String(form.quantity)}
                 onChange={(e) => handleChange('quantity', Number(e.target.value))}
               />
-              <div className="flex rounded-md border border-gray-300">
+              <div className="absolute inset-y-0 right-0 flex items-center pr-1">
                 <button
                   type="button"
-                  className={`px-3 py-2 text-xs font-medium rounded-l-md ${form.quantity_unit !== 'sqm' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  className={`px-2 py-1 text-xs font-medium rounded-l ${form.quantity_unit !== 'sqm' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}
                   onClick={() => handleChange('quantity_unit', 'pcs')}
                 >pcs</button>
                 <button
                   type="button"
-                  className={`px-3 py-2 text-xs font-medium rounded-r-md border-l ${form.quantity_unit === 'sqm' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  className={`px-2 py-1 text-xs font-medium rounded-r ${form.quantity_unit === 'sqm' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}
                   onClick={() => handleChange('quantity_unit', 'sqm')}
                 >m²</button>
               </div>

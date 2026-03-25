@@ -364,7 +364,7 @@ export default function ManagerDashboard() {
         <Card>
           <div className="text-[10px] md:text-xs text-gray-500">Defect Rate</div>
           <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">
-            {dashboardSummary?.defect_rate != null ? `${dashboardSummary.defect_rate.toFixed(1)}%` : '\u2014'}
+            {dashboardSummary?.defect_rate != null ? `${Number(dashboardSummary.defect_rate).toFixed(1)}%` : '\u2014'}
           </div>
         </Card>
         <Card>
@@ -632,12 +632,12 @@ function OrdersTabContent({
           <div className="mb-2 flex items-center gap-2">
             <span className="text-sm font-semibold text-red-800">Stock Shortage Tasks</span>
             <span className="rounded-full bg-red-200 px-2 py-0.5 text-xs font-medium text-red-800">
-              {shortageTasksData!.items.length}
+              {shortageTasksData?.items?.length ?? 0}
             </span>
           </div>
           <div className="space-y-2">
             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-            {shortageTasksData!.items.map((task: any) => (
+            {(shortageTasksData?.items ?? []).map((task: any) => (
               <div
                 key={task.id}
                 className="flex items-center justify-between rounded-md bg-white px-3 py-2 text-sm"
@@ -1221,7 +1221,7 @@ function TpsTabContent({ factoryId }: { factoryId: string | null }) {
         <Card>
           <div className="text-xs text-gray-500">Output (sqm)</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {dashboardSummary?.output_sqm != null ? dashboardSummary.output_sqm.toFixed(1) : '\u2014'}
+            {dashboardSummary?.output_sqm != null ? Number(dashboardSummary.output_sqm).toFixed(1) : '\u2014'}
           </div>
         </Card>
         <Card>
@@ -1233,7 +1233,7 @@ function TpsTabContent({ factoryId }: { factoryId: string | null }) {
         <Card>
           <div className="text-xs text-gray-500">Cost per sqm</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {dashboardSummary?.cost_per_sqm != null ? `$${dashboardSummary.cost_per_sqm.toFixed(2)}` : '\u2014'}
+            {dashboardSummary?.cost_per_sqm != null ? `$${Number(dashboardSummary.cost_per_sqm).toFixed(2)}` : '\u2014'}
           </div>
         </Card>
         <Card>
@@ -1419,7 +1419,7 @@ function TocTabContent({ factoryId }: { factoryId: string | null }) {
                   <ProgressBar value={pct} />
                   <div className="mt-2 flex justify-between text-xs text-gray-500">
                     <span>{buffer.buffered_count ?? 0} positions buffered</span>
-                    <span>{(buffer.buffered_sqm ?? 0).toFixed(1)} sqm</span>
+                    <span>{Number(buffer.buffered_sqm ?? 0).toFixed(1)} sqm</span>
                   </div>
                 </Card>
               );

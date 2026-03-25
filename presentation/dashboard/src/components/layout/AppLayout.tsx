@@ -11,7 +11,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar />
-      <div className={cn('flex flex-1 flex-col overflow-hidden transition-all', sidebarOpen ? 'ml-72' : 'ml-16')}>
+      <div className={cn('flex flex-1 flex-col overflow-hidden transition-all', sidebarOpen ? 'ml-56' : 'ml-14')}>
         <Header />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>

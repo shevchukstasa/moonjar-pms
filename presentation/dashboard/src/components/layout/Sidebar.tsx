@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -8,6 +8,27 @@ import { cn } from '@/lib/cn';
 
 type NavItem = { to: string; label: string; icon?: string };
 type NavSection = { section: string; icon?: string; items: NavItem[]; defaultOpen?: boolean };
+
+/* ── localStorage helper for section state ─────────────────────────── */
+
+const STORAGE_KEY = 'moonjar-sidebar-sections';
+
+function loadSectionState(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveSectionState(state: Record<string, boolean>) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // ignore
+  }
+}
 
 /* ── Icon mapping for Notion-style sidebar ─────────────────────────── */
 
@@ -220,12 +241,14 @@ const navByRole: Record<string, NavSection[]> = {
 function SidebarSection({
   section,
   sidebarOpen,
+  isExpanded,
+  onToggle,
 }: {
   section: NavSection;
   sidebarOpen: boolean;
+  isExpanded: boolean;
+  onToggle: () => void;
 }) {
-  const [expanded, setExpanded] = useState(section.defaultOpen ?? false);
-
   if (!sidebarOpen) {
     // Collapsed sidebar: show divider between sections
     return (
@@ -238,7 +261,7 @@ function SidebarSection({
             title={item.label}
             className={({ isActive }) =>
               cn(
-                'flex items-center justify-center rounded-md p-2 text-lg transition-colors',
+                'flex items-center justify-center rounded-md p-2 text-base transition-colors',
                 isActive ? 'bg-blue-50 text-blue-700' : 'text-gray-500 hover:bg-gray-100',
               )
             }
@@ -254,33 +277,33 @@ function SidebarSection({
     <div className="mb-0.5">
       {/* Section header — clickable to collapse/expand */}
       <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors"
+        onClick={onToggle}
+        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors"
       >
-        <span className="text-sm">{section.icon}</span>
+        <span className="text-xs">{section.icon}</span>
         <span className="flex-1 text-left">{section.section}</span>
-        <span className={cn('text-[10px] text-gray-300 transition-transform', expanded ? 'rotate-0' : '-rotate-90')}>
+        <span className={cn('text-[9px] text-gray-300 transition-transform', isExpanded ? 'rotate-0' : '-rotate-90')}>
           ▼
         </span>
       </button>
 
       {/* Items */}
-      {expanded && (
-        <div className="ml-1 space-y-0.5">
+      {isExpanded && (
+        <div className="ml-1 space-y-px">
           {section.items.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-2.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                  'flex items-center gap-2 rounded-md px-3 py-1 text-[13px] font-medium transition-colors',
                   isActive
                     ? 'bg-blue-50 text-blue-700'
                     : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
                 )
               }
             >
-              <span className="w-5 text-center text-sm">{item.icon}</span>
+              <span className="w-4 text-center text-xs">{item.icon}</span>
               <span>{item.label}</span>
             </NavLink>
           ))}
@@ -297,17 +320,46 @@ export function Sidebar() {
   const { sidebarOpen, toggleSidebar } = useUiStore();
   const sections = user ? navByRole[user.role] || [] : [];
 
+  // Persistent expanded/collapsed state per section
+  const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>(() => {
+    const saved = loadSectionState();
+    const initial: Record<string, boolean> = {};
+    for (const s of sections) {
+      initial[s.section] = saved[s.section] ?? s.defaultOpen ?? false;
+    }
+    return initial;
+  });
+
+  // Re-initialize when role/sections change
+  useEffect(() => {
+    const saved = loadSectionState();
+    const initial: Record<string, boolean> = {};
+    for (const s of sections) {
+      initial[s.section] = saved[s.section] ?? s.defaultOpen ?? false;
+    }
+    setExpandedMap(initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role]);
+
+  const toggleSection = useCallback((sectionName: string) => {
+    setExpandedMap((prev) => {
+      const next = { ...prev, [sectionName]: !prev[sectionName] };
+      saveSectionState(next);
+      return next;
+    });
+  }, []);
+
   return (
     <aside
       className={cn(
         'fixed left-0 top-0 z-40 flex h-screen flex-col border-r bg-white transition-all',
-        sidebarOpen ? 'w-60' : 'w-14',
+        sidebarOpen ? 'w-56' : 'w-14',
       )}
     >
       {/* Logo */}
       <div className="flex h-14 items-center justify-between border-b px-3">
         {sidebarOpen && (
-          <span className="text-lg font-semibold">
+          <span className="text-base font-semibold">
             <span className="text-blue-600">Moonjar</span>{' '}
             <span className="font-bold text-gray-900">PMS</span>
           </span>
@@ -327,6 +379,8 @@ export function Sidebar() {
             key={section.section}
             section={section}
             sidebarOpen={sidebarOpen}
+            isExpanded={expandedMap[section.section] ?? section.defaultOpen ?? false}
+            onToggle={() => toggleSection(section.section)}
           />
         ))}
       </nav>

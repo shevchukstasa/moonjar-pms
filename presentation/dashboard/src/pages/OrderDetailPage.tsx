@@ -107,6 +107,7 @@ export default function OrderDetailPage() {
   const [editClientLocation, setEditClientLocation] = useState('');
   const [editDesiredDelivery, setEditDesiredDelivery] = useState('');
   const [editMandatoryQc, setEditMandatoryQc] = useState(false);
+  const [editOrderNumber, setEditOrderNumber] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
   function startEditing() {

@@ -57,6 +57,7 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
     quantity: 1,
     edge_profile: 'straight',
     edge_profile_sides: 1,
+    quantity_unit: 'pcs',
     priority_order: 0,
     color_2: '',
     description: '',
@@ -78,6 +79,7 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
         finishing: position.finishing || '',
         product_type: position.product_type || 'tile',
         quantity: position.quantity || 1,
+        quantity_unit: position.quantity_unit || 'pcs',
         edge_profile: position.edge_profile || 'straight',
         edge_profile_sides: position.edge_profile_sides || 1,
         priority_order: position.priority_order || 0,
@@ -110,6 +112,7 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
           finishing: form.finishing || null,
           product_type: form.product_type,
           quantity: Number(form.quantity),
+          quantity_unit: form.quantity_unit,
           edge_profile: form.edge_profile,
           edge_profile_sides: form.edge_profile !== 'straight' ? Number(form.edge_profile_sides) : null,
           priority_order: Number(form.priority_order),
@@ -281,13 +284,30 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
             options={PRODUCT_TYPES}
           />
 
-          {/* Quantity */}
-          <Input
-            label="Quantity"
-            type="number"
-            value={String(form.quantity)}
-            onChange={(e) => handleChange('quantity', Number(e.target.value))}
-          />
+          {/* Quantity + Unit toggle */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Quantity</label>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                value={String(form.quantity)}
+                onChange={(e) => handleChange('quantity', Number(e.target.value))}
+              />
+              <div className="flex rounded-md border border-gray-300">
+                <button
+                  type="button"
+                  className={`px-3 py-2 text-xs font-medium rounded-l-md ${form.quantity_unit !== 'sqm' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  onClick={() => handleChange('quantity_unit', 'pcs')}
+                >pcs</button>
+                <button
+                  type="button"
+                  className={`px-3 py-2 text-xs font-medium rounded-r-md border-l ${form.quantity_unit === 'sqm' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  onClick={() => handleChange('quantity_unit', 'sqm')}
+                >m²</button>
+              </div>
+            </div>
+          </div>
 
           {/* Edge Profile */}
           <Select

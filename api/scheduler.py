@@ -857,6 +857,62 @@ async def monthly_retention_cleanup():
         db.close()
 
 
+async def monthly_holiday_check():
+    """Check factory calendars have all Indonesian holidays. Runs 1st of month."""
+    db = _get_db_session()
+    try:
+        from scripts.check_holidays import NATIONAL_HOLIDAYS_2026, BALINESE_HOLIDAYS_2026
+        from api.models import FactoryCalendar, Factory
+        from datetime import date as dt_date
+        from sqlalchemy import select
+
+        year = dt_date.today().year
+        factories = db.execute(select(Factory).where(Factory.is_active.is_(True))).scalars().all()
+
+        for factory in factories:
+            existing = db.execute(
+                select(FactoryCalendar)
+                .where(FactoryCalendar.factory_id == factory.id)
+                .where(FactoryCalendar.date >= dt_date(year, 1, 1))
+                .where(FactoryCalendar.date <= dt_date(year, 12, 31))
+            ).scalars().all()
+            existing_dates = {str(e.date) for e in existing}
+
+            holidays = list(NATIONAL_HOLIDAYS_2026)
+            if "bali" in factory.name.lower():
+                holidays += list(BALINESE_HOLIDAYS_2026)
+
+            missing = [(d, n) for d, n in holidays if d not in existing_dates]
+            if missing:
+                logger.warning(
+                    "Factory %s missing %d holidays: %s",
+                    factory.name, len(missing),
+                    ", ".join(f"{d} ({n})" for d, n in missing[:5]),
+                )
+                # Auto-add missing holidays
+                for d_str, name in missing:
+                    try:
+                        entry = FactoryCalendar(
+                            factory_id=factory.id,
+                            date=dt_date.fromisoformat(d_str),
+                            reason=name,
+                            is_holiday=True,
+                            source="auto_check",
+                        )
+                        db.add(entry)
+                    except Exception:
+                        pass  # skip duplicates
+                db.commit()
+                logger.info("Auto-added %d missing holidays for %s", len(missing), factory.name)
+            else:
+                logger.info("Factory %s: all holidays present (%d entries)", factory.name, len(existing))
+    except Exception as e:
+        logger.error("Holiday check failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 # --- Scheduler setup ---
 
 def setup_scheduler():
@@ -904,6 +960,9 @@ def setup_scheduler():
 
     # Monthly (1st of month at 03:00 UTC) — data retention cleanup
     scheduler.add_job(monthly_retention_cleanup, CronTrigger(day=1, hour=3, minute=0), id="retention_cleanup")
+
+    # Monthly (1st of month at 04:00 UTC) — check factory calendar has all holidays
+    scheduler.add_job(monthly_holiday_check, CronTrigger(day=1, hour=4, minute=0), id="holiday_check")
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

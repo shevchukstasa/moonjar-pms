@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Spinner } from '@/components/ui/Spinner';
 import { useUpdatePosition } from '@/hooks/usePositions';
-import { useCollections } from '@/hooks/useReferenceData';
+import { useCollections, useFinishingTypes, useColors } from '@/hooks/useReferenceData';
 import { useSizes } from '@/hooks/useSizes';
 import {
   SHAPE_OPTIONS,
@@ -42,6 +42,8 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
   const updatePosition = useUpdatePosition();
   const { data: collectionsData, isLoading: collectionsLoading } = useCollections();
   const { data: sizesData, isLoading: sizesLoading } = useSizes();
+  const { data: finishingTypes, isLoading: finishingLoading } = useFinishingTypes();
+  const { data: colorsData, isLoading: colorsLoading } = useColors();
 
   const [form, setForm] = useState({
     color: '',
@@ -58,6 +60,8 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
     edge_profile_sides: 1,
     priority_order: 0,
     color_2: '',
+    description: '',
+    is_additional_item: false,
   });
   const [submitError, setSubmitError] = useState('');
 
@@ -79,6 +83,8 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
         edge_profile_sides: position.edge_profile_sides || 1,
         priority_order: position.priority_order || 0,
         color_2: position.color_2 || '',
+        description: position.description || '',
+        is_additional_item: position.is_additional_item || false,
       });
       setSubmitError('');
     }
@@ -109,6 +115,7 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
           edge_profile_sides: form.edge_profile !== 'straight' ? Number(form.edge_profile_sides) : null,
           priority_order: Number(form.priority_order),
           color_2: form.color_2 || null,
+          description: form.description || null,
         },
       });
       onClose();
@@ -145,12 +152,25 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
     <Dialog open={open} onClose={onClose} title={`Edit Position ${position?.position_label || ''}`} className="w-full max-w-2xl">
       <div className="space-y-4">
         <div className="grid grid-cols-3 gap-3">
-          {/* Color */}
-          <Input
-            label="Color"
-            value={form.color}
-            onChange={(e) => handleChange('color', e.target.value)}
-          />
+          {/* Color — dropdown from DB */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Color {colorsLoading && <Spinner className="ml-1 inline h-3 w-3" />}
+            </label>
+            <select
+              value={form.color}
+              onChange={(e) => handleChange('color', e.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            >
+              <option value="">Select color...</option>
+              {(colorsData || []).map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+              {form.color && !(colorsData || []).find((c) => c.value === form.color) && (
+                <option value={form.color}>{form.color} (custom)</option>
+              )}
+            </select>
+          </div>
 
           {/* Size dropdown */}
           <div>
@@ -234,12 +254,25 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
             </select>
           </div>
 
-          {/* Finishing */}
-          <Input
-            label="Finishing"
-            value={form.finishing}
-            onChange={(e) => handleChange('finishing', e.target.value)}
-          />
+          {/* Finishing — dropdown from DB */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Finishing {finishingLoading && <Spinner className="ml-1 inline h-3 w-3" />}
+            </label>
+            <select
+              value={form.finishing}
+              onChange={(e) => handleChange('finishing', e.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            >
+              <option value="">None</option>
+              {(finishingTypes || []).map((f) => (
+                <option key={f.id} value={f.name}>{f.name}</option>
+              ))}
+              {form.finishing && !(finishingTypes || []).find((f) => f.name === form.finishing) && (
+                <option value={form.finishing}>{form.finishing} (custom)</option>
+              )}
+            </select>
+          </div>
 
           {/* Product Type */}
           <Select
@@ -301,6 +334,29 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
             />
           )}
         </div>
+
+        {/* Description */}
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">Description</label>
+          <textarea
+            value={form.description}
+            onChange={(e) => handleChange('description', e.target.value)}
+            placeholder="Position description / notes"
+            rows={2}
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+          />
+        </div>
+
+        {/* Additional item checkbox */}
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={form.is_additional_item}
+            onChange={(e) => handleChange('is_additional_item', e.target.checked as unknown as string)}
+            className="rounded border-gray-300"
+          />
+          Additional Service (Color Matching, Silkscreen line, etc.)
+        </label>
 
         {submitError && <p className="text-sm text-red-500">{submitError}</p>}
 

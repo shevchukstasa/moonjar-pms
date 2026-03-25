@@ -22,7 +22,6 @@ import { useSizes } from '@/hooks/useSizes';
 
 const PRODUCT_TYPES = [
   { value: 'tile', label: 'Tile' },
-  { value: 'table_top', label: 'Table Top' },
   { value: 'countertop', label: 'Countertop' },
   { value: 'sink', label: 'Sink' },
   { value: '3d', label: '3D' },

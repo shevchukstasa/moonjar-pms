@@ -38,7 +38,14 @@ export function useFinishingTypes() {
 export function useColors() {
   return useQuery<ReferenceItem[]>({
     queryKey: ['reference', 'colors'],
-    queryFn: () => referenceApi.getColors(),
+    queryFn: async () => {
+      const raw = await referenceApi.getColors();
+      // API returns {id, name}, normalize to {value, label}
+      return (raw as unknown as { id: string; name: string }[]).map((c) => ({
+        value: c.name,
+        label: c.name,
+      }));
+    },
     staleTime: 5 * 60 * 1000,
   });
 }

@@ -348,11 +348,11 @@ export default function ManagerSchedulePage() {
                     )}
                   </div>
                   <div className="text-sm text-gray-500">
-                    {k.kiln.capacity_sqm && <span>Cap: {k.kiln.capacity_sqm} m&sup2;</span>}
-                    {k.kiln.num_levels && <span className="ml-2">Levels: {k.kiln.num_levels}</span>}
+                    {k.kiln?.capacity_sqm && <span>Cap: {k.kiln.capacity_sqm} m&sup2;</span>}
+                    {k.kiln?.num_levels && <span className="ml-2">Levels: {k.kiln.num_levels}</span>}
                   </div>
                 </div>
-                {k.batches.length > 0 ? (
+                {(k.batches ?? []).length > 0 ? (
                   <div className="overflow-x-auto rounded-lg border border-gray-200">
                     <table className="w-full text-left text-sm">
                       <thead className="border-b bg-gray-50 text-xs font-medium uppercase text-gray-500">

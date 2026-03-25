@@ -11,6 +11,11 @@ import {
 } from '@/api/employees';
 import { useFactories } from '@/hooks/useFactories';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import {
+  factoryCalendarApi,
+  type CalendarEntry,
+  type WorkingDaysResponse,
+} from '@/api/factoryCalendar';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
@@ -137,6 +142,35 @@ export default function EmployeesPage() {
     },
     enabled: !!factoryId && employees.length > 0 && activeTab === 'attendance',
   });
+
+  // Factory calendar for attendance tab (color-coded headers + working days count)
+  const { data: calendarData } = useQuery({
+    queryKey: ['factory-calendar', factoryId, year, month],
+    queryFn: () => factoryCalendarApi.list(factoryId, year, month),
+    enabled: !!factoryId && activeTab === 'attendance',
+    staleTime: 30_000,
+  });
+
+  const calendarStartDate = toISO(year, month, 1);
+  const calendarDaysInMonth = new Date(year, month, 0).getDate();
+  const calendarEndDate = toISO(year, month, calendarDaysInMonth);
+  const { data: workingDaysData } = useQuery({
+    queryKey: ['factory-calendar-working-days', factoryId, calendarStartDate, calendarEndDate],
+    queryFn: () => factoryCalendarApi.workingDays(factoryId, calendarStartDate, calendarEndDate),
+    enabled: !!factoryId && activeTab === 'attendance',
+    staleTime: 30_000,
+  });
+
+  // Build calendar lookup: date -> CalendarEntry
+  const calendarMap = useMemo(() => {
+    const map = new Map<string, CalendarEntry>();
+    if (calendarData?.items) {
+      for (const entry of calendarData.items) {
+        map.set(entry.date, entry);
+      }
+    }
+    return map;
+  }, [calendarData]);
 
   // Payroll
   const { data: payrollData, isLoading: payrollLoading } = useQuery({
@@ -287,11 +321,26 @@ export default function EmployeesPage() {
     setAttEmployee(emp);
     setAttDate(dateStr);
     setAttStatus('present');
-    setAttOvertime('0');
-    setAttNotes('');
     setFormError('');
+
+    // Check if this date is a non-working day (holiday or Sunday)
+    const dateObj = new Date(dateStr);
+    const isSunday = dateObj.getDay() === 0;
+    const calEntry = calendarMap.get(dateStr);
+    const isNonWorking = calEntry ? !calEntry.is_working_day : isSunday;
+
+    if (isNonWorking) {
+      // Pre-fill as overtime since recording attendance on a non-working day
+      setAttOvertime('8');
+      const reason = calEntry?.holiday_name ?? (isSunday ? 'Sunday' : 'Holiday');
+      setAttNotes(`Overtime: ${reason}`);
+    } else {
+      setAttOvertime('0');
+      setAttNotes('');
+    }
+
     setAttDialogOpen(true);
-  }, []);
+  }, [calendarMap]);
 
   const handleAttendanceSubmit = useCallback(() => {
     if (!attEmployee || !attDate) return;
@@ -400,6 +449,8 @@ export default function EmployeesPage() {
           month={month}
           daysInMonth={daysInMonth}
           onCellClick={openAttendanceDialog}
+          calendarMap={calendarMap}
+          workingDaysData={workingDaysData ?? null}
         />
       )}
 
@@ -536,6 +587,21 @@ export default function EmployeesPage() {
             <span className="font-medium text-gray-700">Date:</span>{' '}
             <span className="text-gray-900">{attDate}</span>
           </div>
+          {/* Overtime warning for non-working days */}
+          {(() => {
+            if (!attDate) return null;
+            const d = new Date(attDate);
+            const isSun = d.getDay() === 0;
+            const cal = calendarMap.get(attDate);
+            const nonWorking = cal ? !cal.is_working_day : isSun;
+            if (!nonWorking) return null;
+            return (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <strong>Overtime day</strong> — {cal?.holiday_name ?? (isSun ? 'Sunday' : 'Non-working day')}.
+                This attendance will be counted as overtime.
+              </div>
+            );
+          })()}
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">Status</label>
             <div className="flex gap-2">
@@ -690,6 +756,8 @@ function AttendanceTab({
   month,
   daysInMonth,
   onCellClick,
+  calendarMap,
+  workingDaysData,
 }: {
   employees: Employee[];
   attendanceData: Record<string, AttendanceRecord[]>;
@@ -698,6 +766,8 @@ function AttendanceTab({
   month: number;
   daysInMonth: number;
   onCellClick: (emp: Employee, dateStr: string) => void;
+  calendarMap: Map<string, CalendarEntry>;
+  workingDaysData: WorkingDaysResponse | null;
 }) {
   if (loading) {
     return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
@@ -735,14 +805,45 @@ function AttendanceTab({
                 Employee
               </th>
               {days.map((d) => {
+                const dateStr = toISO(year, month, d);
                 const dateObj = new Date(year, month - 1, d);
                 const isSunday = dateObj.getDay() === 0;
+                const calEntry = calendarMap.get(dateStr);
+                // Determine day type: holiday (from calendar), Sunday, or working day
+                const isHoliday = calEntry ? !calEntry.is_working_day : false;
+                const isCalendarWorkingDay = calEntry ? calEntry.is_working_day : !isSunday;
+
+                let headerBg = '';
+                let headerText = 'text-gray-500';
+                if (isHoliday && !isSunday) {
+                  // Explicit holiday from calendar
+                  headerBg = 'bg-red-50';
+                  headerText = 'text-red-600 font-semibold';
+                } else if (isSunday && !isCalendarWorkingDay) {
+                  // Regular Sunday (non-working)
+                  headerBg = 'bg-gray-100';
+                  headerText = 'text-gray-400';
+                } else if (isSunday && isCalendarWorkingDay) {
+                  // Sunday overridden to working day (overtime)
+                  headerBg = 'bg-amber-50';
+                  headerText = 'text-amber-600 font-semibold';
+                } else if (isCalendarWorkingDay) {
+                  // Normal working day
+                  headerBg = 'bg-emerald-50';
+                  headerText = 'text-emerald-700';
+                }
+
+                const tooltip = calEntry?.holiday_name
+                  ? calEntry.holiday_name
+                  : isSunday
+                    ? 'Sunday'
+                    : 'Working day';
+
                 return (
                   <th
                     key={d}
-                    className={`px-0.5 py-1.5 text-center font-medium min-w-[28px] ${
-                      isSunday ? 'text-red-400' : 'text-gray-500'
-                    }`}
+                    className={`px-0.5 py-1.5 text-center font-medium min-w-[28px] ${headerBg} ${headerText}`}
+                    title={tooltip}
                   >
                     {d}
                   </th>
@@ -769,6 +870,25 @@ function AttendanceTab({
                       ? ATTENDANCE_STATUSES.find((s) => s.value === record.status)
                       : null;
 
+                    // Calendar-aware styling for empty cells
+                    const dateObj = new Date(year, month - 1, d);
+                    const isSunday = dateObj.getDay() === 0;
+                    const calEntry = calendarMap.get(dateStr);
+                    const isNonWorking = calEntry
+                      ? !calEntry.is_working_day
+                      : isSunday;
+
+                    // Empty cell style: working days show light bg, non-working show striped/dim
+                    const emptyCellClass = isNonWorking
+                      ? 'bg-gray-100 text-gray-200 hover:bg-gray-200'
+                      : 'bg-gray-50 text-gray-300 hover:bg-gray-100';
+
+                    const cellTitle = record
+                      ? `${record.status}${record.overtime_hours ? ` +${record.overtime_hours}h OT` : ''}`
+                      : isNonWorking
+                        ? (calEntry?.holiday_name ?? 'Non-working day') + ' (overtime if recorded)'
+                        : 'Click to record';
+
                     return (
                       <td key={d} className="px-0.5 py-1 text-center">
                         <button
@@ -776,11 +896,11 @@ function AttendanceTab({
                           className={`inline-flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold transition-colors ${
                             statusInfo
                               ? statusInfo.color
-                              : 'bg-gray-50 text-gray-300 hover:bg-gray-100'
+                              : emptyCellClass
                           }`}
-                          title={record ? `${record.status}${record.overtime_hours ? ` +${record.overtime_hours}h OT` : ''}` : 'Click to record'}
+                          title={cellTitle}
                         >
-                          {statusInfo?.label ?? '-'}
+                          {statusInfo?.label ?? (isNonWorking ? '\u00B7' : '-')}
                         </button>
                       </td>
                     );
@@ -800,6 +920,34 @@ function AttendanceTab({
             )}
           </tbody>
         </table>
+      </div>
+      {/* Working Days Summary from Factory Calendar */}
+      <div className="mt-4 flex flex-wrap items-center gap-6 border-t pt-3">
+        {workingDaysData ? (
+          <>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="inline-block h-3 w-3 rounded bg-emerald-200" />
+              <span className="text-gray-600">Working days:</span>
+              <span className="font-bold text-emerald-700">{workingDaysData.working_days}</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="inline-block h-3 w-3 rounded bg-red-200" />
+              <span className="text-gray-600">Holidays:</span>
+              <span className="font-bold text-red-600">{workingDaysData.holidays}</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="inline-block h-3 w-3 rounded bg-gray-200" />
+              <span className="text-gray-600">Sundays:</span>
+              <span className="font-bold text-gray-500">{workingDaysData.sundays}</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-gray-600">Total days:</span>
+              <span className="font-semibold text-gray-700">{workingDaysData.total_days}</span>
+            </div>
+          </>
+        ) : (
+          <span className="text-xs text-gray-400">Loading calendar data...</span>
+        )}
       </div>
     </Card>
   );

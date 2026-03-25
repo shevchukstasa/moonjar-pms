@@ -14,7 +14,14 @@ export function useReferenceData() {
 export function useCollections() {
   return useQuery<ReferenceItem[]>({
     queryKey: ['reference', 'collections'],
-    queryFn: () => referenceApi.getCollections(),
+    queryFn: async () => {
+      const raw = await referenceApi.getCollections();
+      // API returns {id, name} or {value, label} — normalize
+      return (raw as unknown as { id?: string; name?: string; value?: string; label?: string }[]).map((c) => ({
+        value: c.value || c.name || '',
+        label: c.label || c.name || '',
+      }));
+    },
     staleTime: 5 * 60 * 1000,
   });
 }

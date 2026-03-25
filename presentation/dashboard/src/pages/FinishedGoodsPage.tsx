@@ -26,7 +26,7 @@ const PRODUCT_TYPE_TABS = [
   { value: '', label: 'All' },
   { value: 'tile', label: 'Tiles' },
   { value: 'sink', label: 'Sinks' },
-  { value: 'table_top', label: 'Table Top' },
+  { value: 'countertop', label: 'Countertop' },
   { value: 'custom', label: 'Custom' },
 ] as const;
 
@@ -313,7 +313,7 @@ export default function FinishedGoodsPage() {
             options={[
               { value: 'tile', label: 'Tile' },
               { value: 'sink', label: 'Sink' },
-              { value: 'table_top', label: 'Table Top' },
+              { value: 'countertop', label: 'Countertop' },
               { value: 'countertop', label: 'Countertop' },
               { value: '3d', label: '3D' },
               { value: 'custom', label: 'Custom' },

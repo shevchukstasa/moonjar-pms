@@ -729,9 +729,7 @@ function EmployeeListTab({
                   <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(emp.base_salary)}</td>
                   <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(totalAllow)}</td>
                   <td className="px-3 py-2 text-center">
-                    <Badge variant={emp.is_active ? 'green' : 'gray'}>
-                      {emp.is_active ? 'Active' : 'Inactive'}
-                    </Badge>
+                    <Badge status={emp.is_active ? 'active' : 'inactive'} label={emp.is_active ? 'Active' : 'Inactive'} />
                   </td>
                   <td className="px-3 py-2 text-right">
                     <div className="flex justify-end gap-1">

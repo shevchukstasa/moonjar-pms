@@ -86,6 +86,9 @@ export default function EmployeesPage() {
     full_name: '',
     position: '',
     phone: '',
+    email: '',
+    birth_date: '',
+    has_own_bpjs: false,
     hire_date: '',
     employment_type: 'full_time',
     department: isStaffView ? 'production' : 'production',
@@ -285,6 +288,9 @@ export default function EmployeesPage() {
       full_name: emp.full_name,
       position: emp.position,
       phone: emp.phone ?? '',
+      email: emp.email ?? '',
+      birth_date: emp.birth_date ?? '',
+      has_own_bpjs: emp.has_own_bpjs ?? false,
       hire_date: emp.hire_date ?? '',
       employment_type: emp.employment_type,
       department: emp.department || 'production',
@@ -491,11 +497,33 @@ export default function EmployeesPage() {
               onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
             />
             <Input
+              label="Email"
+              type="email"
+              value={(formData as any).email ?? ''}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value } as any)}
+            />
+            <Input
+              label="Birth Date"
+              type="date"
+              value={(formData as any).birth_date ?? ''}
+              onChange={(e) => setFormData({ ...formData, birth_date: e.target.value } as any)}
+            />
+            <Input
               label="Hire Date"
               type="date"
               value={formData.hire_date ?? ''}
               onChange={(e) => setFormData({ ...formData, hire_date: e.target.value })}
             />
+            <div className="flex items-center gap-2 pt-5">
+              <input
+                type="checkbox"
+                id="has_own_bpjs"
+                checked={(formData as any).has_own_bpjs ?? false}
+                onChange={(e) => setFormData({ ...formData, has_own_bpjs: e.target.checked } as any)}
+                className="h-4 w-4 rounded border-gray-300"
+              />
+              <label htmlFor="has_own_bpjs" className="text-sm text-gray-700">Has own BPJS</label>
+            </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Employment Type</label>
               <select
@@ -513,42 +541,33 @@ export default function EmployeesPage() {
           <hr className="my-2" />
           <p className="text-sm font-medium text-gray-700">Salary & Allowances (IDR/month)</p>
           <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="Base Salary"
-              type="number"
-              value={String(formData.base_salary ?? 0)}
-              onChange={(e) => setFormData({ ...formData, base_salary: parseFloat(e.target.value) || 0 })}
-            />
-            <Input
-              label="Bike Allowance"
-              type="number"
-              value={String(formData.allowance_bike ?? 0)}
-              onChange={(e) => setFormData({ ...formData, allowance_bike: parseFloat(e.target.value) || 0 })}
-            />
-            <Input
-              label="Housing Allowance"
-              type="number"
-              value={String(formData.allowance_housing ?? 0)}
-              onChange={(e) => setFormData({ ...formData, allowance_housing: parseFloat(e.target.value) || 0 })}
-            />
-            <Input
-              label="Food Allowance"
-              type="number"
-              value={String(formData.allowance_food ?? 0)}
-              onChange={(e) => setFormData({ ...formData, allowance_food: parseFloat(e.target.value) || 0 })}
-            />
-            <Input
-              label="BPJS"
-              type="number"
-              value={String(formData.allowance_bpjs ?? 0)}
-              onChange={(e) => setFormData({ ...formData, allowance_bpjs: parseFloat(e.target.value) || 0 })}
-            />
-            <Input
-              label="Other Allowance"
-              type="number"
-              value={String(formData.allowance_other ?? 0)}
-              onChange={(e) => setFormData({ ...formData, allowance_other: parseFloat(e.target.value) || 0 })}
-            />
+            {(["base_salary", "allowance_bike", "allowance_housing", "allowance_food", "allowance_bpjs", "allowance_other"] as const).map((field) => {
+              const labels: Record<string, string> = {
+                base_salary: "Base Salary", allowance_bike: "Bike Allowance",
+                allowance_housing: "Housing Allowance", allowance_food: "Food Allowance",
+                allowance_bpjs: "BPJS", allowance_other: "Other Allowance",
+              };
+              const val = (formData as any)[field] ?? 0;
+              const display = Number(val).toLocaleString('id-ID');
+              return (
+                <div key={field}>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">{labels[field]}</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      className="w-full rounded-md border border-gray-300 px-3 py-2 pr-14 text-sm focus:border-blue-500 focus:outline-none"
+                      value={display}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/\D/g, '');
+                        setFormData({ ...formData, [field]: parseInt(raw) || 0 } as any);
+                      }}
+                    />
+                    <span className="absolute inset-y-0 right-0 flex items-center pr-3 text-xs text-gray-400">IDR</span>
+                  </div>
+                </div>
+              );
+            })}
             <div className="col-span-2">
               <Input
                 label="Other Allowance Note"

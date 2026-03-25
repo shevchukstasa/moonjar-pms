@@ -2409,6 +2409,7 @@ class Employee(Base):
 
     # Personal
     full_name = Column(sa.String(200), nullable=False)
+    short_name = Column(sa.String(50), nullable=True)  # Nickname / short name used daily
     position = Column(sa.String(100), nullable=False)  # e.g. "Glazer", "Kiln Operator", "Sorter"
     phone = Column(sa.String(50), nullable=True)
     email = Column(sa.String(255), nullable=True)

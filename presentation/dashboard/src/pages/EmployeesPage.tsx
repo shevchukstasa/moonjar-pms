@@ -84,6 +84,7 @@ export default function EmployeesPage() {
   const [formData, setFormData] = useState<EmployeeCreatePayload>({
     factory_id: '',
     full_name: '',
+    short_name: '',
     position: '',
     phone: '',
     email: '',
@@ -286,6 +287,7 @@ export default function EmployeesPage() {
     setFormData({
       factory_id: emp.factory_id,
       full_name: emp.full_name,
+      short_name: emp.short_name ?? '',
       position: emp.position,
       phone: emp.phone ?? '',
       email: emp.email ?? '',
@@ -478,13 +480,17 @@ export default function EmployeesPage() {
       >
         <div className="space-y-4 max-h-[70vh] overflow-y-auto">
           <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2">
-              <Input
-                label="Full Name *"
-                value={formData.full_name}
-                onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-              />
-            </div>
+            <Input
+              label="Full Name *"
+              value={formData.full_name}
+              onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+            />
+            <Input
+              label="Short Name"
+              placeholder="Nickname"
+              value={(formData as any).short_name ?? ''}
+              onChange={(e) => setFormData({ ...formData, short_name: e.target.value } as any)}
+            />
             <Input
               label="Position *"
               placeholder="e.g. Glazer, Kiln Operator"
@@ -721,7 +727,10 @@ function EmployeeListTab({
               const totalAllow = emp.allowance_bike + emp.allowance_housing + emp.allowance_food + emp.allowance_bpjs + emp.allowance_other;
               return (
                 <tr key={emp.id} className={emp.is_active ? 'bg-white' : 'bg-gray-50 opacity-60'}>
-                  <td className="px-3 py-2 font-medium text-gray-900">{emp.full_name}</td>
+                  <td className="px-3 py-2 font-medium text-gray-900">
+                    {emp.full_name}
+                    {emp.short_name && <span className="ml-1 text-xs text-gray-400">({emp.short_name})</span>}
+                  </td>
                   <td className="px-3 py-2 text-gray-600">{emp.position}</td>
                   <td className="px-3 py-2 text-gray-600">{emp.phone || '-'}</td>
                   <td className="px-3 py-2 text-gray-600 capitalize">{emp.employment_type.replace('_', ' ')}</td>

@@ -25,6 +25,7 @@ class EmployeeOut(BaseModel):
     factory_id: str
     factory_name: Optional[str] = None
     full_name: str
+    short_name: Optional[str] = None
     position: str
     phone: Optional[str] = None
     email: Optional[str] = None
@@ -52,6 +53,7 @@ class EmployeeOut(BaseModel):
 class EmployeeCreateInput(BaseModel):
     factory_id: str
     full_name: str
+    short_name: Optional[str] = None
     position: str
     phone: Optional[str] = None
     email: Optional[str] = None
@@ -174,6 +176,7 @@ def _serialize_employee(emp: Employee, db: Session) -> dict:
         "factory_id": str(emp.factory_id),
         "factory_name": factory.name if factory else None,
         "full_name": emp.full_name,
+        "short_name": emp.short_name,
         "position": emp.position,
         "phone": emp.phone,
         "email": emp.email,
@@ -207,6 +210,7 @@ def _serialize_employee_public(emp: Employee, db: Session) -> dict:
         "factory_id": str(emp.factory_id),
         "factory_name": factory.name if factory else None,
         "full_name": emp.full_name,
+        "short_name": emp.short_name,
         "position": emp.position,
         "department": emp.department or "production",
         "phone": emp.phone,
@@ -420,6 +424,7 @@ async def create_employee(
     emp = Employee(
         factory_id=fid,
         full_name=data.full_name,
+        short_name=data.short_name,
         position=data.position,
         phone=data.phone,
         email=data.email,

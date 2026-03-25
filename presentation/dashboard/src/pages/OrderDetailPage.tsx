@@ -96,12 +96,17 @@ export default function OrderDetailPage() {
   const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
   const [overrideSuccess, setOverrideSuccess] = useState(false);
 
-  // Edit order header
+  // Edit order header — all editable fields
   const [isEditing, setIsEditing] = useState(false);
   const [editClient, setEditClient] = useState('');
   const [editDeadline, setEditDeadline] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [editFactoryId, setEditFactoryId] = useState('');
+  const [editManagerName, setEditManagerName] = useState('');
+  const [editManagerContact, setEditManagerContact] = useState('');
+  const [editClientLocation, setEditClientLocation] = useState('');
+  const [editDesiredDelivery, setEditDesiredDelivery] = useState('');
+  const [editMandatoryQc, setEditMandatoryQc] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
 
   function startEditing() {
@@ -110,6 +115,11 @@ export default function OrderDetailPage() {
     setEditDeadline(order.final_deadline || '');
     setEditNotes(order.notes || '');
     setEditFactoryId(order.factory_id || '');
+    setEditManagerName(order.sales_manager_name || '');
+    setEditManagerContact(order.sales_manager_contact || '');
+    setEditClientLocation(order.client_location || '');
+    setEditDesiredDelivery(order.desired_delivery_date || '');
+    setEditMandatoryQc(!!order.mandatory_qc);
     setIsEditing(true);
   }
 
@@ -123,6 +133,11 @@ export default function OrderDetailPage() {
       if (editDeadline !== (order?.final_deadline || '')) payload.final_deadline = editDeadline || null;
       if (editNotes !== (order?.notes || '')) payload.notes = editNotes;
       if (editFactoryId !== (order?.factory_id || '')) payload.factory_id = editFactoryId;
+      if (editManagerName !== (order?.sales_manager_name || '')) payload.sales_manager_name = editManagerName || null;
+      if (editManagerContact !== (order?.sales_manager_contact || '')) payload.sales_manager_contact = editManagerContact || null;
+      if (editClientLocation !== (order?.client_location || '')) payload.client_location = editClientLocation || null;
+      if (editDesiredDelivery !== (order?.desired_delivery_date || '')) payload.desired_delivery_date = editDesiredDelivery || null;
+      if (editMandatoryQc !== !!order?.mandatory_qc) payload.mandatory_qc = editMandatoryQc;
 
       if (Object.keys(payload).length > 0) {
         await updateOrder.mutateAsync({ id: orderId, data: payload });
@@ -373,16 +388,70 @@ export default function OrderDetailPage() {
               </div>
             </Card>
           </div>
-          <Card>
-            <label className="text-xs text-gray-500">Notes</label>
-            <input
-              type="text"
-              value={editNotes}
-              onChange={(e) => setEditNotes(e.target.value)}
-              placeholder="Add notes..."
-              className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </Card>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <Card>
+              <label className="text-xs text-gray-500">Sales Manager</label>
+              <input
+                type="text"
+                value={editManagerName}
+                onChange={(e) => setEditManagerName(e.target.value)}
+                placeholder="Manager name"
+                className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </Card>
+            <Card>
+              <label className="text-xs text-gray-500">Manager Contact</label>
+              <input
+                type="text"
+                value={editManagerContact}
+                onChange={(e) => setEditManagerContact(e.target.value)}
+                placeholder="Phone / email"
+                className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </Card>
+            <Card>
+              <label className="text-xs text-gray-500">Client Location</label>
+              <input
+                type="text"
+                value={editClientLocation}
+                onChange={(e) => setEditClientLocation(e.target.value)}
+                placeholder="Location"
+                className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </Card>
+            <Card>
+              <label className="text-xs text-gray-500">Desired Delivery</label>
+              <input
+                type="date"
+                value={editDesiredDelivery}
+                onChange={(e) => setEditDesiredDelivery(e.target.value)}
+                className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </Card>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Card>
+              <label className="text-xs text-gray-500">Notes</label>
+              <input
+                type="text"
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+                placeholder="Add notes..."
+                className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </Card>
+            <Card>
+              <label className="flex items-center gap-2 text-xs text-gray-500">
+                <input
+                  type="checkbox"
+                  checked={editMandatoryQc}
+                  onChange={(e) => setEditMandatoryQc(e.target.checked)}
+                  className="rounded"
+                />
+                Mandatory QC
+              </label>
+            </Card>
+          </div>
           <div className="flex gap-2">
             <Button size="sm" onClick={saveEdits} disabled={editSaving}>
               {editSaving ? <Spinner className="h-4 w-4 mr-2" /> : null}
@@ -420,6 +489,39 @@ export default function OrderDetailPage() {
               </div>
             </Card>
           </div>
+
+          {/* Second row: manager, contact, location, delivery */}
+          {(order.sales_manager_name || order.client_location || order.desired_delivery_date || order.mandatory_qc) && (
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              {order.sales_manager_name && (
+                <Card>
+                  <div className="text-xs text-gray-500">Sales Manager</div>
+                  <div className="mt-1 font-medium text-gray-900">{order.sales_manager_name}</div>
+                  {order.sales_manager_contact && (
+                    <div className="text-xs text-gray-500">{order.sales_manager_contact}</div>
+                  )}
+                </Card>
+              )}
+              {order.client_location && (
+                <Card>
+                  <div className="text-xs text-gray-500">Client Location</div>
+                  <div className="mt-1 font-medium text-gray-900">{order.client_location}</div>
+                </Card>
+              )}
+              {order.desired_delivery_date && (
+                <Card>
+                  <div className="text-xs text-gray-500">Desired Delivery</div>
+                  <div className="mt-1 font-medium text-gray-900">{formatDate(order.desired_delivery_date)}</div>
+                </Card>
+              )}
+              {order.mandatory_qc && (
+                <Card>
+                  <div className="text-xs text-gray-500">QC</div>
+                  <div className="mt-1 font-medium text-orange-600">Mandatory QC ✓</div>
+                </Card>
+              )}
+            </div>
+          )}
 
           {order.notes && (
             <Card>

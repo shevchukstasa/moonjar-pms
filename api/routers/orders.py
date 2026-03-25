@@ -78,6 +78,9 @@ class OrderCreateInput(BaseModel):
 class OrderUpdateInput(BaseModel):
     order_number: Optional[str] = None
     client: Optional[str] = None
+    client_location: Optional[str] = None
+    sales_manager_name: Optional[str] = None
+    sales_manager_contact: Optional[str] = None
     final_deadline: Optional[date] = None
     schedule_deadline: Optional[date] = None
     desired_delivery_date: Optional[date] = None

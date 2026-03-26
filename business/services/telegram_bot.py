@@ -37,6 +37,721 @@ logger = logging.getLogger("moonjar.telegram_bot")
 TELEGRAM_API = "https://api.telegram.org/bot{token}"
 
 # ────────────────────────────────────────────────────────────────
+# Multilingual message templates (en / id / ru)
+# ────────────────────────────────────────────────────────────────
+
+MESSAGES: dict[str, dict[str, str]] = {
+    # ── Account linking ───────────────────────────────────────────
+    "account_not_linked": {
+        "en": "Account not linked. Type /start to link.",
+        "id": "Akun belum terhubung. Ketik /start untuk menghubungkan.",
+        "ru": "Аккаунт не привязан. Введите /start для привязки.",
+    },
+    "account_already_linked": {
+        "en": "Your account is already linked as *{name}* ({email}).\nType /stop to unlink.",
+        "id": "Akun Anda sudah terhubung sebagai *{name}* ({email}).\nKetik /stop untuk memutuskan koneksi.",
+        "ru": "Ваш аккаунт привязан как *{name}* ({email}).\nВведите /stop для отвязки.",
+    },
+    "welcome_start": {
+        "en": "Welcome to *Moonjar PMS*, {first_name}!\n\nTo link your Telegram account, please send the email registered in PMS.",
+        "id": "Selamat datang di *Moonjar PMS*, {first_name}!\n\nUntuk menghubungkan akun Telegram Anda, silakan kirim email yang terdaftar di sistem PMS.",
+        "ru": "Добро пожаловать в *Moonjar PMS*, {first_name}!\n\nДля привязки Telegram-аккаунта отправьте email, зарегистрированный в PMS.",
+    },
+    "group_welcome": {
+        "en": "Moonjar PMS Bot is active in this group.\nSend photos for production documentation.\nType /help for commands.",
+        "id": "Moonjar PMS Bot aktif di grup ini.\nKirim foto untuk dokumentasi produksi.\nKetik /help untuk daftar perintah.",
+        "ru": "Moonjar PMS Bot активен в этой группе.\nОтправляйте фото для документации производства.\nВведите /help для списка команд.",
+    },
+    "send_email_prompt": {
+        "en": "Please send the email registered in Moonjar PMS to link your account.",
+        "id": "Silakan kirim email yang terdaftar di Moonjar PMS untuk menghubungkan akun.",
+        "ru": "Отправьте email, зарегистрированный в Moonjar PMS, для привязки аккаунта.",
+    },
+    "email_not_found": {
+        "en": "Email not found in the system.",
+        "id": "Email tidak ditemukan di sistem.",
+        "ru": "Email не найден в системе.",
+    },
+    "already_linked_other": {
+        "en": "This PMS account is already linked to another Telegram account.\nContact your administrator for help.",
+        "id": "Akun PMS ini sudah terhubung ke akun Telegram lain.\nHubungi administrator untuk bantuan.",
+        "ru": "Этот аккаунт PMS уже привязан к другому Telegram-аккаунту.\nОбратитесь к администратору.",
+    },
+    "link_success": {
+        "en": "Linked! Your Telegram is now connected to *{name}* ({email}).\n\nYou will receive production notifications here.\nType /status to see your tasks.",
+        "id": "Terhubung! Akun Telegram Anda sekarang terhubung ke *{name}* ({email}).\n\nAnda akan menerima notifikasi produksi di sini.\nKetik /status untuk melihat tugas Anda.",
+        "ru": "Привязано! Ваш Telegram подключён к *{name}* ({email}).\n\nВы будете получать уведомления о производстве здесь.\nВведите /status для просмотра задач.",
+    },
+    "account_unlinked": {
+        "en": "Your Telegram account has been unlinked from Moonjar PMS.\nType /start to reconnect.",
+        "id": "Akun Telegram Anda telah diputuskan dari Moonjar PMS.\nKetik /start untuk menghubungkan kembali.",
+        "ru": "Ваш Telegram отвязан от Moonjar PMS.\nВведите /start для повторной привязки.",
+    },
+    "account_not_connected": {
+        "en": "Account not connected.",
+        "id": "Akun tidak terhubung.",
+        "ru": "Аккаунт не подключён.",
+    },
+    "already_linked_msg": {
+        "en": "Account already linked as *{name}*.\nType /help for commands.",
+        "id": "Akun sudah terhubung sebagai *{name}*.\nKetik /help untuk daftar perintah.",
+        "ru": "Аккаунт привязан как *{name}*.\nВведите /help для списка команд.",
+    },
+    # ── Commands ──────────────────────────────────────────────────
+    "unknown_command": {
+        "en": "Unknown command. Type /help for available commands.",
+        "id": "Perintah tidak dikenal. Ketik /help untuk daftar perintah.",
+        "ru": "Неизвестная команда. Введите /help для списка команд.",
+    },
+    "no_pending_tasks": {
+        "en": "No pending tasks.",
+        "id": "Tidak ada tugas yang tertunda.",
+        "ru": "Нет ожидающих задач.",
+    },
+    "your_tasks": {
+        "en": "Your tasks:",
+        "id": "Tugas Anda:",
+        "ru": "Ваши задачи:",
+    },
+    "help_text": {
+        "en": (
+            "*Moonjar PMS Bot*\n\n"
+            "Available commands:\n"
+            "/start — Link Telegram account\n"
+            "/status — View pending tasks\n"
+            "/defect <pos\\_id> <percent> — Report defect\n"
+            "/actual <pos\\_id> <quantity> — Record actual output\n"
+            "/split <pos\\_id> <qty1> <qty2> ... — Split position\n"
+            "/glaze <pos\\_id> — Position glaze info\n"
+            "/recipe <collection> <color> [size] — Search recipe\n"
+            "/plan — Tomorrow's production plan\n"
+            "/photo — Send photo for documentation\n"
+            "/help — Show this help\n"
+            "/stop — Unlink account\n\n"
+            "Send photos in group for production documentation."
+        ),
+        "id": (
+            "*Moonjar PMS Bot*\n\n"
+            "Perintah yang tersedia:\n"
+            "/start — Hubungkan akun Telegram\n"
+            "/status — Lihat tugas yang tertunda\n"
+            "/defect <pos\\_id> <persen> — Lapor defect\n"
+            "/actual <pos\\_id> <jumlah> — Catat output aktual\n"
+            "/split <pos\\_id> <qty1> <qty2> ... — Bagi posisi\n"
+            "/glaze <pos\\_id> — Info glasir posisi\n"
+            "/recipe <koleksi> <warna> [ukuran] — Cari resep\n"
+            "/plan — Rencana produksi besok\n"
+            "/photo — Kirim foto untuk dokumentasi\n"
+            "/help — Tampilkan bantuan ini\n"
+            "/stop — Putuskan koneksi akun\n\n"
+            "Kirim foto di grup untuk dokumentasi produksi."
+        ),
+        "ru": (
+            "*Moonjar PMS Bot*\n\n"
+            "Доступные команды:\n"
+            "/start — Привязать аккаунт Telegram\n"
+            "/status — Просмотреть задачи\n"
+            "/defect <pos\\_id> <процент> — Сообщить о дефекте\n"
+            "/actual <pos\\_id> <кол-во> — Записать фактический выход\n"
+            "/split <pos\\_id> <qty1> <qty2> ... — Разделить позицию\n"
+            "/glaze <pos\\_id> — Информация о глазури\n"
+            "/recipe <коллекция> <цвет> [размер] — Поиск рецепта\n"
+            "/plan — Производственный план на завтра\n"
+            "/photo — Отправить фото\n"
+            "/help — Показать справку\n"
+            "/stop — Отвязать аккаунт\n\n"
+            "Отправляйте фото в группе для документации."
+        ),
+    },
+    # ── Photo & delivery ──────────────────────────────────────────
+    "photo_received": {
+        "en": "Photo received ({type_label}).",
+        "id": "Foto diterima ({type_label}).",
+        "ru": "Фото получено ({type_label}).",
+    },
+    "photo_linked": {
+        "en": " Linked to position {pos_label}.",
+        "id": " Terhubung ke posisi {pos_label}.",
+        "ru": " Привязано к позиции {pos_label}.",
+    },
+    "photo_instructions": {
+        "en": (
+            "*Send Production Photo*\n\n"
+            "Send a photo directly in this chat (no /photo command needed).\n\n"
+            "Add a caption to tag:\n"
+            "- Position number (e.g. #123)\n"
+            "- Type: glaze, fire, defect, pack\n\n"
+            "Example: send a photo with caption `#123 glaze`"
+        ),
+        "id": (
+            "*Kirim Foto Produksi*\n\n"
+            "Kirim foto langsung di chat ini (tanpa perintah /photo).\n\n"
+            "Tambahkan caption untuk menandai:\n"
+            "- Nomor posisi (contoh: #123)\n"
+            "- Tipe: glasir, bakar, defect, kemas\n\n"
+            "Contoh: kirim foto dengan caption `#123 glasir`"
+        ),
+        "ru": (
+            "*Отправить фото производства*\n\n"
+            "Отправьте фото прямо в этот чат (без команды /photo).\n\n"
+            "Добавьте подпись:\n"
+            "- Номер позиции (напр. #123)\n"
+            "- Тип: глазурь, обжиг, дефект, упаковка\n\n"
+            "Пример: фото с подписью `#123 глазурь`"
+        ),
+    },
+    "cannot_determine_factory": {
+        "en": "Cannot determine factory for this photo.",
+        "id": "Tidak dapat menentukan pabrik untuk foto ini.",
+        "ru": "Не удалось определить фабрику для этого фото.",
+    },
+    "delivery_photo_failed": {
+        "en": "Failed to process delivery photo. Photo is saved.",
+        "id": "Gagal memproses foto pengiriman. Foto tetap tersimpan.",
+        "ru": "Не удалось обработать фото доставки. Фото сохранено.",
+    },
+    "delivery_server_error": {
+        "en": "Failed to contact server to process photo. Try again later.",
+        "id": "Gagal menghubungi server untuk memproses foto. Coba lagi nanti.",
+        "ru": "Не удалось связаться с сервером для обработки фото. Попробуйте позже.",
+    },
+    "delivery_process_error": {
+        "en": "Failed to process delivery photo. Please try again or input manually.",
+        "id": "Gagal memproses foto pengiriman. Silakan coba lagi atau input secara manual.",
+        "ru": "Не удалось обработать фото доставки. Попробуйте снова или введите вручную.",
+    },
+    "delivery_no_items": {
+        "en": "Delivery photo received, but no material list found. Please input receipt manually.",
+        "id": "Foto pengiriman diterima, tetapi tidak ditemukan daftar material. Silakan input penerimaan secara manual.",
+        "ru": "Фото доставки получено, но список материалов не найден. Введите приёмку вручную.",
+    },
+    "delivery_header": {
+        "en": "\U0001f4e6 Material Receipt — {supplier}",
+        "id": "\U0001f4e6 Penerimaan Material — {supplier}",
+        "ru": "\U0001f4e6 Приёмка материалов — {supplier}",
+    },
+    "delivery_ref": {
+        "en": "\U0001f4cb Ref: {ref} | Date: {date}",
+        "id": "\U0001f4cb Ref: {ref} | Tanggal: {date}",
+        "ru": "\U0001f4cb Ссылка: {ref} | Дата: {date}",
+    },
+    "found_items": {
+        "en": "Found {count} items:",
+        "id": "Ditemukan {count} item:",
+        "ru": "Найдено {count} позиций:",
+    },
+    "not_found_label": {
+        "en": "NOT FOUND",
+        "id": "TIDAK DITEMUKAN",
+        "ru": "НЕ НАЙДЕНО",
+    },
+    "suggestion_label": {
+        "en": "\U0001f4a1 Suggestion: {name}",
+        "id": "\U0001f4a1 Saran: {name}",
+        "ru": "\U0001f4a1 Предложение: {name}",
+    },
+    "unknown_supplier": {
+        "en": "Unknown",
+        "id": "Tidak diketahui",
+        "ru": "Неизвестно",
+    },
+    "confirm_receipt_btn": {
+        "en": "\u2705 Confirm Receipt",
+        "id": "\u2705 Konfirmasi Penerimaan",
+        "ru": "\u2705 Подтвердить приёмку",
+    },
+    "edit_items_btn": {
+        "en": "\u270f\ufe0f Edit Items",
+        "id": "\u270f\ufe0f Edit Items",
+        "ru": "\u270f\ufe0f Редактировать",
+    },
+    "cancel_btn": {
+        "en": "\u274c Cancel",
+        "id": "\u274c Batal",
+        "ru": "\u274c Отмена",
+    },
+    "create_new_btn": {
+        "en": "\u2795 Create New",
+        "id": "\u2795 Buat Baru",
+        "ru": "\u2795 Создать новый",
+    },
+    "material_not_found_prompt": {
+        "en": "\u26a0\ufe0f Material not found: \"{name}\"\n",
+        "id": "\u26a0\ufe0f Material tidak ditemukan: \"{name}\"\n",
+        "ru": "\u26a0\ufe0f Материал не найден: \"{name}\"\n",
+    },
+    "standard_name_hint": {
+        "en": "\U0001f4a1 Standard name: {name}\n",
+        "id": "\U0001f4a1 Nama standar: {name}\n",
+        "ru": "\U0001f4a1 Стандартное имя: {name}\n",
+    },
+    "choose_or_create": {
+        "en": "Choose matching material or create new:",
+        "id": "Pilih material yang sesuai atau tambah baru:",
+        "ru": "Выберите материал или создайте новый:",
+    },
+    # ── Delivery confirmation ─────────────────────────────────────
+    "receipt_expired": {
+        "en": "This receipt has expired (>30 min) or already processed.",
+        "id": "Penerimaan ini sudah kedaluwarsa (>30 menit) atau sudah diproses.",
+        "ru": "Приёмка истекла (>30 мин) или уже обработана.",
+    },
+    "receipt_cancelled": {
+        "en": "\u274c Receipt cancelled.",
+        "id": "\u274c Penerimaan dibatalkan.",
+        "ru": "\u274c Приёмка отменена.",
+    },
+    "item_not_found": {
+        "en": "Item not found.",
+        "id": "Item tidak ditemukan.",
+        "ru": "Позиция не найдена.",
+    },
+    "material_not_found": {
+        "en": "Material not found.",
+        "id": "Material tidak ditemukan.",
+        "ru": "Материал не найден.",
+    },
+    "mapped_to": {
+        "en": "\u2705 \"{original}\" mapped to *{material}*",
+        "id": "\u2705 \"{original}\" dipetakan ke *{material}*",
+        "ru": "\u2705 \"{original}\" сопоставлено с *{material}*",
+    },
+    "new_material_created": {
+        "en": "\u2795 New material created: *{name}*\n\"{original}\" mapped to this new material.",
+        "id": "\u2795 Material baru dibuat: *{name}*\n\"{original}\" dipetakan ke material baru ini.",
+        "ru": "\u2795 Новый материал создан: *{name}*\n\"{original}\" сопоставлено с новым материалом.",
+    },
+    "failed_create_material": {
+        "en": "Failed to create new material: {error}",
+        "id": "Gagal membuat material baru: {error}",
+        "ru": "Не удалось создать материал: {error}",
+    },
+    "unmatched_items_warning": {
+        "en": "\u26a0\ufe0f There are still unmapped items: {names}\nMap them first or cancel the receipt.",
+        "id": "\u26a0\ufe0f Masih ada item yang belum dipetakan: {names}\nPetakan terlebih dahulu atau batalkan penerimaan.",
+        "ru": "\u26a0\ufe0f Есть несопоставленные позиции: {names}\nСопоставьте их или отмените приёмку.",
+    },
+    "still_unmatched": {
+        "en": "There are still unmapped items!",
+        "id": "Masih ada item belum dipetakan!",
+        "ru": "Есть несопоставленные позиции!",
+    },
+    "receipt_confirmed_header": {
+        "en": "\u2705 Receipt Confirmed — {supplier}",
+        "id": "\u2705 Penerimaan Dikonfirmasi — {supplier}",
+        "ru": "\u2705 Приёмка подтверждена — {supplier}",
+    },
+    "receipt_total": {
+        "en": "Total: {count} materials received and stock updated.",
+        "id": "Total: {count} material diterima dan stok diperbarui.",
+        "ru": "Итого: {count} материалов принято, остатки обновлены.",
+    },
+    "receipt_save_failed": {
+        "en": "Failed to save receipt transactions: {error}\nPlease try again or input manually.",
+        "id": "Gagal menyimpan transaksi penerimaan: {error}\nSilakan coba lagi atau input secara manual.",
+        "ru": "Не удалось сохранить транзакции: {error}\nПопробуйте снова или введите вручную.",
+    },
+    # ── Edit flow ─────────────────────────────────────────────────
+    "edit_mode_active": {
+        "en": "\u270f\ufe0f Edit mode active — {count} items.\nEdit one by one or press Finish Edit anytime.",
+        "id": "\u270f\ufe0f Mode edit aktif — {count} item.\nEdit satu per satu atau tekan Selesai Edit kapan saja.",
+        "ru": "\u270f\ufe0f Режим редактирования — {count} позиций.\nРедактируйте по одной или нажмите Завершить.",
+    },
+    "search_db_btn": {
+        "en": "\U0001f50d Search DB",
+        "id": "\U0001f50d Cari di DB",
+        "ru": "\U0001f50d Поиск в БД",
+    },
+    "change_qty_btn": {
+        "en": "\u270f\ufe0f Change Qty",
+        "id": "\u270f\ufe0f Ubah Qty",
+        "ru": "\u270f\ufe0f Изменить кол-во",
+    },
+    "skip_btn": {
+        "en": "\u23ed Skip",
+        "id": "\u23ed Lewati",
+        "ru": "\u23ed Пропустить",
+    },
+    "finish_edit_btn": {
+        "en": "\u2705 Finish Edit",
+        "id": "\u2705 Selesai Edit",
+        "ru": "\u2705 Завершить",
+    },
+    "choose_action": {
+        "en": "Choose action:",
+        "id": "Pilih aksi:",
+        "ru": "Выберите действие:",
+    },
+    "quantity_label": {
+        "en": "Quantity: {qty} {unit}",
+        "id": "Jumlah: {qty} {unit}",
+        "ru": "Кол-во: {qty} {unit}",
+    },
+    "enter_valid_number": {
+        "en": "Enter a valid number (e.g. 500):",
+        "id": "Masukkan angka yang valid (contoh: 500):",
+        "ru": "Введите число (напр. 500):",
+    },
+    "qty_changed": {
+        "en": "\u2705 Quantity changed: {name} — {qty} {unit}",
+        "id": "\u2705 Jumlah diubah: {name} — {qty} {unit}",
+        "ru": "\u2705 Количество изменено: {name} — {qty} {unit}",
+    },
+    "enter_material_name": {
+        "en": "Enter the material name:",
+        "id": "Masukkan nama material:",
+        "ru": "Введите название материала:",
+    },
+    "choose_material_type": {
+        "en": "Material: {name}\nChoose material type:",
+        "id": "Material: {name}\nPilih tipe material:",
+        "ru": "Материал: {name}\nВыберите тип материала:",
+    },
+    "no_materials_found": {
+        "en": "No materials found for \"{name}\".\nUse \"\u2795 Create New\" to add a new material.",
+        "id": "Tidak ada material ditemukan untuk \"{name}\".\nGunakan \"\u2795 Buat Baru\" untuk membuat material baru.",
+        "ru": "Материалы не найдены для \"{name}\".\nИспользуйте \"\u2795 Создать новый\".",
+    },
+    "matching_materials": {
+        "en": "\U0001f50d Matching materials for \"{name}\":",
+        "id": "\U0001f50d Material cocok untuk \"{name}\":",
+        "ru": "\U0001f50d Подходящие материалы для \"{name}\":",
+    },
+    "back_btn": {
+        "en": "\u2b05 Back",
+        "id": "\u2b05 Kembali",
+        "ru": "\u2b05 Назад",
+    },
+    "enter_material_name_en": {
+        "en": "Enter material name (EN) for \"{name}\":",
+        "id": "Masukkan nama material (EN) untuk \"{name}\":",
+        "ru": "Введите название материала (EN) для \"{name}\":",
+    },
+    "choose_subtype": {
+        "en": "Material: {name}\nType: {type}\nChoose subtype:",
+        "id": "Material: {name}\nTipe: {type}\nPilih subtipe:",
+        "ru": "Материал: {name}\nТип: {type}\nВыберите подтип:",
+    },
+    "edited_header": {
+        "en": "\U0001f4e6 Material Receipt (EDITED) — {supplier}",
+        "id": "\U0001f4e6 Penerimaan Material (DIEDIT) — {supplier}",
+        "ru": "\U0001f4e6 Приёмка материалов (ИЗМЕНЕНО) — {supplier}",
+    },
+    "items_skipped": {
+        "en": "\u23ed {count} items skipped (will not be received)",
+        "id": "\u23ed {count} item dilewati (tidak akan diterima)",
+        "ru": "\u23ed {count} позиций пропущено (не будут приняты)",
+    },
+    # ── Defect / actual / split ───────────────────────────────────
+    "defect_format": {
+        "en": "Format: /defect <pos\\_id> <percent>\nExample: /defect 12345 8",
+        "id": "Format: /defect <pos\\_id> <persen>\nContoh: /defect 12345 8",
+        "ru": "Формат: /defect <pos\\_id> <процент>\nПример: /defect 12345 8",
+    },
+    "defect_must_be_number": {
+        "en": "Defect percent must be a number. Example: /defect 12345 8",
+        "id": "Persen defect harus berupa angka. Contoh: /defect 12345 8",
+        "ru": "Процент дефекта должен быть числом. Пример: /defect 12345 8",
+    },
+    "position_not_found": {
+        "en": "Position '{pos}' not found.",
+        "id": "Posisi '{pos}' tidak ditemukan.",
+        "ru": "Позиция '{pos}' не найдена.",
+    },
+    "defect_recorded": {
+        "en": "Defect recorded: {pct}% for position {pos}. Target: {target}%.",
+        "id": "Defect dicatat: {pct}% untuk posisi {pos}. Target: {target}%.",
+        "ru": "Дефект записан: {pct}% для позиции {pos}. Цель: {target}%.",
+    },
+    "defect_exceeded": {
+        "en": "\n\u26a0\ufe0f Threshold exceeded — 5-Why task created.",
+        "id": "\n\u26a0\ufe0f Batas terlampaui — tugas 5-Why dibuat.",
+        "ru": "\n\u26a0\ufe0f Порог превышен — создана задача 5-Why.",
+    },
+    "defect_record_failed": {
+        "en": "Failed to record defect: {error}",
+        "id": "Gagal mencatat defect: {error}",
+        "ru": "Не удалось записать дефект: {error}",
+    },
+    "actual_format": {
+        "en": "Format: /actual <pos\\_id> <quantity>\nExample: /actual 12345 95",
+        "id": "Format: /actual <pos\\_id> <jumlah>\nContoh: /actual 12345 95",
+        "ru": "Формат: /actual <pos\\_id> <кол-во>\nПример: /actual 12345 95",
+    },
+    "actual_must_be_int": {
+        "en": "Quantity must be a whole number. Example: /actual 12345 95",
+        "id": "Jumlah harus berupa angka bulat. Contoh: /actual 12345 95",
+        "ru": "Количество должно быть целым числом. Пример: /actual 12345 95",
+    },
+    "actual_recorded": {
+        "en": "Output recorded: {actual} pcs for {pos} (planned: {planned})",
+        "id": "Output dicatat: {actual} pcs untuk {pos} (rencana: {planned})",
+        "ru": "Выход записан: {actual} шт для {pos} (план: {planned})",
+    },
+    "actual_deficit": {
+        "en": "\n\u26a0\ufe0f {diff} pcs below plan.",
+        "id": "\n\u26a0\ufe0f Kurang {diff} pcs dari rencana.",
+        "ru": "\n\u26a0\ufe0f Не хватает {diff} шт до плана.",
+    },
+    "actual_record_failed": {
+        "en": "Failed to record output: {error}",
+        "id": "Gagal mencatat output: {error}",
+        "ru": "Не удалось записать выход: {error}",
+    },
+    "split_format": {
+        "en": "Format: /split <pos\\_id> <qty1> <qty2> [qty3...]\nExample: /split 12345 50 30 20",
+        "id": "Format: /split <pos\\_id> <qty1> <qty2> [qty3...]\nContoh: /split 12345 50 30 20",
+        "ru": "Формат: /split <pos\\_id> <qty1> <qty2> [qty3...]\nПример: /split 12345 50 30 20",
+    },
+    "all_must_be_int": {
+        "en": "All quantities must be whole numbers.",
+        "id": "Semua jumlah harus berupa angka bulat.",
+        "ru": "Все количества должны быть целыми числами.",
+    },
+    "min_2_parts": {
+        "en": "At least 2 parts required to split a position.",
+        "id": "Minimal 2 bagian untuk membagi posisi.",
+        "ru": "Нужно минимум 2 части для разделения позиции.",
+    },
+    "cannot_split": {
+        "en": "Cannot split position: {reason}",
+        "id": "Tidak bisa membagi posisi: {reason}",
+        "ru": "Невозможно разделить позицию: {reason}",
+    },
+    "split_total_mismatch": {
+        "en": "Total of parts ({total}) must equal position quantity ({qty}).",
+        "id": "Total bagian ({total}) harus sama dengan jumlah posisi ({qty}).",
+        "ru": "Сумма частей ({total}) должна равняться количеству позиции ({qty}).",
+    },
+    "split_success": {
+        "en": "Position split: {pos} -> {children}",
+        "id": "Posisi dibagi: {pos} -> {children}",
+        "ru": "Позиция разделена: {pos} -> {children}",
+    },
+    "split_failed": {
+        "en": "Failed to split position: {error}",
+        "id": "Gagal membagi posisi: {error}",
+        "ru": "Не удалось разделить позицию: {error}",
+    },
+    # ── Glaze / recipe / plan ─────────────────────────────────────
+    "glaze_format": {
+        "en": "Format: /glaze <pos\\_id>\nExample: /glaze 12345",
+        "id": "Format: /glaze <pos\\_id>\nContoh: /glaze 12345",
+        "ru": "Формат: /glaze <pos\\_id>\nПример: /glaze 12345",
+    },
+    "glaze_info_header": {
+        "en": "*Glaze Info — {pos}*\n",
+        "id": "*Info Glasir — {pos}*\n",
+        "ru": "*Информация о глазури — {pos}*\n",
+    },
+    "recipe_label": {
+        "en": "Recipe: {name}",
+        "id": "Resep: {name}",
+        "ru": "Рецепт: {name}",
+    },
+    "type_label": {
+        "en": "Type: {type}",
+        "id": "Tipe: {type}",
+        "ru": "Тип: {type}",
+    },
+    "temperature_label": {
+        "en": "Temp: {temp} C",
+        "id": "Suhu: {temp} C",
+        "ru": "Темп: {temp} C",
+    },
+    "duration_label": {
+        "en": "Duration: {hours} h",
+        "id": "Durasi: {hours} jam",
+        "ru": "Длительность: {hours} ч",
+    },
+    "two_stage_yes": {
+        "en": "2-stage firing: Yes",
+        "id": "Pembakaran 2 tahap: Ya",
+        "ru": "2-этапный обжиг: Да",
+    },
+    "materials_label": {
+        "en": "\nMaterials:",
+        "id": "\nBahan:",
+        "ru": "\nМатериалы:",
+    },
+    "recipe_not_found": {
+        "en": "Recipe: not found",
+        "id": "Resep: tidak ditemukan",
+        "ru": "Рецепт: не найден",
+    },
+    "recipe_not_set": {
+        "en": "Recipe: not set",
+        "id": "Resep: belum ditentukan",
+        "ru": "Рецепт: не назначен",
+    },
+    "color_label": {
+        "en": "\nColor: {color}",
+        "id": "\nWarna: {color}",
+        "ru": "\nЦвет: {color}",
+    },
+    "color_2_label": {
+        "en": "Color 2: {color}",
+        "id": "Warna 2: {color}",
+        "ru": "Цвет 2: {color}",
+    },
+    "size_label": {
+        "en": "Size: {size}",
+        "id": "Ukuran: {size}",
+        "ru": "Размер: {size}",
+    },
+    "qty_pcs": {
+        "en": "Quantity: {qty} pcs",
+        "id": "Jumlah: {qty} pcs",
+        "ru": "Кол-во: {qty} шт",
+    },
+    "glaze_schedule": {
+        "en": "Glaze schedule: {date}",
+        "id": "Jadwal glasir: {date}",
+        "ru": "Расписание глазури: {date}",
+    },
+    "two_stage_type": {
+        "en": "2-stage: Yes ({type})",
+        "id": "2-tahap: Ya ({type})",
+        "ru": "2-этапный: Да ({type})",
+    },
+    "recipe_search_format": {
+        "en": "Format: /recipe <collection> <color> [size]\nExample: /recipe Classic White 30x60",
+        "id": "Format: /recipe <koleksi> <warna> [ukuran]\nContoh: /recipe Classic White 30x60",
+        "ru": "Формат: /recipe <коллекция> <цвет> [размер]\nПример: /recipe Classic White 30x60",
+    },
+    "recipe_min_args": {
+        "en": "Minimum: /recipe <collection> <color>",
+        "id": "Minimal: /recipe <koleksi> <warna>",
+        "ru": "Минимум: /recipe <коллекция> <цвет>",
+    },
+    "recipe_search_not_found": {
+        "en": "Recipe not found for '{query}'.",
+        "id": "Resep tidak ditemukan untuk '{query}'.",
+        "ru": "Рецепт не найден для '{query}'.",
+    },
+    "collection_label": {
+        "en": "Collection: {name}",
+        "id": "Koleksi: {name}",
+        "ru": "Коллекция: {name}",
+    },
+    "plan_header": {
+        "en": "*Production Plan {date} — {factory}*\n",
+        "id": "*Rencana Produksi {date} — {factory}*\n",
+        "ru": "*План производства {date} — {factory}*\n",
+    },
+    "glaze_section": {
+        "en": "*Glazing: {count} positions*",
+        "id": "*Glasir: {count} posisi*",
+        "ru": "*Глазурь: {count} позиций*",
+    },
+    "kiln_section": {
+        "en": "\n*Kiln: {count} positions*",
+        "id": "\n*Kiln: {count} posisi*",
+        "ru": "\n*Обжиг: {count} позиций*",
+    },
+    "kiln_batch_section": {
+        "en": "\n*Kiln: {count} batches*",
+        "id": "\n*Kiln: {count} batch*",
+        "ru": "\n*Обжиг: {count} партий*",
+    },
+    "sorting_section": {
+        "en": "\n*Sorting: {count} positions*",
+        "id": "\n*Sortir: {count} posisi*",
+        "ru": "\n*Сортировка: {count} позиций*",
+    },
+    "no_plan_tomorrow": {
+        "en": "No production plan for tomorrow.",
+        "id": "Tidak ada rencana produksi untuk besok.",
+        "ru": "Нет производственного плана на завтра.",
+    },
+    "factory_not_found": {
+        "en": "Factory not found.",
+        "id": "Pabrik tidak ditemukan.",
+        "ru": "Фабрика не найдена.",
+    },
+    "not_assigned_factory": {
+        "en": "You are not assigned to any factory.",
+        "id": "Anda belum terdaftar di pabrik manapun.",
+        "ru": "Вы не привязаны ни к одной фабрике.",
+    },
+    # ── Misc ──────────────────────────────────────────────────────
+    "receipt_expired_short": {
+        "en": "Receipt expired.",
+        "id": "Penerimaan sudah kedaluwarsa.",
+        "ru": "Приёмка истекла.",
+    },
+    "data_invalid": {
+        "en": "Data invalid",
+        "id": "Data tidak valid",
+        "ru": "Данные недействительны",
+    },
+    "edit_session_not_found": {
+        "en": "Edit session not found. Press Edit Items again.",
+        "id": "Sesi edit tidak ditemukan. Tekan Edit Items lagi.",
+        "ru": "Сессия редактирования не найдена. Нажмите Edit Items снова.",
+    },
+    "error_occurred": {
+        "en": "An error occurred",
+        "id": "Terjadi kesalahan",
+        "ru": "Произошла ошибка",
+    },
+}
+
+# Default language for group chats or unlinked users
+_DEFAULT_LANG = "id"
+
+
+def get_user_language(db: Session, telegram_user_id: Optional[int] = None, chat_id: Optional[int] = None) -> str:
+    """
+    Determine user language from their PMS profile.
+    Falls back to factory telegram_language, then to 'id'.
+    """
+    if telegram_user_id:
+        user = (
+            db.query(User)
+            .filter(User.telegram_user_id == telegram_user_id, User.is_active.is_(True))
+            .first()
+        )
+        if user and user.language:
+            lang = user.language.value if hasattr(user.language, 'value') else str(user.language)
+            if lang in ("en", "id", "ru"):
+                return lang
+
+    # Try factory language from group chat
+    if chat_id:
+        factory = (
+            db.query(Factory)
+            .filter(
+                (Factory.masters_group_chat_id == chat_id) |
+                (Factory.purchaser_chat_id == chat_id)
+            )
+            .first()
+        )
+        if factory and hasattr(factory, 'telegram_language') and factory.telegram_language:
+            lang = factory.telegram_language
+            if lang in ("en", "id", "ru"):
+                return lang
+
+    return _DEFAULT_LANG
+
+
+def msg(key: str, lang: str = "id", **kwargs) -> str:
+    """
+    Get a translated message by key.
+    Falls back: lang -> 'en' -> 'id' -> key itself.
+    """
+    templates = MESSAGES.get(key)
+    if not templates:
+        return key
+    text = templates.get(lang) or templates.get("en") or templates.get("id") or key
+    if kwargs:
+        try:
+            text = text.format(**kwargs)
+        except (KeyError, IndexError):
+            pass
+    return text
+
+# ────────────────────────────────────────────────────────────────
 # Pending delivery confirmations (in-memory, expires after 30 min)
 # ────────────────────────────────────────────────────────────────
 
@@ -173,10 +888,9 @@ async def handle_command(db: Session, message: dict) -> None:
     elif command == "/photo":
         await _cmd_photo(db, message)
     else:
-        await _send_message(
-            chat_id,
-            "Perintah tidak dikenal. Ketik /help untuk daftar perintah.",
-        )
+        _from = message.get("from", {})
+        lang = get_user_language(db, _from.get("id"), chat_id)
+        await _send_message(chat_id, msg("unknown_command", lang))
 
 
 async def handle_photo(db: Session, message: dict) -> None:
@@ -224,7 +938,8 @@ async def handle_photo(db: Session, message: dict) -> None:
 
     if not factory:
         logger.warning(f"Photo from unknown chat {chat_id}, user {telegram_user_id} — no factory found")
-        await _send_message(chat_id, "Cannot determine factory for this photo.")
+        lang = get_user_language(db, telegram_user_id, chat_id)
+        await _send_message(chat_id, msg("cannot_determine_factory", lang))
         return
 
     # Look up the PMS user
@@ -296,11 +1011,12 @@ async def handle_photo(db: Session, message: dict) -> None:
         logger.warning(f"Supabase upload for telegram photo failed (non-fatal): {e}")
 
     # Acknowledge receipt
+    lang = get_user_language(db, telegram_user_id, chat_id)
     type_label = photo_type.replace("_", " ").title() if photo_type else "Photo"
-    ack_msg = f"Foto diterima ({type_label})."
+    ack_msg = msg("photo_received", lang, type_label=type_label)
     if linked_position:
         pos_label = _format_position_label(linked_position)
-        ack_msg += f" Terhubung ke posisi {pos_label}."
+        ack_msg += msg("photo_linked", lang, pos_label=pos_label)
     await _send_message(chat_id, ack_msg)
 
     # ── Delivery Photo — special handler ─────────────────────────
@@ -314,7 +1030,7 @@ async def handle_photo(db: Session, message: dict) -> None:
                 )
         except Exception as e:
             logger.error(f"Delivery photo handler failed: {e}", exc_info=True)
-            await _send_message(chat_id, "Gagal memproses foto pengiriman. Foto tetap tersimpan.")
+            await _send_message(chat_id, msg("delivery_photo_failed", lang))
         return
 
     # ── LLM Photo Analysis ───────────────────────────────────────
@@ -377,6 +1093,8 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
 
     logger.info(f"Callback query from {telegram_user_id}: data={data}")
 
+    _cb_lang = get_user_language(db, telegram_user_id)
+
     # Parse callback data format: "action:param1:param2"
     parts = data.split(":", maxsplit=2)
     action = parts[0] if parts else ""
@@ -389,7 +1107,7 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
             await answer_callback_query(callback_id, response_text)
         except Exception as e:
             logger.error(f"Callback handler error for data={data}: {e}", exc_info=True)
-            await answer_callback_query(callback_id, "Terjadi kesalahan")
+            await answer_callback_query(callback_id, msg("error_occurred", _cb_lang))
         return
 
     # Delivery confirmation callbacks
@@ -402,14 +1120,14 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
             cb_message = callback_query.get("message", {})
             cb_chat_id = cb_message.get("chat", {}).get("id")
             if not cb_chat_id:
-                await answer_callback_query(callback_id, "Terjadi kesalahan")
+                await answer_callback_query(callback_id, msg("error_occurred", _cb_lang))
                 return
             await _handle_delivery_callback(
                 db, data, callback_id, cb_chat_id, telegram_user_id,
             )
         except Exception as e:
             logger.error(f"Delivery callback error for data={data}: {e}", exc_info=True)
-            await answer_callback_query(callback_id, "Terjadi kesalahan")
+            await answer_callback_query(callback_id, msg("error_occurred", _cb_lang))
         return
 
     if action == "link_confirm":
@@ -589,33 +1307,22 @@ async def _cmd_start(db: Session, message: dict, args: str) -> None:
         )
         return
 
+    lang = get_user_language(db, telegram_user_id, chat_id)
+
     if chat_type != "private":
         # Group chat — just welcome
-        await _send_message(
-            chat_id,
-            f"Moonjar PMS Bot aktif di grup ini.\n"
-            f"Kirim foto untuk dokumentasi produksi.\n"
-            f"Ketik /help untuk daftar perintah.",
-        )
+        await _send_message(chat_id, msg("group_welcome", lang))
         return
 
     # Private chat — check if already linked
     existing = _find_user_by_telegram(db, telegram_user_id)
     if existing:
-        await _send_message(
-            chat_id,
-            f"Akun Anda sudah terhubung sebagai *{existing.name}* ({existing.email}).\n"
-            f"Ketik /stop untuk memutuskan koneksi.",
-        )
+        lang = existing.language.value if hasattr(existing.language, 'value') else str(existing.language) if existing.language else lang
+        await _send_message(chat_id, msg("account_already_linked", lang, name=existing.name, email=existing.email))
         return
 
     # Ask for email to link
-    await _send_message(
-        chat_id,
-        f"Selamat datang di *Moonjar PMS*, {first_name}!\n\n"
-        f"Untuk menghubungkan akun Telegram Anda, "
-        f"silakan kirim email yang terdaftar di sistem PMS.",
-    )
+    await _send_message(chat_id, msg("welcome_start", lang, first_name=first_name))
 
 
 async def _cmd_status(db: Session, message: dict) -> None:
@@ -628,9 +1335,12 @@ async def _cmd_status(db: Session, message: dict) -> None:
     telegram_user_id = from_user.get("id")
 
     user = _find_user_by_telegram(db, telegram_user_id)
+    lang = get_user_language(db, telegram_user_id, chat_id)
     if not user:
-        await _send_message(chat_id, "Akun belum terhubung. Ketik /start untuk menghubungkan.")
+        await _send_message(chat_id, msg("account_not_linked", lang))
         return
+
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else lang
 
     # Find pending/in-progress tasks assigned to this user
     tasks = (
@@ -645,10 +1355,10 @@ async def _cmd_status(db: Session, message: dict) -> None:
     )
 
     if not tasks:
-        await _send_message(chat_id, "Tidak ada tugas yang tertunda.")
+        await _send_message(chat_id, msg("no_pending_tasks", lang))
         return
 
-    lines = ["Tugas Anda:"]
+    lines = [msg("your_tasks", lang)]
     for i, task in enumerate(tasks, 1):
         # Try to get order number if task has related_order_id
         order_label = ""
@@ -711,23 +1421,9 @@ async def _cmd_status(db: Session, message: dict) -> None:
 async def _cmd_help(db: Session, message: dict) -> None:
     """/help — List available commands."""
     chat_id = message["chat"]["id"]
-    help_text = (
-        "*Moonjar PMS Bot*\n\n"
-        "Perintah yang tersedia:\n"
-        "/start — Hubungkan akun Telegram\n"
-        "/status — Lihat tugas yang tertunda\n"
-        "/defect <pos\\_id> <persen> — Lapor defect\n"
-        "/actual <pos\\_id> <jumlah> — Catat output aktual\n"
-        "/split <pos\\_id> <qty1> <qty2> ... — Bagi posisi\n"
-        "/glaze <pos\\_id> — Info glasir posisi\n"
-        "/recipe <koleksi> <warna> [ukuran] — Cari resep\n"
-        "/plan — Rencana produksi besok\n"
-        "/photo — Kirim foto untuk dokumentasi\n"
-        "/help — Tampilkan bantuan ini\n"
-        "/stop — Putuskan koneksi akun\n\n"
-        "Kirim foto di grup untuk dokumentasi produksi."
-    )
-    await _send_message(chat_id, help_text)
+    from_user = message.get("from", {})
+    lang = get_user_language(db, from_user.get("id"), chat_id)
+    await _send_message(chat_id, msg("help_text", lang))
 
 
 async def _cmd_stop(db: Session, message: dict) -> None:
@@ -736,20 +1432,18 @@ async def _cmd_stop(db: Session, message: dict) -> None:
     from_user = message.get("from", {})
     telegram_user_id = from_user.get("id")
 
+    lang = get_user_language(db, telegram_user_id, chat_id)
     user = _find_user_by_telegram(db, telegram_user_id)
     if not user:
-        await _send_message(chat_id, "Akun tidak terhubung.")
+        await _send_message(chat_id, msg("account_not_connected", lang))
         return
 
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else lang
     user.telegram_user_id = None
     db.commit()
     logger.info(f"User {user.email} unlinked Telegram account {telegram_user_id}")
 
-    await _send_message(
-        chat_id,
-        "Akun Telegram Anda telah diputuskan dari Moonjar PMS.\n"
-        "Ketik /start untuk menghubungkan kembali.",
-    )
+    await _send_message(chat_id, msg("account_unlinked", lang))
 
 
 # ────────────────────────────────────────────────────────────────
@@ -765,26 +1459,29 @@ async def _cmd_defect(db: Session, message: dict, args: str) -> None:
     from_user = message.get("from", {})
     telegram_user_id = from_user.get("id")
 
+    lang = get_user_language(db, telegram_user_id, chat_id)
     user = _find_user_by_telegram(db, telegram_user_id)
     if not user:
-        await _send_message(chat_id, "Akun belum terhubung. Ketik /start untuk menghubungkan.")
+        await _send_message(chat_id, msg("account_not_linked", lang))
         return
+
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else lang
 
     parts = args.split()
     if len(parts) < 2:
-        await _send_message(chat_id, "Format: /defect <pos\\_id> <persen>\nContoh: /defect 12345 8")
+        await _send_message(chat_id, msg("defect_format", lang))
         return
 
     pos_id_str = parts[0]
     try:
         defect_pct = float(parts[1])
     except ValueError:
-        await _send_message(chat_id, "Persen defect harus berupa angka. Contoh: /defect 12345 8")
+        await _send_message(chat_id, msg("defect_must_be_number", lang))
         return
 
     position = _find_position_by_number_or_id(db, pos_id_str, user)
     if not position:
-        await _send_message(chat_id, f"Posisi '{pos_id_str}' tidak ditemukan.")
+        await _send_message(chat_id, msg("position_not_found", lang, pos=pos_id_str))
         return
 
     # Convert percentage to fraction for the service
@@ -801,10 +1498,10 @@ async def _cmd_defect(db: Session, message: dict, args: str) -> None:
         target_pct = result.get('target_pct', 0)
         actual_pct = result.get('actual_pct', 0)
 
-        msg = f"Defect dicatat: {actual_pct}% untuk posisi {pos_label}. Target: {target_pct}%."
+        defect_msg = msg("defect_recorded", lang, pct=actual_pct, pos=pos_label, target=target_pct)
         if result.get('exceeded'):
-            msg += "\n\u26a0\ufe0f Batas terlampaui — tugas 5-Why dibuat."
-        await _send_message(chat_id, msg)
+            defect_msg += msg("defect_exceeded", lang)
+        await _send_message(chat_id, defect_msg)
 
         # ── AI: Defect diagnostics ────────────────────────────────
         try:
@@ -832,7 +1529,7 @@ async def _cmd_defect(db: Session, message: dict, args: str) -> None:
     except Exception as e:
         logger.error(f"Error in /defect: {e}", exc_info=True)
         db.rollback()
-        await _send_message(chat_id, f"Gagal mencatat defect: {e}")
+        await _send_message(chat_id, msg("defect_record_failed", lang, error=str(e)))
 
 
 async def _cmd_actual(db: Session, message: dict, args: str) -> None:
@@ -844,26 +1541,29 @@ async def _cmd_actual(db: Session, message: dict, args: str) -> None:
     from_user = message.get("from", {})
     telegram_user_id = from_user.get("id")
 
+    lang = get_user_language(db, telegram_user_id, chat_id)
     user = _find_user_by_telegram(db, telegram_user_id)
     if not user:
-        await _send_message(chat_id, "Akun belum terhubung. Ketik /start untuk menghubungkan.")
+        await _send_message(chat_id, msg("account_not_linked", lang))
         return
+
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else lang
 
     parts = args.split()
     if len(parts) < 2:
-        await _send_message(chat_id, "Format: /actual <pos\\_id> <jumlah>\nContoh: /actual 12345 95")
+        await _send_message(chat_id, msg("actual_format", lang))
         return
 
     pos_id_str = parts[0]
     try:
         actual_qty = int(parts[1])
     except ValueError:
-        await _send_message(chat_id, "Jumlah harus berupa angka bulat. Contoh: /actual 12345 95")
+        await _send_message(chat_id, msg("actual_must_be_int", lang))
         return
 
     position = _find_position_by_number_or_id(db, pos_id_str, user)
     if not position:
-        await _send_message(chat_id, f"Posisi '{pos_id_str}' tidak ditemukan.")
+        await _send_message(chat_id, msg("position_not_found", lang, pos=pos_id_str))
         return
 
     try:
@@ -883,16 +1583,16 @@ async def _cmd_actual(db: Session, message: dict, args: str) -> None:
         db.commit()
 
         pos_label = _format_position_label(position)
-        msg = f"Output dicatat: {actual_qty} pcs untuk {pos_label} (rencana: {planned_qty})"
+        actual_msg = msg("actual_recorded", lang, actual=actual_qty, pos=pos_label, planned=planned_qty)
         if actual_qty < planned_qty:
             diff = planned_qty - actual_qty
-            msg += f"\n\u26a0\ufe0f Kurang {diff} pcs dari rencana."
-        await _send_message(chat_id, msg)
+            actual_msg += msg("actual_deficit", lang, diff=diff)
+        await _send_message(chat_id, actual_msg)
 
     except Exception as e:
         logger.error(f"Error in /actual: {e}", exc_info=True)
         db.rollback()
-        await _send_message(chat_id, f"Gagal mencatat output: {e}")
+        await _send_message(chat_id, msg("actual_record_failed", lang, error=str(e)))
 
 
 async def _cmd_split(db: Session, message: dict, args: str) -> None:
@@ -904,33 +1604,33 @@ async def _cmd_split(db: Session, message: dict, args: str) -> None:
     from_user = message.get("from", {})
     telegram_user_id = from_user.get("id")
 
+    lang = get_user_language(db, telegram_user_id, chat_id)
     user = _find_user_by_telegram(db, telegram_user_id)
     if not user:
-        await _send_message(chat_id, "Akun belum terhubung. Ketik /start untuk menghubungkan.")
+        await _send_message(chat_id, msg("account_not_linked", lang))
         return
+
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else lang
 
     parts = args.split()
     if len(parts) < 3:
-        await _send_message(
-            chat_id,
-            "Format: /split <pos\\_id> <qty1> <qty2> [qty3...]\nContoh: /split 12345 50 30 20",
-        )
+        await _send_message(chat_id, msg("split_format", lang))
         return
 
     pos_id_str = parts[0]
     try:
         quantities = [int(p) for p in parts[1:]]
     except ValueError:
-        await _send_message(chat_id, "Semua jumlah harus berupa angka bulat.")
+        await _send_message(chat_id, msg("all_must_be_int", lang))
         return
 
     if len(quantities) < 2:
-        await _send_message(chat_id, "Minimal 2 bagian untuk membagi posisi.")
+        await _send_message(chat_id, msg("min_2_parts", lang))
         return
 
     position = _find_position_by_number_or_id(db, pos_id_str, user)
     if not position:
-        await _send_message(chat_id, f"Posisi '{pos_id_str}' tidak ditemukan.")
+        await _send_message(chat_id, msg("position_not_found", lang, pos=pos_id_str))
         return
 
     try:
@@ -938,15 +1638,12 @@ async def _cmd_split(db: Session, message: dict, args: str) -> None:
 
         can_split, reason = can_split_position(position)
         if not can_split:
-            await _send_message(chat_id, f"Tidak bisa membagi posisi: {reason}")
+            await _send_message(chat_id, msg("cannot_split", lang, reason=reason))
             return
 
         total_qty = sum(quantities)
         if total_qty != position.quantity:
-            await _send_message(
-                chat_id,
-                f"Total bagian ({total_qty}) harus sama dengan jumlah posisi ({position.quantity}).",
-            )
+            await _send_message(chat_id, msg("split_total_mismatch", lang, total=total_qty, qty=position.quantity))
             return
 
         splits = [{'quantity': q} for q in quantities]
@@ -963,16 +1660,15 @@ async def _cmd_split(db: Session, message: dict, args: str) -> None:
             cl = _format_position_label(child)
             child_labels.append(f"{cl} ({child.quantity})")
 
-        msg = f"Posisi dibagi: {pos_label} -> " + ", ".join(child_labels)
-        await _send_message(chat_id, msg)
+        await _send_message(chat_id, msg("split_success", lang, pos=pos_label, children=", ".join(child_labels)))
 
     except ValueError as e:
         db.rollback()
-        await _send_message(chat_id, f"Gagal membagi posisi: {e}")
+        await _send_message(chat_id, msg("split_failed", lang, error=str(e)))
     except Exception as e:
         logger.error(f"Error in /split: {e}", exc_info=True)
         db.rollback()
-        await _send_message(chat_id, f"Gagal membagi posisi: {e}")
+        await _send_message(chat_id, msg("split_failed", lang, error=str(e)))
 
 
 async def _cmd_glaze(db: Session, message: dict, args: str) -> None:
@@ -983,31 +1679,34 @@ async def _cmd_glaze(db: Session, message: dict, args: str) -> None:
     from_user = message.get("from", {})
     telegram_user_id = from_user.get("id")
 
+    lang = get_user_language(db, telegram_user_id, chat_id)
     user = _find_user_by_telegram(db, telegram_user_id)
     if not user:
-        await _send_message(chat_id, "Akun belum terhubung. Ketik /start untuk menghubungkan.")
+        await _send_message(chat_id, msg("account_not_linked", lang))
         return
+
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else lang
 
     pos_id_str = args.strip()
     if not pos_id_str:
-        await _send_message(chat_id, "Format: /glaze <pos\\_id>\nContoh: /glaze 12345")
+        await _send_message(chat_id, msg("glaze_format", lang))
         return
 
     position = _find_position_by_number_or_id(db, pos_id_str, user)
     if not position:
-        await _send_message(chat_id, f"Posisi '{pos_id_str}' tidak ditemukan.")
+        await _send_message(chat_id, msg("position_not_found", lang, pos=pos_id_str))
         return
 
     pos_label = _format_position_label(position)
-    lines = [f"*Info Glasir — {pos_label}*\n"]
+    lines = [msg("glaze_info_header", lang, pos=pos_label)]
 
     # Recipe info
     if position.recipe_id:
         recipe = db.query(Recipe).filter(Recipe.id == position.recipe_id).first()
         if recipe:
-            lines.append(f"Resep: {recipe.name}")
+            lines.append(msg("recipe_label", lang, name=recipe.name))
             if recipe.recipe_type:
-                lines.append(f"Tipe: {recipe.recipe_type}")
+                lines.append(msg("type_label", lang, type=recipe.recipe_type))
 
             # Kiln config (temperature, duration)
             kiln_config = db.query(RecipeKilnConfig).filter(
@@ -1015,11 +1714,11 @@ async def _cmd_glaze(db: Session, message: dict, args: str) -> None:
             ).first()
             if kiln_config:
                 if kiln_config.firing_temperature:
-                    lines.append(f"Suhu: {kiln_config.firing_temperature} C")
+                    lines.append(msg("temperature_label", lang, temp=kiln_config.firing_temperature))
                 if kiln_config.firing_duration_hours:
-                    lines.append(f"Durasi: {kiln_config.firing_duration_hours} jam")
+                    lines.append(msg("duration_label", lang, hours=kiln_config.firing_duration_hours))
                 if kiln_config.two_stage_firing:
-                    lines.append("Pembakaran 2 tahap: Ya")
+                    lines.append(msg("two_stage_yes", lang))
 
             # BOM / materials
             recipe_materials = (
@@ -1028,28 +1727,28 @@ async def _cmd_glaze(db: Session, message: dict, args: str) -> None:
                 .all()
             )
             if recipe_materials:
-                lines.append("\nBahan:")
+                lines.append(msg("materials_label", lang))
                 for rm in recipe_materials:
                     mat = db.query(Material).filter(Material.id == rm.material_id).first()
                     mat_name = mat.name if mat else "?"
                     lines.append(f"  - {mat_name}: {rm.quantity_per_unit} {rm.unit}")
         else:
-            lines.append("Resep: tidak ditemukan")
+            lines.append(msg("recipe_not_found", lang))
     else:
-        lines.append("Resep: belum ditentukan")
+        lines.append(msg("recipe_not_set", lang))
 
     # Position glazing info
-    lines.append(f"\nWarna: {position.color or '-'}")
+    lines.append(msg("color_label", lang, color=position.color or '-'))
     if position.color_2:
-        lines.append(f"Warna 2: {position.color_2}")
-    lines.append(f"Ukuran: {position.size or '-'}")
-    lines.append(f"Jumlah: {position.quantity} pcs")
+        lines.append(msg("color_2_label", lang, color=position.color_2))
+    lines.append(msg("size_label", lang, size=position.size or '-'))
+    lines.append(msg("qty_pcs", lang, qty=position.quantity))
 
     if position.planned_glazing_date:
-        lines.append(f"Jadwal glasir: {position.planned_glazing_date}")
+        lines.append(msg("glaze_schedule", lang, date=position.planned_glazing_date))
     if position.two_stage_firing:
         tst = position.two_stage_type or "-"
-        lines.append(f"2-tahap: Ya ({tst})")
+        lines.append(msg("two_stage_type", lang, type=tst))
 
     status_val = position.status.value if hasattr(position.status, 'value') else str(position.status)
     lines.append(f"Status: {status_val}")
@@ -1066,21 +1765,21 @@ async def _cmd_recipe(db: Session, message: dict, args: str) -> None:
     from_user = message.get("from", {})
     telegram_user_id = from_user.get("id")
 
+    lang = get_user_language(db, telegram_user_id, chat_id)
     user = _find_user_by_telegram(db, telegram_user_id)
     if not user:
-        await _send_message(chat_id, "Akun belum terhubung. Ketik /start untuk menghubungkan.")
+        await _send_message(chat_id, msg("account_not_linked", lang))
         return
 
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else lang
+
     if not args.strip():
-        await _send_message(
-            chat_id,
-            "Format: /recipe <koleksi> <warna> [ukuran]\nContoh: /recipe Classic White 30x60",
-        )
+        await _send_message(chat_id, msg("recipe_search_format", lang))
         return
 
     parts = args.strip().split()
     if len(parts) < 2:
-        await _send_message(chat_id, "Minimal: /recipe <koleksi> <warna>")
+        await _send_message(chat_id, msg("recipe_min_args", lang))
         return
 
     # Parse: first word is collection, second is color, rest is optional size
@@ -1116,15 +1815,15 @@ async def _cmd_recipe(db: Session, message: dict, args: str) -> None:
         )
 
     if not recipes:
-        await _send_message(chat_id, f"Resep tidak ditemukan untuk '{collection} {color}'.")
+        await _send_message(chat_id, msg("recipe_search_not_found", lang, query=f"{collection} {color}"))
         return
 
     for recipe in recipes:
-        lines = [f"*Resep: {recipe.name}*"]
+        lines = [f"*{msg('recipe_label', lang, name=recipe.name)}*"]
         if recipe.color_collection:
-            lines.append(f"Koleksi: {recipe.color_collection}")
+            lines.append(msg("collection_label", lang, name=recipe.color_collection))
         if recipe.recipe_type:
-            lines.append(f"Tipe: {recipe.recipe_type}")
+            lines.append(msg("type_label", lang, type=recipe.recipe_type))
 
         # Kiln config
         kiln_config = db.query(RecipeKilnConfig).filter(
@@ -1132,9 +1831,9 @@ async def _cmd_recipe(db: Session, message: dict, args: str) -> None:
         ).first()
         if kiln_config:
             if kiln_config.firing_temperature:
-                lines.append(f"Suhu: {kiln_config.firing_temperature} C")
+                lines.append(msg("temperature_label", lang, temp=kiln_config.firing_temperature))
             if kiln_config.firing_duration_hours:
-                lines.append(f"Durasi: {kiln_config.firing_duration_hours} jam")
+                lines.append(msg("duration_label", lang, hours=kiln_config.firing_duration_hours))
 
         # BOM
         recipe_materials = (
@@ -1143,7 +1842,7 @@ async def _cmd_recipe(db: Session, message: dict, args: str) -> None:
             .all()
         )
         if recipe_materials:
-            lines.append("\nBahan:")
+            lines.append(msg("materials_label", lang))
             for rm in recipe_materials:
                 mat = db.query(Material).filter(Material.id == rm.material_id).first()
                 mat_name = mat.name if mat else "?"
@@ -1160,20 +1859,23 @@ async def _cmd_plan(db: Session, message: dict) -> None:
     from_user = message.get("from", {})
     telegram_user_id = from_user.get("id")
 
+    lang = get_user_language(db, telegram_user_id, chat_id)
     user = _find_user_by_telegram(db, telegram_user_id)
     if not user:
-        await _send_message(chat_id, "Akun belum terhubung. Ketik /start untuk menghubungkan.")
+        await _send_message(chat_id, msg("account_not_linked", lang))
         return
+
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else lang
 
     # Get user's factory
     uf = db.query(UserFactory).filter(UserFactory.user_id == user.id).first()
     if not uf:
-        await _send_message(chat_id, "Anda belum terdaftar di pabrik manapun.")
+        await _send_message(chat_id, msg("not_assigned_factory", lang))
         return
 
     factory = db.query(Factory).filter(Factory.id == uf.factory_id).first()
     if not factory:
-        await _send_message(chat_id, "Pabrik tidak ditemukan.")
+        await _send_message(chat_id, msg("factory_not_found", lang))
         return
 
     tomorrow = date.today() + timedelta(days=1)
@@ -1184,7 +1886,7 @@ async def _cmd_plan(db: Session, message: dict) -> None:
         DailyTaskDistribution.distribution_date == tomorrow,
     ).first()
 
-    lines = [f"*Rencana Produksi {tomorrow} — {factory.name}*\n"]
+    lines = [msg("plan_header", lang, date=tomorrow, factory=factory.name)]
 
     if distribution:
         # Use pre-computed distribution data
@@ -1192,7 +1894,7 @@ async def _cmd_plan(db: Session, message: dict) -> None:
         kiln = distribution.kiln_loading_json or []
 
         if glazing:
-            lines.append(f"*Glasir: {len(glazing)} posisi*")
+            lines.append(msg("glaze_section", lang, count=len(glazing)))
             for i, t in enumerate(glazing, 1):
                 lines.append(
                     f"{i}. #{t.get('order_number', '?')} "
@@ -1202,11 +1904,11 @@ async def _cmd_plan(db: Session, message: dict) -> None:
                 )
 
         if kiln:
-            lines.append(f"\n*Kiln: {len(kiln)} batch*")
+            lines.append(msg("kiln_batch_section", lang, count=len(kiln)))
             for b in kiln:
                 lines.append(
                     f"- {b.get('kiln_name', '?')}: "
-                    f"{b.get('positions_count', 0)} posisi, "
+                    f"{b.get('positions_count', 0)} pos, "
                     f"{b.get('temperature', 0)} C"
                 )
     else:
@@ -1257,28 +1959,28 @@ async def _cmd_plan(db: Session, message: dict) -> None:
         )
 
         if glazing_positions:
-            lines.append(f"*Glasir: {len(glazing_positions)} posisi*")
+            lines.append(msg("glaze_section", lang, count=len(glazing_positions)))
             for i, pos in enumerate(glazing_positions, 1):
                 pl = _format_position_label(pos)
                 order_num = pos.order.order_number if pos.order else "?"
                 lines.append(f"{i}. {order_num} {pl} | {pos.color or ''} {pos.size or ''} | {pos.quantity} pcs")
 
         if firing_positions:
-            lines.append(f"\n*Kiln: {len(firing_positions)} posisi*")
+            lines.append(msg("kiln_section", lang, count=len(firing_positions)))
             for i, pos in enumerate(firing_positions, 1):
                 pl = _format_position_label(pos)
                 order_num = pos.order.order_number if pos.order else "?"
                 lines.append(f"{i}. {order_num} {pl} | {pos.color or ''} {pos.size or ''} | {pos.quantity} pcs")
 
         if sorting_positions:
-            lines.append(f"\n*Sortir: {len(sorting_positions)} posisi*")
+            lines.append(msg("sorting_section", lang, count=len(sorting_positions)))
             for i, pos in enumerate(sorting_positions, 1):
                 pl = _format_position_label(pos)
                 order_num = pos.order.order_number if pos.order else "?"
                 lines.append(f"{i}. {order_num} {pl} | {pos.quantity} pcs")
 
         if not glazing_positions and not firing_positions and not sorting_positions:
-            lines.append("Tidak ada rencana produksi untuk besok.")
+            lines.append(msg("no_plan_tomorrow", lang))
 
     await _send_message(chat_id, "\n".join(lines))
 
@@ -1289,15 +1991,9 @@ async def _cmd_photo(db: Session, message: dict) -> None:
     Actual photo processing happens in handle_photo().
     """
     chat_id = message["chat"]["id"]
-    await _send_message(
-        chat_id,
-        "*Kirim Foto Produksi*\n\n"
-        "Kirim foto langsung di chat ini (tanpa perintah /photo).\n\n"
-        "Tambahkan caption untuk menandai:\n"
-        "- Nomor posisi (contoh: #123)\n"
-        "- Tipe: glasir, bakar, defect, kemas\n\n"
-        "Contoh: kirim foto dengan caption `#123 glasir`",
-    )
+    from_user = message.get("from", {})
+    lang = get_user_language(db, from_user.get("id"), chat_id)
+    await _send_message(chat_id, msg("photo_instructions", lang))
 
 
 # ────────────────────────────────────────────────────────────────
@@ -1314,9 +2010,12 @@ async def _handle_private_text(db: Session, message: dict) -> None:
     telegram_user_id = from_user.get("id")
     text = (message.get("text") or "").strip()
 
+    lang = get_user_language(db, telegram_user_id, chat_id)
+
     # Check if already linked
     existing = _find_user_by_telegram(db, telegram_user_id)
     if existing:
+        lang = existing.language.value if hasattr(existing.language, 'value') else str(existing.language) if existing.language else lang
         # ── AI: Try natural language command parsing ───────────────
         try:
             from business.services.telegram_ai import parse_natural_language
@@ -1355,19 +2054,12 @@ async def _handle_private_text(db: Session, message: dict) -> None:
         except Exception as e:
             logger.debug("AI NL parsing failed (non-fatal): %s", e)
 
-        await _send_message(
-            chat_id,
-            f"Akun sudah terhubung sebagai *{existing.name}*.\n"
-            f"Ketik /help untuk daftar perintah.",
-        )
+        await _send_message(chat_id, msg("already_linked_msg", lang, name=existing.name))
         return
 
     # Check if it looks like an email
     if "@" not in text or "." not in text:
-        await _send_message(
-            chat_id,
-            "Silakan kirim email yang terdaftar di Moonjar PMS untuk menghubungkan akun.",
-        )
+        await _send_message(chat_id, msg("send_email_prompt", lang))
         return
 
     email = text.lower().strip()
@@ -1375,16 +2067,12 @@ async def _handle_private_text(db: Session, message: dict) -> None:
     # Look up user by email
     user = db.query(User).filter(User.email == email, User.is_active.is_(True)).first()
     if not user:
-        await _send_message(chat_id, "Email tidak ditemukan di sistem.")
+        await _send_message(chat_id, msg("email_not_found", lang))
         return
 
     # Check if this user already has a different Telegram linked
     if user.telegram_user_id and user.telegram_user_id != telegram_user_id:
-        await _send_message(
-            chat_id,
-            "Akun PMS ini sudah terhubung ke akun Telegram lain.\n"
-            "Hubungi administrator untuk bantuan.",
-        )
+        await _send_message(chat_id, msg("already_linked_other", lang))
         return
 
     # Link the account
@@ -1392,12 +2080,9 @@ async def _handle_private_text(db: Session, message: dict) -> None:
     db.commit()
     logger.info(f"Linked Telegram {telegram_user_id} to user {user.email} (id={user.id})")
 
-    await _send_message(
-        chat_id,
-        f"Terhubung! Akun Telegram Anda sekarang terhubung ke *{user.name}* ({user.email}).\n\n"
-        f"Anda akan menerima notifikasi produksi di sini.\n"
-        f"Ketik /status untuk melihat tugas Anda.",
-    )
+    # Use the newly linked user's language
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else lang
+    await _send_message(chat_id, msg("link_success", lang, name=user.name, email=user.email))
 
 
 # ────────────────────────────────────────────────────────────────
@@ -1601,6 +2286,11 @@ async def _handle_delivery_photo(
     """
     import os
 
+    # Determine language from user
+    lang = "id"
+    if user and user.language:
+        lang = user.language.value if hasattr(user.language, 'value') else str(user.language)
+
     # Cleanup expired pending deliveries on each new photo
     _cleanup_expired_deliveries()
 
@@ -1638,22 +2328,14 @@ async def _handle_delivery_photo(
             )
     except Exception as e:
         logger.error("Failed to call delivery API: %s", e, exc_info=True)
-        await _send_message(
-            chat_id,
-            "Gagal menghubungi server untuk memproses foto. Coba lagi nanti.",
-            parse_mode="",
-        )
+        await _send_message(chat_id, msg("delivery_server_error", lang), parse_mode="")
         return
 
     if resp.status_code != 200:
         logger.error(
             "Delivery API returned %d: %s", resp.status_code, resp.text[:500],
         )
-        await _send_message(
-            chat_id,
-            "Gagal memproses foto pengiriman. Silakan coba lagi atau input secara manual.",
-            parse_mode="",
-        )
+        await _send_message(chat_id, msg("delivery_process_error", lang), parse_mode="")
         return
 
     result = resp.json()
@@ -1662,12 +2344,7 @@ async def _handle_delivery_photo(
 
     api_items = result.get("items", [])
     if not api_items:
-        await _send_message(
-            chat_id,
-            "Foto pengiriman diterima, tetapi tidak ditemukan daftar material. "
-            "Silakan input penerimaan secara manual.",
-            parse_mode="",
-        )
+        await _send_message(chat_id, msg("delivery_no_items", lang), parse_mode="")
         return
 
     # ── Step 2: Convert API response into matched/unmatched lists ─
@@ -1743,16 +2420,16 @@ async def _handle_delivery_photo(
     }
 
     # ── Step 4: Send preview message with inline buttons ──────────
-    supplier = readings.get("supplier") or "Tidak diketahui"
+    supplier = readings.get("supplier") or msg("unknown_supplier", lang)
     ref_number = readings.get("reference_number") or "-"
     delivery_date = readings.get("date") or "-"
     total_items = len(matched_items) + len(unmatched_items)
 
     lines = [
-        f"\U0001f4e6 Penerimaan Material \u2014 {supplier}",
-        f"\U0001f4cb Ref: {ref_number} | Tanggal: {delivery_date}",
+        msg("delivery_header", lang, supplier=supplier),
+        msg("delivery_ref", lang, ref=ref_number, date=delivery_date),
         "",
-        f"Ditemukan {total_items} item:",
+        msg("found_items", lang, count=total_items),
     ]
 
     item_num = 0
@@ -1774,22 +2451,25 @@ async def _handle_delivery_photo(
                 size_hint = f" | size: {ui['suggested_size_name']} \u26a0\ufe0f baru"
         suggested = ""
         if ui.get("suggested_name"):
-            suggested = f"\n   \U0001f4a1 Saran: {ui['suggested_name']}"
+            suggested = f"\n   {msg('suggestion_label', lang, name=ui['suggested_name'])}"
         lines.append(
             f"{item_num}. \u26a0\ufe0f \"{ui['original_name']}\" \u2014 {ui['quantity']} {ui['unit']}"
-            f" (TIDAK DITEMUKAN{size_hint}){suggested}"
+            f" ({msg('not_found_label', lang)}{size_hint}){suggested}"
         )
 
     preview_text = "\n".join(lines)
 
     # Main confirm / cancel / edit buttons
+    # Store language in pending delivery for use in callbacks
+    _pending_deliveries[delivery_id]["lang"] = lang
+
     keyboard = [
         [
-            {"text": "\u2705 Konfirmasi Penerimaan", "callback_data": f"delivery_confirm:{delivery_id}"},
+            {"text": msg("confirm_receipt_btn", lang), "callback_data": f"delivery_confirm:{delivery_id}"},
         ],
         [
-            {"text": "\u270f\ufe0f Edit Items", "callback_data": f"delivery_edit:{delivery_id}"},
-            {"text": "\u274c Batal", "callback_data": f"delivery_cancel:{delivery_id}"},
+            {"text": msg("edit_items_btn", lang), "callback_data": f"delivery_edit:{delivery_id}"},
+            {"text": msg("cancel_btn", lang), "callback_data": f"delivery_cancel:{delivery_id}"},
         ],
     ]
 
@@ -1802,12 +2482,10 @@ async def _handle_delivery_photo(
         # Use candidates from API response if available
         api_candidates = ui.get("candidates", [])
 
-        suggestion_text = (
-            f"\u26a0\ufe0f Material tidak ditemukan: \"{ui['original_name']}\"\n"
-        )
+        suggestion_text = msg("material_not_found_prompt", lang, name=ui['original_name'])
         if ui.get("suggested_name"):
-            suggestion_text += f"\U0001f4a1 Nama standar: {ui['suggested_name']}\n"
-        suggestion_text += "Pilih material yang sesuai atau tambah baru:"
+            suggestion_text += msg("standard_name_hint", lang, name=ui['suggested_name'])
+        suggestion_text += msg("choose_or_create", lang)
 
         suggestion_rows = []
         row: list[dict] = []
@@ -1843,7 +2521,7 @@ async def _handle_delivery_photo(
 
         # "Create New" button on its own row
         suggestion_rows.append([{
-            "text": "\u2795 Buat Baru",
+            "text": msg("create_new_btn", lang),
             "callback_data": f"delivery_new:{delivery_id}:{ui_idx}",
         }])
 
@@ -1981,9 +2659,13 @@ async def _handle_delivery_callback(
     delivery_id = parts[1] if len(parts) > 1 else ""
 
     pending = _pending_deliveries.get(delivery_id)
+    lang = get_user_language(db, telegram_user_id, chat_id)
+    if pending:
+        lang = pending.get("lang", lang)
+
     if not pending:
-        await answer_callback_query(callback_id, "Penerimaan sudah kedaluwarsa atau tidak ditemukan.")
-        await _send_message(chat_id, "Penerimaan ini sudah kedaluwarsa (>30 menit) atau sudah diproses.")
+        await answer_callback_query(callback_id, msg("receipt_expired_short", lang))
+        await _send_message(chat_id, msg("receipt_expired", lang))
         return
 
     # ── delivery_cancel ───────────────────────────────────────────
@@ -1992,8 +2674,8 @@ async def _handle_delivery_callback(
         # Clean up any active edit session for this chat
         if chat_id in _pending_edits and _pending_edits[chat_id].get("delivery_id") == delivery_id:
             del _pending_edits[chat_id]
-        await answer_callback_query(callback_id, "Dibatalkan")
-        await _send_message(chat_id, "\u274c Penerimaan dibatalkan.", parse_mode="")
+        await answer_callback_query(callback_id, msg("cancel_btn", lang))
+        await _send_message(chat_id, msg("receipt_cancelled", lang), parse_mode="")
         logger.info(f"Delivery {delivery_id} cancelled by user {telegram_user_id}")
         return
 
@@ -2010,7 +2692,7 @@ async def _handle_delivery_callback(
                 break
 
         if not target_item:
-            await answer_callback_query(callback_id, "Item tidak ditemukan.")
+            await answer_callback_query(callback_id, msg("item_not_found", lang))
             return
 
         # Look up the selected material
@@ -2020,7 +2702,7 @@ async def _handle_delivery_callback(
             material = None
 
         if not material:
-            await answer_callback_query(callback_id, "Material tidak ditemukan.")
+            await answer_callback_query(callback_id, msg("material_not_found", lang))
             return
 
         # Move from unmatched to matched
@@ -2038,10 +2720,7 @@ async def _handle_delivery_callback(
             callback_id,
             f"\"{target_item['original_name']}\" \u2192 {material.name}",
         )
-        await _send_message(
-            chat_id,
-            f"\u2705 \"{target_item['original_name']}\" dipetakan ke *{material.name}*",
-        )
+        await _send_message(chat_id, msg("mapped_to", lang, original=target_item['original_name'], material=material.name))
         logger.info(
             f"Delivery {delivery_id}: matched \"{target_item['original_name']}\" "
             f"-> {material.name} (id={material.id})"
@@ -2059,7 +2738,7 @@ async def _handle_delivery_callback(
                 break
 
         if not target_item:
-            await answer_callback_query(callback_id, "Item tidak ditemukan.")
+            await answer_callback_query(callback_id, msg("item_not_found", lang))
             return
 
         # Create new material with auto-classification into subgroup
@@ -2090,12 +2769,8 @@ async def _handle_delivery_callback(
 
             db.commit()
 
-            await answer_callback_query(callback_id, f"Material \"{new_material.name}\" dibuat")
-            await _send_message(
-                chat_id,
-                f"\u2795 Material baru dibuat: *{new_material.name}*\n"
-                f"\"{target_item['original_name']}\" dipetakan ke material baru ini.",
-            )
+            await answer_callback_query(callback_id, f"Material \"{new_material.name}\" created")
+            await _send_message(chat_id, msg("new_material_created", lang, name=new_material.name, original=target_item['original_name']))
             logger.info(
                 f"Delivery {delivery_id}: created new material \"{new_material.name}\" "
                 f"(id={new_material.id}) for \"{target_item['original_name']}\""
@@ -2103,8 +2778,8 @@ async def _handle_delivery_callback(
         except Exception as e:
             db.rollback()
             logger.error(f"Failed to create new material: {e}", exc_info=True)
-            await answer_callback_query(callback_id, "Gagal membuat material baru")
-            await _send_message(chat_id, f"Gagal membuat material baru: {e}", parse_mode="")
+            await answer_callback_query(callback_id, msg("error_occurred", lang))
+            await _send_message(chat_id, msg("failed_create_material", lang, error=str(e)), parse_mode="")
         return
 
     # ── delivery_confirm:{id} ─────────────────────────────────────
@@ -2113,17 +2788,8 @@ async def _handle_delivery_callback(
             unmatched_names = ", ".join(
                 f"\"{ui['original_name']}\"" for ui in pending["unmatched_items"]
             )
-            await answer_callback_query(
-                callback_id,
-                "Masih ada item belum dipetakan!",
-                show_alert=True,
-            )
-            await _send_message(
-                chat_id,
-                f"\u26a0\ufe0f Masih ada item yang belum dipetakan: {unmatched_names}\n"
-                f"Petakan terlebih dahulu atau batalkan penerimaan.",
-                parse_mode="",
-            )
+            await answer_callback_query(callback_id, msg("still_unmatched", lang), show_alert=True)
+            await _send_message(chat_id, msg("unmatched_items_warning", lang, names=unmatched_names), parse_mode="")
             return
 
         # All items matched — execute transactions
@@ -2143,7 +2809,7 @@ async def _handle_delivery_callback(
             ref_number = readings.get("reference_number", "-")
 
             lines = [
-                f"\u2705 Penerimaan Dikonfirmasi — {supplier}",
+                msg("receipt_confirmed_header", lang, supplier=supplier),
                 f"Ref: {ref_number}",
                 "",
             ]
@@ -2152,7 +2818,7 @@ async def _handle_delivery_callback(
                     f"  \u2022 {mi['material_name']} — {mi['quantity']} {mi['unit']}"
                 )
             lines.append("")
-            lines.append(f"Total: {len(pending['matched_items'])} material diterima dan stok diperbarui.")
+            lines.append(msg("receipt_total", lang, count=len(pending['matched_items'])))
 
             await _send_message(chat_id, "\n".join(lines), parse_mode="")
 
@@ -2164,13 +2830,8 @@ async def _handle_delivery_callback(
         except Exception as e:
             db.rollback()
             logger.error(f"Failed to commit delivery {delivery_id}: {e}", exc_info=True)
-            await answer_callback_query(callback_id, "Gagal menyimpan transaksi!")
-            await _send_message(
-                chat_id,
-                f"Gagal menyimpan transaksi penerimaan: {e}\n"
-                f"Silakan coba lagi atau input secara manual.",
-                parse_mode="",
-            )
+            await answer_callback_query(callback_id, msg("error_occurred", lang))
+            await _send_message(chat_id, msg("receipt_save_failed", lang, error=str(e)), parse_mode="")
         return
 
     # ── delivery_edit:{id} — start editing items ────────────────
@@ -2184,12 +2845,12 @@ async def _handle_delivery_callback(
             "new_material_name": "",
             "new_material_type": "",
             "items": items,
+            "lang": lang,
         }
-        await answer_callback_query(callback_id, "Mode edit aktif")
+        await answer_callback_query(callback_id, msg("edit_mode_active", lang, count=len(items))[:200])
         await _send_message(
             chat_id,
-            f"\u270f\ufe0f Mode edit aktif — {len(items)} item.\n"
-            f"Edit satu per satu atau tekan Selesai Edit kapan saja.",
+            msg("edit_mode_active", lang, count=len(items)),
             parse_mode="",
         )
         await _send_edit_item_prompt(chat_id, delivery_id, _pending_edits[chat_id])
@@ -2425,11 +3086,13 @@ async def _send_edit_item_prompt(chat_id: int, delivery_id: str, edit_session: d
     if item["status"] == "matched":
         match_info = f"\n\u2192 {item['material_name']}"
 
+    lang = edit_session.get("lang", "id")
+
     text = (
         f"{status_icon} Item {num}/{total}: {item['original_name']}\n"
-        f"Jumlah: {item['quantity']} {item['unit']}"
+        f"{msg('quantity_label', lang, qty=item['quantity'], unit=item['unit'])}"
         f"{match_info}\n\n"
-        f"Pilih aksi:"
+        f"{msg('choose_action', lang)}"
     )
 
     # Use compact callback prefix "dedit" to stay within 64-byte Telegram limit
@@ -2437,15 +3100,15 @@ async def _send_edit_item_prompt(chat_id: int, delivery_id: str, edit_session: d
     pos = str(current_idx)
     keyboard = [
         [
-            {"text": "\U0001f50d Cari di DB", "callback_data": f"dedit:{delivery_id}:match:{pos}"},
-            {"text": "\u2795 Buat Baru", "callback_data": f"dedit:{delivery_id}:new:{pos}"},
+            {"text": msg("search_db_btn", lang), "callback_data": f"dedit:{delivery_id}:match:{pos}"},
+            {"text": msg("create_new_btn", lang), "callback_data": f"dedit:{delivery_id}:new:{pos}"},
         ],
         [
-            {"text": "\u270f\ufe0f Ubah Qty", "callback_data": f"dedit:{delivery_id}:qty:{pos}"},
-            {"text": "\u23ed Lewati", "callback_data": f"dedit:{delivery_id}:skip:{pos}"},
+            {"text": msg("change_qty_btn", lang), "callback_data": f"dedit:{delivery_id}:qty:{pos}"},
+            {"text": msg("skip_btn", lang), "callback_data": f"dedit:{delivery_id}:skip:{pos}"},
         ],
         [
-            {"text": "\u2705 Selesai Edit", "callback_data": f"dedit:{delivery_id}:done:0"},
+            {"text": msg("finish_edit_btn", lang), "callback_data": f"dedit:{delivery_id}:done:0"},
         ],
     ]
 
@@ -2453,10 +3116,12 @@ async def _send_edit_item_prompt(chat_id: int, delivery_id: str, edit_session: d
 
 
 async def _send_edit_summary(chat_id: int, delivery_id: str, edit_session: dict) -> None:
-    """Show updated summary after editing, with Konfirmasi/Batal buttons."""
+    """Show updated summary after editing, with Confirm/Cancel buttons."""
     pending = _pending_deliveries.get(delivery_id)
+    lang = edit_session.get("lang", pending.get("lang", "id") if pending else "id")
+
     if not pending:
-        await _send_message(chat_id, "Penerimaan sudah kedaluwarsa.", parse_mode="")
+        await _send_message(chat_id, msg("receipt_expired_short", lang), parse_mode="")
         return
 
     # Sync edit_session items back to pending
@@ -2468,7 +3133,7 @@ async def _send_edit_summary(chat_id: int, delivery_id: str, edit_session: dict)
 
     # Re-render preview
     readings = pending["readings"]
-    supplier = readings.get("supplier", "Tidak diketahui")
+    supplier = readings.get("supplier") or msg("unknown_supplier", lang)
     ref_number = readings.get("reference_number", "-")
     delivery_date = readings.get("date", "-")
 
@@ -2477,10 +3142,10 @@ async def _send_edit_summary(chat_id: int, delivery_id: str, edit_session: dict)
     total_items = len(matched) + len(unmatched)
 
     lines = [
-        f"\U0001f4e6 Penerimaan Material (DIEDIT) — {supplier}",
-        f"\U0001f4cb Ref: {ref_number} | Tanggal: {delivery_date}",
+        msg("edited_header", lang, supplier=supplier),
+        msg("delivery_ref", lang, ref=ref_number, date=delivery_date),
         "",
-        f"Ditemukan {total_items} item:",
+        msg("found_items", lang, count=total_items),
     ]
 
     item_num = 0
@@ -2494,7 +3159,7 @@ async def _send_edit_summary(chat_id: int, delivery_id: str, edit_session: dict)
         item_num += 1
         lines.append(
             f"{item_num}. \u26a0\ufe0f \"{ui['original_name']}\" — {ui['quantity']} {ui['unit']}"
-            f" (TIDAK DITEMUKAN)"
+            f" ({msg('not_found_label', lang)})"
         )
 
     # Count skipped items from the edit session
@@ -2502,17 +3167,17 @@ async def _send_edit_summary(chat_id: int, delivery_id: str, edit_session: dict)
         1 for it in edit_session["items"] if it["status"] == "skipped"
     )
     if skipped_count:
-        lines.append(f"\n\u23ed {skipped_count} item dilewati (tidak akan diterima)")
+        lines.append(f"\n{msg('items_skipped', lang, count=skipped_count)}")
 
     preview_text = "\n".join(lines)
 
     keyboard = [
         [
-            {"text": "\u2705 Konfirmasi Penerimaan", "callback_data": f"delivery_confirm:{delivery_id}"},
+            {"text": msg("confirm_receipt_btn", lang), "callback_data": f"delivery_confirm:{delivery_id}"},
         ],
         [
-            {"text": "\u270f\ufe0f Edit Items", "callback_data": f"delivery_edit:{delivery_id}"},
-            {"text": "\u274c Batal", "callback_data": f"delivery_cancel:{delivery_id}"},
+            {"text": msg("edit_items_btn", lang), "callback_data": f"delivery_edit:{delivery_id}"},
+            {"text": msg("cancel_btn", lang), "callback_data": f"delivery_cancel:{delivery_id}"},
         ],
     ]
 
@@ -2568,6 +3233,7 @@ async def _handle_edit_text_input(db: Session, chat_id: int, text: str) -> None:
         return
 
     item = items[current_idx]
+    lang = edit_session.get("lang", "id")
 
     # ── Awaiting new quantity ─────────────────────────────────────
     if awaiting == "qty":
@@ -2577,16 +3243,12 @@ async def _handle_edit_text_input(db: Session, chat_id: int, text: str) -> None:
             if new_qty <= 0:
                 raise ValueError("non-positive")
         except Exception:
-            await _send_message(chat_id, "Masukkan angka yang valid (contoh: 500):", parse_mode="")
+            await _send_message(chat_id, msg("enter_valid_number", lang), parse_mode="")
             return
 
         item["quantity"] = str(new_qty)
         edit_session["awaiting"] = None
-        await _send_message(
-            chat_id,
-            f"\u2705 Jumlah diubah: {item['original_name']} — {new_qty} {item['unit']}",
-            parse_mode="",
-        )
+        await _send_message(chat_id, msg("qty_changed", lang, name=item['original_name'], qty=new_qty, unit=item['unit']), parse_mode="")
         # Show item prompt again
         await _send_edit_item_prompt(chat_id, delivery_id, edit_session)
         return
@@ -2595,7 +3257,7 @@ async def _handle_edit_text_input(db: Session, chat_id: int, text: str) -> None:
     if awaiting == "material_name":
         mat_name = text.strip()
         if not mat_name:
-            await _send_message(chat_id, "Masukkan nama material:", parse_mode="")
+            await _send_message(chat_id, msg("enter_material_name", lang), parse_mode="")
             return
         edit_session["new_material_name"] = mat_name
         edit_session["awaiting"] = "material_type"
@@ -2611,12 +3273,7 @@ async def _handle_edit_text_input(db: Session, chat_id: int, text: str) -> None:
                 {"text": "Other", "callback_data": f"dedit:{delivery_id}:type:other"},
             ],
         ]
-        await send_message_with_buttons(
-            chat_id,
-            f"Material: {mat_name}\nPilih tipe material:",
-            keyboard,
-            parse_mode="",
-        )
+        await send_message_with_buttons(chat_id, msg("choose_material_type", lang, name=mat_name), keyboard, parse_mode="")
         return
 
     # Unknown awaiting state — clear it
@@ -2636,9 +3293,11 @@ async def _handle_dedit_callback(
     Callback data format: dedit:{delivery_id}:{action}:{param}
     Actions: match, new, qty, skip, done, sel (select material), type, subtype
     """
+    lang = get_user_language(db, telegram_user_id, chat_id)
+
     parts = callback_data.split(":")
     if len(parts) < 4:
-        await answer_callback_query(callback_id, "Data tidak valid")
+        await answer_callback_query(callback_id, msg("data_invalid", lang))
         return
 
     delivery_id = parts[1]
@@ -2647,12 +3306,15 @@ async def _handle_dedit_callback(
 
     pending = _pending_deliveries.get(delivery_id)
     if not pending:
-        await answer_callback_query(callback_id, "Penerimaan sudah kedaluwarsa.")
+        await answer_callback_query(callback_id, msg("receipt_expired_short", lang))
         if chat_id in _pending_edits:
             del _pending_edits[chat_id]
         return
 
+    lang = pending.get("lang", lang)
     edit_session = _pending_edits.get(chat_id)
+    if edit_session:
+        lang = edit_session.get("lang", lang)
 
     # ── Start edit session (delivery_edit:{delivery_id}) ──────────
     # This is handled below via action routing
@@ -2660,15 +3322,15 @@ async def _handle_dedit_callback(
     # ── "done" — finish editing ───────────────────────────────────
     if action == "done":
         if edit_session:
-            await answer_callback_query(callback_id, "Selesai edit")
+            await answer_callback_query(callback_id, msg("finish_edit_btn", lang))
             await _send_edit_summary(chat_id, delivery_id, edit_session)
         else:
-            await answer_callback_query(callback_id, "Tidak ada sesi edit aktif")
+            await answer_callback_query(callback_id, "OK")
         return
 
     # Ensure we have an active edit session for other actions
     if not edit_session or edit_session["delivery_id"] != delivery_id:
-        await answer_callback_query(callback_id, "Sesi edit tidak ditemukan. Tekan Edit Items lagi.")
+        await answer_callback_query(callback_id, msg("edit_session_not_found", lang))
         return
 
     items = edit_session["items"]
@@ -2678,12 +3340,8 @@ async def _handle_dedit_callback(
         idx = int(param)
         if 0 <= idx < len(items):
             items[idx]["status"] = "skipped"
-            await answer_callback_query(callback_id, f"Item dilewati: {items[idx]['original_name']}")
-            await _send_message(
-                chat_id,
-                f"\u23ed Dilewati: {items[idx]['original_name']}",
-                parse_mode="",
-            )
+            await answer_callback_query(callback_id, f"{msg('skip_btn', lang)}: {items[idx]['original_name']}")
+            await _send_message(chat_id, f"\u23ed {items[idx]['original_name']}", parse_mode="")
         edit_session["current_index"] = idx + 1
         edit_session["awaiting"] = None
         await _send_edit_item_prompt(chat_id, delivery_id, edit_session)
@@ -2694,11 +3352,11 @@ async def _handle_dedit_callback(
         idx = int(param)
         edit_session["current_index"] = idx
         edit_session["awaiting"] = "qty"
-        await answer_callback_query(callback_id, "Masukkan jumlah baru")
+        await answer_callback_query(callback_id, "OK")
         await _send_message(
             chat_id,
-            f"Masukkan jumlah baru untuk \"{items[idx]['original_name']}\" "
-            f"(saat ini: {items[idx]['quantity']} {items[idx]['unit']}):",
+            f"{msg('change_qty_btn', lang)}: \"{items[idx]['original_name']}\" "
+            f"({items[idx]['quantity']} {items[idx]['unit']}):",
             parse_mode="",
         )
         return
@@ -2714,17 +3372,12 @@ async def _handle_dedit_callback(
         suggestions = _suggest_materials(db, item["original_name"], limit=5)
 
         if not suggestions:
-            await answer_callback_query(callback_id, "Tidak ada material ditemukan")
-            await _send_message(
-                chat_id,
-                f"Tidak ada material ditemukan untuk \"{item['original_name']}\".\n"
-                f"Gunakan \"\u2795 Buat Baru\" untuk membuat material baru.",
-                parse_mode="",
-            )
+            await answer_callback_query(callback_id, msg("material_not_found", lang))
+            await _send_message(chat_id, msg("no_materials_found", lang, name=item['original_name']), parse_mode="")
             await _send_edit_item_prompt(chat_id, delivery_id, edit_session)
             return
 
-        await answer_callback_query(callback_id, "Pilih material")
+        await answer_callback_query(callback_id, "OK")
 
         # Build suggestion buttons
         keyboard_rows = []
@@ -2745,16 +3398,11 @@ async def _handle_dedit_callback(
 
         # Back button
         keyboard_rows.append([{
-            "text": "\u2b05 Kembali",
+            "text": msg("back_btn", lang),
             "callback_data": f"dedit:{delivery_id}:back:{idx}",
         }])
 
-        await send_message_with_buttons(
-            chat_id,
-            f"\U0001f50d Material cocok untuk \"{item['original_name']}\":",
-            keyboard_rows,
-            parse_mode="",
-        )
+        await send_message_with_buttons(chat_id, msg("matching_materials", lang, name=item['original_name']), keyboard_rows, parse_mode="")
         return
 
     # ── "sel" — select a material from search results ─────────────
@@ -2764,17 +3412,17 @@ async def _handle_dedit_callback(
             idx = int(parts[3])
             mat_id_short = parts[4]
         else:
-            await answer_callback_query(callback_id, "Data tidak valid")
+            await answer_callback_query(callback_id, msg("data_invalid", lang))
             return
 
         full_mat_id = edit_session.get("mat_id_map", {}).get(mat_id_short)
         if not full_mat_id:
-            await answer_callback_query(callback_id, "Material tidak ditemukan")
+            await answer_callback_query(callback_id, msg("material_not_found", lang))
             return
 
         material = db.query(Material).filter(Material.id == full_mat_id).first()
         if not material:
-            await answer_callback_query(callback_id, "Material tidak ditemukan di DB")
+            await answer_callback_query(callback_id, msg("material_not_found", lang))
             return
 
         if 0 <= idx < len(items):
@@ -2782,12 +3430,8 @@ async def _handle_dedit_callback(
             items[idx]["material_name"] = material.name
             items[idx]["status"] = "matched"
 
-        await answer_callback_query(callback_id, f"Dipetakan ke {material.name}")
-        await _send_message(
-            chat_id,
-            f"\u2705 \"{items[idx]['original_name']}\" \u2192 {material.name}",
-            parse_mode="",
-        )
+        await answer_callback_query(callback_id, f"\u2192 {material.name}")
+        await _send_message(chat_id, f"\u2705 \"{items[idx]['original_name']}\" \u2192 {material.name}", parse_mode="")
 
         # Move to next item
         edit_session["current_index"] = idx + 1
@@ -2800,7 +3444,7 @@ async def _handle_dedit_callback(
         idx = int(param)
         edit_session["current_index"] = idx
         edit_session["awaiting"] = None
-        await answer_callback_query(callback_id, "Kembali")
+        await answer_callback_query(callback_id, msg("back_btn", lang))
         await _send_edit_item_prompt(chat_id, delivery_id, edit_session)
         return
 
@@ -2811,12 +3455,8 @@ async def _handle_dedit_callback(
         edit_session["awaiting"] = "material_name"
         edit_session["new_material_name"] = ""
         edit_session["new_material_type"] = ""
-        await answer_callback_query(callback_id, "Buat material baru")
-        await _send_message(
-            chat_id,
-            f"Masukkan nama material (EN) untuk \"{items[idx]['original_name']}\":",
-            parse_mode="",
-        )
+        await answer_callback_query(callback_id, msg("create_new_btn", lang))
+        await _send_message(chat_id, msg("enter_material_name_en", lang, name=items[idx]['original_name']), parse_mode="")
         return
 
     # ── "type" — material type selected in Add New flow ───────────
@@ -2839,12 +3479,7 @@ async def _handle_dedit_callback(
                 ],
             ]
             await answer_callback_query(callback_id, mat_type)
-            await send_message_with_buttons(
-                chat_id,
-                f"Material: {mat_name}\nTipe: {mat_type}\nPilih subtipe:",
-                keyboard,
-                parse_mode="",
-            )
+            await send_message_with_buttons(chat_id, msg("choose_subtype", lang, name=mat_name, type=mat_type), keyboard, parse_mode="")
         else:
             # Create material directly
             await answer_callback_query(callback_id, mat_type)
@@ -2899,12 +3534,8 @@ async def _create_new_material_from_edit(
         item["material_name"] = new_material.name
         item["status"] = "matched"
 
-        await _send_message(
-            chat_id,
-            f"\u2795 Material baru dibuat: {new_material.name}\n"
-            f"\"{item['original_name']}\" dipetakan ke material baru ini.",
-            parse_mode="",
-        )
+        _lang = edit_session.get("lang", "id")
+        await _send_message(chat_id, msg("new_material_created", _lang, name=new_material.name, original=item['original_name']), parse_mode="")
         logger.info(
             f"Edit flow: created material \"{new_material.name}\" "
             f"(id={new_material.id}) for \"{item['original_name']}\""
@@ -2913,11 +3544,8 @@ async def _create_new_material_from_edit(
     except Exception as e:
         db.rollback()
         logger.error(f"Failed to create material in edit flow: {e}", exc_info=True)
-        await _send_message(
-            chat_id,
-            f"Gagal membuat material baru: {e}",
-            parse_mode="",
-        )
+        _lang = edit_session.get("lang", "id")
+        await _send_message(chat_id, msg("failed_create_material", _lang, error=str(e)), parse_mode="")
 
     # Clear temp state and move to next item
     edit_session["awaiting"] = None
@@ -2932,16 +3560,16 @@ def _safe_summary(update_data: dict) -> str:
     """Create a safe log summary of a Telegram update (no sensitive data)."""
     parts = []
     if "message" in update_data:
-        msg = update_data["message"]
-        chat = msg.get("chat", {})
+        _msg = update_data["message"]
+        chat = _msg.get("chat", {})
         parts.append(f"chat_type={chat.get('type')}")
         parts.append(f"chat_id={chat.get('id')}")
-        if msg.get("text"):
-            text_preview = msg["text"][:50]
+        if _msg.get("text"):
+            text_preview = _msg["text"][:50]
             parts.append(f"text={text_preview!r}")
-        if msg.get("photo"):
-            parts.append(f"photo_count={len(msg['photo'])}")
-        from_user = msg.get("from", {})
+        if _msg.get("photo"):
+            parts.append(f"photo_count={len(_msg['photo'])}")
+        from_user = _msg.get("from", {})
         parts.append(f"from_id={from_user.get('id')}")
     elif "callback_query" in update_data:
         cq = update_data["callback_query"]

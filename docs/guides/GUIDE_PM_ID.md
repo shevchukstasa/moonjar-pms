@@ -1,6 +1,6 @@
 # Panduan Production Manager (PM) -- Moonjar PMS
 
-> Versi: 1.1 | Tanggal: 2026-03-21
+> Versi: 1.2 | Tanggal: 2026-03-26
 > Moonjar Production Management System
 
 ---
@@ -32,6 +32,11 @@
 24. [Pengelolaan Ukuran](#24-pengelolaan-ukuran)
 25. [Tablo (Papan Tampilan Produksi)](#25-tablo-papan-tampilan-produksi)
 26. [Tips dan Praktik Terbaik](#26-tips-dan-praktik-terbaik)
+27. [Checklist QC Pra-Kiln](#27-checklist-qc-pra-kiln)
+28. [Checklist QC Akhir](#28-checklist-qc-akhir)
+29. [Alur Kerja Pengiriman](#29-alur-kerja-pengiriman)
+30. [Pengelolaan Karyawan dan Kehadiran](#30-pengelolaan-karyawan-dan-kehadiran)
+31. [Pencatatan Suhu Pembakaran](#31-pencatatan-suhu-pembakaran)
 
 ---
 
@@ -1428,6 +1433,186 @@ PM menerima notifikasi untuk:
 - Di halaman Jadwal, **Status Dropdown** hanya menampilkan transisi yang valid -- Anda tidak bisa salah memilih status yang tidak diizinkan.
 - Dialog **Transaction History** bisa di-scroll -- transaksi lebih lama ada di bawah.
 - Saat membuat aturan konsumsi dengan beberapa ukuran, gunakan **mode Multi-size** untuk menghemat waktu.
+
+---
+
+## 27. Checklist QC Pra-Kiln
+
+Sebelum batch masuk ke kiln, pemeriksaan QC Pra-Kiln memastikan semua posisi memenuhi standar kualitas.
+
+### 27.1. Membuka Dialog QC Pra-Kiln
+
+1. Navigasi ke halaman **Jadwal** (`/manager/schedule`), bagian **Kilns**.
+2. Temukan batch yang siap untuk pembakaran.
+3. Klik tombol **QC** (ikon checklist) pada baris posisi. Pilih **Pre-Kiln QC**.
+
+### 27.2. Mengisi Checklist
+
+Dialog menampilkan daftar item pemeriksaan kualitas khusus untuk inspeksi pra-kiln (misalnya, cakupan glaze, cacat permukaan, posisi yang benar).
+
+Untuk setiap item:
+- Klik **Pass** jika item memenuhi standar.
+- Klik **Fail** jika tidak memenuhi.
+- Klik **N/A** jika item tidak berlaku untuk posisi ini.
+
+Semua item harus dievaluasi sebelum pengiriman.
+
+### 27.3. Menambahkan Catatan
+
+Di bagian bawah checklist, terdapat kolom teks bebas **Notes**. Gunakan untuk mencatat pengamatan, terutama untuk item yang ditandai Fail.
+
+### 27.4. Mengirim
+
+Klik **Submit** untuk menyimpan hasil QC. Hasil keseluruhan (Pass/Fail) dihitung secara otomatis:
+- **Pass**: semua item adalah Pass atau N/A.
+- **Fail**: ada item yang Fail.
+
+Jika hasilnya Fail, posisi akan ditandai dan mungkin memerlukan tindakan korektif sebelum pembakaran.
+
+---
+
+## 28. Checklist QC Akhir
+
+Setelah pembakaran, pemeriksaan QC Akhir memverifikasi kualitas produk jadi.
+
+### 28.1. Membuka Dialog QC Akhir
+
+1. Navigasi ke halaman **Jadwal**, bagian **Sorting/QC**.
+2. Temukan posisi yang telah selesai pembakaran.
+3. Klik tombol **QC** dan pilih **Final QC**.
+
+### 28.2. Mengisi Checklist
+
+Checklist QC Akhir berisi item khusus untuk kualitas pasca-pembakaran (misalnya, akurasi warna, toleransi dimensi, finishing permukaan, kualitas tepi).
+
+Untuk setiap item:
+- Klik **Pass** atau **Fail**. (N/A tidak tersedia untuk QC Akhir -- semua item harus dievaluasi.)
+
+### 28.3. Mengirim
+
+Klik **Submit** untuk menyimpan hasil. Posisi yang gagal akan diarahkan ke alur keputusan Grinding atau ditandai untuk pelaporan defect.
+
+### 28.4. Detail Material pada Kartu Posisi
+
+Kartu posisi di halaman Jadwal sekarang menampilkan informasi material:
+- Nama resep glaze dan material yang digunakan.
+- Ini membantu inspektor QC memverifikasi bahwa resep yang benar telah diterapkan.
+
+---
+
+## 29. Alur Kerja Pengiriman
+
+Halaman Pengiriman memungkinkan Anda mengelola pengiriman keluar untuk pesanan yang telah selesai.
+
+### 29.1. Mengakses Halaman Pengiriman
+
+- Dari halaman **Detail Pesanan** (`/orders/:id`), klik tab **Shipments** atau tombol **Create Shipment**.
+- Atau navigasi langsung ke `/manager/shipments` untuk melihat daftar semua pengiriman.
+
+### 29.2. Membuat Pengiriman
+
+1. Klik **Create Shipment**.
+2. Pilih **metode pengiriman**: Courier, Pickup, atau Container.
+3. Pilih **kurir** (JNE, TIKI, J&T, SiCepat, AnterAja, Pickup, Container, Other).
+4. Pilih **posisi** mana yang akan disertakan dalam pengiriman. Hanya posisi dengan status "Ready for Shipment" yang tersedia.
+5. Klik **Create** untuk membuat catatan pengiriman. Status dimulai sebagai **Prepared**.
+
+### 29.3. Menambahkan Informasi Pelacakan
+
+Setelah membuat pengiriman:
+1. Masukkan **nomor pelacakan** yang diberikan oleh kurir.
+2. Opsional tambahkan **catatan pengiriman** (misalnya, instruksi penanganan khusus).
+
+### 29.4. Menandai Sebagai Terkirim
+
+1. Setelah paket diserahkan ke kurir, klik **Mark Shipped**.
+2. Status pengiriman berubah menjadi **Shipped** dan posisi yang disertakan berubah ke status Shipped.
+
+### 29.5. Status Pengiriman
+
+| Status | Keterangan |
+|---|---|
+| Prepared | Pengiriman dibuat, menunggu pengambilan |
+| Shipped | Diserahkan ke kurir |
+| In Transit | Kurir mengonfirmasi dalam perjalanan |
+| Delivered | Dikonfirmasi terkirim ke klien |
+| Cancelled | Pengiriman dibatalkan |
+
+### 29.6. Membatalkan Pengiriman
+
+Klik **Cancel Shipment** untuk membatalkan. Posisi akan kembali ke status sebelumnya (Ready for Shipment).
+
+---
+
+## 30. Pengelolaan Karyawan dan Kehadiran
+
+Halaman Karyawan (`/manager/employees`) menyediakan alat untuk mengelola staf pabrik dan melacak kehadiran.
+
+### 30.1. Daftar Karyawan
+
+Halaman menampilkan semua karyawan yang ditugaskan ke pabrik Anda dengan detail berikut:
+- Nama, posisi/peran, tipe pekerjaan (Full Time, Part Time, Contract)
+- Informasi kontak
+- Status aktif/tidak aktif
+
+### 30.2. Menambah Karyawan Baru
+
+1. Klik **Add Employee**.
+2. Isi: nama, posisi, tipe pekerjaan, tarif harian, info kontak.
+3. Klik **Save**.
+
+### 30.3. Pelacakan Kehadiran
+
+Tab **Attendance** menampilkan grid kalender bulanan:
+
+- Baris = karyawan, Kolom = hari dalam bulan.
+- Klik sel untuk mengubah status kehadiran:
+  - **P** (Present/Hadir) -- hijau
+  - **A** (Absent/Tidak Hadir) -- merah
+  - **S** (Sick/Sakit) -- kuning
+  - **L** (Leave/Cuti) -- biru
+  - **H** (Half Day/Setengah Hari) -- oranye
+
+Hari non-kerja (libur) dari Kalender Pabrik diberi bayangan dan tidak bisa diedit.
+
+### 30.4. Ringkasan Penggajian
+
+Tab **Payroll** menghitung gaji bulanan berdasarkan:
+- Jumlah hari hadir (hari penuh + setengah hari pada 50%)
+- Tarif harian per karyawan
+- Total hari kerja dalam bulan (dari Kalender Pabrik)
+
+Ini memberikan gambaran cepat untuk pemrosesan penggajian.
+
+---
+
+## 31. Pencatatan Suhu Pembakaran
+
+Selama pembakaran kiln, Anda dapat mencatat pembacaan suhu untuk melacak kurva pembakaran dan mencatat suhu puncak.
+
+### 31.1. Mengakses Log Suhu
+
+1. Navigasi ke halaman **Jadwal**, bagian **Kilns**.
+2. Temukan batch/sesi pembakaran yang aktif.
+3. Klik **ikon termometer** ("Log temperature readings") pada baris batch.
+
+### 31.2. Mencatat Pembacaan Suhu
+
+Dialog Firing Temperature Log menampilkan:
+- **Suhu puncak** (jika sudah dicatat).
+- **Timeline pembacaan suhu** -- semua pembacaan yang dicatat sejauh ini dengan timestamp.
+
+Untuk menambah pembacaan:
+1. Masukkan **suhu** dalam derajat Celsius.
+2. Sistem mencatat timestamp secara otomatis.
+3. Klik **Add** untuk menyimpan pembacaan.
+
+### 31.3. Mengapa Mencatat Suhu
+
+- Memastikan profil pembakaran diikuti dengan benar.
+- Membantu mendiagnosis defect yang disebabkan oleh deviasi suhu.
+- Membangun catatan historis untuk optimasi resep.
+- Suhu puncak dibandingkan dengan suhu target pembakaran dari resep.
 
 ---
 

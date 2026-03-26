@@ -1,6 +1,6 @@
 # Production Manager (PM) Guide -- Moonjar PMS
 
-> Version: 1.1 | Date: 2026-03-21
+> Version: 1.2 | Date: 2026-03-26
 > Moonjar Production Management System
 
 ---
@@ -32,6 +32,11 @@
 24. [Sizes Management](#24-sizes-management)
 25. [Tablo (Production Display)](#25-tablo-production-display)
 26. [Tips and Best Practices](#26-tips-and-best-practices)
+27. [Pre-Kiln QC Checklist](#27-pre-kiln-qc-checklist)
+28. [Final QC Checklist](#28-final-qc-checklist)
+29. [Shipment Workflow](#29-shipment-workflow)
+30. [Employee Management and Attendance](#30-employee-management-and-attendance)
+31. [Firing Temperature Logging](#31-firing-temperature-logging)
 
 ---
 
@@ -1428,6 +1433,186 @@ The **Telegram bot** sends a daily summary at 21:00 (Indonesian language) with:
 - On the Schedule page, the **Status Dropdown** shows only valid transitions -- you cannot accidentally select an invalid status.
 - The **Transaction History** dialog is scrollable -- older transactions are at the bottom.
 - When creating consumption rules with multiple sizes, use **Multi-size mode** to save time.
+
+---
+
+## 27. Pre-Kiln QC Checklist
+
+Before a batch enters the kiln, a Pre-Kiln QC check ensures all positions meet quality standards.
+
+### 27.1. Opening the Pre-Kiln QC Dialog
+
+1. Navigate to the **Schedule** page (`/manager/schedule`), section **Kilns**.
+2. Find the batch that is ready for firing.
+3. Click the **QC** button (checklist icon) on the position row. Select **Pre-Kiln QC**.
+
+### 27.2. Completing the Checklist
+
+The dialog shows a list of quality check items specific to pre-kiln inspection (e.g., glaze coverage, surface defects, correct positioning).
+
+For each item:
+- Click **Pass** if the item meets standards.
+- Click **Fail** if it does not.
+- Click **N/A** if the item is not applicable to this position.
+
+All items must be evaluated before submission.
+
+### 27.3. Adding Notes
+
+At the bottom of the checklist, there is a free-text **Notes** field. Use it to record any observations, especially for items marked as Fail.
+
+### 27.4. Submitting
+
+Click **Submit** to save the QC result. The overall result (Pass/Fail) is computed automatically:
+- **Pass**: all items are Pass or N/A.
+- **Fail**: any item is Fail.
+
+If the result is Fail, the position will be flagged and may require corrective action before firing.
+
+---
+
+## 28. Final QC Checklist
+
+After firing, a Final QC check verifies the finished product quality.
+
+### 28.1. Opening the Final QC Dialog
+
+1. Navigate to the **Schedule** page, section **Sorting/QC**.
+2. Find the position that has completed firing.
+3. Click the **QC** button and select **Final QC**.
+
+### 28.2. Completing the Checklist
+
+The Final QC checklist contains items specific to post-firing quality (e.g., color accuracy, dimensional tolerance, surface finish, edge quality).
+
+For each item:
+- Click **Pass** or **Fail**. (N/A is not available for Final QC -- all items must be evaluated.)
+
+### 28.3. Submitting
+
+Click **Submit** to save the result. Failed positions will be routed to the Grinding decision workflow or flagged for defect reporting.
+
+### 28.4. Material Details on Position Cards
+
+Position cards on the Schedule page now display material information:
+- Glaze recipe name and materials used.
+- This helps QC inspectors verify the correct recipe was applied.
+
+---
+
+## 29. Shipment Workflow
+
+The Shipment page allows you to manage outbound shipments for completed orders.
+
+### 29.1. Accessing the Shipment Page
+
+- From the **Order Detail** page (`/orders/:id`), click the **Shipments** tab or **Create Shipment** button.
+- Or navigate directly to `/manager/shipments` for a list of all shipments.
+
+### 29.2. Creating a Shipment
+
+1. Click **Create Shipment**.
+2. Select the **shipping method**: Courier, Pickup, or Container.
+3. Select the **carrier** (JNE, TIKI, J&T, SiCepat, AnterAja, Pickup, Container, Other).
+4. Select which **positions** to include in the shipment. Only positions with status "Ready for Shipment" are available.
+5. Click **Create** to generate the shipment record. Status starts as **Prepared**.
+
+### 29.3. Adding Tracking Information
+
+After creating a shipment:
+1. Enter the **tracking number** provided by the carrier.
+2. Optionally add **shipping notes** (e.g., special handling instructions).
+
+### 29.4. Marking as Shipped
+
+1. Once the package is handed off to the carrier, click **Mark Shipped**.
+2. The shipment status changes to **Shipped** and included positions transition to the Shipped status.
+
+### 29.5. Shipment Statuses
+
+| Status | Meaning |
+|---|---|
+| Prepared | Shipment created, awaiting pickup |
+| Shipped | Handed to carrier |
+| In Transit | Carrier confirmed in transit |
+| Delivered | Confirmed delivered to client |
+| Cancelled | Shipment cancelled |
+
+### 29.6. Cancelling a Shipment
+
+Click **Cancel Shipment** to revert. Positions will return to their previous status (Ready for Shipment).
+
+---
+
+## 30. Employee Management and Attendance
+
+The Employees page (`/manager/employees`) provides tools for managing factory staff and tracking attendance.
+
+### 30.1. Employee List
+
+The page displays all employees assigned to your factory with the following details:
+- Name, position/role, employment type (Full Time, Part Time, Contract)
+- Contact information
+- Active/inactive status
+
+### 30.2. Adding a New Employee
+
+1. Click **Add Employee**.
+2. Fill in: name, position, employment type, daily rate, contact info.
+3. Click **Save**.
+
+### 30.3. Attendance Tracking
+
+The **Attendance** tab shows a monthly calendar grid:
+
+- Rows = employees, Columns = days of the month.
+- Click a cell to cycle through attendance statuses:
+  - **P** (Present) -- green
+  - **A** (Absent) -- red
+  - **S** (Sick) -- yellow
+  - **L** (Leave) -- blue
+  - **H** (Half Day) -- orange
+
+Non-working days (holidays) from the Factory Calendar are shaded and cannot be edited.
+
+### 30.4. Payroll Summary
+
+The **Payroll** tab calculates monthly pay based on:
+- Number of days present (full days + half days at 50%)
+- Daily rate per employee
+- Total working days in the month (from Factory Calendar)
+
+This provides a quick overview for payroll processing.
+
+---
+
+## 31. Firing Temperature Logging
+
+During kiln firing, you can log temperature readings to track the firing curve and record peak temperatures.
+
+### 31.1. Accessing the Temperature Log
+
+1. Navigate to the **Schedule** page, **Kilns** section.
+2. Find the active batch/firing session.
+3. Click the **thermometer icon** ("Log temperature readings") on the batch row.
+
+### 31.2. Logging a Temperature Reading
+
+The Firing Temperature Log dialog shows:
+- **Peak temperature** (if already recorded).
+- **Temperature readings timeline** -- all readings logged so far with timestamps.
+
+To add a reading:
+1. Enter the **temperature** in degrees Celsius.
+2. The system records the timestamp automatically.
+3. Click **Add** to save the reading.
+
+### 31.3. Why Log Temperatures
+
+- Ensures the firing profile was followed correctly.
+- Helps diagnose defects caused by temperature deviations.
+- Builds a historical record for recipe optimization.
+- Peak temperature is compared against the recipe's target firing temperature.
 
 ---
 

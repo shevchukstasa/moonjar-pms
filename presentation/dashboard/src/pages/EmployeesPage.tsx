@@ -329,26 +329,34 @@ export default function EmployeesPage() {
     }
   }, [formData, editingEmployee, factoryId, createMutation, updateMutation]);
 
-  const openAttendanceDialog = useCallback((emp: Employee, dateStr: string) => {
+  const openAttendanceDialog = useCallback((emp: Employee, dateStr: string, existingRecord?: { status: string; overtime_hours?: number; notes?: string }) => {
     setAttEmployee(emp);
     setAttDate(dateStr);
-    setAttStatus('present');
     setFormError('');
 
-    // Check if this date is a non-working day (holiday or Sunday)
-    const dateObj = new Date(dateStr);
-    const isSunday = dateObj.getDay() === 0;
-    const calEntry = calendarMap.get(dateStr);
-    const isNonWorking = calEntry ? !calEntry.is_working_day : isSunday;
-
-    if (isNonWorking) {
-      // Pre-fill as overtime since recording attendance on a non-working day
-      setAttOvertime('8');
-      const reason = calEntry?.holiday_name ?? (isSunday ? 'Sunday' : 'Holiday');
-      setAttNotes(`Overtime: ${reason}`);
+    if (existingRecord) {
+      // Pre-fill from existing record (editing mode)
+      setAttStatus(existingRecord.status);
+      setAttOvertime(String(existingRecord.overtime_hours ?? 0));
+      setAttNotes(existingRecord.notes ?? '');
     } else {
-      setAttOvertime('0');
-      setAttNotes('');
+      // New record
+      setAttStatus('present');
+
+      // Check if this date is a non-working day (holiday or Sunday)
+      const dateObj = new Date(dateStr);
+      const isSunday = dateObj.getDay() === 0;
+      const calEntry = calendarMap.get(dateStr);
+      const isNonWorking = calEntry ? !calEntry.is_working_day : isSunday;
+
+      if (isNonWorking) {
+        setAttOvertime('8');
+        const reason = calEntry?.holiday_name ?? (isSunday ? 'Sunday' : 'Holiday');
+        setAttNotes(`Overtime: ${reason}`);
+      } else {
+        setAttOvertime('0');
+        setAttNotes('');
+      }
     }
 
     setAttDialogOpen(true);
@@ -795,7 +803,7 @@ function AttendanceTab({
   year: number;
   month: number;
   daysInMonth: number;
-  onCellClick: (emp: Employee, dateStr: string) => void;
+  onCellClick: (emp: Employee, dateStr: string, existingRecord?: { status: string; overtime_hours?: number; notes?: string }) => void;
   calendarMap: Map<string, CalendarEntry>;
   workingDaysData: WorkingDaysResponse | null;
 }) {
@@ -922,7 +930,7 @@ function AttendanceTab({
                     return (
                       <td key={d} className="px-0.5 py-1 text-center">
                         <button
-                          onClick={() => !record && onCellClick(emp, dateStr)}
+                          onClick={() => onCellClick(emp, dateStr, record ?? undefined)}
                           className={`inline-flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold transition-colors ${
                             statusInfo
                               ? statusInfo.color

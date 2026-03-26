@@ -816,7 +816,10 @@ async def create_order(
 
     # Lazy import to avoid circular dependency
     from business.services.order_intake import process_order_item
+    import logging as _logging
+    _logger = _logging.getLogger("moonjar.orders.create")
 
+    positions = []
     for item_data in data.items:
         item = ProductionOrderItem(
             order_id=order.id,
@@ -838,13 +841,70 @@ async def create_order(
         # Use the full intake pipeline: recipe lookup → blocking tasks →
         # material reservation → defect margin (same as webhook orders)
         position = process_order_item(db, order, item)
+        if position:
+            positions.append(position)
 
         # Stock positions: distribute across factories based on finished goods availability
         if position and is_stock_collection(item_data.collection):
             _distribute_stock_position(db, position, item_data.quantity_pcs)
 
+    # ── Post-processing: same as webhook path ──────────────────
+    # Backward scheduling (TOC/DBR) — calculate planned dates for positions
+    try:
+        from business.services.production_scheduler import schedule_order
+        schedule_order(db, order)
+    except Exception as e:
+        _logger.warning("Failed to schedule manual order %s: %s", order.order_number, e)
+
+    # Update order status based on position statuses
+    old_status = order.status
+    if positions and any(
+        p.status in (
+            PositionStatus.INSUFFICIENT_MATERIALS,
+            PositionStatus.AWAITING_RECIPE,
+            PositionStatus.AWAITING_STENCIL_SILKSCREEN,
+            PositionStatus.AWAITING_COLOR_MATCHING,
+            PositionStatus.AWAITING_SIZE_CONFIRMATION,
+        )
+        for p in positions
+    ):
+        order.status = OrderStatus.NEW
+    elif positions:
+        order.status = OrderStatus.IN_PRODUCTION
+
+    # Log order status transition (NEW → IN_PRODUCTION if all positions are clean)
+    if order.status != old_status:
+        try:
+            db.add(ProductionOrderStatusLog(
+                order_id=order.id,
+                old_status=old_status,
+                new_status=order.status,
+                changed_by=current_user.id,
+            ))
+        except Exception:
+            pass
+
     db.commit()
     db.refresh(order)
+
+    # Notify PM about new manual order (best-effort, after commit)
+    try:
+        from business.services.notifications import notify_pm
+        notify_pm(
+            db=db,
+            factory_id=order.factory_id,
+            type="status_change",
+            title=f"New manual order: {order.order_number}",
+            message=(
+                f"Client: {order.client}, "
+                f"{len(positions)} position(s). "
+                f"Deadline: {order.final_deadline or 'not set'}"
+            ),
+            related_entity_type="order",
+            related_entity_id=order.id,
+        )
+    except Exception as e:
+        _logger.warning("Failed to notify PM about manual order %s: %s", order.order_number, e)
 
     # RAG indexing (background, best-effort)
     try:

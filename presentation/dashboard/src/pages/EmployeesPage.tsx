@@ -319,7 +319,11 @@ export default function EmployeesPage() {
     }
     if (editingEmployee) {
       const { factory_id, ...rest } = formData;
-      updateMutation.mutate({ id: editingEmployee.id, data: rest });
+      // Convert empty strings to null for optional fields
+      const cleaned = Object.fromEntries(
+        Object.entries(rest).map(([k, v]) => [k, v === '' ? null : v])
+      );
+      updateMutation.mutate({ id: editingEmployee.id, data: cleaned });
     } else {
       createMutation.mutate({ ...formData, factory_id: factoryId });
     }

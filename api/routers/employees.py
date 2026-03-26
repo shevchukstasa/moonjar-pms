@@ -469,10 +469,14 @@ async def update_employee(
         raise HTTPException(404, "Employee not found")
 
     update_data = data.model_dump(exclude_unset=True)
-    if "hire_date" in update_data and update_data["hire_date"]:
-        update_data["hire_date"] = date.fromisoformat(update_data["hire_date"])
-    if "birth_date" in update_data and update_data["birth_date"]:
-        update_data["birth_date"] = date.fromisoformat(update_data["birth_date"])
+    # Convert date strings to date objects, empty strings to None
+    for date_field in ("hire_date", "birth_date"):
+        if date_field in update_data:
+            val = update_data[date_field]
+            if val and isinstance(val, str):
+                update_data[date_field] = date.fromisoformat(val)
+            elif not val:
+                update_data[date_field] = None
 
     for key, value in update_data.items():
         setattr(emp, key, value)

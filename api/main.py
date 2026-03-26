@@ -77,6 +77,8 @@ from api.routers import admin_settings
 from api.routers import delivery
 from api.routers import employees
 from api.routers import mana_shipments
+from api.routers import shipments
+from api.routers import firing_logs
 
 
 def _ensure_schema():
@@ -1798,6 +1800,8 @@ async def lifespan(app: FastAPI):
         ("audit_log", "api.schema_patches.audit_log_patch", "apply"),
         ("product_subtype", "api.schema_patches.product_subtype_patch", "apply"),
         ("employee", "api.schema_patches.employee_patch", "apply_patch"),
+        ("firing_log", "api.schema_patches.firing_log_patch", "apply_patch"),
+        ("shipment", "api.schema_patches.shipment_patch", "apply_patch"),
     ]
 
     patch_ok = 0
@@ -1930,6 +1934,7 @@ def setup_routers():
     app.include_router(finished_goods.router, prefix="/api/finished-goods", tags=["finished-goods"])
     app.include_router(firing_profiles.router, prefix="/api/firing-profiles", tags=["firing-profiles"])
     app.include_router(batches.router, prefix="/api/batches", tags=["batches"])
+    app.include_router(firing_logs.router, prefix="/api/batches", tags=["firing-logs"])
     app.include_router(cleanup.router, prefix="/api/cleanup", tags=["cleanup"])
     app.include_router(material_groups.router, prefix="/api/material-groups", tags=["material-groups"])
     app.include_router(packaging.router, prefix="/api/packaging", tags=["packaging"])
@@ -1944,5 +1949,6 @@ def setup_routers():
     app.include_router(delivery.router, prefix="/api/delivery", tags=["delivery"])
     app.include_router(employees.router, prefix="/api/employees", tags=["employees"])
     app.include_router(mana_shipments.router, prefix="/api/mana-shipments", tags=["mana-shipments"])
+    app.include_router(shipments.router, prefix="/api/shipments", tags=["shipments"])
 
 setup_routers()

@@ -52,6 +52,7 @@ import SettingsPage from '@/pages/SettingsPage';
 import AdminSettingsPage from '@/pages/AdminSettingsPage';
 import EmployeesPage from '@/pages/EmployeesPage';
 import CeoEmployeesPage from '@/pages/CeoEmployeesPage';
+import ShipmentPage from '@/pages/ShipmentPage';
 import AppLayout from '@/components/layout/AppLayout';
 import { Spinner } from '@/components/ui/Spinner';
 import { ErrorBoundary, PageErrorFallback } from '@/components/ErrorBoundary';
@@ -154,6 +155,7 @@ export default function App() {
           <Route element={<RequireRole roles={['production_manager', 'owner', 'administrator']} />}>
             <Route path="/manager" element={<ManagerDashboard />} />
             <Route path="/manager/orders/:orderId" element={<OrderDetailPage />} />
+            <Route path="/manager/orders/:orderId/shipment" element={<ShipmentPage />} />
             <Route path="/manager/schedule" element={<ManagerSchedulePage />} />
             <Route path="/manager/kilns" element={<ManagerKilnsPage />} />
             <Route path="/manager/materials" element={<ManagerMaterialsPage />} />

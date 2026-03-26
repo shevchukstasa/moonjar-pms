@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Thermometer } from 'lucide-react';
 import { useUiStore } from '@/stores/uiStore';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGlazingSchedule, useFiringSchedule, useSortingSchedule, useQcSchedule, useKilnSchedule, useAutoFormBatches } from '@/hooks/useSchedule';
@@ -44,6 +44,85 @@ export default function ManagerSchedulePage() {
 
   const autoFormMutation = useAutoFormBatches();
   const [autoFormResult, setAutoFormResult] = useState<string | null>(null);
+
+  // Firing log state
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [firingLogBatch, setFiringLogBatch] = useState<any | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [firingLogData, setFiringLogData] = useState<any | null>(null);
+  const [firingLogLoading, setFiringLogLoading] = useState(false);
+  const [tempInput, setTempInput] = useState('');
+  const [tempNotes, setTempNotes] = useState('');
+  const [firingLogSaving, setFiringLogSaving] = useState(false);
+
+  const openFiringLog = useCallback(async (batch: { id: string; kiln_id?: string }) => {
+    setFiringLogBatch(batch);
+    setFiringLogLoading(true);
+    try {
+      const res = await apiClient.get(`/batches/${batch.id}/firing-log`);
+      const logs = res.data?.items || [];
+      // Use the latest active log, or null
+      setFiringLogData(logs.length > 0 ? logs[0] : null);
+    } catch {
+      setFiringLogData(null);
+    } finally {
+      setFiringLogLoading(false);
+    }
+  }, []);
+
+  const startFiringLog = useCallback(async () => {
+    if (!firingLogBatch) return;
+    setFiringLogSaving(true);
+    try {
+      const res = await apiClient.post(`/batches/${firingLogBatch.id}/firing-log`, {});
+      setFiringLogData(res.data);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Failed to start firing log';
+      alert(msg);
+    } finally {
+      setFiringLogSaving(false);
+    }
+  }, [firingLogBatch]);
+
+  const addReading = useCallback(async () => {
+    if (!firingLogBatch || !firingLogData || !tempInput) return;
+    const temp = parseFloat(tempInput);
+    if (isNaN(temp)) return;
+    setFiringLogSaving(true);
+    try {
+      const res = await apiClient.post(
+        `/batches/${firingLogBatch.id}/firing-log/${firingLogData.id}/reading`,
+        { temp, notes: tempNotes || undefined },
+      );
+      setFiringLogData(res.data);
+      setTempInput('');
+      setTempNotes('');
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Failed to add reading';
+      alert(msg);
+    } finally {
+      setFiringLogSaving(false);
+    }
+  }, [firingLogBatch, firingLogData, tempInput, tempNotes]);
+
+  const endFiring = useCallback(async (result: string) => {
+    if (!firingLogBatch || !firingLogData) return;
+    if (!window.confirm(`End firing with result: ${result}?`)) return;
+    setFiringLogSaving(true);
+    try {
+      const res = await apiClient.patch(
+        `/batches/${firingLogBatch.id}/firing-log/${firingLogData.id}`,
+        { ended_at: new Date().toISOString(), result },
+      );
+      setFiringLogData(res.data);
+      queryClient.invalidateQueries({ queryKey: ['schedule'] });
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Failed to end firing';
+      alert(msg);
+    } finally {
+      setFiringLogSaving(false);
+    }
+  }, [firingLogBatch, firingLogData, queryClient]);
 
   const handleAutoFormBatches = useCallback(async () => {
     if (!activeFactoryId) {
@@ -362,6 +441,7 @@ export default function ManagerSchedulePage() {
                           <th className="px-4 py-2">Positions</th>
                           <th className="px-4 py-2">Pieces</th>
                           <th className="px-4 py-2">Notes</th>
+                          <th className="px-4 py-2"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -373,6 +453,18 @@ export default function ManagerSchedulePage() {
                             <td className="px-4 py-2">{b.positions_count}</td>
                             <td className="px-4 py-2">{b.total_pcs}</td>
                             <td className="px-4 py-2 text-xs text-gray-500">{b.notes || '\u2014'}</td>
+                            <td className="px-4 py-2">
+                              {b.status === 'in_progress' && (
+                                <button
+                                  onClick={() => openFiringLog({ id: b.id, kiln_id: k.kiln.id })}
+                                  className="inline-flex items-center gap-1 rounded bg-orange-50 px-2 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100"
+                                  title="Log temperature readings"
+                                >
+                                  <Thermometer className="h-3.5 w-3.5" />
+                                  Log Temp
+                                </button>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -392,6 +484,117 @@ export default function ManagerSchedulePage() {
         ) : (
           <DataTable columns={positionColumns} data={(sectionItems[tab] || []) as Record<string, unknown>[]} />
         )
+      )}
+
+      {/* Firing Log Dialog */}
+      {firingLogBatch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setFiringLogBatch(null)}>
+          <div className="mx-4 w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Firing Temperature Log</h3>
+              <button onClick={() => setFiringLogBatch(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+            </div>
+
+            {firingLogLoading ? (
+              <div className="flex justify-center py-8"><Spinner className="h-6 w-6" /></div>
+            ) : !firingLogData ? (
+              <div className="space-y-4">
+                <p className="text-sm text-gray-500">No firing log started yet for this batch.</p>
+                <Button onClick={startFiringLog} disabled={firingLogSaving}>
+                  {firingLogSaving ? 'Starting...' : 'Start Firing Log'}
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Status bar */}
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="text-gray-500">Started:</span>
+                  <span className="font-medium">{firingLogData.started_at ? new Date(firingLogData.started_at).toLocaleString() : '—'}</span>
+                  {firingLogData.ended_at && (
+                    <>
+                      <span className="text-gray-500">Ended:</span>
+                      <span className="font-medium">{new Date(firingLogData.ended_at).toLocaleString()}</span>
+                    </>
+                  )}
+                  {firingLogData.peak_temperature && (
+                    <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-bold text-red-700">
+                      Peak: {firingLogData.peak_temperature}&deg;C
+                    </span>
+                  )}
+                  {firingLogData.result && (
+                    <Badge status={firingLogData.result} />
+                  )}
+                </div>
+
+                {/* Temperature readings timeline */}
+                {(firingLogData.temperature_readings?.length > 0) && (
+                  <div className="max-h-48 overflow-y-auto rounded-lg border border-gray-200">
+                    <table className="w-full text-left text-sm">
+                      <thead className="border-b bg-gray-50 text-xs font-medium uppercase text-gray-500 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-1.5">Time</th>
+                          <th className="px-3 py-1.5">Temp (&deg;C)</th>
+                          <th className="px-3 py-1.5">Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                        {firingLogData.temperature_readings.map((r: any, i: number) => (
+                          <tr key={i} className="bg-white">
+                            <td className="px-3 py-1.5 font-mono text-xs">{r.time}</td>
+                            <td className="px-3 py-1.5 font-bold">{r.temp}</td>
+                            <td className="px-3 py-1.5 text-xs text-gray-500">{r.notes || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Add reading form — only if firing not ended */}
+                {!firingLogData.ended_at && (
+                  <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        placeholder="Temperature (\u00b0C)"
+                        value={tempInput}
+                        onChange={(e) => setTempInput(e.target.value)}
+                        className="w-32 rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Notes (optional)"
+                        value={tempNotes}
+                        onChange={(e) => setTempNotes(e.target.value)}
+                        className="flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                      />
+                      <Button size="sm" onClick={addReading} disabled={firingLogSaving || !tempInput}>
+                        {firingLogSaving ? '...' : 'Add'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* End firing buttons — only if not ended */}
+                {!firingLogData.ended_at && (
+                  <div className="flex items-center gap-2 pt-2 border-t">
+                    <span className="text-sm text-gray-500">End firing:</span>
+                    <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => endFiring('success')} disabled={firingLogSaving}>
+                      Success
+                    </Button>
+                    <Button size="sm" className="bg-amber-500 hover:bg-amber-600 text-white" onClick={() => endFiring('partial_failure')} disabled={firingLogSaving}>
+                      Partial Failure
+                    </Button>
+                    <Button size="sm" className="bg-red-600 hover:bg-red-700 text-white" onClick={() => endFiring('abort')} disabled={firingLogSaving}>
+                      Abort
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

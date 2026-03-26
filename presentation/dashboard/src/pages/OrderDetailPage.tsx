@@ -2,7 +2,7 @@ import { formatDate } from "@/lib/format";
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useOrder, useShipOrder, useUpdateOrder } from '@/hooks/useOrders';
+import { useOrder, useUpdateOrder } from '@/hooks/useOrders';
 import { ordersApi } from '@/api/orders';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useFactories } from '@/hooks/useFactories';
@@ -56,11 +56,6 @@ export default function OrderDetailPage() {
   // Factories for edit dropdown
   const { data: factoriesData } = useFactories();
   const factories = factoriesData?.items || [];
-
-  // Ship order
-  const shipOrder = useShipOrder();
-  const [showShipConfirm, setShowShipConfirm] = useState(false);
-  const [shipSuccess, setShipSuccess] = useState(false);
 
   // Edit position
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -289,15 +284,13 @@ export default function OrderDetailPage() {
           </Button>
         )}
 
-        {/* Ship Order button -- only when ready for shipment */}
-        {isReadyForShipment && !isShipped && (
+        {/* Shipment management button -- ready for shipment or already shipped */}
+        {(isReadyForShipment || isShipped) && (
           <Button
             className="bg-green-600 hover:bg-green-700 text-white"
-            onClick={() => setShowShipConfirm(true)}
-            disabled={shipOrder.isPending}
+            onClick={() => navigate(`/manager/orders/${orderId}/shipment`)}
           >
-            {shipOrder.isPending ? <Spinner className="h-4 w-4 mr-2" /> : null}
-            Ship Order
+            {isShipped ? 'View Shipments' : 'Ship Order'}
           </Button>
         )}
         {isShipped && order.shipped_at && (
@@ -308,11 +301,6 @@ export default function OrderDetailPage() {
       </div>
 
       {/* Success banners */}
-      {shipSuccess && (
-        <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
-          Order shipped successfully. Sales has been notified.
-        </div>
-      )}
       {overrideSuccess && (
         <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">
           Order status overridden manually.
@@ -569,19 +557,6 @@ export default function OrderDetailPage() {
         )
       )}
 
-      {/* Confirm Ship */}
-      <ConfirmDialog
-        open={showShipConfirm}
-        onClose={() => setShowShipConfirm(false)}
-        onConfirm={async () => {
-          if (!orderId) return;
-          await shipOrder.mutateAsync(orderId);
-          setShipSuccess(true);
-        }}
-        title="Confirm Shipment"
-        message={`Confirm shipment of order #${order.order_number}? This will notify Sales and mark the order as shipped.`}
-      />
-
       {/* Edit Position Dialog */}
       <PositionEditDialog
         open={!!editingPosition}
@@ -621,6 +596,30 @@ function PositionCard({
   index: number;
   onEdit: () => void;
 }) {
+  const [materialsOpen, setMaterialsOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [materialsData, setMaterialsData] = useState<any[] | null>(null);
+  const [materialsLoading, setMaterialsLoading] = useState(false);
+
+  const toggleMaterials = async () => {
+    if (materialsOpen) {
+      setMaterialsOpen(false);
+      return;
+    }
+    setMaterialsOpen(true);
+    if (materialsData !== null) return; // already loaded
+    setMaterialsLoading(true);
+    try {
+      const { default: apiClient } = await import('@/api/client');
+      const res = await apiClient.get(`/positions/${p.id}/materials`);
+      setMaterialsData(res.data?.requirements || []);
+    } catch {
+      setMaterialsData([]);
+    } finally {
+      setMaterialsLoading(false);
+    }
+  };
+
   const label = posLabel(p);
   const color = (p.color as string) || '\u2014';
   const size = (p.size as string) || '';
@@ -701,6 +700,57 @@ function PositionCard({
           <span>Delay: {p.delay_hours ? <span className="text-orange-600">{p.delay_hours as number}h</span> : '\u2014'}</span>
         </div>
       )}
+
+      {/* Materials expandable section */}
+      <div className="mt-3 border-t pt-2">
+        <button
+          onClick={toggleMaterials}
+          className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+        >
+          {materialsOpen ? '\u25BC' : '\u25B6'} Materials
+        </button>
+        {materialsOpen && (
+          <div className="mt-2">
+            {materialsLoading ? (
+              <div className="text-xs text-gray-400">Loading materials...</div>
+            ) : materialsData && materialsData.length > 0 ? (
+              <div className="overflow-x-auto rounded border border-gray-200">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b bg-gray-50 text-[10px] font-medium uppercase text-gray-500">
+                    <tr>
+                      <th className="px-2 py-1">Material</th>
+                      <th className="px-2 py-1">Type</th>
+                      <th className="px-2 py-1 text-right">Qty</th>
+                      <th className="px-2 py-1">Unit</th>
+                      <th className="px-2 py-1">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                    {materialsData.map((m: any, i: number) => (
+                      <tr key={i} className="bg-white">
+                        <td className="px-2 py-1 font-medium text-gray-700">{m.material_name}</td>
+                        <td className="px-2 py-1 text-gray-500">{m.type}</td>
+                        <td className="px-2 py-1 text-right font-mono">{m.quantity_needed}</td>
+                        <td className="px-2 py-1 text-gray-500">{m.unit}</td>
+                        <td className="px-2 py-1">
+                          {m.reserved ? (
+                            <span className="inline-flex items-center rounded bg-green-50 px-1.5 py-0.5 text-[10px] font-medium text-green-700">Reserved</span>
+                          ) : (
+                            <span className="inline-flex items-center rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700">Not Reserved</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-xs text-gray-400">No material requirements found (recipe may not be assigned yet)</div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

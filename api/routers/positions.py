@@ -1764,3 +1764,121 @@ def merge_child_position(
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ────────────────────────────────────────────────────────────────
+# GET /api/positions/{id}/materials — material requirements
+# ────────────────────────────────────────────────────────────────
+
+@router.get("/{position_id}/materials")
+async def get_position_materials(
+    position_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Get material requirements for a position with reservation status.
+
+    Returns the list of materials needed (stone, glaze, engobe, etc.)
+    with required quantities and whether each is reserved.
+    """
+    from decimal import Decimal
+    from api.models import (
+        MaterialStock, MaterialTransaction, StoneReservation,
+    )
+    from api.enums import TransactionType
+
+    position = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not position:
+        raise HTTPException(404, "Position not found")
+
+    requirements = []
+
+    # 1. Stone requirement — from StoneReservation
+    stone_reservation = (
+        db.query(StoneReservation)
+        .filter(
+            StoneReservation.position_id == position.id,
+            StoneReservation.status == 'active',
+        )
+        .first()
+    )
+    if stone_reservation:
+        requirements.append({
+            "material_name": f"Stone ({stone_reservation.size_category}, {stone_reservation.product_type})",
+            "type": "stone",
+            "quantity_needed": float(stone_reservation.reserved_sqm),
+            "unit": "m\u00b2",
+            "reserved": True,
+        })
+    else:
+        # Stone not yet reserved — estimate from position
+        qty_sqm = float(position.quantity_sqm) if position.quantity_sqm else None
+        if qty_sqm:
+            requirements.append({
+                "material_name": f"Stone ({position.size or '?'})",
+                "type": "stone",
+                "quantity_needed": qty_sqm,
+                "unit": "m\u00b2",
+                "reserved": False,
+            })
+
+    # 2. Recipe materials — glaze, engobe, etc.
+    recipe = None
+    if position.recipe_id:
+        recipe = db.query(Recipe).filter(Recipe.id == position.recipe_id).first()
+
+    if recipe:
+        recipe_materials = (
+            db.query(RecipeMaterial)
+            .filter(RecipeMaterial.recipe_id == recipe.id)
+            .all()
+        )
+
+        for rm in recipe_materials:
+            material = db.query(Material).filter(Material.id == rm.material_id).first()
+            if not material:
+                continue
+
+            mat_type = (material.material_type or "").lower()
+            mat_name = material.name
+
+            # Calculate required quantity
+            try:
+                from business.services.material_reservation import _calculate_required
+                required = float(_calculate_required(rm, position, recipe=recipe, db=db))
+            except Exception:
+                # Fallback: simple per-piece calculation
+                required = float(rm.quantity_per_unit) * position.quantity
+
+            # Check if this material has been reserved for this position
+            # by looking for RESERVE transactions
+            reserved_qty = (
+                db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+                .filter(
+                    MaterialTransaction.position_id == position.id,
+                    MaterialTransaction.material_id == rm.material_id,
+                    MaterialTransaction.type == TransactionType.RESERVE,
+                )
+                .scalar()
+            ) or 0
+
+            is_reserved = float(reserved_qty) >= required * 0.99 if required > 0 else False
+
+            requirements.append({
+                "material_name": mat_name,
+                "type": mat_type,
+                "quantity_needed": round(required, 2),
+                "unit": material.unit or "pcs",
+                "reserved": is_reserved,
+            })
+
+    return {
+        "position_id": str(position.id),
+        "material_status": _ev(
+            "consumed" if position.materials_written_off_at
+            else "reserved" if position.reservation_at
+            else position.status
+        ),
+        "requirements": requirements,
+    }

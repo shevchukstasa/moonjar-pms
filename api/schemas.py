@@ -947,3 +947,34 @@ class ManaShipmentResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ── Quality Checklists ─────────────────────────────────────────
+
+class QualityChecklistCreate(BaseModel):
+    position_id: UUID
+    factory_id: UUID
+    checklist_results: dict  # {item_key: "pass"|"fail"|"na"}
+    overall_result: str  # "pass" | "fail" | "needs_rework"
+    notes: Optional[str] = None
+
+
+class QualityChecklistResponse(BaseModel):
+    id: UUID
+    position_id: UUID
+    factory_id: UUID
+    check_type: str
+    checklist_results: dict
+    overall_result: str
+    checked_by: Optional[UUID] = None
+    checked_by_name: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+    # Position context (populated by serializer)
+    order_number: Optional[str] = None
+    color: Optional[str] = None
+    size: Optional[str] = None
+    quantity: Optional[int] = None
+    position_status: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)

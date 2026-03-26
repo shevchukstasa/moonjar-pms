@@ -830,6 +830,25 @@ class QualityAssignmentConfig(Base):
     factory = relationship('Factory', foreign_keys=[factory_id])
 
 
+class QualityChecklist(Base):
+    """Structured QC checklists for pre-kiln and final inspections."""
+    __tablename__ = 'quality_checklists'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id'), nullable=False)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    check_type = Column(sa.String(30), nullable=False)  # 'pre_kiln' | 'final'
+    checklist_results = Column(JSONB, nullable=False)  # {item_key: "pass"|"fail"|"na"}
+    overall_result = Column(sa.String(20), nullable=False)  # 'pass' | 'fail' | 'needs_rework'
+    checked_by = Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    notes = Column(sa.Text)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    position = relationship('OrderPosition', foreign_keys=[position_id])
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    checked_by_rel = relationship('User', foreign_keys=[checked_by])
+
+
 class ProblemCard(Base):
     __tablename__ = 'problem_cards'
 
@@ -2463,3 +2482,94 @@ class Attendance(Base):
 
     employee = relationship('Employee', backref='attendance_records')
     recorded_by_rel = relationship('User', foreign_keys=[recorded_by])
+
+
+class Shipment(Base):
+    __tablename__ = 'shipments'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    order_id = Column(UUID(as_uuid=True), ForeignKey('production_orders.id'), nullable=False)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+
+    # Shipping details
+    tracking_number = Column(sa.String(100), nullable=True)
+    carrier = Column(sa.String(100), nullable=True)  # e.g., "JNE", "TIKI", "J&T", "Pickup"
+    shipping_method = Column(sa.String(50), nullable=True)  # "courier", "pickup", "container"
+
+    # Quantities
+    total_pieces = Column(sa.Integer, nullable=False, server_default='0')
+    total_boxes = Column(sa.Integer, nullable=True)
+    total_weight_kg = Column(sa.Numeric(10, 2), nullable=True)
+
+    # Status: prepared, shipped, in_transit, delivered, cancelled
+    status = Column(sa.String(30), nullable=False, server_default="'prepared'")
+
+    # Dates
+    shipped_at = Column(sa.DateTime(timezone=True), nullable=True)
+    estimated_delivery = Column(sa.Date, nullable=True)
+    delivered_at = Column(sa.DateTime(timezone=True), nullable=True)
+
+    # People
+    shipped_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    received_by = Column(sa.String(200), nullable=True)  # client's receiver name
+
+    # Documents
+    delivery_note_url = Column(sa.String(500), nullable=True)  # photo of surat jalan
+
+    notes = Column(sa.Text, nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    order = relationship('ProductionOrder', backref='shipments')
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    shipped_by_rel = relationship('User', foreign_keys=[shipped_by])
+
+
+class ShipmentItem(Base):
+    __tablename__ = 'shipment_items'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shipment_id = Column(UUID(as_uuid=True), ForeignKey('shipments.id', ondelete='CASCADE'), nullable=False)
+    position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id'), nullable=False)
+    quantity_shipped = Column(sa.Integer, nullable=False)
+    box_number = Column(sa.Integer, nullable=True)
+    notes = Column(sa.Text, nullable=True)
+
+    shipment = relationship('Shipment', backref='items')
+    position = relationship('OrderPosition', foreign_keys=[position_id])
+
+
+# ──────────────────────────────────────────────────────────────────
+# Firing Logs — temperature data during kiln firing
+# ──────────────────────────────────────────────────────────────────
+
+class FiringLog(Base):
+    """Log temperature data during kiln firing for a batch."""
+    __tablename__ = 'firing_logs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    batch_id = Column(UUID(as_uuid=True), ForeignKey('batches.id', ondelete='CASCADE'), nullable=False)
+    kiln_id = Column(UUID(as_uuid=True), ForeignKey('resources.id'), nullable=False)
+
+    # Temperature data
+    started_at = Column(sa.DateTime(timezone=True), nullable=True)
+    ended_at = Column(sa.DateTime(timezone=True), nullable=True)
+    peak_temperature = Column(sa.Numeric(6, 1), nullable=True)   # °C
+    target_temperature = Column(sa.Numeric(6, 1), nullable=True)
+
+    # Manual temperature readings (workers record periodically)
+    # Format: [{"time": "HH:MM", "temp": 850, "notes": "..."}, ...]
+    temperature_readings = Column(JSONB, nullable=True)
+
+    # Firing profile used
+    firing_profile_id = Column(UUID(as_uuid=True), ForeignKey('firing_profiles.id'), nullable=True)
+
+    # Result
+    result = Column(sa.String(30), nullable=True)  # success, partial_failure, abort
+    notes = Column(sa.Text, nullable=True)
+    recorded_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    batch = relationship('Batch', backref='firing_logs')
+    kiln = relationship('Resource', foreign_keys=[kiln_id])
+    firing_profile = relationship('FiringProfile', foreign_keys=[firing_profile_id])
+    recorded_by_user = relationship('User', foreign_keys=[recorded_by])

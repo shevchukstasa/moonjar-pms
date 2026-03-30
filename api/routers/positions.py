@@ -680,6 +680,7 @@ async def split_position(
     current_user=Depends(require_sorting),
 ):
     """Sort a fired position: split into good/refire/repair/color_mismatch/grinding/write-off."""
+    import traceback as _tb
 
     p = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
     if not p:
@@ -799,7 +800,12 @@ async def split_position(
         sub_positions.append(repair_pos)
 
         # Repair queue entry + SLA task
-        _create_repair_queue_entry(db, repair_pos.id, repair_type="reglaze")
+        try:
+            _create_repair_queue_entry(db, repair_pos.id, repair_type="reglaze")
+        except Exception as _rqe:
+            logger.error("Repair queue entry failed for position %s: %s\n%s",
+                         repair_pos.id, _rqe, _tb.format_exc())
+            raise HTTPException(500, f"Repair queue entry failed: {_rqe}")
 
     # 5. Color mismatch sub-position
     if data.color_mismatch_quantity > 0:
@@ -880,7 +886,13 @@ async def split_position(
             "outcome": "write_off",
         }
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception as _ce:
+        logger.error("Split commit failed for position %s: %s\n%s",
+                     position_id, _ce, _tb.format_exc())
+        db.rollback()
+        raise HTTPException(500, f"Split commit failed: {_ce}")
     db.refresh(p)
     for sp in sub_positions:
         db.refresh(sp)

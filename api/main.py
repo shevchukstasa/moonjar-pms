@@ -1816,6 +1816,9 @@ async def lifespan(app: FastAPI):
         for stmt in [
             "ALTER TYPE product_type ADD VALUE IF NOT EXISTS 'table_top'",
             "ALTER TYPE product_type ADD VALUE IF NOT EXISTS 'custom'",
+            "ALTER TYPE product_type ADD VALUE IF NOT EXISTS 'sink'",
+            "ALTER TYPE product_type ADD VALUE IF NOT EXISTS '3d'",
+            "ALTER TYPE product_type ADD VALUE IF NOT EXISTS 'countertop'",
         ]:
             try:
                 conn.execute(text(stmt))
@@ -1828,7 +1831,7 @@ async def lifespan(app: FastAPI):
         raw_conn = engine.raw_connection()
         raw_conn.set_session(autocommit=True)
         cur = raw_conn.cursor()
-        for val in ('table_top', 'custom'):
+        for val in ('table_top', 'custom', 'sink', '3d', 'countertop'):
             try:
                 cur.execute(f"ALTER TYPE product_type ADD VALUE IF NOT EXISTS '{val}'")
             except Exception:

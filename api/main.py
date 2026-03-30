@@ -1804,6 +1804,7 @@ async def lifespan(app: FastAPI):
         ("shipment", "api.schema_patches.shipment_patch", "apply_patch"),
         ("engobe_type", "api.schema_patches.engobe_type_patch", "apply_patch"),
         ("problem_card_mode", "api.schema_patches.problem_card_mode_patch", "apply"),
+        ("numeric_precision", "api.schema_patches.numeric_precision_patch", "apply_patch"),
     ]
 
     # Inline patches (too small for separate files)

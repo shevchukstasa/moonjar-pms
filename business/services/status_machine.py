@@ -29,6 +29,8 @@ _TRANSITIONS: dict[PositionStatus, set[PositionStatus]] = {
         PositionStatus.AWAITING_RECIPE,
         PositionStatus.AWAITING_STENCIL_SILKSCREEN,
         PositionStatus.AWAITING_COLOR_MATCHING,
+        PositionStatus.AWAITING_SIZE_CONFIRMATION,
+        PositionStatus.AWAITING_CONSUMPTION_DATA,
         PositionStatus.ENGOBE_APPLIED,
         PositionStatus.GLAZED,  # if no engobe needed
     },
@@ -42,6 +44,12 @@ _TRANSITIONS: dict[PositionStatus, set[PositionStatus]] = {
         PositionStatus.PLANNED,
     },
     PositionStatus.AWAITING_COLOR_MATCHING: {
+        PositionStatus.PLANNED,
+    },
+    PositionStatus.AWAITING_SIZE_CONFIRMATION: {
+        PositionStatus.PLANNED,
+    },
+    PositionStatus.AWAITING_CONSUMPTION_DATA: {
         PositionStatus.PLANNED,
     },
     PositionStatus.ENGOBE_APPLIED: {

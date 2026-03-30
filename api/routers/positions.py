@@ -576,8 +576,15 @@ async def change_position_status(
         if not p.materials_written_off_at:
             try:
                 from business.services.material_consumption import on_glazing_start
+                # Use a savepoint so partial failures don't pollute the session
+                _nested = db.begin_nested()
                 on_glazing_start(db, p.id)
+                _nested.commit()
             except Exception as _mc_err:
+                try:
+                    _nested.rollback()
+                except Exception:
+                    pass
                 import logging
                 logging.getLogger("moonjar.positions").warning(
                     "Failed to consume materials for position %s on glazing start: %s",
@@ -587,8 +594,14 @@ async def change_position_status(
             # Refire/reglaze cycle — consume only surface materials
             try:
                 from business.services.material_consumption import consume_refire_materials
+                _nested = db.begin_nested()
                 consume_refire_materials(db, p.id)
+                _nested.commit()
             except Exception as _mc_err:
+                try:
+                    _nested.rollback()
+                except Exception:
+                    pass
                 import logging
                 logging.getLogger("moonjar.positions").warning(
                     "Failed to consume refire materials for position %s: %s",
@@ -1570,6 +1583,7 @@ async def reorder_positions(
 
 class ReassignBatchRequest(BaseModel):
     target_batch_id: Optional[UUID] = None  # None = remove from batch
+    batch_id: Optional[UUID] = None         # Alias for target_batch_id (backward compat)
     notes: Optional[str] = None
 
 
@@ -1589,8 +1603,11 @@ async def reassign_position_batch(
 
     old_batch_id = pos.batch_id
 
-    if data.target_batch_id:
-        target_batch = db.query(Batch).filter(Batch.id == data.target_batch_id).first()
+    # Accept both "target_batch_id" and "batch_id" (alias)
+    effective_batch_id = data.target_batch_id or data.batch_id
+
+    if effective_batch_id:
+        target_batch = db.query(Batch).filter(Batch.id == effective_batch_id).first()
         if not target_batch:
             raise HTTPException(404, "Target batch not found")
         if target_batch.factory_id != pos.factory_id:

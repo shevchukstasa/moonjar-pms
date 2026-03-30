@@ -125,7 +125,7 @@ class SupplierLeadTime(Base):
     supplier_id = Column(UUID(as_uuid=True), ForeignKey('suppliers.id', ondelete='CASCADE'), nullable=False)
     material_type = Column(sa.String(50), nullable=False)
     default_lead_time_days = Column(sa.Integer, nullable=False)
-    avg_actual_lead_time_days = Column(sa.Numeric(5, 1))
+    avg_actual_lead_time_days = Column(sa.Numeric(8, 2))
     last_updated = Column(sa.DateTime(timezone=True))
     sample_count = Column(sa.Integer, nullable=False, default=0)
 
@@ -304,7 +304,7 @@ class ProductionOrderItem(Base):
     size = Column(sa.String(50), nullable=False)
     application = Column(sa.String(100))
     finishing = Column(sa.String(100))
-    thickness = Column(sa.Numeric(5, 1), nullable=False, default=11.0)
+    thickness = Column(sa.Numeric(8, 2), nullable=False, default=11.0)
     quantity_pcs = Column(sa.Integer, nullable=False)
     quantity_sqm = Column(sa.Numeric(10, 3))
     collection = Column(sa.String(100))
@@ -385,7 +385,7 @@ class Recipe(Base):
     # values: 'product', 'glaze', 'engobe'
     color_type = Column(sa.String(20))
     # values: 'base', 'custom', None
-    specific_gravity = Column(sa.Numeric(5, 3))
+    specific_gravity = Column(sa.Numeric(8, 4))
     # SG (удельный вес) — for converting dry grams → ml of liquid glaze
     consumption_spray_ml_per_sqm = Column(sa.Numeric(8, 2))
     # Spray application consumption rate in ml per m²
@@ -528,7 +528,7 @@ class RecipeKilnConfig(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     recipe_id = Column(UUID(as_uuid=True), ForeignKey('recipes.id', ondelete='CASCADE'), unique=True, nullable=False)
     firing_temperature = Column(sa.Integer)
-    firing_duration_hours = Column(sa.Numeric(5, 1))
+    firing_duration_hours = Column(sa.Numeric(8, 2))
     two_stage_firing = Column(sa.Boolean, nullable=False, default=False)
     special_instructions = Column(sa.Text)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
@@ -645,7 +645,7 @@ class OrderPosition(Base):
     edge_profile_sides = Column(sa.SmallInteger, nullable=True)   # 1, 2, 3, 4 — number of profiled sides
     edge_profile_notes = Column(sa.String(255), nullable=True)    # description for custom profile
     glazeable_sqm = Column(sa.Numeric(10, 4))        # Glazeable surface area per piece (m²)
-    thickness_mm = Column(sa.Numeric(5, 1), nullable=False, default=11.0)
+    thickness_mm = Column(sa.Numeric(8, 2), nullable=False, default=11.0)
     recipe_id = Column(UUID(as_uuid=True), ForeignKey('recipes.id', ondelete='SET NULL'))
     size_id = Column(UUID(as_uuid=True), ForeignKey('sizes.id'), nullable=True)
     mandatory_qc = Column(sa.Boolean, nullable=False, default=False)
@@ -1248,7 +1248,7 @@ class KilnMaintenanceSchedule(Base):
     maintenance_type_id = Column(UUID(as_uuid=True), ForeignKey('kiln_maintenance_types.id'))
     scheduled_date = Column(sa.Date, nullable=False)
     scheduled_time = Column(sa.Time)                           # optional specific time
-    estimated_duration_hours = Column(sa.Numeric(5, 1))        # how long it will take
+    estimated_duration_hours = Column(sa.Numeric(8, 2))        # how long it will take
     status = Column(PgEnum(MaintenanceStatus), nullable=False, default=MaintenanceStatus.PLANNED)
     notes = Column(sa.Text)
     completed_at = Column(sa.DateTime(timezone=True))
@@ -1867,10 +1867,10 @@ class FiringProfile(Base):
     )
     product_type = Column(PgEnum(ProductType))                       # nullable = matches all
     collection = Column(sa.String(100))                              # nullable = matches all
-    thickness_min_mm = Column(sa.Numeric(5, 1))                      # nullable = no lower bound
-    thickness_max_mm = Column(sa.Numeric(5, 1))                      # nullable = no upper bound
+    thickness_min_mm = Column(sa.Numeric(8, 2))                      # nullable = no lower bound
+    thickness_max_mm = Column(sa.Numeric(8, 2))                      # nullable = no upper bound
     target_temperature = Column(sa.Integer, nullable=False)          # max firing temp °C
-    total_duration_hours = Column(sa.Numeric(5, 1), nullable=False)  # total cycle time
+    total_duration_hours = Column(sa.Numeric(8, 2), nullable=False)  # total cycle time
     stages = Column(JSONB, nullable=False, default=list)             # temperature curve stages
     match_priority = Column(sa.Integer, nullable=False, default=0)   # higher = more specific
     is_default = Column(sa.Boolean, nullable=False, default=False)
@@ -1941,7 +1941,7 @@ class ConsumptionAdjustment(Base):
     variance_pct = Column(sa.Numeric(7, 2))  # (actual - expected) / expected × 100
     shape = Column(sa.String(20))
     product_type = Column(sa.String(20))
-    suggested_coefficient = Column(sa.Numeric(5, 3))
+    suggested_coefficient = Column(sa.Numeric(10, 4))
     status = Column(sa.String(20), nullable=False, default='pending')  # pending | approved | rejected
     approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id'))
     approved_at = Column(sa.DateTime(timezone=True))
@@ -2035,7 +2035,7 @@ class KilnMaintenanceType(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(sa.String(200), nullable=False)           # e.g. "Thermocouple calibration"
     description = Column(sa.Text)
-    duration_hours = Column(sa.Numeric(5, 1), nullable=False, default=2)   # how long it takes
+    duration_hours = Column(sa.Numeric(8, 2), nullable=False, default=2)   # how long it takes
     requires_empty_kiln = Column(sa.Boolean, nullable=False, default=False)  # kiln must be empty
     requires_cooled_kiln = Column(sa.Boolean, nullable=False, default=False) # kiln must be cooled down
     requires_power_off = Column(sa.Boolean, nullable=False, default=False)   # kiln must be turned off
@@ -2107,8 +2107,8 @@ class ConsumptionRule(Base):
     product_type = Column(sa.String(30))         # tile / countertop / sink / 3d
     size_id = Column(UUID(as_uuid=True), ForeignKey('sizes.id'))
     shape = Column(sa.String(20))                # rectangle / round / freeform / etc.
-    thickness_mm_min = Column(sa.Numeric(5, 1))  # min thickness (inclusive)
-    thickness_mm_max = Column(sa.Numeric(5, 1))  # max thickness (inclusive)
+    thickness_mm_min = Column(sa.Numeric(8, 2))  # min thickness (inclusive)
+    thickness_mm_max = Column(sa.Numeric(8, 2))  # max thickness (inclusive)
     place_of_application = Column(sa.String(50)) # face_only / face_and_sides / etc.
     recipe_type = Column(sa.String(20))          # glaze / engobe
     application_method = Column(sa.String(20))   # spray / brush
@@ -2118,7 +2118,7 @@ class ConsumptionRule(Base):
     # Number of coats (layers)
     coats = Column(sa.Integer, nullable=False, default=1)
     # Specific gravity override (if different from recipe default)
-    specific_gravity_override = Column(sa.Numeric(5, 3))
+    specific_gravity_override = Column(sa.Numeric(8, 4))
 
     # Priority — higher number = higher priority when multiple rules match
     priority = Column(sa.Integer, nullable=False, default=0)

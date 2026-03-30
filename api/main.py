@@ -1806,6 +1806,26 @@ async def lifespan(app: FastAPI):
         ("problem_card_mode", "api.schema_patches.problem_card_mode_patch", "apply"),
     ]
 
+    # Inline patches (too small for separate files)
+    def _webhook_retry_patch(conn):
+        conn.execute(text("""
+            DO $$ BEGIN
+                ALTER TABLE sales_webhook_events ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;
+            EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+        """))
+        conn.execute(text("""
+            DO $$ BEGIN
+                ALTER TABLE sales_webhook_events ADD COLUMN permanently_failed BOOLEAN NOT NULL DEFAULT FALSE;
+            EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+        """))
+
+    try:
+        with engine.connect() as conn:
+            _webhook_retry_patch(conn)
+            conn.commit()
+    except Exception as e:
+        logger.warning("Webhook retry patch warning: %s", e)
+
     patch_ok = 0
     import importlib
     for name, module_path, func_name in _patches:

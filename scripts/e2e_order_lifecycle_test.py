@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 E2E Order Lifecycle Test — Moonjar PMS
-Tests 5 orders through the complete production pipeline via HTTP API.
+Tests orders through the complete production pipeline via HTTP API.
 
 Usage:
     python scripts/e2e_order_lifecycle_test.py --email shevchukstasa@gmail.com --password Moonjar2024!
+    python scripts/e2e_order_lifecycle_test.py --extended  (orders 1-15)
+    python scripts/e2e_order_lifecycle_test.py --stress    (orders 1-25, includes defect splits)
     python scripts/e2e_order_lifecycle_test.py --api-url http://localhost:8000/api --email ... --password ...
-    python scripts/e2e_order_lifecycle_test.py --email ... --password ... --api-key YOUR_SALES_API_KEY
 """
 
 import argparse
@@ -1435,6 +1436,467 @@ class E2ETest:
             ],
         )
 
+    # ─── Complex Order Helper (with defect splits) ─────────────────────
+
+    def _sorting_split_with_defects(self, position_id: str, split_spec: dict):
+        """Split with specific defect quantities. split_spec keys:
+        good_quantity, refire_quantity, repair_quantity, color_mismatch_quantity,
+        grinding_quantity, write_off_quantity. All must sum to position.quantity.
+        """
+        payload = {
+            "good_quantity": split_spec.get("good_quantity", 0),
+            "refire_quantity": split_spec.get("refire_quantity", 0),
+            "repair_quantity": split_spec.get("repair_quantity", 0),
+            "color_mismatch_quantity": split_spec.get("color_mismatch_quantity", 0),
+            "grinding_quantity": split_spec.get("grinding_quantity", 0),
+            "write_off_quantity": split_spec.get("write_off_quantity", 0),
+            "notes": "e2e stress test - split with defects",
+        }
+        r = self._api("POST", f"/positions/{position_id}/split", json=payload)
+        if not r.ok:
+            raise RuntimeError(f"Split with defects failed: {r.status_code} {r.text[:200]}")
+        time.sleep(0.3)
+        return r.json()
+
+    def _get_child_positions(self, parent_position_id: str) -> list:
+        """Get child positions created after a split with defects."""
+        r = self._api("GET", f"/positions/{parent_position_id}/children")
+        if r.ok:
+            data = r.json()
+            return data if isinstance(data, list) else data.get("items", [])
+        return []
+
+    def _run_complex_order(self, name: str, customer: str, items: list[dict],
+                           split_specs: dict | None = None, use_engobe: bool = False):
+        """Run a complex order through the full pipeline with optional defect splits.
+
+        split_specs: dict mapping position_index (0-based) to split dict.
+        If None for a position, all are good. Example:
+            split_specs = {
+                1: {"good_quantity": 120, "refire_quantity": 20, "write_off_quantity": 10},
+                3: {"good_quantity": 80, "refire_quantity": 10, "repair_quantity": 5, "write_off_quantity": 5},
+            }
+        """
+        steps: list[tuple[str, bool, str]] = []
+        order_id = None
+
+        print(f"\n{'='*60}")
+        print(f"{BOLD}{name}{RESET}")
+        print(f"{'='*60}")
+
+        # Step 1: Create order via _create_order_manual
+        def create():
+            nonlocal order_id
+            payload = {
+                "event_id": f"e2e-{uuid.uuid4().hex[:8]}",
+                "event_type": "new_order",
+                "external_id": f"E2E-STRESS-{uuid.uuid4().hex[:8]}",
+                "customer_name": customer,
+                "client_location": "Bali",
+                "items": items,
+            }
+            r = self._create_order_manual(payload)
+            if not r.ok:
+                raise RuntimeError(f"Create order failed: {r.status_code}")
+            data = r.json()
+            order_id = data.get("order_id")
+            if not order_id:
+                raise RuntimeError(f"No order_id in response: {data}")
+            self.created_order_ids.append(order_id)
+            time.sleep(0.5)
+        self._step(name, "1. Create order (manual)", create, steps)
+        if not order_id:
+            self.results.append((name, steps))
+            return
+
+        # Step 2: Verify positions
+        positions = []
+        def verify():
+            nonlocal positions
+            positions = self._get_positions(order_id)
+            print(f"    Positions: {len(positions)}")
+            if len(positions) < len(items):
+                print(f"    {YELLOW}Expected {len(items)}, got {len(positions)}{RESET}")
+            for p in positions:
+                print(f"    {p.get('id', '?')[:8]}... color={p.get('color')} status={p.get('status')} qty={p.get('quantity')}")
+        self._step(name, "2. Verify positions created", verify, steps)
+        if not positions:
+            self.results.append((name, steps))
+            self._cleanup_if_needed(order_id)
+            return
+
+        # Step 3: Resolve blocking statuses
+        def resolve_blocks():
+            for p in positions:
+                pid = p["id"]
+                ps = p.get("status", "planned")
+                if ps in ("awaiting_stencil_silkscreen", "awaiting_color_matching",
+                           "awaiting_recipe", "insufficient_materials",
+                           "awaiting_size_confirmation", "awaiting_consumption_data"):
+                    print(f"    Resolving block: {pid[:8]}... {ps} -> planned")
+                    self._transition_status(pid, "planned")
+                    r = self._api("GET", f"/tasks?related_position_id={pid}&status=pending")
+                    if r.ok:
+                        tasks = r.json().get("items", [])
+                        if isinstance(r.json(), list):
+                            tasks = r.json()
+                        for t in tasks:
+                            tid = t.get("id")
+                            if tid:
+                                print(f"    Completing blocking task {tid[:8]}...")
+                                self._api("PATCH", f"/tasks/{tid}", json={"status": "done"})
+                                time.sleep(0.2)
+        self._step(name, "3. Resolve blocking statuses/tasks", resolve_blocks, steps)
+
+        # Step 4: Move all to glazed
+        def glaze_all():
+            for p in positions:
+                pid = p["id"]
+                ps = self._get_position_status(pid)
+                print(f"    Position {pid[:8]}... status={ps} -> glazed")
+                self._move_position_to_glazed(pid, ps, use_engobe=use_engobe)
+        self._step(name, "4. Move all to glazed", glaze_all, steps)
+
+        # Step 5: Pre-kiln QC
+        def prekiln():
+            for p in positions:
+                self._pre_kiln_check(p["id"])
+        self._step(name, "5. Pre-kiln QC (all)", prekiln, steps)
+
+        # Step 6: Batch + Fire
+        def batch_fire():
+            self._create_batch_and_fire([p["id"] for p in positions])
+        self._step(name, "6. Batch + Fire", batch_fire, steps)
+
+        # Step 7: Post-fire -> sorting
+        def post_fire():
+            for p in positions:
+                status = self._get_position_status(p["id"])
+                print(f"    {p['id'][:8]}... post-fire: {status}")
+                if status == "fired":
+                    self._transition_status(p["id"], "transferred_to_sorting")
+                elif status == "sent_to_glazing":
+                    print(f"    {CYAN}Multi-round detected for {p['id'][:8]}...{RESET}")
+                    self._transition_status(p["id"], "planned")
+                    self._move_position_to_glazed(p["id"], "planned")
+                    self._pre_kiln_check(p["id"])
+                    self._create_batch_and_fire([p["id"]])
+                    s2 = self._get_position_status(p["id"])
+                    if s2 == "fired":
+                        self._transition_status(p["id"], "transferred_to_sorting")
+                    elif s2 != "transferred_to_sorting":
+                        try:
+                            self._transition_status(p["id"], "transferred_to_sorting")
+                        except Exception as e:
+                            print(f"    {YELLOW}Could not transition after round 2: {e}{RESET}")
+                elif status != "transferred_to_sorting":
+                    try:
+                        self._transition_status(p["id"], "transferred_to_sorting")
+                    except Exception as e:
+                        print(f"    {YELLOW}Could not transition: {e}{RESET}")
+        self._step(name, "7. Post-fire -> sorting", post_fire, steps)
+
+        # Step 8: Sorting split (with defects where specified)
+        def split_all():
+            for idx, p in enumerate(positions):
+                pid = p["id"]
+                qty = p.get("quantity", 50)
+                if split_specs and idx in split_specs:
+                    spec = split_specs[idx]
+                    total = sum(spec.values())
+                    if total != qty:
+                        print(f"    {YELLOW}Split spec sums to {total}, position qty={qty}. Adjusting good_quantity.{RESET}")
+                        spec["good_quantity"] = qty - (total - spec.get("good_quantity", 0))
+                    print(f"    Position {pid[:8]}... split with defects: {spec}")
+                    self._sorting_split_with_defects(pid, spec)
+                else:
+                    print(f"    Position {pid[:8]}... split all good ({qty} pcs)")
+                    self._sorting_split_all_good(pid, qty)
+        self._step(name, "8. Sorting split (with defects)", split_all, steps)
+
+        # Step 9: Verify sub-positions for splits with defects
+        def verify_children():
+            if not split_specs:
+                print(f"    No defect splits — skipping child verification")
+                return
+            for idx in split_specs:
+                if idx >= len(positions):
+                    continue
+                p = positions[idx]
+                children = self._get_child_positions(p["id"])
+                print(f"    Position {p['id'][:8]}... has {len(children)} child positions")
+                for c in children:
+                    print(f"      Child {c.get('id', '?')[:8]}... type={c.get('defect_type', '?')} "
+                          f"status={c.get('status', '?')} qty={c.get('quantity', '?')}")
+        self._step(name, "9. Verify sub-positions (defects)", verify_children, steps)
+
+        # Step 10: Final QC on good positions only (parent positions after split)
+        def final_qc():
+            for p in positions:
+                try:
+                    self._final_check(p["id"])
+                except Exception as e:
+                    print(f"    {YELLOW}Final check skipped for {p['id'][:8]}...: {e}{RESET}")
+        self._step(name, "10. Final QC (good parts)", final_qc, steps)
+
+        # Step 11: Ship good positions
+        def ship():
+            ship_items = []
+            for idx, p in enumerate(positions):
+                if split_specs and idx in split_specs:
+                    good_qty = split_specs[idx].get("good_quantity", 0)
+                    if good_qty > 0:
+                        ship_items.append({"position_id": p["id"], "quantity_shipped": good_qty})
+                else:
+                    ship_items.append({"position_id": p["id"], "quantity_shipped": p.get("quantity", 50)})
+            if ship_items:
+                self._create_shipment_and_ship(order_id, ship_items)
+            else:
+                print(f"    {YELLOW}No good items to ship{RESET}")
+        self._step(name, "11. Ship good positions", ship, steps)
+
+        # Step 12: Verify + Cleanup
+        def verify_cleanup():
+            order = self._get_order(order_id)
+            print(f"    Final order status: {order.get('status', '?') if order else 'not_found'}")
+            self._cleanup_order(order_id)
+        self._step(name, "12. Verify + Cleanup", verify_cleanup, steps)
+
+        self.results.append((name, steps))
+
+    # ─── Stress Test Orders (16–25) ────────────────────────────────────
+
+    def test_order_16_split_defects_refire_repair_writeoff(self):
+        """Order 16: Split with Defects — Refire + Repair + Write-off (4 positions)."""
+        self._run_complex_order(
+            name="Order 16: Split Defects — Refire/Repair/Write-off",
+            customer="E2E Stress - Defect Split",
+            items=[
+                {"color": "Red", "size": "20x20", "quantity_pcs": 200, "collection": "Authentic",
+                 "product_type": "tile", "thickness": 11.0},
+                {"color": "Blue", "size": "30x30", "quantity_pcs": 150, "collection": "Authentic",
+                 "product_type": "tile", "thickness": 11.0},
+                {"color": "Green", "size": "15x15", "quantity_pcs": 300, "collection": "Authentic",
+                 "product_type": "tile", "thickness": 11.0},
+                {"color": "Black", "size": "25x25", "quantity_pcs": 100, "collection": "Authentic",
+                 "product_type": "tile", "thickness": 11.0},
+            ],
+            split_specs={
+                # Pos 0: all good (200 pcs)
+                1: {"good_quantity": 120, "refire_quantity": 20, "write_off_quantity": 10},
+                2: {"good_quantity": 250, "repair_quantity": 30, "grinding_quantity": 20},
+                3: {"good_quantity": 80, "refire_quantity": 10, "repair_quantity": 5, "write_off_quantity": 5},
+            },
+        )
+
+    def test_order_17_color_matching_stencil_blocking(self):
+        """Order 17: Color Matching + Stencil Blocking (3 positions)."""
+        self._run_complex_order(
+            name="Order 17: Color Matching + Stencil Blocking",
+            customer="E2E Stress - Blocking Statuses",
+            items=[
+                {"color": "Coral Pattern", "size": "20x20", "quantity_pcs": 150, "collection": "Stencil",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "stencil"},
+                {"color": "Ocean Wave", "size": "30x30", "quantity_pcs": 100, "collection": "Creative",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "brush"},
+                {"color": "Gold Accent", "size": "15x15", "quantity_pcs": 200, "collection": "Gold",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "gold"},
+            ],
+            split_specs={
+                0: {"good_quantity": 140, "refire_quantity": 10},
+                2: {"good_quantity": 185, "repair_quantity": 10, "write_off_quantity": 5},
+            },
+        )
+
+    def test_order_18_large_countertops_edge_profiles(self):
+        """Order 18: Large Countertops with Edge Profiles (3 positions)."""
+        self._run_complex_order(
+            name="Order 18: Large Countertops + Edge Profiles",
+            customer="E2E Stress - Countertops",
+            items=[
+                {"color": "Midnight", "size": "60x90", "quantity_pcs": 25, "collection": "Exclusive",
+                 "product_type": "countertop", "thickness": 25.0, "edge_profile": "bullnose",
+                 "length_cm": 60, "width_cm": 90},
+                {"color": "Pearl", "size": "45x90", "quantity_pcs": 30, "collection": "Exclusive",
+                 "product_type": "countertop", "thickness": 30.0, "edge_profile": "ogee",
+                 "length_cm": 45, "width_cm": 90},
+                {"color": "Charcoal", "size": "60x60", "quantity_pcs": 20, "collection": "Exclusive",
+                 "product_type": "countertop", "thickness": 20.0, "edge_profile": "beveled_45",
+                 "length_cm": 60, "width_cm": 60},
+            ],
+            split_specs={
+                0: {"good_quantity": 23, "write_off_quantity": 2},
+                1: {"good_quantity": 27, "write_off_quantity": 3},
+                2: {"good_quantity": 18, "write_off_quantity": 2},
+            },
+        )
+
+    def test_order_19_raku_3d_mixed(self):
+        """Order 19: Raku + 3D Mixed (4 positions)."""
+        self._run_complex_order(
+            name="Order 19: Raku + 3D Mixed",
+            customer="E2E Stress - Raku 3D",
+            items=[
+                {"color": "Copper", "size": "20x20", "quantity_pcs": 200, "collection": "Raku",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "raku"},
+                {"color": "Bronze", "size": "25x25", "quantity_pcs": 150, "collection": "Raku",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "raku"},
+                {"color": "Wave 3D", "size": "5x20", "quantity_pcs": 400, "collection": "Creative",
+                 "product_type": "3d", "thickness": 15.0},
+                {"color": "Mountain 3D", "size": "10x10", "quantity_pcs": 300, "collection": "Creative",
+                 "product_type": "3d", "thickness": 15.0},
+            ],
+            split_specs={
+                0: {"good_quantity": 190, "refire_quantity": 5, "write_off_quantity": 5},
+                1: {"good_quantity": 140, "refire_quantity": 10},
+                3: {"good_quantity": 285, "repair_quantity": 10, "write_off_quantity": 5},
+            },
+        )
+
+    def test_order_20_silk_screen_multi_color(self):
+        """Order 20: Silk Screen Multi-Color (3 positions)."""
+        self._run_complex_order(
+            name="Order 20: Silk Screen Multi-Color",
+            customer="E2E Stress - Silk Screen",
+            items=[
+                {"color": "Sunset", "size": "30x60", "quantity_pcs": 80, "collection": "Silk_Screen",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "silk_screen",
+                 "color_2": "Orange"},
+                {"color": "Aurora", "size": "20x40", "quantity_pcs": 120, "collection": "Silk_Screen",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "silk_screen",
+                 "color_2": "Purple"},
+                {"color": "Forest", "size": "25x50", "quantity_pcs": 90, "collection": "Silk_Screen",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "silk_screen",
+                 "color_2": "Emerald"},
+            ],
+            split_specs={
+                0: {"good_quantity": 72, "refire_quantity": 8},
+                1: {"good_quantity": 112, "refire_quantity": 5, "write_off_quantity": 3},
+                2: {"good_quantity": 80, "refire_quantity": 10},
+            },
+            use_engobe=True,
+        )
+
+    def test_order_21_splashing_large_quantity(self):
+        """Order 21: Splashing + Large Quantity (5 positions, 78+ m2)."""
+        self._run_complex_order(
+            name="Order 21: Splashing Large Quantity (78+ m2)",
+            customer="E2E Stress - Splashing Large",
+            items=[
+                {"color": "Volcano", "size": "20x20", "quantity_pcs": 500, "collection": "Splashing",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "splashing"},
+                {"color": "Ocean", "size": "30x30", "quantity_pcs": 200, "collection": "Splashing",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "splashing"},
+                {"color": "Earth", "size": "15x15", "quantity_pcs": 600, "collection": "Creative",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "brush"},
+                {"color": "Sky", "size": "10x20", "quantity_pcs": 400, "collection": "Creative",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "spray"},
+                {"color": "Lava", "size": "25x25", "quantity_pcs": 300, "collection": "Splashing",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "splashing"},
+            ],
+            split_specs={
+                0: {"good_quantity": 470, "refire_quantity": 20, "write_off_quantity": 10},
+                1: {"good_quantity": 185, "repair_quantity": 10, "write_off_quantity": 5},
+                3: {"good_quantity": 380, "refire_quantity": 15, "grinding_quantity": 5},
+                4: {"good_quantity": 280, "refire_quantity": 10, "repair_quantity": 5, "write_off_quantity": 5},
+            },
+        )
+
+    def test_order_22_shapes_round_triangle_octagon(self):
+        """Order 22: Round + Triangle + Octagon + Freeform Shapes (4 positions)."""
+        self._run_complex_order(
+            name="Order 22: Shapes — Round/Triangle/Octagon/Freeform",
+            customer="E2E Stress - Shapes",
+            items=[
+                {"color": "Pearl", "size": "30x30", "quantity_pcs": 100, "collection": "Authentic",
+                 "product_type": "tile", "thickness": 11.0, "shape": "round"},
+                {"color": "Terracotta", "size": "20x20", "quantity_pcs": 150, "collection": "Creative",
+                 "product_type": "tile", "thickness": 11.0, "shape": "triangle"},
+                {"color": "Jade", "size": "15x15", "quantity_pcs": 200, "collection": "Creative",
+                 "product_type": "tile", "thickness": 11.0, "shape": "octagon"},
+                {"color": "Onyx", "size": "25x15", "quantity_pcs": 80, "collection": "Exclusive",
+                 "product_type": "tile", "thickness": 11.0, "shape": "freeform"},
+            ],
+            split_specs={
+                3: {"good_quantity": 65, "grinding_quantity": 10, "write_off_quantity": 5},
+            },
+        )
+
+    def test_order_23_sink_products_bowl_shapes(self):
+        """Order 23: Sink Products with Bowl Shapes (3 positions)."""
+        self._run_complex_order(
+            name="Order 23: Sink Products + Bowl Shapes",
+            customer="E2E Stress - Sinks",
+            items=[
+                {"color": "White", "size": "40x50", "quantity_pcs": 15, "collection": "Exclusive",
+                 "product_type": "sink", "thickness": 20.0,
+                 "length_cm": 40, "width_cm": 50},
+                {"color": "Grey", "size": "35x45", "quantity_pcs": 20, "collection": "Exclusive",
+                 "product_type": "sink", "thickness": 18.0,
+                 "length_cm": 35, "width_cm": 45},
+                {"color": "Black", "size": "45x60", "quantity_pcs": 10, "collection": "Exclusive",
+                 "product_type": "sink", "thickness": 22.0,
+                 "length_cm": 45, "width_cm": 60},
+            ],
+            split_specs={
+                0: {"good_quantity": 13, "write_off_quantity": 2},
+                1: {"good_quantity": 18, "write_off_quantity": 2},
+                2: {"good_quantity": 9, "write_off_quantity": 1},
+            },
+        )
+
+    def test_order_24_maximum_defect_scenario(self):
+        """Order 24: Maximum Defect Scenario (3 positions, aggressive splits)."""
+        self._run_complex_order(
+            name="Order 24: Maximum Defect Scenario",
+            customer="E2E Stress - Max Defects",
+            items=[
+                {"color": "Test Red", "size": "20x20", "quantity_pcs": 100, "collection": "Authentic",
+                 "product_type": "tile", "thickness": 11.0},
+                {"color": "Test Blue", "size": "30x30", "quantity_pcs": 80, "collection": "Authentic",
+                 "product_type": "tile", "thickness": 11.0},
+                {"color": "Test Green", "size": "25x25", "quantity_pcs": 120, "collection": "Authentic",
+                 "product_type": "tile", "thickness": 11.0},
+            ],
+            split_specs={
+                0: {"good_quantity": 30, "refire_quantity": 30, "repair_quantity": 20,
+                    "color_mismatch_quantity": 10, "grinding_quantity": 5, "write_off_quantity": 5},
+                1: {"good_quantity": 50, "refire_quantity": 15, "repair_quantity": 10,
+                    "write_off_quantity": 5},
+                2: {"good_quantity": 60, "refire_quantity": 25, "repair_quantity": 20,
+                    "grinding_quantity": 10, "write_off_quantity": 5},
+            },
+        )
+
+    def test_order_25_everything_combined(self):
+        """Order 25: Everything Combined (6 positions — ultimate stress test)."""
+        self._run_complex_order(
+            name="Order 25: Everything Combined (Ultimate)",
+            customer="E2E Stress - Ultimate",
+            items=[
+                {"color": "Ruby", "size": "40x40", "quantity_pcs": 100, "collection": "Authentic",
+                 "product_type": "tile", "thickness": 11.0},
+                {"color": "Emerald", "size": "60x60", "quantity_pcs": 20, "collection": "Exclusive",
+                 "product_type": "countertop", "thickness": 25.0, "edge_profile": "rounded",
+                 "length_cm": 60, "width_cm": 60},
+                {"color": "Sapphire", "size": "20x20", "quantity_pcs": 200, "collection": "Gold",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "gold"},
+                {"color": "Diamond 3D", "size": "5x20", "quantity_pcs": 300, "collection": "Creative",
+                 "product_type": "3d", "thickness": 15.0},
+                {"color": "Topaz Raku", "size": "25x25", "quantity_pcs": 150, "collection": "Raku",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "raku"},
+                {"color": "Amethyst Stencil", "size": "30x30", "quantity_pcs": 100, "collection": "Stencil",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "stencil"},
+            ],
+            split_specs={
+                1: {"good_quantity": 17, "write_off_quantity": 3},
+                2: {"good_quantity": 180, "refire_quantity": 15, "write_off_quantity": 5},
+                3: {"good_quantity": 280, "repair_quantity": 15, "write_off_quantity": 5},
+                4: {"good_quantity": 135, "refire_quantity": 10, "write_off_quantity": 5},
+                5: {"good_quantity": 90, "refire_quantity": 5, "repair_quantity": 3, "write_off_quantity": 2},
+            },
+        )
+
     # ─── Cleanup helper ─────────────────────────────────────────────────
 
     def _cleanup_if_needed(self, order_id: str | None):
@@ -1455,9 +1917,14 @@ class E2ETest:
 
     # ─── Runner ─────────────────────────────────────────────────────────
 
-    def run_all(self, extended: bool = False):
+    def run_all(self, extended: bool = False, stress: bool = False):
         start = time.time()
-        mode = "EXTENDED (Orders 1-15)" if extended else "BASE (Orders 1-5)"
+        if stress:
+            mode = "STRESS (Orders 1-25)"
+        elif extended:
+            mode = "EXTENDED (Orders 1-15)"
+        else:
+            mode = "BASE (Orders 1-5)"
         print(f"\n{BOLD}{'#'*60}{RESET}")
         print(f"{BOLD}  Moonjar PMS — E2E Order Lifecycle Test{RESET}")
         print(f"{BOLD}  Mode: {mode}{RESET}")
@@ -1476,7 +1943,7 @@ class E2ETest:
             time.sleep(2)
             self.test_order_5_mixed_service_items()
 
-            if extended:
+            if extended or stress:
                 time.sleep(2)
                 self.test_order_6_large_authentic()
                 time.sleep(2)
@@ -1497,6 +1964,28 @@ class E2ETest:
                 self.test_order_14_splashing_brush()
                 time.sleep(2)
                 self.test_order_15_mixed_everything()
+
+            if stress:
+                time.sleep(2)
+                self.test_order_16_split_defects_refire_repair_writeoff()
+                time.sleep(2)
+                self.test_order_17_color_matching_stencil_blocking()
+                time.sleep(2)
+                self.test_order_18_large_countertops_edge_profiles()
+                time.sleep(2)
+                self.test_order_19_raku_3d_mixed()
+                time.sleep(2)
+                self.test_order_20_silk_screen_multi_color()
+                time.sleep(2)
+                self.test_order_21_splashing_large_quantity()
+                time.sleep(2)
+                self.test_order_22_shapes_round_triangle_octagon()
+                time.sleep(2)
+                self.test_order_23_sink_products_bowl_shapes()
+                time.sleep(2)
+                self.test_order_24_maximum_defect_scenario()
+                time.sleep(2)
+                self.test_order_25_everything_combined()
         except KeyboardInterrupt:
             print(f"\n{YELLOW}Interrupted! Running cleanup...{RESET}")
             self.cleanup_all()
@@ -1602,7 +2091,9 @@ Examples:
     parser.add_argument("--api-key", help="Sales webhook API key (uses Bearer token if omitted)")
     parser.add_argument("--extended", action="store_true",
                         help="Run extended tests (orders 6-15) in addition to base orders 1-5")
+    parser.add_argument("--stress", action="store_true",
+                        help="Run stress tests (orders 16-25) with complex defect splits, after extended")
     args = parser.parse_args()
 
     test = E2ETest(args.api_url, args.email, args.password, args.api_key)
-    test.run_all(extended=args.extended)
+    test.run_all(extended=args.extended, stress=args.stress)

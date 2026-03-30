@@ -1808,6 +1808,35 @@ async def lifespan(app: FastAPI):
     ]
 
     # Inline patches (too small for separate files)
+
+    # Add missing enum values to PostgreSQL enums
+    def _enum_values_patch(conn):
+        for stmt in [
+            "ALTER TYPE product_type ADD VALUE IF NOT EXISTS 'table_top'",
+            "ALTER TYPE product_type ADD VALUE IF NOT EXISTS 'custom'",
+        ]:
+            try:
+                conn.execute(text(stmt))
+            except Exception:
+                pass  # value already exists
+
+    try:
+        # IMPORTANT: ALTER TYPE ADD VALUE cannot run inside a transaction in PG < 12
+        # Use autocommit connection
+        raw_conn = engine.raw_connection()
+        raw_conn.set_session(autocommit=True)
+        cur = raw_conn.cursor()
+        for val in ('table_top', 'custom'):
+            try:
+                cur.execute(f"ALTER TYPE product_type ADD VALUE IF NOT EXISTS '{val}'")
+            except Exception:
+                pass
+        cur.close()
+        raw_conn.close()
+        logger.info("Enum values patch applied")
+    except Exception as e:
+        logger.warning("Enum values patch warning: %s", e)
+
     def _webhook_retry_patch(conn):
         conn.execute(text("""
             DO $$ BEGIN

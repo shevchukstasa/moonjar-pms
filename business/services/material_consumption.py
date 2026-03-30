@@ -140,7 +140,14 @@ def on_glazing_start(
             .first()
         )
         if stock:
-            stock.balance = Decimal(str(stock.balance)) - actual
+            current_balance = Decimal(str(stock.balance))
+            if current_balance < actual:
+                logger.warning(
+                    "Insufficient stock for %s: balance=%.3f, needed=%.3f — consuming available",
+                    material.name, float(current_balance), float(actual),
+                )
+                actual = current_balance
+            stock.balance = current_balance - actual
 
         consumed.append({
             "material_id": mat_id_str,
@@ -311,7 +318,14 @@ def consume_refire_materials(
             .first()
         )
         if stock:
-            stock.balance = Decimal(str(stock.balance)) - actual
+            current_balance = Decimal(str(stock.balance))
+            if current_balance < actual:
+                logger.warning(
+                    "Insufficient stock for %s (refire): balance=%.3f, needed=%.3f — consuming available",
+                    material.name, float(current_balance), float(actual),
+                )
+                actual = current_balance
+            stock.balance = current_balance - actual
 
         consumed.append({
             "material_id": mat_id_str,

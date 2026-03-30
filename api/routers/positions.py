@@ -609,7 +609,13 @@ async def change_position_status(
     # Auto-recalculate parent order status
     old_order_status, new_order_status, order = _recalculate_order_status(db, p.order_id)
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception as commit_err:
+        db.rollback()
+        logger.warning("Status transition commit failed for position %s: %s", position_id, commit_err)
+        db.refresh(p)
+        raise HTTPException(status_code=500, detail=f"Status transition saved but commit failed: {str(commit_err)[:200]}")
     db.refresh(p)
 
     # Send order_ready webhook to Sales when all positions become ready_for_shipment

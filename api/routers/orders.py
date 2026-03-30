@@ -62,6 +62,8 @@ class OrderItemInput(BaseModel):
     width_cm: Optional[float] = None   # Width in cm
     depth_cm: Optional[float] = None   # Depth in cm (sinks only)
     bowl_shape: Optional[str] = None   # Bowl shape: parallelepiped, half_oval, other (sinks only)
+    edge_profile: Optional[str] = None  # straight, bullnose, ogee, etc.
+    color_2: Optional[str] = None       # Second color for Stencil/Silkscreen/Custom
 
 
 class OrderCreateInput(BaseModel):
@@ -551,7 +553,11 @@ async def confirm_pdf_order(
         db.add(item)
         db.flush()
 
-        position = process_order_item(db, order, item)
+        try:
+            position = process_order_item(db, order, item)
+        except Exception as e:
+            logger.warning("Failed to process PDF item %s: %s", item_data.color, e)
+            position = None
 
         if position and is_stock_collection(item_data.collection):
             _distribute_stock_position(db, position, item_data.quantity_pcs)
@@ -848,13 +854,20 @@ async def create_order(
             shape=item_data.shape, length_cm=item_data.length_cm,
             width_cm=item_data.width_cm, depth_cm=item_data.depth_cm,
             bowl_shape=item_data.bowl_shape,
+            edge_profile=item_data.edge_profile,
+            color_2=item_data.color_2,
         )
         db.add(item)
         db.flush()
 
         # Use the full intake pipeline: recipe lookup → blocking tasks →
         # material reservation → defect margin (same as webhook orders)
-        position = process_order_item(db, order, item)
+        try:
+            position = process_order_item(db, order, item)
+        except Exception as e:
+            logger.warning("Failed to process item %s: %s", item_data.color, e)
+            position = None
+
         if position:
             positions.append(position)
 

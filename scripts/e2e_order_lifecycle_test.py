@@ -113,14 +113,32 @@ class E2ETest:
 
     # ─── HTTP wrapper ───────────────────────────────────────────────────
 
-    def _api(self, method: str, path: str, **kwargs) -> requests.Response:
-        url = f"{self.api_url}{path}"
-        r = self.session.request(method, url, timeout=30, **kwargs)
-        status_color = GREEN if r.ok else RED
-        body_preview = r.text[:200] if not r.ok else ""
-        print(f"  {CYAN}{method} {path}{RESET} -> {status_color}{r.status_code}{RESET}"
-              + (f" {body_preview}" if body_preview else ""))
-        return r
+    def _api(self, method: str, path: str, retries: int = 2, **kwargs) -> requests.Response:
+        """HTTP request with retry for transient failures."""
+        kwargs.setdefault("timeout", 30)
+        for attempt in range(retries + 1):
+            try:
+                r = self.session.request(method, f"{self.api_url}{path}", **kwargs)
+                if r.status_code in (502, 503) and attempt < retries:
+                    wait = 5 * (attempt + 1)
+                    print(f"    {YELLOW}Retry {attempt+1}/{retries} after {wait}s (got {r.status_code}){RESET}")
+                    time.sleep(wait)
+                    continue
+                # Log
+                status_color = GREEN if r.ok else RED
+                print(f"  {CYAN}{method} {path}{RESET} -> {status_color}{r.status_code}{RESET}", end="")
+                if not r.ok:
+                    print(f" {r.text[:150]}")
+                else:
+                    print()
+                return r
+            except requests.exceptions.RequestException as e:
+                if attempt < retries:
+                    wait = 5 * (attempt + 1)
+                    print(f"    {YELLOW}Retry {attempt+1}/{retries} after {wait}s ({type(e).__name__}){RESET}")
+                    time.sleep(wait)
+                    continue
+                raise
 
     def _webhook(self, payload: dict) -> requests.Response:
         """Send webhook with appropriate auth. Falls back to manual order creation."""
@@ -156,9 +174,25 @@ class E2ETest:
                 "product_type": item.get("product_type", "tile"),
                 "thickness": float(item.get("thickness", 11.0)),
             }
-            for opt in ("finishing", "application", "application_type", "shape"):
+            for opt in ("finishing", "application", "application_type", "shape",
+                        "edge_profile", "color_2", "place_of_application"):
                 if item.get(opt):
                     entry[opt] = item[opt]
+            # Pass length_cm / width_cm — auto-derive from size for countertops
+            for dim in ("length_cm", "width_cm"):
+                if item.get(dim):
+                    entry[dim] = float(item[dim])
+            if not entry.get("length_cm") and not entry.get("width_cm"):
+                pt = item.get("product_type", "tile")
+                if pt in ("table_top", "countertop", "sink"):
+                    size = item.get("size", "")
+                    if "x" in size.lower():
+                        try:
+                            parts = size.lower().replace(" ", "").split("x")
+                            entry["length_cm"] = float(parts[0])
+                            entry["width_cm"] = float(parts[1]) if len(parts) > 1 else float(parts[0])
+                        except (ValueError, IndexError):
+                            pass
             items.append(entry)
         order_data = {
             "order_number": webhook_payload.get("external_id", f"E2E-{uuid.uuid4().hex[:8]}"),
@@ -192,6 +226,21 @@ class E2ETest:
             result = func()
             steps_list.append((step_name, True, "OK"))
             return result
+        except requests.exceptions.ConnectionError as e:
+            msg = f"Connection error — server may be down or unreachable ({type(e).__name__})"
+            steps_list.append((step_name, False, msg))
+            print(f"  {RED}FAIL: {msg}{RESET}")
+            return None
+        except requests.exceptions.Timeout as e:
+            msg = f"Request timed out — server too slow to respond ({type(e).__name__})"
+            steps_list.append((step_name, False, msg))
+            print(f"  {RED}FAIL: {msg}{RESET}")
+            return None
+        except requests.exceptions.RequestException as e:
+            msg = f"Network error: {type(e).__name__}: {str(e)[:150]}"
+            steps_list.append((step_name, False, msg))
+            print(f"  {RED}FAIL: {msg}{RESET}")
+            return None
         except Exception as e:
             msg = str(e)[:200]
             steps_list.append((step_name, False, msg))
@@ -1062,6 +1111,327 @@ class E2ETest:
 
         self.results.append((name, steps))
 
+    # ─── Generic multi-position pipeline ──────────────────────────────
+
+    def _run_multi_position_order(self, name: str, items: list[dict],
+                                  customer: str = "E2E Test Client",
+                                  use_engobe: bool = False):
+        """Generic pipeline for multi-position orders created via _create_order_manual.
+        items: list of dicts with keys matching _create_order_manual format.
+        Returns None — results are appended to self.results.
+        """
+        steps: list[tuple[str, bool, str]] = []
+        order_id = None
+
+        print(f"\n{'='*60}")
+        print(f"{BOLD}{name}{RESET}")
+        print(f"{'='*60}")
+
+        # Step 1: Create order
+        def create():
+            nonlocal order_id
+            payload = {
+                "event_id": f"e2e-{uuid.uuid4().hex[:8]}",
+                "event_type": "new_order",
+                "external_id": f"E2E-{uuid.uuid4().hex[:8]}",
+                "customer_name": customer,
+                "client_location": "Bali",
+                "items": items,
+            }
+            r = self._create_order_manual(payload)
+            if not r.ok:
+                raise RuntimeError(f"Create order failed: {r.status_code}")
+            data = r.json()
+            order_id = data.get("order_id")
+            if not order_id:
+                raise RuntimeError(f"No order_id in response: {data}")
+            self.created_order_ids.append(order_id)
+            time.sleep(0.5)
+        self._step(name, "1. Create order (manual)", create, steps)
+        if not order_id:
+            self.results.append((name, steps))
+            return
+
+        # Step 2: Verify positions
+        positions = []
+        def verify():
+            nonlocal positions
+            positions = self._get_positions(order_id)
+            print(f"    Positions: {len(positions)}")
+            if len(positions) < len(items):
+                print(f"    {YELLOW}Expected {len(items)}, got {len(positions)}{RESET}")
+            for p in positions:
+                print(f"    {p.get('id', '?')[:8]}... color={p.get('color')} status={p.get('status')} qty={p.get('quantity')}")
+        self._step(name, "2. Verify positions created", verify, steps)
+        if not positions:
+            self.results.append((name, steps))
+            self._cleanup_if_needed(order_id)
+            return
+
+        # Step 3: Resolve blocking statuses
+        def resolve_blocks():
+            for p in positions:
+                pid = p["id"]
+                ps = p.get("status", "planned")
+                if ps in ("awaiting_stencil_silkscreen", "awaiting_color_matching",
+                           "awaiting_recipe", "insufficient_materials",
+                           "awaiting_size_confirmation", "awaiting_consumption_data"):
+                    print(f"    Resolving block: {pid[:8]}... {ps} -> planned")
+                    self._transition_status(pid, "planned")
+                    r = self._api("GET", f"/tasks?related_position_id={pid}&status=pending")
+                    if r.ok:
+                        tasks = r.json().get("items", [])
+                        if isinstance(r.json(), list):
+                            tasks = r.json()
+                        for t in tasks:
+                            tid = t.get("id")
+                            if tid:
+                                print(f"    Completing blocking task {tid[:8]}...")
+                                self._api("PATCH", f"/tasks/{tid}", json={"status": "done"})
+                                time.sleep(0.2)
+        self._step(name, "3. Resolve blocking statuses/tasks", resolve_blocks, steps)
+
+        # Step 4: Move all to glazed
+        def glaze_all():
+            for p in positions:
+                pid = p["id"]
+                ps = self._get_position_status(pid)
+                print(f"    Position {pid[:8]}... status={ps} -> glazed")
+                self._move_position_to_glazed(pid, ps, use_engobe=use_engobe)
+        self._step(name, "4. Move all to glazed", glaze_all, steps)
+
+        # Step 5: Pre-kiln QC
+        def prekiln():
+            for p in positions:
+                self._pre_kiln_check(p["id"])
+        self._step(name, "5. Pre-kiln QC (all)", prekiln, steps)
+
+        # Step 6: Batch + Fire
+        def batch_fire():
+            self._create_batch_and_fire([p["id"] for p in positions])
+        self._step(name, "6. Batch + Fire", batch_fire, steps)
+
+        # Step 7: Post-fire
+        def post_fire():
+            for p in positions:
+                status = self._get_position_status(p["id"])
+                print(f"    {p['id'][:8]}... post-fire: {status}")
+                if status == "fired":
+                    self._transition_status(p["id"], "transferred_to_sorting")
+                elif status == "sent_to_glazing":
+                    # Multi-round handling
+                    print(f"    {CYAN}Multi-round detected for {p['id'][:8]}...{RESET}")
+                    self._transition_status(p["id"], "planned")
+                    self._move_position_to_glazed(p["id"], "planned")
+                    self._pre_kiln_check(p["id"])
+                    self._create_batch_and_fire([p["id"]])
+                    s2 = self._get_position_status(p["id"])
+                    if s2 == "fired":
+                        self._transition_status(p["id"], "transferred_to_sorting")
+                    elif s2 != "transferred_to_sorting":
+                        try:
+                            self._transition_status(p["id"], "transferred_to_sorting")
+                        except Exception as e:
+                            print(f"    {YELLOW}Could not transition after round 2: {e}{RESET}")
+                elif status != "transferred_to_sorting":
+                    try:
+                        self._transition_status(p["id"], "transferred_to_sorting")
+                    except Exception as e:
+                        print(f"    {YELLOW}Could not transition: {e}{RESET}")
+        self._step(name, "7. Post-fire -> sorting", post_fire, steps)
+
+        # Step 8: Sorting split
+        def split_all():
+            for p in positions:
+                qty = p.get("quantity", 50)
+                self._sorting_split_all_good(p["id"], qty)
+        self._step(name, "8. Sorting split (all good)", split_all, steps)
+
+        # Step 9: Final QC
+        def final_qc():
+            for p in positions:
+                self._final_check(p["id"])
+        self._step(name, "9. Final QC (all pass)", final_qc, steps)
+
+        # Step 10: Ship
+        def ship():
+            ship_items = [{"position_id": p["id"], "quantity_shipped": p.get("quantity", 50)}
+                          for p in positions]
+            self._create_shipment_and_ship(order_id, ship_items)
+        self._step(name, "10. Ship all positions", ship, steps)
+
+        # Step 11: Verify + Cleanup
+        def verify_cleanup():
+            order = self._get_order(order_id)
+            print(f"    Final order status: {order.get('status', '?') if order else 'not_found'}")
+            self._cleanup_order(order_id)
+        self._step(name, "11. Verify + Cleanup", verify_cleanup, steps)
+
+        self.results.append((name, steps))
+
+    # ─── Extended Test Orders (6–15) ───────────────────────────────────
+
+    def test_order_6_large_authentic(self):
+        """Order 6: Large Authentic Collection — 5 positions, 36.5 m²."""
+        self._run_multi_position_order(
+            name="Order 6: Large Authentic Collection",
+            customer="E2E Client - Authentic",
+            items=[
+                {"color": "Red", "size": "30x30", "quantity_pcs": 200, "collection": "Authentic", "product_type": "tile", "thickness": 11.0},
+                {"color": "Blue", "size": "20x20", "quantity_pcs": 150, "collection": "Authentic", "product_type": "tile", "thickness": 11.0},
+                {"color": "Green", "size": "10x10", "quantity_pcs": 500, "collection": "Authentic", "product_type": "tile", "thickness": 11.0},
+                {"color": "White", "size": "15x30", "quantity_pcs": 100, "collection": "Authentic", "product_type": "tile", "thickness": 11.0},
+                {"color": "Black", "size": "5x20", "quantity_pcs": 300, "collection": "Authentic", "product_type": "tile", "thickness": 11.0},
+            ],
+        )
+
+    def test_order_7_creative_mix(self):
+        """Order 7: Creative Mix — 4 positions, 43.3 m²."""
+        self._run_multi_position_order(
+            name="Order 7: Creative Mix",
+            customer="E2E Client - Creative",
+            items=[
+                {"color": "Turquoise", "size": "25x25", "quantity_pcs": 250, "collection": "Creative", "product_type": "tile", "thickness": 11.0},
+                {"color": "Coral", "size": "40x40", "quantity_pcs": 100, "collection": "Creative", "product_type": "tile", "thickness": 11.0},
+                {"color": "Olive", "size": "20x30", "quantity_pcs": 120, "collection": "Creative", "product_type": "tile", "thickness": 11.0},
+                {"color": "Sage Green", "size": "15x15", "quantity_pcs": 200, "collection": "Creative", "product_type": "tile", "thickness": 11.0},
+            ],
+        )
+
+    def test_order_8_exclusive_countertops(self):
+        """Order 8: Exclusive Countertops — 3 positions, 40.7 m²."""
+        self._run_multi_position_order(
+            name="Order 8: Exclusive Countertops",
+            customer="E2E Client - Exclusive Countertops",
+            items=[
+                {"color": "Midnight Blue", "size": "60x90", "quantity_pcs": 30, "collection": "Exclusive",
+                 "product_type": "table_top", "thickness": 30.0, "finishing": "bullnose"},
+                {"color": "Ivory", "size": "60x60", "quantity_pcs": 40, "collection": "Exclusive",
+                 "product_type": "table_top", "thickness": 30.0, "finishing": "ogee"},
+                {"color": "Charcoal", "size": "45x90", "quantity_pcs": 25, "collection": "Exclusive",
+                 "product_type": "table_top", "thickness": 30.0, "finishing": "beveled_45"},
+            ],
+        )
+
+    def test_order_9_gold_collection(self):
+        """Order 9: Gold Collection — 3 positions, 44.75 m², two-stage firing."""
+        self._run_multi_position_order(
+            name="Order 9: Gold Collection",
+            customer="E2E Client - Gold",
+            items=[
+                {"color": "Gold Leaf", "size": "20x20", "quantity_pcs": 500, "collection": "Gold",
+                 "product_type": "tile", "thickness": 11.0, "application": "gold"},
+                {"color": "Rose Gold", "size": "30x30", "quantity_pcs": 200, "collection": "Gold",
+                 "product_type": "tile", "thickness": 11.0, "application": "gold"},
+                {"color": "Champagne", "size": "15x30", "quantity_pcs": 150, "collection": "Gold",
+                 "product_type": "tile", "thickness": 11.0, "application": "gold"},
+            ],
+        )
+
+    def test_order_10_raku_3d(self):
+        """Order 10: Raku + 3D — 4 positions, 34.5 m²."""
+        self._run_multi_position_order(
+            name="Order 10: Raku + 3D",
+            customer="E2E Client - Raku 3D",
+            items=[
+                {"color": "Copper Raku", "size": "20x20", "quantity_pcs": 300, "collection": "Raku",
+                 "product_type": "tile", "thickness": 11.0, "application": "raku"},
+                {"color": "Bronze Raku", "size": "25x25", "quantity_pcs": 200, "collection": "Raku",
+                 "product_type": "tile", "thickness": 11.0, "application": "raku"},
+                {"color": "Ocean 3D", "size": "5x20", "quantity_pcs": 400, "collection": "Authentic",
+                 "product_type": "3d", "thickness": 15.0},
+                {"color": "Mountain 3D", "size": "10x10", "quantity_pcs": 600, "collection": "Authentic",
+                 "product_type": "3d", "thickness": 15.0},
+            ],
+        )
+
+    def test_order_11_stencil(self):
+        """Order 11: Stencil Collection — 4 positions, 35.15 m²."""
+        self._run_multi_position_order(
+            name="Order 11: Stencil Collection",
+            customer="E2E Client - Stencil",
+            items=[
+                {"color": "Floral Pattern", "size": "20x20", "quantity_pcs": 250, "collection": "Stencil",
+                 "product_type": "tile", "thickness": 11.0, "application": "stencil"},
+                {"color": "Geometric Pattern", "size": "30x30", "quantity_pcs": 150, "collection": "Stencil",
+                 "product_type": "tile", "thickness": 11.0, "application": "stencil"},
+                {"color": "Mandala", "size": "25x25", "quantity_pcs": 100, "collection": "Stencil",
+                 "product_type": "tile", "thickness": 11.0, "application": "stencil"},
+                {"color": "Arabesque", "size": "15x30", "quantity_pcs": 120, "collection": "Stencil",
+                 "product_type": "tile", "thickness": 11.0, "application": "stencil"},
+            ],
+        )
+
+    def test_order_12_silk_screen(self):
+        """Order 12: Silk Screen + Custom Colors — 3 positions, 42.9 m²."""
+        self._run_multi_position_order(
+            name="Order 12: Silk Screen",
+            customer="E2E Client - Silk Screen",
+            items=[
+                {"color": "Sunset Gradient", "size": "30x60", "quantity_pcs": 80, "collection": "Silk Screen",
+                 "product_type": "tile", "thickness": 11.0, "application": "silk_screen"},
+                {"color": "Ocean Wave", "size": "20x40", "quantity_pcs": 200, "collection": "Silk Screen",
+                 "product_type": "tile", "thickness": 11.0, "application": "silk_screen"},
+                {"color": "Forest Mist", "size": "25x50", "quantity_pcs": 100, "collection": "Silk Screen",
+                 "product_type": "tile", "thickness": 11.0, "application": "silk_screen"},
+            ],
+        )
+
+    def test_order_13_shapes(self):
+        """Order 13: Round + Triangle shapes — 3 positions, 21.35 m²."""
+        self._run_multi_position_order(
+            name="Order 13: Round + Triangle Shapes",
+            customer="E2E Client - Shapes",
+            items=[
+                {"color": "Pearl White", "size": "30", "quantity_pcs": 150, "collection": "Authentic",
+                 "product_type": "tile", "thickness": 11.0, "shape": "round"},
+                {"color": "Terracotta", "size": "20x20", "quantity_pcs": 200, "collection": "Creative",
+                 "product_type": "tile", "thickness": 11.0, "shape": "triangle"},
+                {"color": "Jade", "size": "15x15", "quantity_pcs": 300, "collection": "Creative",
+                 "product_type": "tile", "thickness": 11.0, "shape": "hexagon"},
+            ],
+        )
+
+    def test_order_14_splashing_brush(self):
+        """Order 14: Splashing + Brush — 5 positions, 54.75 m²."""
+        self._run_multi_position_order(
+            name="Order 14: Splashing + Brush",
+            customer="E2E Client - Splashing Brush",
+            items=[
+                {"color": "Lava Splash", "size": "20x20", "quantity_pcs": 400, "collection": "Splashing",
+                 "product_type": "tile", "thickness": 11.0, "application": "splashing"},
+                {"color": "Ocean Splash", "size": "30x30", "quantity_pcs": 150, "collection": "Splashing",
+                 "product_type": "tile", "thickness": 11.0, "application": "splashing"},
+                {"color": "Earth Brush", "size": "25x25", "quantity_pcs": 180, "collection": "Creative",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "brush"},
+                {"color": "Sky Brush", "size": "15x30", "quantity_pcs": 200, "collection": "Creative",
+                 "product_type": "tile", "thickness": 11.0, "application_type": "brush"},
+                {"color": "Volcano", "size": "10x10", "quantity_pcs": 500, "collection": "Splashing",
+                 "product_type": "tile", "thickness": 11.0, "application": "splashing"},
+            ],
+        )
+
+    def test_order_15_mixed_everything(self):
+        """Order 15: Mixed Everything — 6 positions, 65.3 m²."""
+        self._run_multi_position_order(
+            name="Order 15: Mixed Everything",
+            customer="E2E Client - Mixed Everything",
+            items=[
+                {"color": "Ruby", "size": "40x40", "quantity_pcs": 100, "collection": "Authentic",
+                 "product_type": "tile", "thickness": 11.0},
+                {"color": "Emerald", "size": "60x60", "quantity_pcs": 30, "collection": "Exclusive",
+                 "product_type": "table_top", "thickness": 30.0, "finishing": "rounded"},
+                {"color": "Sapphire", "size": "20x20", "quantity_pcs": 300, "collection": "Gold",
+                 "product_type": "tile", "thickness": 11.0, "application": "gold"},
+                {"color": "Diamond 3D", "size": "5x20", "quantity_pcs": 500, "collection": "Creative",
+                 "product_type": "3d", "thickness": 15.0},
+                {"color": "Topaz Raku", "size": "25x25", "quantity_pcs": 200, "collection": "Raku",
+                 "product_type": "tile", "thickness": 11.0, "application": "raku"},
+                {"color": "Amethyst Stencil", "size": "30x30", "quantity_pcs": 100, "collection": "Stencil",
+                 "product_type": "tile", "thickness": 11.0, "application": "stencil"},
+            ],
+        )
+
     # ─── Cleanup helper ─────────────────────────────────────────────────
 
     def _cleanup_if_needed(self, order_id: str | None):
@@ -1082,20 +1452,48 @@ class E2ETest:
 
     # ─── Runner ─────────────────────────────────────────────────────────
 
-    def run_all(self):
+    def run_all(self, extended: bool = False):
         start = time.time()
+        mode = "EXTENDED (Orders 1-15)" if extended else "BASE (Orders 1-5)"
         print(f"\n{BOLD}{'#'*60}{RESET}")
         print(f"{BOLD}  Moonjar PMS — E2E Order Lifecycle Test{RESET}")
+        print(f"{BOLD}  Mode: {mode}{RESET}")
         print(f"{BOLD}  API: {self.api_url}{RESET}")
         print(f"{BOLD}  Factory: {self.factory_name} ({self.factory_id}){RESET}")
         print(f"{BOLD}{'#'*60}{RESET}")
 
         try:
             self.test_order_1_simple_tiles()
+            time.sleep(2)
             self.test_order_2_multi_position_engobe()
+            time.sleep(2)
             self.test_order_3_countertop()
+            time.sleep(2)
             self.test_order_4_gold_raku()
+            time.sleep(2)
             self.test_order_5_mixed_service_items()
+
+            if extended:
+                time.sleep(2)
+                self.test_order_6_large_authentic()
+                time.sleep(2)
+                self.test_order_7_creative_mix()
+                time.sleep(2)
+                self.test_order_8_exclusive_countertops()
+                time.sleep(2)
+                self.test_order_9_gold_collection()
+                time.sleep(2)
+                self.test_order_10_raku_3d()
+                time.sleep(2)
+                self.test_order_11_stencil()
+                time.sleep(2)
+                self.test_order_12_silk_screen()
+                time.sleep(2)
+                self.test_order_13_shapes()
+                time.sleep(2)
+                self.test_order_14_splashing_brush()
+                time.sleep(2)
+                self.test_order_15_mixed_everything()
         except KeyboardInterrupt:
             print(f"\n{YELLOW}Interrupted! Running cleanup...{RESET}")
             self.cleanup_all()
@@ -1199,7 +1597,9 @@ Examples:
     parser.add_argument("--email", required=True, help="Login email")
     parser.add_argument("--password", required=True, help="Login password")
     parser.add_argument("--api-key", help="Sales webhook API key (uses Bearer token if omitted)")
+    parser.add_argument("--extended", action="store_true",
+                        help="Run extended tests (orders 6-15) in addition to base orders 1-5")
     args = parser.parse_args()
 
     test = E2ETest(args.api_url, args.email, args.password, args.api_key)
-    test.run_all()
+    test.run_all(extended=args.extended)

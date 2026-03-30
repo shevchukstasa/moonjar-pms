@@ -1,0 +1,141 @@
+E2E Order Lifecycle Test Report
+Generated: 2026-03-30T19:02:56.072969
+API: https://moonjar-pms-production.up.railway.app/api
+Factory: Bali (a2045a5f-c5c3-465c-a953-2c16b5e4b418)
+Duration: 306.5s
+
+Order 1: Simple Tiles: 8/11 passed  [3 FAIL]
+  [PASS] 1. Create order via webhook
+  [PASS] 2. Verify order created
+  [PASS] 3. Transition to glazed
+  [PASS] 4. Pre-kiln QC check (pass)
+  [PASS] 5. Batch auto-form, start, complete
+  [PASS] 6. Post-fire -> transferred_to_sorting
+  [FAIL] 7. Sorting split (all good) -- Expected transferred_to_sorting, got pre_kiln_check
+  [FAIL] 8. Final QC check (pass) -- Final check failed: 400 {"detail":"Position must be in 'packed' status for final check, got 'transferred_to_sorting'"}
+  [FAIL] 9. Create shipment + ship -- Create shipment failed: 400 {"detail":"Position #1 is not ready for shipment (status: transferred_to_sorting)"}
+  [PASS] 10. Verify final order state
+  [PASS] 11. Cleanup
+
+Order 2: Multi-position Engobe: 8/10 passed  [2 FAIL]
+  [PASS] 1. Create 3-position order via webhook
+  [PASS] 2. Verify 3 positions created
+  [FAIL] 3. Engobe path (all 3 positions) -- Status transition to 'engobe_applied' failed: 500 Internal Server Error
+  [FAIL] 4. Pre-kiln QC (all 3) -- Pre-kiln check failed: 400 {"detail":"Position must be in 'glazed' status for pre-kiln check, got 'planned'"}
+  [PASS] 5. Batch auto-form + start + complete
+  [PASS] 6. Post-fire -> sorting
+  [PASS] 7. Sorting split (all good)
+  [PASS] 8. Final QC (all pass)
+  [PASS] 9. Ship all positions
+  [PASS] 10. Verify + Cleanup
+
+Order 3: Countertop: 0/1 passed  [1 FAIL]
+  [FAIL] 1. Create countertop order via webhook -- Webhook failed: 500
+
+Order 4: Gold+Raku: 10/10 passed  [ALL PASS]
+  [PASS] 1. Create gold/raku order
+  [PASS] 2. Verify order
+  [PASS] 3. Move to glazed
+  [PASS] 4. Pre-kiln QC
+  [PASS] 5. Batch + Fire (round 1)
+  [PASS] 6. Handle post-fire (multi-round possible)
+  [PASS] 7. Split (all good)
+  [PASS] 8. Final QC
+  [PASS] 9. Ship
+  [PASS] 10. Verify + Cleanup
+
+Order 5: Mixed + Service Items: 10/11 passed  [1 FAIL]
+  [PASS] 1. Create mixed order (stencil + regular)
+  [PASS] 2. Verify positions
+  [PASS] 3. Resolve blocking statuses/tasks
+  [FAIL] 4. Move all to glazed -- Status transition to 'glazed' failed: 500 Internal Server Error
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all)
+  [PASS] 10. Ship all
+  [PASS] 11. Verify + Cleanup
+
+Order 6: Large Authentic Collection: 0/1 passed  [1 FAIL]
+  [FAIL] 1. Create order (manual) -- Create order failed: 500
+
+Order 7: Creative Mix: 0/1 passed  [1 FAIL]
+  [FAIL] 1. Create order (manual) -- Create order failed: 500
+
+Order 8: Exclusive Countertops: 0/1 passed  [1 FAIL]
+  [FAIL] 1. Create order (manual) -- Create order failed: 500
+
+Order 9: Gold Collection: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 10: Raku + 3D: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 11: Stencil Collection: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 12: Silk Screen: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 13: Round + Triangle Shapes: 2/11 passed  [9 FAIL]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [FAIL] 3. Resolve blocking statuses/tasks -- HTTPSConnectionPool(host='moonjar-pms-production.up.railway.app', port=443): Read timed out. (read timeout=30)
+  [FAIL] 4. Move all to glazed -- HTTPSConnectionPool(host='moonjar-pms-production.up.railway.app', port=443): Max retries exceeded with url: /api/positions/85b2fe66-ddba-4ac6-96aa-443cb7adf1fb/allowed-transitions (Caused by ConnectTi
+  [FAIL] 5. Pre-kiln QC (all) -- HTTPSConnectionPool(host='moonjar-pms-production.up.railway.app', port=443): Max retries exceeded with url: /api/quality/pre-kiln-check (Caused by NameResolutionError("HTTPSConnection(host='moonjar-pm
+  [FAIL] 6. Batch + Fire -- HTTPSConnectionPool(host='moonjar-pms-production.up.railway.app', port=443): Max retries exceeded with url: /api/batches (Caused by NameResolutionError("HTTPSConnection(host='moonjar-pms-production.up
+  [FAIL] 7. Post-fire -> sorting -- HTTPSConnectionPool(host='moonjar-pms-production.up.railway.app', port=443): Max retries exceeded with url: /api/positions/85b2fe66-ddba-4ac6-96aa-443cb7adf1fb/allowed-transitions (Caused by NameResol
+  [FAIL] 8. Sorting split (all good) -- HTTPSConnectionPool(host='moonjar-pms-production.up.railway.app', port=443): Max retries exceeded with url: /api/positions/85b2fe66-ddba-4ac6-96aa-443cb7adf1fb/split (Caused by NameResolutionError("HT
+  [FAIL] 9. Final QC (all pass) -- HTTPSConnectionPool(host='moonjar-pms-production.up.railway.app', port=443): Max retries exceeded with url: /api/quality/final-check (Caused by NameResolutionError("HTTPSConnection(host='moonjar-pms-p
+  [FAIL] 10. Ship all positions -- HTTPSConnectionPool(host='moonjar-pms-production.up.railway.app', port=443): Max retries exceeded with url: /api/shipments (Caused by NameResolutionError("HTTPSConnection(host='moonjar-pms-production.
+  [FAIL] 11. Verify + Cleanup -- HTTPSConnectionPool(host='moonjar-pms-production.up.railway.app', port=443): Max retries exceeded with url: /api/orders/8b879904-9c47-4640-88db-9b860ade1c78 (Caused by NameResolutionError("HTTPSConnec
+
+Order 14: Splashing + Brush: 0/1 passed  [1 FAIL]
+  [FAIL] 1. Create order (manual) -- HTTPSConnectionPool(host='moonjar-pms-production.up.railway.app', port=443): Max retries exceeded with url: /api/orders (Caused by NameResolutionError("HTTPSConnection(host='moonjar-pms-production.up.
+
+Order 15: Mixed Everything: 0/1 passed  [1 FAIL]
+  [FAIL] 1. Create order (manual) -- HTTPSConnectionPool(host='moonjar-pms-production.up.railway.app', port=443): Max retries exceeded with url: /api/orders (Caused by NameResolutionError("HTTPSConnection(host='moonjar-pms-production.up.
+
+Total: 82/103 passed, 21 failed
+21 STEPS FAILED

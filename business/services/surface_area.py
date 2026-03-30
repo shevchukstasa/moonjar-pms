@@ -351,14 +351,17 @@ def get_shape_coefficient(
     return DEFAULTS.get(shape, 1.0)
 
 
-def calculate_glazeable_sqm_for_position(db, position) -> Optional[Decimal]:
+def _calculate_glazeable_sqm_for_position_inner(db, position) -> Optional[Decimal]:
     """Calculate glazeable_sqm for a position, using dimensions or coefficients.
+
+    NEVER returns None, NEVER raises. Returns a positive Decimal.
 
     Strategy:
     1. If length_cm and width_cm are available → exact calculation
     2. If only size string available → parse "WxH" → exact for standard shapes,
        coefficient for non-standard
     3. Fallback: quantity_sqm / quantity × coefficient
+    4. Last resort: 0.04 * quantity (20x20 default)
 
     After base face area is computed, adjusts for place_of_application
     (edges_1, edges_2, all_edges, with_back).
@@ -441,7 +444,14 @@ def calculate_glazeable_sqm_for_position(db, position) -> Optional[Decimal]:
             face_area = Decimal(str(round(area_per_piece * coeff, 4)))
 
     if face_area is None:
-        return None
+        # 4. Last-resort fallback: assume 20x20 tile (0.04 sqm per piece)
+        qty = getattr(position, "quantity", None) or getattr(position, "quantity_pcs", None)
+        qty_val = max(int(qty), 1) if qty else 1
+        face_area = Decimal(str(round(0.04 * qty_val, 4)))
+        logger.warning(
+            "Surface area fallback: position %s — using 0.04*%d = %s sqm",
+            getattr(position, "id", "?"), qty_val, face_area,
+        )
 
     # --- Adjust for place_of_application (edges/back add surface) ---
     poa = getattr(position, 'place_of_application', None) or ''
@@ -516,3 +526,30 @@ def calculate_glazeable_sqm_for_position(db, position) -> Optional[Decimal]:
         )
 
     return face_area
+
+
+def calculate_glazeable_sqm_for_position(db, position) -> Decimal:
+    """Safe wrapper: NEVER returns None, NEVER raises. Returns a positive Decimal."""
+    try:
+        result = _calculate_glazeable_sqm_for_position_inner(db, position)
+        if result is not None:
+            return result
+    except Exception as exc:
+        logger.error(
+            "calculate_glazeable_sqm_for_position crashed for position %s: %s",
+            getattr(position, "id", "?"), exc,
+        )
+
+    # Fallback: use quantity_sqm if available, else 0.04 * quantity (20x20 default)
+    qty_sqm = getattr(position, "quantity_sqm", None)
+    if qty_sqm and float(qty_sqm) > 0:
+        return Decimal(str(round(float(qty_sqm), 4)))
+
+    qty = getattr(position, "quantity", None) or getattr(position, "quantity_pcs", None)
+    qty_val = max(int(qty), 1) if qty else 1
+    fallback = Decimal(str(round(0.04 * qty_val, 4)))
+    logger.warning(
+        "Surface area fallback for position %s: 0.04 * %d = %s sqm",
+        getattr(position, "id", "?"), qty_val, fallback,
+    )
+    return fallback

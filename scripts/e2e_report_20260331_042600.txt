@@ -1,0 +1,318 @@
+E2E Order Lifecycle Test Report
+Generated: 2026-03-31T04:26:00.823150
+API: https://moonjar-pms-production.up.railway.app/api
+Factory: Bali (a2045a5f-c5c3-465c-a953-2c16b5e4b418)
+Duration: 767.4s
+
+Order 1: Simple Tiles: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order via webhook
+  [PASS] 2. Verify order created
+  [PASS] 3. Transition to glazed
+  [PASS] 4. Pre-kiln QC check (pass)
+  [PASS] 5. Batch auto-form, start, complete
+  [PASS] 6. Post-fire -> transferred_to_sorting
+  [PASS] 7. Sorting split (all good)
+  [PASS] 8. Final QC check (pass)
+  [PASS] 9. Create shipment + ship
+  [PASS] 10. Verify final order state
+  [PASS] 11. Cleanup
+
+Order 2: Multi-position Engobe: 10/10 passed  [ALL PASS]
+  [PASS] 1. Create 3-position order via webhook
+  [PASS] 2. Verify 3 positions created
+  [PASS] 3. Engobe path (all 3 positions)
+  [PASS] 4. Pre-kiln QC (all 3)
+  [PASS] 5. Batch auto-form + start + complete
+  [PASS] 6. Post-fire -> sorting
+  [PASS] 7. Sorting split (all good)
+  [PASS] 8. Final QC (all pass)
+  [PASS] 9. Ship all positions
+  [PASS] 10. Verify + Cleanup
+
+Order 3: Countertop: 10/10 passed  [ALL PASS]
+  [PASS] 1. Create countertop order via webhook
+  [PASS] 2. Verify countertop order
+  [PASS] 3. Move to glazed
+  [PASS] 4. Pre-kiln QC
+  [PASS] 5. Batch + Fire
+  [PASS] 6. Post-fire -> sorting
+  [PASS] 7. Split (all good)
+  [PASS] 8. Final QC
+  [PASS] 9. Ship
+  [PASS] 10. Verify + Cleanup
+
+Order 4: Gold+Raku: 10/10 passed  [ALL PASS]
+  [PASS] 1. Create gold/raku order
+  [PASS] 2. Verify order
+  [PASS] 3. Move to glazed
+  [PASS] 4. Pre-kiln QC
+  [PASS] 5. Batch + Fire (round 1)
+  [PASS] 6. Handle post-fire (multi-round possible)
+  [PASS] 7. Split (all good)
+  [PASS] 8. Final QC
+  [PASS] 9. Ship
+  [PASS] 10. Verify + Cleanup
+
+Order 5: Mixed + Service Items: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create mixed order (stencil + regular)
+  [PASS] 2. Verify positions
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all)
+  [PASS] 10. Ship all
+  [PASS] 11. Verify + Cleanup
+
+Order 6: Large Authentic Collection: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 7: Creative Mix: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 8: Exclusive Countertops: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 9: Gold Collection: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 10: Raku + 3D: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 11: Stencil Collection: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 12: Silk Screen: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 13: Round + Triangle Shapes: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 14: Splashing + Brush: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 15: Mixed Everything: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 16: Split Defects — Refire/Repair/Write-off: 0/1 passed  [1 FAIL]
+  [FAIL] 1. Create order (manual) -- Create order failed: 500
+
+Order 17: Color Matching + Stencil Blocking: 11/12 passed  [1 FAIL]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [FAIL] 8. Sorting split (with defects) -- Split with defects failed: 500 Internal Server Error
+  [PASS] 9. Verify sub-positions (defects)
+  [PASS] 10. Final QC (good parts)
+  [PASS] 11. Ship good positions
+  [PASS] 12. Verify + Cleanup
+
+Order 18: Large Countertops + Edge Profiles: 12/12 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (with defects)
+  [PASS] 9. Verify sub-positions (defects)
+  [PASS] 10. Final QC (good parts)
+  [PASS] 11. Ship good positions
+  [PASS] 12. Verify + Cleanup
+
+Order 19: Raku + 3D Mixed: 11/12 passed  [1 FAIL]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [FAIL] 8. Sorting split (with defects) -- Split with defects failed: 500 Internal Server Error
+  [PASS] 9. Verify sub-positions (defects)
+  [PASS] 10. Final QC (good parts)
+  [PASS] 11. Ship good positions
+  [PASS] 12. Verify + Cleanup
+
+Order 20: Silk Screen Multi-Color: 12/12 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (with defects)
+  [PASS] 9. Verify sub-positions (defects)
+  [PASS] 10. Final QC (good parts)
+  [PASS] 11. Ship good positions
+  [PASS] 12. Verify + Cleanup
+
+Order 21: Splashing Large Quantity (78+ m2): 10/12 passed  [2 FAIL]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [FAIL] 8. Sorting split (with defects) -- Split with defects failed: 500 Internal Server Error
+  [PASS] 9. Verify sub-positions (defects)
+  [PASS] 10. Final QC (good parts)
+  [FAIL] 11. Ship good positions -- Create shipment failed: 400 {"detail":"Position #3 is not ready for shipment (status: transferred_to_sorting)"}
+  [PASS] 12. Verify + Cleanup
+
+Order 22: Shapes — Round/Triangle/Octagon/Freeform: 12/12 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (with defects)
+  [PASS] 9. Verify sub-positions (defects)
+  [PASS] 10. Final QC (good parts)
+  [PASS] 11. Ship good positions
+  [PASS] 12. Verify + Cleanup
+
+Order 23: Sink Products + Bowl Shapes: 0/1 passed  [1 FAIL]
+  [FAIL] 1. Create order (manual) -- Create order failed: 500
+
+Order 24: Maximum Defect Scenario: 10/12 passed  [2 FAIL]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [FAIL] 8. Sorting split (with defects) -- Split with defects failed: 500 Internal Server Error
+  [PASS] 9. Verify sub-positions (defects)
+  [PASS] 10. Final QC (good parts)
+  [FAIL] 11. Ship good positions -- Create shipment failed: 400 {"detail":"Position #3 is not ready for shipment (status: transferred_to_sorting)"}
+  [PASS] 12. Verify + Cleanup
+
+Order 25: Everything Combined (Ultimate): 10/12 passed  [2 FAIL]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [FAIL] 8. Sorting split (with defects) -- Split with defects failed: 500 Internal Server Error
+  [PASS] 9. Verify sub-positions (defects)
+  [PASS] 10. Final QC (good parts)
+  [FAIL] 11. Ship good positions -- Create shipment failed: 400 {"detail":"Position #6 is not ready for shipment (status: transferred_to_sorting)"}
+  [PASS] 12. Verify + Cleanup
+
+Total: 250/260 passed, 10 failed
+10 STEPS FAILED

@@ -1,0 +1,8 @@
+E2E Order Lifecycle Test Report
+Generated: 2026-03-31T04:12:58.232777
+API: https://moonjar-pms-production.up.railway.app/api
+Factory: Bali (a2045a5f-c5c3-465c-a953-2c16b5e4b418)
+Duration: 0.0s
+
+Total: 0/0 passed, 0 failed
+ALL PASSED

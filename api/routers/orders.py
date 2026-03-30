@@ -858,7 +858,16 @@ async def create_order(
             color_2=item_data.color_2,
         )
         db.add(item)
-        db.flush()
+        try:
+            db.flush()
+        except Exception as flush_err:
+            import logging as _logging
+            _logging.getLogger("moonjar.orders.create").error(
+                "Item flush failed for color=%s size=%s product_type=%s thickness=%s: %s",
+                item_data.color, item_data.size, item_data.product_type, item_data.thickness, flush_err
+            )
+            db.rollback()
+            raise HTTPException(500, f"Failed to create item '{item_data.color} {item_data.size}': {str(flush_err)[:200]}")
 
         # Use the full intake pipeline: recipe lookup → blocking tasks →
         # material reservation → defect margin (same as webhook orders)

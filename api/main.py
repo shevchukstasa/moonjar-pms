@@ -5,7 +5,6 @@ Moonjar PMS — FastAPI application entry point.
 import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from contextlib import asynccontextmanager
 import logging
@@ -77,6 +76,7 @@ from api.routers import admin_settings
 from api.routers import delivery
 from api.routers import employees
 from api.routers import mana_shipments
+from api.routers import pdf_templates
 from api.routers import shipments
 from api.routers import firing_logs
 
@@ -1802,6 +1802,8 @@ async def lifespan(app: FastAPI):
         ("employee", "api.schema_patches.employee_patch", "apply_patch"),
         ("firing_log", "api.schema_patches.firing_log_patch", "apply_patch"),
         ("shipment", "api.schema_patches.shipment_patch", "apply_patch"),
+        ("engobe_type", "api.schema_patches.engobe_type_patch", "apply_patch"),
+        ("problem_card_mode", "api.schema_patches.problem_card_mode_patch", "apply"),
     ]
 
     patch_ok = 0
@@ -1950,5 +1952,6 @@ def setup_routers():
     app.include_router(employees.router, prefix="/api/employees", tags=["employees"])
     app.include_router(mana_shipments.router, prefix="/api/mana-shipments", tags=["mana-shipments"])
     app.include_router(shipments.router, prefix="/api/shipments", tags=["shipments"])
+    app.include_router(pdf_templates.router, prefix="/api/pdf/templates", tags=["pdf-templates"])
 
 setup_routers()

@@ -11,7 +11,6 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from api.database import get_db
 from api.auth import get_current_user
@@ -222,6 +221,10 @@ async def get_production_status(
     # Include factory info
     factory = db.query(Factory).filter(Factory.id == order.factory_id).first()
 
+    # Factory lead time estimate
+    from business.services.order_intake import estimate_factory_lead_time
+    lead_time = estimate_factory_lead_time(db, order.factory_id)
+
     # Per-position schedule data (TOC/DBR upfront scheduling)
     position_schedules = [
         {
@@ -263,6 +266,8 @@ async def get_production_status(
         "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
         "updated_at": order.updated_at.isoformat() if order.updated_at else None,
         # Cancellation request state — so Sales app knows current decision state
+        # Factory lead time estimate
+        "estimated_lead_time": lead_time,
         "cancellation_requested": getattr(order, "cancellation_requested", False) or False,
         "cancellation_decision": getattr(order, "cancellation_decision", None),
         "cancellation_requested_at": (
@@ -486,7 +491,7 @@ async def request_cancellation(
 
 # ---------- Incoming Webhook (from Sales) ----------
 
-class SalesOrderWebhookPayload(BaseModel):
+class SalesOrderWebhookPayload(BaseModel):  # noqa: dead-code — schema docs, HMAC bypasses runtime validation
     event_id: str
     event_type: str = "new_order"  # new_order | order_update | order_cancel
     order_data: dict
@@ -509,40 +514,32 @@ async def receive_sales_order(
     # Read raw body BEFORE json parsing (needed for HMAC verification)
     raw_body = await request.body()
 
-    # Verify authentication — accept both X-API-Key and Bearer
+    # ── Authentication dispatch based on PRODUCTION_WEBHOOK_AUTH_MODE ──
+    # "bearer" → only check Bearer token / X-API-Key
+    # "hmac"   → only check HMAC-SHA256 signature
+    # anything else (empty / legacy) → check both (backward-compatible)
+    auth_mode = (settings.PRODUCTION_WEBHOOK_AUTH_MODE or "").strip().lower()
+
     x_api_key = request.headers.get("X-API-Key")
     auth_header = request.headers.get("Authorization", "")
     bearer_token = auth_header[7:] if auth_header.startswith("Bearer ") else None
 
-    authenticated = False
-    if x_api_key and settings.SALES_APP_API_KEY and hmac_mod.compare_digest(x_api_key, settings.SALES_APP_API_KEY):
-        authenticated = True
-    elif bearer_token and settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and hmac_mod.compare_digest(bearer_token, settings.PRODUCTION_WEBHOOK_BEARER_TOKEN):
-        authenticated = True
+    def _verify_bearer() -> bool:
+        """Check Bearer token or X-API-Key."""
+        if x_api_key and settings.SALES_APP_API_KEY and hmac_mod.compare_digest(x_api_key, settings.SALES_APP_API_KEY):
+            return True
+        if bearer_token and settings.PRODUCTION_WEBHOOK_BEARER_TOKEN and hmac_mod.compare_digest(bearer_token, settings.PRODUCTION_WEBHOOK_BEARER_TOKEN):
+            return True
+        return False
 
-    if not authenticated:
-        # Debug logging — safe (no secrets leaked, only lengths and presence)
-        logger.warning(
-            "Webhook auth FAILED — "
-            "X-API-Key present: %s (len=%d), "
-            "SALES_APP_API_KEY configured: %s (len=%d), "
-            "Bearer present: %s, "
-            "PRODUCTION_WEBHOOK_BEARER_TOKEN configured: %s, "
-            "match_apikey: %s",
-            bool(x_api_key), len(x_api_key or ""),
-            bool(settings.SALES_APP_API_KEY), len(settings.SALES_APP_API_KEY or ""),
-            bool(bearer_token),
-            bool(settings.PRODUCTION_WEBHOOK_BEARER_TOKEN),
-            hmac_mod.compare_digest(x_api_key, settings.SALES_APP_API_KEY) if (x_api_key and settings.SALES_APP_API_KEY) else "N/A",
-        )
-        raise HTTPException(401, "Invalid API key or bearer token")
-
-    # HMAC-SHA256 signature verification (when HMAC secret is configured)
-    hmac_secret = settings.PRODUCTION_WEBHOOK_HMAC_SECRET
-    if hmac_secret:
+    def _verify_hmac() -> None:
+        """Verify HMAC-SHA256 signature. Raises HTTPException on failure."""
+        hmac_secret = settings.PRODUCTION_WEBHOOK_HMAC_SECRET
+        if not hmac_secret:
+            raise HTTPException(500, "HMAC auth_mode configured but PRODUCTION_WEBHOOK_HMAC_SECRET is empty")
         signature = request.headers.get("X-Webhook-Signature")
         if not signature:
-            logger.warning("Webhook received without HMAC signature")
+            logger.warning("Webhook received without HMAC signature (auth_mode=hmac)")
             raise HTTPException(401, "Missing webhook signature")
         expected = hmac_mod.new(
             hmac_secret.encode(), raw_body, hashlib.sha256
@@ -550,6 +547,47 @@ async def receive_sales_order(
         if not hmac_mod.compare_digest(signature, expected):
             logger.warning("Webhook HMAC signature mismatch")
             raise HTTPException(401, "Invalid webhook signature")
+
+    if auth_mode == "hmac":
+        # Only HMAC — no bearer check at all
+        _verify_hmac()
+    elif auth_mode == "bearer":
+        # Only Bearer / X-API-Key — no HMAC check
+        if not _verify_bearer():
+            logger.warning(
+                "Webhook auth FAILED (mode=bearer) — "
+                "X-API-Key present: %s (len=%d), Bearer present: %s",
+                bool(x_api_key), len(x_api_key or ""), bool(bearer_token),
+            )
+            raise HTTPException(401, "Invalid API key or bearer token")
+    else:
+        # Legacy / unset: check bearer first, then HMAC if secret is configured
+        if not _verify_bearer():
+            logger.warning(
+                "Webhook auth FAILED (mode=legacy) — "
+                "X-API-Key present: %s (len=%d), "
+                "SALES_APP_API_KEY configured: %s (len=%d), "
+                "Bearer present: %s, "
+                "PRODUCTION_WEBHOOK_BEARER_TOKEN configured: %s",
+                bool(x_api_key), len(x_api_key or ""),
+                bool(settings.SALES_APP_API_KEY), len(settings.SALES_APP_API_KEY or ""),
+                bool(bearer_token),
+                bool(settings.PRODUCTION_WEBHOOK_BEARER_TOKEN),
+            )
+            raise HTTPException(401, "Invalid API key or bearer token")
+        # Additionally verify HMAC if secret is configured (legacy double-check)
+        hmac_secret = settings.PRODUCTION_WEBHOOK_HMAC_SECRET
+        if hmac_secret:
+            signature = request.headers.get("X-Webhook-Signature")
+            if not signature:
+                logger.warning("Webhook received without HMAC signature (legacy mode)")
+                raise HTTPException(401, "Missing webhook signature")
+            expected = hmac_mod.new(
+                hmac_secret.encode(), raw_body, hashlib.sha256
+            ).hexdigest()
+            if not hmac_mod.compare_digest(signature, expected):
+                logger.warning("Webhook HMAC signature mismatch (legacy mode)")
+                raise HTTPException(401, "Invalid webhook signature")
 
     # Parse body
     import json
@@ -653,32 +691,13 @@ async def receive_sales_order(
             order = _create_order_from_webhook(db, order_data, body)
             event.processed = True
 
-            # Schedule deadline estimation BEFORE commit (same db session)
+            # Schedule deadline estimation (order already committed by process_incoming_order,
+            # but still attached to session — _estimate_completion updates schedule_deadline)
             estimated_completion = _estimate_completion(db, order)
 
-            db.commit()
+            db.commit()  # Commits event.processed=True + schedule_deadline update
 
-            # Notify Production Managers of the assigned factory (best-effort, after commit)
-            try:
-                from business.services.notifications import notify_pm
-                positions_count = db.query(OrderPosition).filter(
-                    OrderPosition.order_id == order.id,
-                ).count()
-                notify_pm(
-                    db=db,
-                    factory_id=order.factory_id,
-                    type="status_change",
-                    title=f"New order from Sales: {order.order_number}",
-                    message=(
-                        f"Client: {order.client}, "
-                        f"{positions_count} position(s). "
-                        f"Deadline: {order.final_deadline or 'not set'}"
-                    ),
-                    related_entity_type="order",
-                    related_entity_id=order.id,
-                )
-            except Exception as e:
-                logger.warning(f"Failed to notify PM about new order: {e}")
+            # PM notification is handled inside process_incoming_order — no duplicate here.
 
             # Return factory info + estimated completion so Sales can show delivery date
             factory = db.query(Factory).filter(Factory.id == order.factory_id).first()
@@ -906,242 +925,55 @@ def _resolve_factory(db: Session, client_location: str | None, explicit_factory_
 
 
 def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict) -> ProductionOrder:
-    """Create a production order from Sales webhook payload."""
+    """Create a production order from Sales webhook payload.
 
-    # Resolve factory (handles single-factory, location matching, fallback)
+    Delegates to process_incoming_order (single source of truth for order creation).
+    The webhook path uses:
+    - skip_scheduling=True (caller runs _estimate_completion separately)
+    - factory_id_override from _resolve_factory (uses served_locations JSONB)
+    - return_order=True to get the ORM object back
+    """
+    # Resolve factory using webhook-specific logic (served_locations JSONB matching)
     factory = _resolve_factory(
         db,
         client_location=order_data.get("client_location"),
         explicit_factory_id=order_data.get("factory_id"),
     )
-    factory_id = str(factory.id)
 
-    order = ProductionOrder(
-        id=uuid_mod.uuid4(),
-        order_number=order_data.get("order_number", f"SALES-{uuid_mod.uuid4().hex[:8].upper()}"),
-        client=order_data.get("client") or order_data.get("customer_name", "Unknown"),
-        client_location=order_data.get("client_location"),
-        sales_manager_name=order_data.get("sales_manager_name"),
-        sales_manager_contact=order_data.get("sales_manager_contact"),
-        factory_id=UUID(factory_id),
-        document_date=date.today(),
-        production_received_date=date.today(),
-        final_deadline=_parse_date(order_data.get("final_deadline")),
-        desired_delivery_date=_parse_date(order_data.get("desired_delivery_date")),
-        status=OrderStatus.NEW,
-        source=OrderSource.SALES_WEBHOOK,
-        external_id=order_data.get("external_id"),
-        sales_payload_json=raw_payload,
-        mandatory_qc=order_data.get("mandatory_qc", False),
-        notes=order_data.get("notes"),
+    # Normalize Sales payload for process_incoming_order
+    # - "customer_name" → "client" (Sales uses customer_name)
+    # - "table_top" → "countertop" (unified product type)
+    # - Strip event_id to skip idempotency check (webhook already handles it)
+    # - Strip external_id existence check (webhook already handles it above)
+    payload = dict(order_data)
+    payload.pop("event_id", None)  # Webhook handles idempotency; avoid duplicate detection
+    if "client" not in payload and "customer_name" in payload:
+        payload["client"] = payload["customer_name"]
+    if not payload.get("order_number"):
+        payload["order_number"] = f"SALES-{uuid_mod.uuid4().hex[:8].upper()}"
+
+    # Normalize product_type in items: table_top → countertop
+    for item in payload.get("items", []):
+        if item.get("product_type") == "table_top":
+            item["product_type"] = "countertop"
+
+    # Store raw Sales payload for audit
+    payload["sales_payload_json"] = raw_payload
+
+    from business.services.order_intake import process_incoming_order
+    result = process_incoming_order(
+        db,
+        payload,
+        source=OrderSource.SALES_WEBHOOK.value,
+        skip_scheduling=True,
+        skip_duplicate_check=True,  # Webhook already handles idempotency & existence
+        factory_id_override=factory.id,
+        return_order=True,
     )
-    db.add(order)
-    db.flush()
 
-    # --- Helpers to detect service items and stencil/silkscreen ---
-    def _is_service_item(idata: dict) -> bool:
-        """Detect non-production service items (stencil design, silkscreen design, color matching)."""
-        # Explicit flag from Sales
-        if idata.get("is_additional_item") or idata.get("is_service"):
-            return True
-        # Heuristic: items with no size or zero quantity are service items
-        app = (idata.get("application") or "").strip().lower()
-        desc = (idata.get("description") or "").strip().lower()
-        name = (idata.get("name") or "").strip().lower()
-        combined = f"{desc} {name} {app}"
-        service_keywords = ["design", "matching service", "color matching", "design&production",
-                            "design & production", "stencil design", "silkscreen design"]
-        return any(kw in combined for kw in service_keywords)
-
-    def _detect_task_type(idata: dict) -> Optional[TaskType]:
-        """Determine task type for a service item."""
-        app = (idata.get("application") or "").strip().lower()
-        desc = (idata.get("description") or idata.get("name") or "").strip().lower()
-        combined = f"{desc} {app}"
-        if "stencil" in combined:
-            return TaskType.STENCIL_ORDER
-        if "silkscreen" in combined or "silk_screen" in combined or "silk screen" in combined:
-            return TaskType.SILK_SCREEN_ORDER
-        if "color matching" in combined or "color_matching" in combined:
-            return TaskType.COLOR_MATCHING
-        return None
-
-    def _needs_stencil_silkscreen(idata: dict) -> bool:
-        """Check if a tile position requires stencil/silkscreen work before glazing."""
-        app = (idata.get("application") or "").strip().lower()
-        return app in ("stencil", "silkscreen")
-
-    def _needs_color_matching(idata: dict) -> bool:
-        """Check if a tile position requires color matching work."""
-        app = (idata.get("application") or "").strip().lower()
-        desc = (idata.get("description") or "").strip().lower()
-        return "color matching" in desc or "color_matching" in app
-
-    items = order_data.get("items", [])
-    created_tasks = []  # Track tasks created for linking
-    tile_positions = []  # Track tile positions that may need blocking
-
-    for item_data in items:
-        # Support both "quantity" (Sales) and "quantity_pcs" (PMS native)
-        qty_pcs = item_data.get("quantity_pcs") or item_data.get("quantity", 0)
-        qty_sqm = item_data.get("quantity_sqm")
-
-        # Parse thickness: accept string "11mm" or number 11.0; prefer thickness_mm
-        raw_thickness = item_data.get("thickness", 11.0)
-        if isinstance(raw_thickness, str):
-            raw_thickness = float(''.join(c for c in raw_thickness if c.isdigit() or c == '.') or '11')
-        thickness_mm = item_data.get("thickness_mm") or raw_thickness
-
-        # Resolve size string — use explicit numeric dims from Sales App if size string absent
-        _size_str = item_data.get("size", "")
-        if not _size_str:
-            _sw = item_data.get("size_width_cm")
-            _sh = item_data.get("size_height_cm")
-            if _sw and _sh:
-                _size_str = f"{_sw:g}x{_sh:g}"
-
-        # qty_sqm fallback — calculate from dimensions × qty_pcs if not provided
-        if not qty_sqm:
-            _sw = item_data.get("size_width_cm")
-            _sh = item_data.get("size_height_cm")
-            if not (_sw and _sh) and _size_str:
-                try:
-                    from business.kiln.capacity import parse_size as _parse_size
-                    _dims = _parse_size(_size_str)
-                    _sw, _sh = _dims.get("width_cm"), _dims.get("height_cm")
-                except Exception:
-                    _sw = _sh = None
-            if _sw and _sh and qty_pcs:
-                qty_sqm = round((float(_sw) * float(_sh) / 10000) * qty_pcs, 3)
-
-        item = ProductionOrderItem(
-            id=uuid_mod.uuid4(),
-            order_id=order.id,
-            color=item_data.get("color", ""),
-            color_2=item_data.get("color_2"),
-            size=_size_str,
-            application=item_data.get("application"),
-            finishing=item_data.get("finishing"),
-            thickness=thickness_mm,
-            quantity_pcs=qty_pcs,
-            quantity_sqm=qty_sqm,
-            collection=item_data.get("collection"),
-            application_type=item_data.get("application_type"),
-            place_of_application=item_data.get("place_of_application"),
-            product_type=("countertop" if item_data.get("product_type") == "table_top" else item_data.get("product_type", "tile")),
-            # Shape & dimension data from Sales app (for glaze surface area calculation)
-            shape=item_data.get("shape"),
-            length_cm=item_data.get("length_cm"),
-            width_cm=item_data.get("width_cm"),
-            depth_cm=item_data.get("depth_cm"),
-            bowl_shape=item_data.get("bowl_shape"),
-            shape_dimensions=item_data.get("shape_dimensions"),
-            # Edge profile data
-            edge_profile=item_data.get("edge_profile"),
-            edge_profile_sides=item_data.get("edge_profile_sides"),
-            edge_profile_notes=item_data.get("edge_profile_notes"),
-        )
-        db.add(item)
-        db.flush()
-
-        # Store Sales-only fields as transient attributes on the item object.
-        # These are NOT model columns, but process_order_item() reads them
-        # via getattr() for application collection/method mapping.
-        item._sales_application_collection = item_data.get("application_collection")
-        item._sales_application_method = item_data.get("application_method")
-        item._sales_colors_for_splashing = item_data.get("colors_for_splashing")
-        item._sales_is_additional_item = item_data.get("is_additional_item")
-        item._sales_description = item_data.get("description")
-
-        # --- Route: service item → Task (not a production position) ---
-        if _is_service_item(item_data):
-            task_type = _detect_task_type(item_data) or TaskType.STENCIL_ORDER
-            task = Task(
-                id=uuid_mod.uuid4(),
-                factory_id=UUID(factory_id),
-                type=task_type,
-                status=TaskStatus.PENDING,
-                assigned_role=UserRole.PRODUCTION_MANAGER,
-                related_order_id=order.id,
-                blocking=True,
-                description=(
-                    f"[{task_type.value.replace('_', ' ').title()}] "
-                    f"Order {order.order_number}: "
-                    f"{item_data.get('application', '')} — "
-                    f"{item_data.get('color', '')} "
-                    f"{'/ ' + item_data.get('color_2') if item_data.get('color_2') else ''}"
-                ).strip(),
-                priority=10,
-                metadata_json={
-                    "order_item_id": str(item.id),
-                    "application": item_data.get("application"),
-                    "color": item_data.get("color"),
-                    "color_2": item_data.get("color_2"),
-                    "source": "sales_webhook_auto",
-                },
-            )
-            db.add(task)
-            db.flush()
-            created_tasks.append(task)
-            logger.info(f"Created task {task_type.value} for order {order.order_number}")
-            continue  # Don't create position for service items
-
-        # --- Route: tile/product → full intake pipeline ---
-        # Use process_order_item() for recipe lookup, defect margin, surface area,
-        # size resolution, material reservation, and blocking task creation.
-        from business.services.order_intake import process_order_item
-
-        try:
-            position = process_order_item(db, order, item)
-            if position:
-                tile_positions.append(position)
-        except Exception as e:
-            logger.error(
-                "process_order_item failed for order %s item %s: %s",
-                order.order_number, item.id, e,
-            )
-            # Continue to next item — don't fail the entire webhook
-
-    # Link service tasks to their tile positions (same order)
-    for task in created_tasks:
-        if task.type in (TaskType.STENCIL_ORDER, TaskType.SILK_SCREEN_ORDER):
-            # Find positions that need stencil/silkscreen in this order
-            for pos in tile_positions:
-                if _ev(pos.status) == PositionStatus.AWAITING_STENCIL_SILKSCREEN.value:
-                    task.related_position_id = pos.id
-                    break
-        elif task.type == TaskType.COLOR_MATCHING:
-            for pos in tile_positions:
-                if _ev(pos.status) == PositionStatus.AWAITING_COLOR_MATCHING.value:
-                    task.related_position_id = pos.id
-                    break
-
-    # Update order status based on position statuses (same as order_intake pipeline)
-    old_status = order.status
-    if tile_positions and any(
-        pos.status in (
-            PositionStatus.INSUFFICIENT_MATERIALS,
-            PositionStatus.AWAITING_RECIPE,
-            PositionStatus.AWAITING_STENCIL_SILKSCREEN,
-            PositionStatus.AWAITING_COLOR_MATCHING,
-            PositionStatus.AWAITING_SIZE_CONFIRMATION,
-        )
-        for pos in tile_positions
-    ):
-        order.status = OrderStatus.NEW
-    elif tile_positions:
-        order.status = OrderStatus.IN_PRODUCTION
-
-    # Log order status change
-    if order.status != old_status:
-        try:
-            db.add(ProductionOrderStatusLog(
-                order_id=order.id,
-                old_status=old_status,
-                new_status=order.status,
-            ))
-        except Exception:
-            pass
+    order = result.get("_order")
+    if not order:
+        raise ValueError(f"process_incoming_order returned status={result.get('status')} without order object")
 
     return order
 

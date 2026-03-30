@@ -2,8 +2,6 @@
 Defect Alert service — creates 5 Why tasks and alerts when defect % exceeds target.
 Decision 2026-03-19.
 """
-from __future__ import annotations
-
 import logging
 from typing import Optional
 

@@ -291,27 +291,6 @@ def create_breakdown_maintenance(
 
 
 # ────────────────────────────────────────────────────────────────
-# Get affected positions
-# ────────────────────────────────────────────────────────────────
-
-def get_affected_positions(db: Session, kiln_id: UUID) -> list[OrderPosition]:
-    """Get all non-terminal positions estimated to use the broken kiln."""
-    from api.enums import PositionStatus
-
-    terminal_statuses = {
-        PositionStatus.SHIPPED.value,
-        PositionStatus.CANCELLED.value,
-        PositionStatus.READY_FOR_SHIPMENT.value,
-        PositionStatus.PACKED.value,
-    }
-
-    return db.query(OrderPosition).filter(
-        OrderPosition.estimated_kiln_id == kiln_id,
-        OrderPosition.status.notin_(list(terminal_statuses)),
-    ).all()
-
-
-# ────────────────────────────────────────────────────────────────
 # Reschedule affected positions
 # ────────────────────────────────────────────────────────────────
 

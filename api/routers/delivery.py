@@ -159,6 +159,17 @@ async def process_delivery_photo(
         matched_count, len(matches), supplier_name,
     )
 
+    # 8. Pre-format text for API consumers (non-Telegram channels)
+    from business.services.photo_analysis import format_delivery_message
+
+    matched_for_fmt = [m for m in matches if m.get("matched")]
+    unmatched_for_fmt = [m for m in matches if not m.get("matched")]
+    formatted_text = format_delivery_message(
+        result,
+        matched_items=matched_for_fmt,
+        unmatched_items=unmatched_for_fmt,
+    )
+
     return {
         "supplier": supplier_name,
         "delivery_date": date_hint or readings.get("delivery_date"),
@@ -168,4 +179,5 @@ async def process_delivery_photo(
         "matched_items": matched_count,
         "vision_raw": readings,
         "confidence": result.get("confidence"),
+        "formatted_text": formatted_text,
     }

@@ -6,7 +6,6 @@ Provides:
   - Factory-wide upcoming maintenance view
 """
 
-import uuid as uuid_mod
 from uuid import UUID
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional
@@ -14,7 +13,6 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
 
 from api.database import get_db
 from api.auth import get_current_user

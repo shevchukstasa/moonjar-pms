@@ -6,7 +6,7 @@ from datetime import date
 from uuid import UUID
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,7 +14,7 @@ from api.database import get_db
 from api.auth import get_current_user
 from api.roles import require_management
 
-from api.models import BottleneckConfig, BufferStatus, Resource, Factory, ProductionOrder, OrderPosition
+from api.models import BottleneckConfig, Resource, Factory, ProductionOrder, OrderPosition
 from api.enums import ResourceType, BufferHealth, OrderStatus, PositionStatus
 from business.services.buffer_health import calculate_buffer_health
 
@@ -143,6 +143,16 @@ class BufferHealthResponse(BaseModel):
     kiln_name: str | None = None
 
 
+class ConstraintListResponse(BaseModel):
+    items: list[ConstraintResponse]
+    total: int
+
+
+class BufferHealthListResponse(BaseModel):
+    items: list[BufferHealthResponse]
+    total: int
+
+
 def _serialize_constraint(config: BottleneckConfig) -> dict:
     """Serialize BottleneckConfig to dict."""
     return {
@@ -160,7 +170,7 @@ def _serialize_constraint(config: BottleneckConfig) -> dict:
     }
 
 
-@router.get("/constraints")
+@router.get("/constraints", response_model=ConstraintListResponse)
 async def list_constraints(
     factory_id: UUID | None = None,
     db: Session = Depends(get_db),
@@ -321,7 +331,7 @@ async def set_buffer_target(
     }
 
 
-@router.get("/buffer-health")
+@router.get("/buffer-health", response_model=BufferHealthListResponse)
 async def get_buffer_health(
     factory_id: UUID | None = None,
     db: Session = Depends(get_db),

@@ -17,7 +17,6 @@ Rules:
 """
 
 from dataclasses import dataclass
-from typing import Optional
 import logging
 
 logger = logging.getLogger("moonjar.glazing_board")

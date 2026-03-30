@@ -12,8 +12,6 @@ Templates are matched via `detect_template()` which scores each template
 against the extracted PDF text and returns the best match (or "generic" fallback).
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass, field
 from typing import Optional

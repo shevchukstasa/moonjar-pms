@@ -17,7 +17,6 @@ Rules:
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
-from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 

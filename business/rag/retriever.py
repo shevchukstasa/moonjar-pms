@@ -146,56 +146,5 @@ def _semantic_search(
     return scored[:top_k]
 
 
-async def chat_with_context(
-    db: Session,
-    user_message: str,
-    session_id: UUID,
-    factory_id: Optional[UUID] = None,
-) -> str:
-    """
-    RAG chat: retrieve context → build prompt → call LLM → return answer.
-    """
-    import httpx
-    from api.config import get_settings
-
-    settings = get_settings()
-
-    # 1. Retrieve relevant context
-    context_items = await search(
-        db, user_message, top_k=5, factory_id=factory_id,
-    )
-
-    context_text = "\n\n".join(
-        f"[{item['source_table']}] {item['content_text']}"
-        for item in context_items
-    )
-
-    # 2. Build prompt
-    system_prompt = (
-        "You are a production management assistant for Moonjar PMS. "
-        "Answer questions based on the provided context from the production database. "
-        "If the context doesn't contain enough information, say so. "
-        "Respond in the same language as the user's question.\n\n"
-        f"CONTEXT:\n{context_text}"
-    )
-
-    # 3. Call OpenAI API
-    if not settings.OPENAI_API_KEY:
-        return "AI chat is not configured. Please set OPENAI_API_KEY."
-
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
-            json={
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message},
-                ],
-                "max_tokens": 1000,
-            },
-            timeout=60,
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+# chat_with_context — removed (replaced by ai_chat_service.py which supports
+# Anthropic→OpenAI fallback, session history, RAG sources, auto-naming)

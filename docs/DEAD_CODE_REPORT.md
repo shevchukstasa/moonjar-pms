@@ -1,300 +1,33 @@
 # Moonjar PMS — Отчёт по мёртвому коду
 
-Дата сканирования: 2026-03-24 23:05
+Дата сканирования: 2026-03-27 16:37
 
 ## Сводка
 
 | Категория | Точно мёртвый | Возможно мёртвый |
 |-----------|:---:|:---:|
-| Неиспользуемые импорты | 94 | 0 |
-| Неиспользуемые функции | 35 | 15 |
-| Неиспользуемые классы | 18 | 0 |
-| Неиспользуемые SQLAlchemy-модели | 1 | 0 |
-| Неиспользуемые компоненты | 2 | 0 |
-| Неиспользуемые TS-экспорты | 0 | 202 |
-| Мёртвая бизнес-логика | 2 | 0 |
-| Осиротевшие схемы | 9 | 0 |
-| Неиспользуемые env-переменные | 0 | 6 |
-| **ИТОГО** | **161** | **223** |
-
-## Неиспользуемые импорты
-
-- **[DEAD]** `api/auth.py:7` — `secrets`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/auth.py:281` — `UserFactory`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/main.py:8` — `JSONResponse`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/models.py:18` — `MaterialType`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/rate_limit.py:14` — `datetime`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/rate_limit.py:14` — `timezone`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/roles.py:5` — `wraps`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/analytics.py:26` — `Resource`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/employees.py:5` — `datetime`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/employees.py:5` — `timezone`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/employees.py:6` — `Decimal`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/factories.py:7` — `func`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/firing_profiles.py:8` — `and_`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/health.py:175` — `daily_database_backup`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/integration.py:14` — `func`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/kiln_maintenance.py:9` — `uuid_mod`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/kiln_maintenance.py:17` — `and_`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/orders.py:8` — `Body`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/orders.py:14` — `get_current_user`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/orders.py:969` — `NotificationType`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/orders.py:969` — `RelatedEntityType`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/packaging.py:7` — `Query`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/packaging.py:12` — `get_current_user`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/purchaser.py:13` — `apply_factory_filter`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/purchaser.py:184` — `and_`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/quality.py:19` — `QcResult`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/quality.py:19` — `QcStage`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/reports.py:8` — `Query`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/reports.py:13` — `get_current_user`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/security.py:22` — `IpScope`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/settings.py:13` — `text`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/stone_reservations.py:12` — `text`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/stone_reservations.py:12` — `func`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/stone_reservations.py:15` — `StoneReservationAdjustment`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/tasks.py:15` — `ProductionOrderItem`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/tasks.py:15` — `Factory`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/telegram.py:5` — `Optional`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/toc.py:9` — `Request`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/toc.py:17` — `BufferStatus`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/tps.py:19` — `TpsStatus`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/users.py:8` — `EmailStr`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/routers/users.py:13` — `get_current_user`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `api/schemas.py:6` — `annotations`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/planning_engine/scheduler.py:6` — `timedelta`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/planning_engine/scheduler.py:7` — `Optional`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/anomaly_detection.py:16` — `field`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/anomaly_detection.py:19` — `datetime`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/buffer_health.py:7` — `ceil`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/buffer_health.py:7` — `floor`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/daily_distribution.py:11` — `ceil`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/daily_kpi.py:9` — `datetime`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/daily_kpi.py:10` — `ceil`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/daily_kpi.py:15` — `case`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/defect_alert.py:5` — `annotations`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/defect_coefficient.py:7` — `floor`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/defect_coefficient.py:12` — `sa_func`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/firing_profiles.py:10` — `and_`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/firing_profiles.py:156` — `sa_func`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/glazing_board.py:20` — `Optional`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/material_consumption.py:16` — `func`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/material_consumption.py:52` — `_get_area_for_position`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/min_balance.py:9` — `Optional`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/notifications.py:14` — `NotificationType`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/notifications.py:14` — `RelatedEntityType`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/order_cancellation.py:10` — `Optional`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/payroll.py:8` — `Optional`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/pdf_parser_service.py:12` — `datetime`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/pdf_templates.py:15` — `annotations`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/photo_analysis.py:17` — `Optional`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/photo_storage.py:18` — `datetime`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/photo_storage.py:18` — `timezone`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/production_split.py:9` — `Optional`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/purchase_consolidation.py:20` — `Decimal`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/purchaser_lifecycle.py:18` — `func`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/reconciliation.py:6` — `timedelta`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/reconciliation.py:7` — `ceil`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/reconciliation.py:7` — `floor`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/rotation_rules.py:17` — `datetime`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/rotation_rules.py:17` — `timezone`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/rotation_rules.py:23` — `Resource`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/schedule_estimation.py:6` — `datetime`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/schedule_estimation.py:7` — `floor`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/schedule_estimation.py:8` — `Optional`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/status_machine.py:381` — `create_notification`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/status_machine.py:383` — `NotificationType`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/status_machine.py:383` — `RelatedEntityType`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/stone_reservation.py:17` — `math`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/stone_reservation.py:20` — `Decimal`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `business/services/telegram_callbacks.py:300` — `sa_text`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `scripts/architecture_audit_detailed.py:16` — `sys`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `scripts/dead_code_scanner.py:25` — `sys`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `scripts/dead_code_scanner.py:29` — `Optional`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `scripts/reconcile.py:9` — `json`
-  - Импортирован, но не используется в файле
-- **[DEAD]** `scripts/test_stages_1_2.py:21` — `datetime`
-  - Импортирован, но не используется в файле
+| Неиспользуемые функции | 0 | 15 |
+| Неиспользуемые TS-экспорты | 0 | 205 |
+| Неиспользуемые env-переменные | 0 | 5 |
+| **ИТОГО** | **0** | **225** |
 
 ## Неиспользуемые функции
 
-- **[DEAD]** `api/auth.py:142` — `validate_csrf`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `api/unit_conversion.py:38` — `convert_units`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/planning_engine/optimizer.py:10` — `optimize_batch_fill`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/planning_engine/scheduler.py:12` — `generate_production_schedule`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/planning_engine/scheduler.py:27` — `recalculate_schedule`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/rag/retriever.py:149` — `chat_with_context`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/defect_coefficient.py:197` — `calculate_production_quantity_with_defects`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/firing_profiles.py:118` — `get_firing_profile_for_stage`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/firing_profiles.py:176` — `get_temperature_group_recipes`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/kiln_breakdown.py:297` — `get_affected_positions`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/material_matcher.py:274` — `guess_subtype_from_size`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/material_matcher.py:654` — `find_best_match_sync`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/min_balance.py:175` — `pm_override_min_balance`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/notifications.py:332` — `edit_telegram_message_buttons`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/order_intake.py:86` — `process_incoming_order`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/order_intake.py:378` — `estimate_factory_lead_time`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/pdf_templates.py:199` — `get_template`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/pdf_templates.py:261` — `list_templates`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/photo_analysis.py:382` — `format_delivery_message`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/photo_storage.py:196` — `get_public_url`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/photo_storage.py:213` — `delete_photo`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/purchase_consolidation.py:296` — `auto_consolidate_on_schedule`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/purchaser_lifecycle.py:243` — `check_and_notify_overdue`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/repair_monitoring.py:361` — `create_repair_queue_entry`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/rotation_rules.py:239` — `validate_batch_rotation`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/status_machine.py:218` — `transition_position_status`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/surplus_handling.py:146` — `process_surplus_batch`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/telegram_ai.py:504` — `detect_language`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/telegram_ai.py:532` — `translate_response`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `business/services/telegram_ai.py:582` — `ai_match_material`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `scripts/architecture_audit_detailed.py:46` — `count_lines`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `scripts/architecture_audit_detailed.py:89` — `count_endpoints`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `scripts/architecture_audit_detailed.py:97` — `search_in_codebase`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `scripts/audit_pm.py:260` — `parse_pm_api_calls`
-  - Определена, но нигде не вызывается
-- **[DEAD]** `scripts/audit_pm.py:283` — `parse_api_module_calls`
-  - Определена, но нигде не вызывается
 - **[MAYBE]** `api/config.py:92` — `model_post_init`
   - Метод определён, но возможно не вызывается
-- **[MAYBE]** `api/routers/integration.py:969` — `_needs_stencil_silkscreen`
+- **[MAYBE]** `api/routers/integration.py:981` — `_parse_date`
   - Приватная функция — найдено <=1 упоминание в файле
-- **[MAYBE]** `api/routers/integration.py:974` — `_needs_color_matching`
+- **[MAYBE]** `api/routers/orders.py:254` — `_cancel_order_tasks`
   - Приватная функция — найдено <=1 упоминание в файле
-- **[MAYBE]** `api/routers/orders.py:240` — `_cancel_order_tasks`
+- **[MAYBE]** `api/routers/packaging.py:52` — `_ev`
   - Приватная функция — найдено <=1 упоминание в файле
-- **[MAYBE]** `api/routers/packaging.py:53` — `_ev`
-  - Приватная функция — найдено <=1 упоминание в файле
-- **[MAYBE]** `api/routers/positions.py:41` — `_next_position_number`
+- **[MAYBE]** `api/routers/positions.py:47` — `_next_position_number`
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `api/websocket.py:57` — `send_to_factory`
   - Метод определён, но возможно не вызывается
 - **[MAYBE]** `business/kiln/capacity.py:38` — `_c`
+  - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `business/services/order_intake.py:89` — `_get_defect_coefficient`
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `business/services/purchaser_lifecycle.py:323` — `_notify_on_approved`
   - Приватная функция — найдено <=1 упоминание в файле
@@ -302,65 +35,14 @@
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `business/services/purchaser_lifecycle.py:360` — `_notify_on_in_transit`
   - Приватная функция — найдено <=1 упоминание в файле
-- **[MAYBE]** `business/services/telegram_bot.py:1542` — `_fuzzy_match_material`
+- **[MAYBE]** `business/services/telegram_bot.py:2240` — `_fuzzy_match_material`
   - Приватная функция — найдено <=1 упоминание в файле
-- **[MAYBE]** `business/services/telegram_bot.py:2341` — `_edit_telegram_message`
+- **[MAYBE]** `business/services/telegram_bot.py:3034` — `_edit_telegram_message`
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `scripts/audit_pm.py:165` — `_get_router_prefix`
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `scripts/diff_migration.py:428` — `_parse_main_add_columns`
   - Приватная функция — найдено <=1 упоминание в файле
-
-## Неиспользуемые классы
-
-- **[DEAD]** `api/enums.py:296` — `WebhookAuthMode`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:344` — `ReceivingApprovalMode`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:348` — `ProblemCardMode`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:352` — `ProblemCardStatus`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:409` — `EdgeProfileType`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:422` — `ApplicationMethodCode`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:434` — `ApplicationCollectionCode`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:446` — `ConsumptionGroup`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:453` — `EngobeType`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/enums.py:459` — `NightAlertLevel`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/routers/batches.py:72` — `BatchDetailResponse`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/routers/employees.py:23` — `EmployeeOut`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/routers/employees.py:92` — `AttendanceOut`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/routers/employees.py:117` — `PayrollSummaryItem`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/routers/factory_calendar.py:21` — `CalendarEntryOut`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/routers/integration.py:489` — `SalesOrderWebhookPayload`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/routers/toc.py:111` — `ConstraintResponse`
-  - Определён, но нигде не используется
-- **[DEAD]** `api/routers/toc.py:134` — `BufferHealthResponse`
-  - Определён, но нигде не используется
-
-## Неиспользуемые SQLAlchemy-модели
-
-- **[DEAD]** `api/models.py:2144` — `MasterPermission`
-  - Модель определена, но не импортируется ни в одном роутере/сервисе
-
-## Неиспользуемые компоненты
-
-- **[DEAD]** `presentation/dashboard/src/components/tablo/BatchGroup.tsx:1` — `BatchGroup`
-  - Компонент нигде не импортируется
-- **[DEAD]** `presentation/dashboard/src/components/ui/DatePicker.tsx:1` — `DatePicker`
-  - Компонент нигде не импортируется
 
 ## Неиспользуемые TS-экспорты
 
@@ -406,8 +88,6 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/factoryCalendar.ts:18` — `CalendarListResponse`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/factoryCalendar.ts:25` — `WorkingDaysResponse`
-  - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/factoryCalendar.ts:45` — `CalendarBulkPayload`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/factoryCalendar.ts:50` — `BulkCreateResponse`
@@ -450,10 +130,6 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/recipes.ts:70` — `RecipeLookupResult`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/reference.ts:3` — `ReferenceItem`
-  - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/reference.ts:8` — `AllReferenceData`
-  - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/reference.ts:19` — `ApplicationMethodItem`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/reference.ts:32` — `ApplicationCollectionItem`
@@ -470,6 +146,12 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/security.ts:25` — `ActiveSessionEntry`
   - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/shipments.ts:3` — `ShipmentItemCreate`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/shipments.ts:34` — `ShipmentItem`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/shipments.ts:68` — `ShipmentListResponse`
+  - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/stages.ts:9` — `ProductionStageForm`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/telegram.ts:26` — `RecentChat`
@@ -481,10 +163,6 @@
 - **[MAYBE]** `presentation/dashboard/src/components/shared/ShapeDimensionEditor.tsx:209` — `calculateShapeArea`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/components/shared/ShapeDimensionEditor.tsx:346` — `ShapeDimensionEditorProps`
-  - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/components/tablo/BatchGroup.tsx:20` — `BatchGroup`
-  - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/components/ui/DatePicker.tsx:1` — `DatePicker`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/config/csvImportConfigs.ts:3` — `CsvImportConfig`
   - Экспортируется, но не импортируется в других файлах
@@ -508,23 +186,33 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/useOrders.ts:36` — `useCancelOrder`
   - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/hooks/useOrders.ts:114` — `useShipOrder`
+  - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/usePackingPhotos.ts:17` — `UploadPackingPhotoArgs`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/usePositions.ts:44` — `usePosition`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/hooks/usePositions.ts:113` — `useMergePosition`
-  - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/usePurchaseRequests.ts:29` — `useCreatePurchaseRequestPurchaser`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/hooks/useQuality.ts:42` — `useUpdateInspection`
+- **[MAYBE]** `presentation/dashboard/src/hooks/useQuality.ts:51` — `useUpdateInspection`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/hooks/useQuality.ts:75` — `usePreKilnChecks`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/hooks/useQuality.ts:85` — `useFinalChecks`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/hooks/useReferenceData.ts:29` — `useApplicationMethods`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/useSchedule.ts:4` — `useResources`
-  - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/hooks/useSchedule.ts:11` — `useBatches`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/useSchedule.ts:18` — `useCreateBatch`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/useSchedule.ts:76` — `useAssignBatchPositions`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/hooks/useShipments.ts:12` — `useShipment`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/hooks/useShipments.ts:31` — `useUpdateShipment`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/hooks/useShipments.ts:53` — `useMarkDelivered`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/useUsers.ts:24` — `useUser`
   - Экспортируется, но не импортируется в других файлах
@@ -760,42 +448,14 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/types/forms.ts:4` — `LoginFormData`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/forms.ts:22` — `orderItemSchema`
+- **[MAYBE]** `presentation/dashboard/src/types/forms.ts:46` — `orderItemSchema`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/forms.ts:40` — `OrderItemFormData`
+- **[MAYBE]** `presentation/dashboard/src/types/forms.ts:71` — `OrderItemFormData`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/types/models.ts:4` — `OrderPosition`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/types/models.ts:7` — `PaginatedResponse`
   - Экспортируется, но не импортируется в других файлах
-
-## Мёртвая бизнес-логика
-
-- **[DEAD]** `business/planning_engine/optimizer.py:1` — `optimizer`
-  - Модуль business.planning_engine.optimizer нигде не импортируется
-- **[DEAD]** `business/planning_engine/scheduler.py:1` — `scheduler`
-  - Модуль business.planning_engine.scheduler нигде не импортируется
-
-## Осиротевшие схемы
-
-- **[DEAD]** `api/schemas.py:71` — `UserCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:85` — `UserUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:127` — `SupplierResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:174` — `SizeUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:237` — `MaterialCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:252` — `MaterialUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:267` — `MaterialResponse`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:356` — `TaskCreate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
-- **[DEAD]** `api/schemas.py:371` — `TaskUpdate`
-  - Pydantic-схема не используется ни в одном роутере/сервисе
 
 ## Неиспользуемые env-переменные
 
@@ -808,6 +468,4 @@
 - **[MAYBE]** `api/config.py:46` — `AWS_SECRET_ACCESS_KEY`
   - Определена в Settings, но не используется за пределами config.py
 - **[MAYBE]** `api/config.py:51` — `SUPABASE_ANON_KEY`
-  - Определена в Settings, но не используется за пределами config.py
-- **[MAYBE]** `api/config.py:77` — `PRODUCTION_WEBHOOK_AUTH_MODE`
   - Определена в Settings, но не используется за пределами config.py

@@ -19,7 +19,6 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.auth import get_current_user
 from api.models import FiringLog, Batch, Resource
-from api.enums import ResourceType
 
 router = APIRouter()
 

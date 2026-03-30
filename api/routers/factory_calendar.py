@@ -33,6 +33,13 @@ class CalendarEntryOut(BaseModel):
     created_at: Optional[str] = None
 
 
+class CalendarListResponse(BaseModel):
+    items: List[CalendarEntryOut]
+    total: int
+    page: int
+    per_page: int
+
+
 class CalendarCreateInput(BaseModel):
     factory_id: str
     date: str  # ISO format YYYY-MM-DD
@@ -136,7 +143,7 @@ async def count_working_days(
     }
 
 
-@router.get("")
+@router.get("", response_model=CalendarListResponse)
 async def list_calendar(
     factory_id: str = Query(..., description="Factory UUID"),
     year: Optional[int] = Query(None, description="Filter by year"),

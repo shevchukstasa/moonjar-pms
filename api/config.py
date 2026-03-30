@@ -123,7 +123,10 @@ def get_settings() -> Settings:
         critical_insecure.append("SECRET_KEY")
     if s.OWNER_KEY in _INSECURE_DEFAULTS:
         critical_insecure.append("OWNER_KEY")
-    # TOTP — warn but don't block (not all deployments have it configured yet)
+    # TOTP_ENCRYPTION_KEY — currently WARNING because 2FA is not mandatory.
+    # TODO: Promote to critical_insecure when 2FA goes live for all users.
+    #       At that point, move this to the critical_insecure block above so
+    #       production startup is blocked if the key is still the default.
     if s.TOTP_ENCRYPTION_KEY in _INSECURE_DEFAULTS:
         warn_insecure.append("TOTP_ENCRYPTION_KEY")
 
@@ -135,7 +138,9 @@ def get_settings() -> Settings:
     all_insecure = critical_insecure + warn_insecure
     if all_insecure:
         _config_logger.warning(
-            f"⚠ Insecure default secrets detected: {', '.join(all_insecure)}. "
-            f"Set proper values in .env before deploying to production."
+            "SECURITY WARNING: Insecure default secrets detected: %s. "
+            "Set proper values in .env before deploying to production. "
+            "TOTP_ENCRYPTION_KEY must be changed before enabling 2FA for users.",
+            ", ".join(all_insecure),
         )
     return s

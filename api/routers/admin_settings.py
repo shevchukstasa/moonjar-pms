@@ -21,6 +21,7 @@ from api.models import (
     PurchaseConsolidationSetting,
     Material,
 )
+from api.enums import ReceivingApprovalMode
 from api.roles import require_admin
 
 router = APIRouter(tags=["admin-settings"])
@@ -74,7 +75,7 @@ class ReceivingSettingOut(BaseModel):
 
 
 class ReceivingSettingUpdate(BaseModel):
-    approval_mode: str = Field(..., pattern=r"^(all|auto)$")
+    approval_mode: ReceivingApprovalMode
 
 
 # --- Material Defect Thresholds ---

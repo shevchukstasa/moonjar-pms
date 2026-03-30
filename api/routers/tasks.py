@@ -12,8 +12,9 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
-from api.models import Task, User, ProductionOrder, OrderPosition, ProductionOrderItem, Factory, Size, GlazingBoardSpec, Recipe
+from api.models import Task, User, ProductionOrder, OrderPosition, Size, GlazingBoardSpec, Recipe
 from api.enums import TaskStatus, TaskType, PositionStatus, UserRole
+from business.services.status_machine import transition_position_status
 
 router = APIRouter()
 
@@ -168,7 +169,11 @@ async def update_task(
         raise HTTPException(404, "Task not found")
 
     if data.status:
-        task.status = data.status
+        try:
+            validated = TaskStatus(data.status)
+            task.status = validated.value
+        except ValueError:
+            raise HTTPException(400, f"Invalid status: {data.status}. Valid: {[s.value for s in TaskStatus]}")
     if data.assigned_to:
         task.assigned_to = UUID(data.assigned_to)
     if data.description is not None:
@@ -406,7 +411,7 @@ async def resolve_size(
 
     # Transition position back to PLANNED if it was awaiting size
     if _ev(position.status) == "awaiting_size_confirmation":
-        position.status = PositionStatus.PLANNED
+        transition_position_status(db, position.id, PositionStatus.PLANNED.value, changed_by=current_user.id)
 
     # Close task
     task.status = TaskStatus.DONE
@@ -501,6 +506,11 @@ async def resolve_size(
             "Glazing board calc failed for size %s: %s", chosen_size_id, exc
         )
 
+    # Ensure defect margin is calculated before reservation
+    if position.quantity and not position.quantity_with_defect_margin:
+        from business.services.defect_coefficient import calculate_production_quantity_with_defects
+        calculate_production_quantity_with_defects(db, position)
+
     # Trigger material reservation for the unblocked position
     # (only if position is now PLANNED and has a recipe)
     reservation_result = None
@@ -514,7 +524,7 @@ async def resolve_size(
                 )
                 result = reserve_materials_for_position(db, position, recipe, position.factory_id)
                 if result.shortages:
-                    position.status = PositionStatus.INSUFFICIENT_MATERIALS
+                    transition_position_status(db, position.id, PositionStatus.INSUFFICIENT_MATERIALS.value, changed_by=current_user.id)
                     reservation_result = {
                         "status": "insufficient_materials",
                         "shortages": len(result.shortages),
@@ -606,7 +616,7 @@ async def resolve_consumption(
     ).first()
 
     if position and _ev(position.status) == "awaiting_consumption_data":
-        position.status = PositionStatus.PLANNED
+        transition_position_status(db, position.id, PositionStatus.PLANNED.value, changed_by=current_user.id)
         position.updated_at = now
 
     # Close task
@@ -622,6 +632,11 @@ async def resolve_consumption(
         "resolved_at": now.isoformat(),
     }
 
+    # Ensure defect margin is calculated before reservation
+    if position and position.quantity and not position.quantity_with_defect_margin:
+        from business.services.defect_coefficient import calculate_production_quantity_with_defects
+        calculate_production_quantity_with_defects(db, position)
+
     # Trigger material reservation for the unblocked position
     reservation_result = None
     if position and _ev(position.status) == "planned" and position.recipe_id:
@@ -631,7 +646,7 @@ async def resolve_consumption(
             )
             result = reserve_materials_for_position(db, position, recipe, position.factory_id)
             if result.shortages:
-                position.status = PositionStatus.INSUFFICIENT_MATERIALS
+                transition_position_status(db, position.id, PositionStatus.INSUFFICIENT_MATERIALS.value, changed_by=current_user.id)
                 reservation_result = {
                     "status": "insufficient_materials",
                     "shortages": len(result.shortages),

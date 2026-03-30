@@ -3,9 +3,8 @@ Schedule Estimation service.
 Business Logic: §5
 """
 from uuid import UUID
-from datetime import date, datetime, timedelta
-from math import ceil, floor
-from typing import Optional
+from datetime import date, timedelta
+from math import ceil
 import logging
 
 from sqlalchemy.orm import Session

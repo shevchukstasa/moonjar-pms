@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Trash2, Thermometer } from 'lucide-react';
+import { Trash2, Thermometer, ClipboardCheck } from 'lucide-react';
 import { useUiStore } from '@/stores/uiStore';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGlazingSchedule, useFiringSchedule, useSortingSchedule, useQcSchedule, useKilnSchedule, useAutoFormBatches } from '@/hooks/useSchedule';
@@ -15,6 +15,7 @@ import { DataTable } from '@/components/ui/Table';
 import { FactorySelector } from '@/components/layout/FactorySelector';
 import apiClient from '@/api/client';
 import { formatEdgeProfile, formatShape } from '@/components/tablo/PositionRow';
+import { QualityCheckDialog } from '@/components/quality/QualityCheckDialog';
 
 const SECTION_TABS = [
   { id: 'glazing', label: 'Glazing' },
@@ -34,6 +35,13 @@ export default function ManagerSchedulePage() {
   // Map factory_id → whether cleanup is allowed (used when "All Factories" selected)
   const [deleteFactoryMap, setDeleteFactoryMap] = useState<Record<string, boolean>>({});
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // QC Check dialog state
+  const [qcOpen, setQcOpen] = useState(false);
+  const [qcPositionId, setQcPositionId] = useState('');
+  const [qcFactoryId, setQcFactoryId] = useState('');
+  const [qcCheckType, setQcCheckType] = useState<'pre_kiln' | 'final'>('pre_kiln');
+  const [qcPositionLabel, setQcPositionLabel] = useState('');
 
   const { data: glazingData, isLoading: glazingLoading, isError: glazingError } = useGlazingSchedule(activeFactoryId);
   const { data: firingData, isLoading: firingLoading, isError: firingError } = useFiringSchedule(activeFactoryId);
@@ -329,6 +337,34 @@ export default function ManagerSchedulePage() {
         );
       },
     }] : []),
+    // QC Check column — only shown on the QC tab
+    ...(tab === 'qc' ? [{
+      key: '_qc_check',
+      header: 'QC Check',
+      render: (item: { id: string; factory_id?: string; status?: string; order_number?: string; color?: string; size?: string }) => {
+        // Determine check type based on position status
+        const PRE_KILN_STATUSES = ['glazing', 'drying', 'ready_to_fire', 'pending_pre_kiln_qc'];
+        const checkType: 'pre_kiln' | 'final' = PRE_KILN_STATUSES.includes(item.status ?? '') ? 'pre_kiln' : 'final';
+        const label = checkType === 'pre_kiln' ? 'Pre-Kiln' : 'Final';
+        return (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setQcPositionId(item.id);
+              setQcFactoryId(item.factory_id ?? activeFactoryId ?? '');
+              setQcCheckType(checkType);
+              setQcPositionLabel(`${item.order_number ?? ''} · ${item.color ?? ''} · ${item.size ?? ''}`);
+              setQcOpen(true);
+            }}
+            className="inline-flex items-center gap-1 rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+            title={`Run ${label} QC Check`}
+          >
+            <ClipboardCheck className="h-3.5 w-3.5" />
+            {label}
+          </button>
+        );
+      },
+    }] : []),
   ];
 
   return (
@@ -596,6 +632,19 @@ export default function ManagerSchedulePage() {
           </div>
         </div>
       )}
+
+      {/* QC Check Dialog */}
+      <QualityCheckDialog
+        open={qcOpen}
+        onClose={() => {
+          setQcOpen(false);
+          queryClient.invalidateQueries({ queryKey: ['schedule', 'qc'] });
+        }}
+        checkType={qcCheckType}
+        positionId={qcPositionId}
+        factoryId={qcFactoryId}
+        positionLabel={qcPositionLabel}
+      />
     </div>
   );
 }

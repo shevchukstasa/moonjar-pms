@@ -3,8 +3,7 @@ Buffer Health (TOC) service.
 Business Logic: §17, §20
 """
 from uuid import UUID
-from datetime import date, datetime, timedelta
-from math import ceil, floor
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 import logging
 
@@ -119,7 +118,7 @@ def calculate_buffer_health(db: Session, factory_id: UUID) -> Optional[dict]:
         bs.buffered_positions_count = buffered_count
         bs.buffered_sqm = buffered_sqm
         bs.buffer_health = health
-        bs.updated_at = datetime.utcnow()
+        bs.updated_at = datetime.now(timezone.utc)
     else:
         bs = BufferStatus(
             resource_id=kiln.id,

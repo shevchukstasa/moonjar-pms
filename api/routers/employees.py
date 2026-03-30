@@ -2,8 +2,7 @@
 
 from uuid import UUID
 from typing import Optional, List
-from datetime import date, datetime, timezone
-from decimal import Decimal
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -26,25 +25,25 @@ class EmployeeOut(BaseModel):
     factory_name: Optional[str] = None
     full_name: str
     short_name: Optional[str] = None
-    position: str
+    position: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
     birth_date: Optional[str] = None
-    has_own_bpjs: bool = False
+    has_own_bpjs: Optional[bool] = False
     hire_date: Optional[str] = None
     is_active: bool
-    employment_type: str
-    department: str
-    work_schedule: str
-    bpjs_mode: str
-    employment_category: str
+    employment_type: Optional[str] = None
+    department: Optional[str] = None
+    work_schedule: Optional[str] = None
+    bpjs_mode: Optional[str] = None
+    employment_category: Optional[str] = None
     commission_rate: Optional[float] = None
-    base_salary: float
-    allowance_bike: float
-    allowance_housing: float
-    allowance_food: float
-    allowance_bpjs: float
-    allowance_other: float
+    base_salary: Optional[float] = None
+    allowance_bike: Optional[float] = None
+    allowance_housing: Optional[float] = None
+    allowance_food: Optional[float] = None
+    allowance_bpjs: Optional[float] = None
+    allowance_other: Optional[float] = None
     allowance_other_note: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -113,6 +112,10 @@ class AttendanceOut(BaseModel):
     created_at: Optional[str] = None
 
 
+class AttendanceListResponse(BaseModel):
+    items: List[AttendanceOut]
+
+
 class AttendanceCreateInput(BaseModel):
     date: str  # YYYY-MM-DD
     status: str  # present, absent, sick, leave, half_day
@@ -124,6 +127,29 @@ class AttendanceUpdateInput(BaseModel):
     status: Optional[str] = None
     overtime_hours: Optional[float] = None
     notes: Optional[str] = None
+
+
+class PayrollTotals(BaseModel):
+    total_employees: int = 0
+    formal_count: int = 0
+    contractor_count: int = 0
+    total_gross: float = 0.0
+    total_bpjs_employer: float = 0.0
+    total_bpjs_employee: float = 0.0
+    total_pph21: float = 0.0
+    total_contractor_tax: float = 0.0
+    total_net: float = 0.0
+    total_cost: float = 0.0
+    total_overtime_pay: float = 0.0
+    total_commission: float = 0.0
+
+
+class PayrollSummaryResponse(BaseModel):
+    items: list[PayrollSummaryItem]
+    totals: PayrollTotals
+    factory_id: Optional[str] = None
+    year: int
+    month: int
 
 
 class PayrollSummaryItem(BaseModel):
@@ -299,7 +325,7 @@ async def list_employees(
     }
 
 
-@router.get("/payroll-summary")
+@router.get("/payroll-summary", response_model=PayrollSummaryResponse)
 async def payroll_summary(
     factory_id: Optional[str] = Query(None, description="Factory UUID (omit for all factories)"),
     year: int = Query(..., description="Year"),
@@ -389,7 +415,7 @@ async def payroll_summary(
     }
 
 
-@router.get("/{employee_id}")
+@router.get("/{employee_id}", response_model=EmployeeOut)
 async def get_employee(
     employee_id: UUID,
     db: Session = Depends(get_db),
@@ -503,7 +529,7 @@ async def deactivate_employee(
 
 # ── Attendance endpoints ──────────────────────────────────────
 
-@router.get("/{employee_id}/attendance")
+@router.get("/{employee_id}/attendance", response_model=AttendanceListResponse)
 async def get_attendance(
     employee_id: UUID,
     start_date: Optional[str] = Query(None),

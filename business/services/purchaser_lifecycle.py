@@ -15,7 +15,7 @@ from uuid import UUID
 import logging
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import and_
 
 from api.models import (
     MaterialPurchaseRequest,

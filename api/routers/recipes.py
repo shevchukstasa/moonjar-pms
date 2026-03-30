@@ -8,11 +8,12 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
-from api.roles import require_admin
+from api.roles import require_admin, require_management
 from api.models import (
     Recipe, RecipeFiringStage, RecipeMaterial, Material,
     FiringTemperatureGroup, FiringTemperatureGroupRecipe,
 )
+from business.services.firing_profiles import get_temperature_group_recipes
 from api.schemas import (
     RecipeCreate,
     RecipeUpdate,
@@ -26,6 +27,8 @@ from api.schemas import (
 )
 
 import logging
+
+logger = logging.getLogger("moonjar.recipes")
 
 router = APIRouter()
 
@@ -75,6 +78,46 @@ def _get_temperature_groups_for_recipe(db: Session, recipe_id: UUID) -> list[dic
                 "is_default": link.is_default,
             })
     return result
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Shelf coating engobe recipes
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.get("/engobe/shelf-coating")
+async def list_shelf_coating_recipes(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    List shelf coating engobe recipes.
+
+    Shelf coating protects kiln shelves from glaze drips.
+    These are consumed per-batch based on kiln area, not per-piece.
+    """
+    items = (
+        db.query(Recipe)
+        .filter(
+            Recipe.recipe_type == "engobe",
+            Recipe.engobe_type == "shelf_coating",
+            Recipe.is_active.is_(True),
+        )
+        .all()
+    )
+    results = []
+    for item in items:
+        if item.glaze_settings is None:
+            item.glaze_settings = {}
+        d = RecipeResponse.model_validate(item).model_dump(mode="json")
+        d["ingredients_count"] = (
+            db.query(RecipeMaterial)
+            .filter(RecipeMaterial.recipe_id == item.id)
+            .count()
+        )
+        d["temperature_groups"] = _get_temperature_groups_for_recipe(db, item.id)
+        results.append(d)
+
+    return {"items": results, "total": len(results)}
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -359,6 +402,64 @@ async def import_recipes_csv(
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# Temperature Groups — convenience endpoints on /recipes prefix
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.get("/temperature-groups")
+async def list_temperature_groups(
+    include_inactive: bool = Query(False, description="Include deactivated groups"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """List all firing temperature groups. Management role required."""
+    query = db.query(FiringTemperatureGroup)
+    if not include_inactive:
+        query = query.filter(FiringTemperatureGroup.is_active.is_(True))
+    groups = query.order_by(
+        FiringTemperatureGroup.display_order,
+        FiringTemperatureGroup.name,
+    ).all()
+    items = [
+        {
+            "id": str(g.id),
+            "name": g.name,
+            "temperature": g.temperature,
+            "description": g.description,
+            "is_active": g.is_active,
+            "display_order": g.display_order,
+        }
+        for g in groups
+    ]
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/temperature-groups/{group_id}/recipes")
+async def list_temperature_group_recipes(
+    group_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Get all recipes linked to a temperature group. Management role required."""
+    group = db.query(FiringTemperatureGroup).filter(
+        FiringTemperatureGroup.id == group_id,
+    ).first()
+    if not group:
+        raise HTTPException(404, "Temperature group not found")
+
+    links = get_temperature_group_recipes(db, group_id)
+    items = []
+    for link in links:
+        recipe = db.query(Recipe).filter(Recipe.id == link.recipe_id).first()
+        if recipe:
+            if recipe.glaze_settings is None:
+                recipe.glaze_settings = {}
+            d = RecipeResponse.model_validate(recipe).model_dump(mode="json")
+            d["is_default"] = link.is_default
+            items.append(d)
+    return {"items": items, "total": len(items)}
+
+
 @router.get("/{item_id}")
 async def get_recipes_item(
     item_id: UUID,
@@ -465,8 +566,8 @@ async def create_recipes_item(
             from business.rag.embeddings import index_recipe
             await index_recipe(db, item.id)
             db.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("RAG indexing failed for recipe %s: %s", item.id, e)
 
     return item
 
@@ -496,8 +597,8 @@ async def update_recipes_item(
             from business.rag.embeddings import index_recipe
             await index_recipe(db, item.id)
             db.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("RAG indexing failed for recipe %s: %s", item.id, e)
 
     return item
 

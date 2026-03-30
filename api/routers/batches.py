@@ -83,6 +83,10 @@ class BatchDetailResponse(BaseModel):
     positions: list[BatchPositionResponse] = []
     positions_count: int = 0
     total_area_sqm: Optional[float] = None
+    kiln_capacity_sqm: Optional[float] = None
+    loading_plan: Optional[dict] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 def _ev(val):
@@ -270,7 +274,7 @@ async def list_batches(
 # GET /api/batches/{id}
 # ────────────────────────────────────────────────────────────────
 
-@router.get("/{batch_id}")
+@router.get("/{batch_id}", response_model=BatchDetailResponse)
 async def get_batch_detail(
     batch_id: UUID,
     db: Session = Depends(get_db),

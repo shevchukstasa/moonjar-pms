@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import or_
 
 from api.models import (
     FiringProfile,
@@ -65,19 +65,29 @@ def get_batch_firing_profile(
     """
     Determine firing profile for a batch — slowest profile wins.
 
-    For each position → match_firing_profile by product_type/collection/thickness.
+    For each position → match firing profile.
+    - If position.firing_round > 1 and recipe has stage-specific profiles,
+      use get_firing_profile_for_stage() for the correct round.
+    - Otherwise → match_firing_profile by product_type/collection/thickness.
     Among all matched profiles → return the one with MAX(total_duration_hours).
     """
     slowest: Optional[FiringProfile] = None
     max_duration = Decimal("0")
 
     for pos in positions:
-        profile = match_firing_profile(
-            db,
-            pos.product_type.value if pos.product_type else "tile",
-            pos.collection,
-            pos.thickness_mm or Decimal("11.0"),
-        )
+        firing_round = getattr(pos, "firing_round", 1) or 1
+
+        if firing_round > 1 and pos.recipe_id:
+            # Multi-round firing: use stage-specific profile if available
+            profile = get_firing_profile_for_stage(db, pos, firing_round)
+        else:
+            profile = match_firing_profile(
+                db,
+                pos.product_type.value if pos.product_type else "tile",
+                pos.collection,
+                pos.thickness_mm or Decimal("11.0"),
+            )
+
         if profile and profile.total_duration_hours > max_duration:
             max_duration = profile.total_duration_hours
             slowest = profile
@@ -153,8 +163,6 @@ def get_temperature_group(
     Matches if the group's working temperature is within ±max_delta of the target.
     Returns the closest match by temperature distance, then display_order.
     """
-    from sqlalchemy import func as sa_func
-
     groups = (
         db.query(FiringTemperatureGroup)
         .filter(

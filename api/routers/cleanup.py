@@ -139,9 +139,35 @@ def _purge_position_refs(db: Session, position_ids: list[UUID]) -> int:
     if not position_ids:
         return total
     for Model, fk_col in _POSITION_FK_MODELS:
-        total += db.query(Model).filter(fk_col.in_(position_ids)).delete(
-            synchronize_session="fetch"
-        )
+        try:
+            total += db.query(Model).filter(fk_col.in_(position_ids)).delete(
+                synchronize_session="fetch"
+            )
+        except Exception as e:
+            logger.warning("Cleanup: failed to purge %s: %s", Model.__tablename__, e)
+            db.rollback()
+    # Clear batch_id on positions before CASCADE (avoid FK conflict)
+    try:
+        from api.models import Notification, PositionPhoto, KilnCalculationLog, OperationLog, StoneReservation, Shipment, ShipmentItem
+        for M, col in [
+            (Notification, Notification.related_entity_id),
+            (KilnCalculationLog, KilnCalculationLog.position_id),
+            (OperationLog, OperationLog.position_id),
+        ]:
+            try:
+                db.query(M).filter(col.in_(position_ids)).delete(synchronize_session="fetch")
+            except Exception:
+                db.rollback()
+        # Nullify batch references for positions
+        for pid in position_ids:
+            try:
+                db.query(OrderPosition).filter(OrderPosition.id == pid).update(
+                    {"batch_id": None, "resource_id": None}, synchronize_session="fetch"
+                )
+            except Exception:
+                db.rollback()
+    except ImportError:
+        pass
     return total
 
 

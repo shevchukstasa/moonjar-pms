@@ -13,7 +13,8 @@ from typing import Optional
 import logging
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+
+from api.unit_conversion import get_calculation_unit, convert_to_stock_unit
 
 logger = logging.getLogger("moonjar.material_consumption")
 
@@ -49,7 +50,7 @@ def on_glazing_start(
         MaterialTransaction, MaterialStock, ConsumptionAdjustment,
     )
     from api.enums import TransactionType
-    from business.services.material_reservation import _calculate_required, _get_area_for_position
+    from business.services.material_reservation import _calculate_required
 
     position = db.query(OrderPosition).get(position_id)
     if not position:
@@ -76,17 +77,35 @@ def on_glazing_start(
         if not material:
             continue
 
-        # Expected quantity from calculation
-        expected = _calculate_required(rm, position, recipe=recipe)
+        # Expected quantity from calculation (in recipe's calculation unit)
+        try:
+            expected_calc = _calculate_required(rm, position, recipe=recipe)
+        except Exception as e:
+            logger.warning("on_glazing_start: _calculate_required failed for material %s: %s", material.name, e)
+            continue
 
-        # Actual quantity (from glazing master, or use expected as default)
+        if expected_calc is None or expected_calc <= 0:
+            continue
+
+        # Determine units for conversion
+        calc_unit = get_calculation_unit(rm.unit)
+        stock_unit = (material.unit or "pcs").lower().strip()
+        sg = recipe.specific_gravity if recipe else None
+
+        # Convert expected to stock unit for balance operations
+        expected = convert_to_stock_unit(
+            expected_calc, calc_unit, stock_unit,
+            specific_gravity=sg, material_name=material.name,
+        )
+
+        # Actual quantity (from glazing master — assumed in stock unit, or use expected)
         mat_id_str = str(rm.material_id)
         if mat_id_str in actual_map:
             actual = Decimal(str(actual_map[mat_id_str]))
         else:
-            actual = expected  # If no actual data, use expected
+            actual = expected  # If no actual data, use expected (already in stock unit)
 
-        # --- Create CONSUME transaction ---
+        # --- Create CONSUME transaction (in stock unit) ---
         consume_txn = MaterialTransaction(
             material_id=rm.material_id,
             factory_id=position.factory_id,
@@ -99,7 +118,7 @@ def on_glazing_start(
         db.add(consume_txn)
 
         # --- Create UNRESERVE transaction to release reservation ---
-        # Release the full expected amount (what was originally reserved)
+        # Release the full expected amount (what was originally reserved — in stock unit)
         unreserve_txn = MaterialTransaction(
             material_id=rm.material_id,
             factory_id=position.factory_id,
@@ -111,7 +130,7 @@ def on_glazing_start(
         )
         db.add(unreserve_txn)
 
-        # --- Deduct from stock balance ---
+        # --- Deduct from stock balance (both in stock unit now) ---
         stock = (
             db.query(MaterialStock)
             .filter(
@@ -128,6 +147,7 @@ def on_glazing_start(
             "material_name": material.name,
             "expected": float(expected),
             "actual": float(actual),
+            "unit": stock_unit,
         })
 
         # --- Create ConsumptionAdjustment if variance exists ---
@@ -248,17 +268,28 @@ def consume_refire_materials(
         if mat_type in _BASE_MATERIAL_TYPES:
             continue
 
-        # Expected quantity from calculation
-        expected = _calculate_required(rm, position, recipe=recipe)
+        # Expected quantity from calculation (in recipe's calculation unit)
+        expected_calc = _calculate_required(rm, position, recipe=recipe)
 
-        # Actual quantity (from glazing master, or use expected)
+        # Determine units for conversion
+        calc_unit = get_calculation_unit(rm.unit)
+        stock_unit = (material.unit or "pcs").lower().strip()
+        sg = recipe.specific_gravity if recipe else None
+
+        # Convert expected to stock unit
+        expected = convert_to_stock_unit(
+            expected_calc, calc_unit, stock_unit,
+            specific_gravity=sg, material_name=material.name,
+        )
+
+        # Actual quantity (from glazing master — in stock unit, or use expected)
         mat_id_str = str(rm.material_id)
         if mat_id_str in actual_map:
             actual = Decimal(str(actual_map[mat_id_str]))
         else:
             actual = expected
 
-        # --- CONSUME transaction ---
+        # --- CONSUME transaction (in stock unit) ---
         consume_txn = MaterialTransaction(
             material_id=rm.material_id,
             factory_id=position.factory_id,
@@ -270,7 +301,7 @@ def consume_refire_materials(
         )
         db.add(consume_txn)
 
-        # --- Deduct from stock ---
+        # --- Deduct from stock (both in stock unit now) ---
         stock = (
             db.query(MaterialStock)
             .filter(
@@ -287,6 +318,7 @@ def consume_refire_materials(
             "material_name": material.name,
             "expected": float(expected),
             "actual": float(actual),
+            "unit": stock_unit,
         })
 
         # --- ConsumptionAdjustment if variance ---

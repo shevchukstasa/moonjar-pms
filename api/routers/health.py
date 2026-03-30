@@ -176,7 +176,7 @@ async def trigger_manual_backup(
 
     Returns the backup_log id for status tracking via GET /api/health/backup.
     """
-    from api.scheduler import daily_database_backup, _create_backup_log
+    from api.scheduler import _create_backup_log
 
     # Pre-create the log entry so we can return its ID immediately
     backup_log_id = _create_backup_log(backup_type="manual")

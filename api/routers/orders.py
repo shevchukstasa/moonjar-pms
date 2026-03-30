@@ -1,20 +1,24 @@
 """Orders router — production order management."""
 
+import logging
 import uuid as uuid_mod
 from datetime import date, datetime, timezone
 from uuid import UUID
 from typing import Optional, Union, List
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 
 from api.database import get_db
-from api.auth import get_current_user, apply_factory_filter
+from api.auth import apply_factory_filter
 from api.roles import require_management
 from api.models import ProductionOrder, ProductionOrderItem, OrderPosition, Factory, FinishedGoodsStock, Task, ProductionOrderStatusLog
 from api.enums import OrderStatus, OrderSource, PositionStatus, TaskStatus, is_stock_collection, ChangeRequestStatus
+from business.services.status_machine import transition_position_status
+
+logger = logging.getLogger("moonjar.orders")
 
 router = APIRouter()
 
@@ -575,7 +579,6 @@ async def reprocess_order(
     6. Create blocking tasks (stencil, silkscreen, color matching, service)
     7. Schedule production dates
     """
-    from math import ceil
     from business.services.order_intake import (
         _find_recipe, _get_defect_coefficient, _auto_detect_exclusive,
     )
@@ -616,10 +619,10 @@ async def reprocess_order(
             p.glazeable_sqm = new_area
             pos_result["actions"].append(f"area={float(new_area):.4f}")
 
-        # 3. Recalculate defect margin
+        # 3. Recalculate defect margin (2D: glaze + product type coefficients)
         if p.quantity and not p.quantity_with_defect_margin:
-            coeff = _get_defect_coefficient(db, order.factory_id, p.size or '')
-            p.quantity_with_defect_margin = ceil(p.quantity * (1 + coeff))
+            from business.services.defect_coefficient import calculate_production_quantity_with_defects
+            calculate_production_quantity_with_defects(db, p)
             pos_result["actions"].append(f"margin={p.quantity_with_defect_margin}")
 
         # 4. Size resolution (if no size_id)
@@ -785,6 +788,17 @@ async def create_order(
     if not data.items:
         raise HTTPException(400, "Order must have at least one item")
 
+    # Auto-derive dimensions from size for large-format products
+    for item in data.items:
+        if item.product_type in ("table_top", "countertop", "sink") and not (item.length_cm and item.width_cm):
+            if item.size and "x" in item.size.lower():
+                try:
+                    parts = item.size.lower().replace(" ", "").split("x")
+                    item.length_cm = float(parts[0])
+                    item.width_cm = float(parts[1]) if len(parts) > 1 else item.length_cm
+                except (ValueError, IndexError):
+                    pass
+
     order = ProductionOrder(
         order_number=data.order_number,
         client=data.client,
@@ -811,8 +825,8 @@ async def create_order(
             new_status=OrderStatus.NEW,
             changed_by=current_user.id,
         ))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to log initial order status: %s", e)
 
     # Lazy import to avoid circular dependency
     from business.services.order_intake import process_order_item
@@ -881,8 +895,8 @@ async def create_order(
                 new_status=order.status,
                 changed_by=current_user.id,
             ))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to log order status transition: %s", e)
 
     db.commit()
     db.refresh(order)
@@ -913,8 +927,8 @@ async def create_order(
             from business.rag.embeddings import index_order
             await index_order(db, order.id)
             db.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("RAG indexing failed for order %s: %s", order.id, e)
 
     return _order_detail(order, db)
 
@@ -987,7 +1001,7 @@ async def mark_order_shipped(
         raise HTTPException(400, "No positions are ready for shipment")
 
     for p in positions:
-        p.status = PositionStatus.SHIPPED
+        transition_position_status(db, p.id, PositionStatus.SHIPPED.value, changed_by=current_user.id)
 
     old_status = order.status
     order.status = OrderStatus.SHIPPED
@@ -1002,8 +1016,8 @@ async def mark_order_shipped(
             new_status=OrderStatus.SHIPPED,
             changed_by=current_user.id,
         ))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to log shipped status change: %s", e)
 
     db.commit()
 
@@ -1067,6 +1081,21 @@ async def accept_cancellation(
     except Exception as e:
         _logger.error("Order cancellation service failed for %s: %s", order_id, e)
         raise HTTPException(500, "Order cancellation failed")
+
+    # Notify PMs at this factory about cancellation (best-effort)
+    try:
+        from business.services.notifications import notify_pm
+        notify_pm(
+            db=db,
+            factory_id=order.factory_id,
+            type=NotificationType.ORDER_CANCELLED.value,
+            title=f"Order {order.order_number} has been cancelled",
+            message=f"Client: {order.client}. Cancelled by {current_user.name}.",
+            related_entity_type=RelatedEntityType.ORDER.value,
+            related_entity_id=order.id,
+        )
+    except Exception as exc:
+        _logger.warning("Failed to notify PMs about cancellation of %s: %s", order.order_number, exc)
 
     # Notify Sales App of cancellation (with retry)
     if order.external_id:

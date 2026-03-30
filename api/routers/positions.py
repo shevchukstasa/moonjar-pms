@@ -1,6 +1,7 @@
 """Positions router — list, status transitions, sorting split, filtering by section,
    blocking summary, material reservations, PM force-unblock."""
 
+import logging
 import uuid as uuid_mod
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -17,19 +18,27 @@ from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management, require_sorting
 from api.models import (
     OrderPosition, ProductionOrder, ProductionOrderItem, DefectRecord,
-    GrindingStock, RepairQueue, FinishedGoodsStock, Task,
+    GrindingStock, FinishedGoodsStock, Task,
     MaterialTransaction, MaterialStock, RecipeMaterial, Material, Recipe,
 )
 from api.enums import (
     PositionStatus, OrderStatus, SplitCategory, DefectStage, DefectOutcome,
-    GrindingStatus, RepairStatus, TaskType, TaskStatus, UserRole,
+    GrindingStatus, TaskType, TaskStatus, UserRole,
     TransactionType, is_stock_collection,
+    EdgeProfileType, ApplicationMethodCode, ApplicationCollectionCode,
 )
+from business.services.status_machine import transition_position_status
+
+logger = logging.getLogger("moonjar.positions")
 
 # Import handle_surplus lazily to avoid circular imports
 def _handle_surplus(db, position, surplus_qty):
     from business.services.sorting_split import handle_surplus
     handle_surplus(db, position, surplus_qty)
+
+def _create_repair_queue_entry(db, position_id, repair_type, priority=None):
+    from business.services.repair_monitoring import create_repair_queue_entry
+    return create_repair_queue_entry(db, position_id, repair_type, priority)
 
 router = APIRouter()
 
@@ -466,6 +475,25 @@ async def update_position(
                "color", "size", "application", "finishing", "collection",
                "quantity", "edge_profile", "edge_profile_sides", "edge_profile_notes",
                "color_2", "application_type"}
+    # Validate enum fields before applying
+    _edge = data.get("edge_profile")
+    if _edge is not None:
+        _allowed_edge = [e.value for e in EdgeProfileType]
+        if _edge not in _allowed_edge:
+            raise HTTPException(422, f"edge_profile must be one of {_allowed_edge}, got '{_edge}'")
+
+    _amc = data.get("application_method_code")
+    if _amc is not None:
+        _allowed_amc = [e.value for e in ApplicationMethodCode]
+        if _amc not in _allowed_amc:
+            raise HTTPException(422, f"application_method_code must be one of {_allowed_amc}, got '{_amc}'")
+
+    _acc = data.get("application_collection_code")
+    if _acc is not None:
+        _allowed_acc = [e.value for e in ApplicationCollectionCode]
+        if _acc not in _allowed_acc:
+            raise HTTPException(422, f"application_collection_code must be one of {_allowed_acc}, got '{_acc}'")
+
     for k, v in data.items():
         if k in allowed:
             setattr(p, k, v)
@@ -607,8 +635,8 @@ async def change_position_status(
         if _order and _order.external_id and old_status != _ev(p.status):
             from api.routers.integration import notify_sales_status_change_stub
             await notify_sales_status_change_stub(_order, p, old_status, _ev(p.status))
-    except Exception:
-        pass  # Best-effort
+    except Exception as e:
+        logger.debug("Sales status callback failed: %s", e)
 
     return _serialize_position(p)
 
@@ -667,7 +695,7 @@ async def split_position(
 
     # 1. Update parent — good quantity, mark as packed
     p.quantity = data.good_quantity
-    p.status = PositionStatus.PACKED
+    transition_position_status(db, p.id, PositionStatus.PACKED.value, changed_by=current_user.id)
     p.updated_at = now
 
     # Consume packaging materials (boxes + spacers)
@@ -751,21 +779,8 @@ async def split_position(
         db.add(repair_pos)
         sub_positions.append(repair_pos)
 
-        # Repair queue entry for SLA tracking
-        rq = RepairQueue(
-            id=uuid_mod.uuid4(),
-            factory_id=p.factory_id,
-            color=p.color,
-            size=p.size,
-            quantity=data.repair_quantity,
-            defect_type="sorting_repair",
-            source_order_id=p.order_id,
-            source_position_id=p.id,
-            status=RepairStatus.IN_REPAIR,
-            created_at=now,
-            updated_at=now,
-        )
-        db.add(rq)
+        # Repair queue entry + SLA task
+        _create_repair_queue_entry(db, repair_pos.id, repair_type="reglaze")
 
     # 5. Color mismatch sub-position
     if data.color_mismatch_quantity > 0:
@@ -1136,19 +1151,8 @@ async def resolve_color_mismatch(
         pos = _clone(PositionStatus.SENT_TO_GLAZING, data.reglaze_qty, SplitCategory.REPAIR)
         db.add(pos)
         new_positions.append(pos)
-        # Track in repair queue for SLA monitoring
-        rq = RepairQueue(
-            id=uuid_mod.uuid4(),
-            factory_id=p.factory_id,
-            color=p.color, size=p.size,
-            quantity=data.reglaze_qty,
-            defect_type="color_mismatch_reglaze",
-            source_order_id=p.order_id,
-            source_position_id=p.id,
-            status=RepairStatus.IN_REPAIR,
-            created_at=now, updated_at=now,
-        )
-        db.add(rq)
+        # Track in repair queue + SLA task
+        _create_repair_queue_entry(db, pos.id, repair_type="reglaze")
 
     if data.stock_qty > 0:
         pos = _clone(PositionStatus.PACKED, data.stock_qty, None)
@@ -1156,7 +1160,7 @@ async def resolve_color_mismatch(
         new_positions.append(pos)
 
     # Mark original color-mismatch position as resolved
-    p.status = PositionStatus.CANCELLED
+    transition_position_status(db, p.id, PositionStatus.CANCELLED.value, changed_by=current_user.id)
     p.quantity = 0
     p.updated_at = now
 
@@ -1325,7 +1329,7 @@ async def force_unblock_position(
 
     # --- Transition to PLANNED ---
     old_status_str = _ev(p.status)
-    p.status = PositionStatus.PLANNED
+    transition_position_status(db, p.id, PositionStatus.PLANNED.value, changed_by=current_user.id, is_override=True, notes=data.notes.strip())
     p.updated_at = now
 
     # --- Audit metadata ---
@@ -1843,10 +1847,18 @@ async def get_position_materials(
             mat_type = (material.material_type or "").lower()
             mat_name = material.name
 
-            # Calculate required quantity
+            # Calculate required quantity (converted to stock unit)
             try:
                 from business.services.material_reservation import _calculate_required
-                required = float(_calculate_required(rm, position, recipe=recipe, db=db))
+                from api.unit_conversion import get_calculation_unit, convert_to_stock_unit
+                required_calc = _calculate_required(rm, position, recipe=recipe, db=db)
+                calc_unit = get_calculation_unit(rm.unit)
+                stock_unit = (material.unit or "pcs").lower().strip()
+                sg = recipe.specific_gravity if recipe else None
+                required = float(convert_to_stock_unit(
+                    required_calc, calc_unit, stock_unit,
+                    specific_gravity=sg, material_name=material.name,
+                ))
             except Exception:
                 # Fallback: simple per-piece calculation
                 required = float(rm.quantity_per_unit) * position.quantity

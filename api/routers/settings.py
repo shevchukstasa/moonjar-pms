@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query, Body, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 from typing import List
 from uuid import UUID
 from pydantic import BaseModel, Field

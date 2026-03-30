@@ -16,6 +16,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { StatusDropdown } from '@/components/tablo/StatusDropdown';
 import { formatEdgeProfile, formatPlaceOfApplication, formatShape, MaterialStatusBadge } from '@/components/tablo/PositionRow';
 import { PositionEditDialog } from '@/components/orders/PositionEditDialog';
+import { DatePicker } from '@/components/ui/DatePicker';
 
 /** Format ISO date string as DD/MM (short, year omitted). */
 function fmtShortDate(iso: string | null | undefined): string {
@@ -347,11 +348,10 @@ export default function OrderDetailPage() {
             </Card>
             <Card>
               <label className="text-xs text-gray-500">Deadline</label>
-              <input
-                type="date"
+              <DatePicker
                 value={editDeadline}
-                onChange={(e) => setEditDeadline(e.target.value)}
-                className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                onChange={(v) => setEditDeadline(v)}
+                className="mt-1 w-full px-2 py-1.5 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </Card>
             <Card>
@@ -410,11 +410,10 @@ export default function OrderDetailPage() {
             </Card>
             <Card>
               <label className="text-xs text-gray-500">Desired Delivery</label>
-              <input
-                type="date"
+              <DatePicker
                 value={editDesiredDelivery}
-                onChange={(e) => setEditDesiredDelivery(e.target.value)}
-                className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                onChange={(v) => setEditDesiredDelivery(v)}
+                className="mt-1 w-full px-2 py-1.5 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </Card>
           </div>

@@ -104,6 +104,10 @@ export const positionsApi = {
   getMergeableChildren: (parentId: string) =>
     apiClient.get(`/positions/${parentId}/mergeable-children`).then((r) => r.data),
 
+  // --- Split Tree ---
+  getSplitTree: (positionId: string) =>
+    apiClient.get(`/positions/${positionId}/split-tree`).then((r) => r.data),
+
   // --- Blocking & Reservations ---
   blockingSummary: (factoryId?: string) =>
     apiClient.get<BlockingSummaryResponse>('/positions/blocking-summary', {

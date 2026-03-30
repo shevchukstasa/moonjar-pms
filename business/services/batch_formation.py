@@ -23,7 +23,10 @@ from api.models import (
     Batch,
     KilnActualLoad,
     KilnCalculationLog,
+    MaterialTransaction,
     OrderPosition,
+    Recipe,
+    RecipeMaterial,
     Resource,
     KilnMaintenanceSchedule,
     RecipeKilnConfig,
@@ -38,6 +41,106 @@ from api.enums import (
 )
 
 logger = logging.getLogger("moonjar.batch_formation")
+
+
+# ────────────────────────────────────────────────────────────────
+# §0-  Shelf coating consumption (batch-level, per kiln area)
+# ────────────────────────────────────────────────────────────────
+
+def _consume_shelf_coating(
+    db: Session,
+    batch: "Batch",
+    kiln: "Resource",
+    factory_id: UUID,
+) -> None:
+    """
+    Consume shelf coating engobe for the batch based on kiln shelf area.
+
+    Shelf coating protects kiln shelves from glaze drips. It is mixed once
+    per batch/cycle, consumed per-batch (not per-piece).
+
+    Looks up an active Recipe with recipe_type='engobe' AND
+    engobe_type='shelf_coating'. For each RecipeMaterial in that recipe,
+    creates a CONSUME MaterialTransaction scaled by kiln capacity_sqm.
+
+    The recipe's consumption rates (consumption_spray_ml_per_sqm or
+    consumption_brush_ml_per_sqm) determine how much is used per m².
+    If neither is set, falls back to RecipeMaterial.quantity_per_unit * area.
+    """
+    # Find shelf coating recipe (active, any factory — recipes are global)
+    shelf_recipe = (
+        db.query(Recipe)
+        .filter(
+            Recipe.recipe_type == "engobe",
+            Recipe.engobe_type == "shelf_coating",
+            Recipe.is_active.is_(True),
+        )
+        .first()
+    )
+    if not shelf_recipe:
+        return  # No shelf coating recipe configured — nothing to consume
+
+    kiln_area = kiln.capacity_sqm
+    if not kiln_area or kiln_area <= 0:
+        logger.warning(
+            "SHELF_COATING | batch=%s kiln=%s | kiln has no capacity_sqm — skip",
+            batch.id, kiln.name,
+        )
+        return
+
+    area_sqm = Decimal(str(kiln_area))
+
+    # Determine consumption rate per m² (ml)
+    rate_per_sqm = (
+        shelf_recipe.consumption_spray_ml_per_sqm
+        or shelf_recipe.consumption_brush_ml_per_sqm
+    )
+
+    # Consume each material in the shelf coating recipe
+    recipe_materials = (
+        db.query(RecipeMaterial)
+        .filter(RecipeMaterial.recipe_id == shelf_recipe.id)
+        .all()
+    )
+    if not recipe_materials:
+        logger.debug(
+            "SHELF_COATING | batch=%s | recipe '%s' has no materials — skip",
+            batch.id, shelf_recipe.name,
+        )
+        return
+
+    consumed = []
+    for rm in recipe_materials:
+        # Quantity = rate * area, or fallback to recipe material qty * area
+        if rate_per_sqm:
+            qty = Decimal(str(rate_per_sqm)) * area_sqm
+        else:
+            qty = Decimal(str(rm.quantity_per_unit)) * area_sqm
+
+        txn = MaterialTransaction(
+            material_id=rm.material_id,
+            factory_id=factory_id,
+            type="consume",
+            quantity=qty,
+            notes=(
+                f"Shelf coating consumption for batch {batch.id} "
+                f"(kiln {kiln.name}, {float(area_sqm):.2f} m²)"
+            ),
+        )
+        db.add(txn)
+        consumed.append({
+            "material_id": str(rm.material_id),
+            "quantity": float(qty),
+        })
+
+    if consumed:
+        db.flush()
+        logger.info(
+            "SHELF_COATING | batch=%s kiln=%s | consumed %d materials "
+            "(area=%.2f m², recipe='%s')",
+            batch.id, kiln.name, len(consumed),
+            float(area_sqm), shelf_recipe.name,
+        )
 
 
 # ────────────────────────────────────────────────────────────────
@@ -1154,6 +1257,9 @@ def _build_batches_for_group(
         for pos in batch_positions:
             pos.batch_id = batch.id
             pos.resource_id = kiln.id  # actual kiln assignment
+
+        # ── Shelf coating consumption (batch-level, based on kiln area) ──
+        _consume_shelf_coating(db, batch, kiln, factory_id)
 
         fill_pct = float(
             (total_area / kiln_capacity * 100) if kiln_capacity > 0 else 0

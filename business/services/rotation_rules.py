@@ -14,13 +14,12 @@ in batch.metadata_json (e.g. "standard", "two_stage:gold").
 
 import logging
 from uuid import UUID
-from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-from api.models import KilnRotationRule, Batch, Resource
+from api.models import KilnRotationRule, Batch
 from api.enums import BatchStatus
 
 logger = logging.getLogger("moonjar.rotation_rules")
@@ -236,37 +235,3 @@ def get_next_recommended_glaze(
     return sequence[0]
 
 
-def validate_batch_rotation(db: Session, batch: Batch) -> dict:
-    """
-    Check if a batch's proposed firing follows rotation rules for its kiln.
-
-    Returns:
-        {
-            "compliant": bool,
-            "reason": str,
-            "cooldown_needed": int,
-            "suggestion": str | None,
-            "kiln_id": str,
-            "batch_id": str,
-        }
-    """
-    if not batch.resource_id or not batch.factory_id:
-        return {
-            "compliant": True,
-            "reason": "Batch has no kiln or factory assigned.",
-            "cooldown_needed": 0,
-            "suggestion": None,
-            "kiln_id": None,
-            "batch_id": str(batch.id),
-        }
-
-    # Determine proposed glaze from batch metadata
-    meta = batch.metadata_json or {}
-    proposed_glaze = meta.get("cofiring_group", "standard")
-
-    result = check_rotation_compliance(
-        db, batch.resource_id, proposed_glaze, batch.factory_id,
-    )
-    result["kiln_id"] = str(batch.resource_id)
-    result["batch_id"] = str(batch.id)
-    return result

@@ -11,7 +11,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from api.models import Notification, User, UserFactory, NotificationPreference
-from api.enums import NotificationType, RelatedEntityType, UserRole, NotificationChannel
+from api.enums import NotificationType, RelatedEntityType, UserRole, NotificationChannel  # noqa: dead-code
 
 logger = logging.getLogger("moonjar.notifications")
 

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from api.models import (
     Task, EscalationRule, User, UserFactory, Notification,
 )
-from api.enums import TaskStatus, UserRole, NotificationType
+from api.enums import TaskStatus, UserRole, NotificationType, NightAlertLevel
 
 logger = logging.getLogger("moonjar.escalation")
 
@@ -110,7 +110,7 @@ def check_and_escalate(db: Session, factory_id: UUID) -> list[dict]:
                     f"Escalated: {task_type} not resolved by PM in {rule.pm_timeout_hours}h",
                     night=night,
                 )
-            _set_escalation_level(task, 1)
+            _set_escalation_level(task, 1, night=night)
             actions.append({
                 "task_id": str(task.id),
                 "task_type": task_type,
@@ -126,7 +126,7 @@ def check_and_escalate(db: Session, factory_id: UUID) -> list[dict]:
                     f"URGENT: {task_type} not resolved by CEO in {rule.ceo_timeout_hours}h",
                     night=night,
                 )
-            _set_escalation_level(task, 2)
+            _set_escalation_level(task, 2, night=night)
             actions.append({
                 "task_id": str(task.id),
                 "task_type": task_type,
@@ -138,7 +138,7 @@ def check_and_escalate(db: Session, factory_id: UUID) -> list[dict]:
         elif current_level == 2 and age_hours >= float(rule.owner_timeout_hours):
             for user in owner_users:
                 _request_voice_call(db, task, user)
-            _set_escalation_level(task, 3)
+            _set_escalation_level(task, 3, night=night)
             actions.append({
                 "task_id": str(task.id),
                 "task_type": task_type,
@@ -157,6 +157,10 @@ def check_and_escalate(db: Session, factory_id: UUID) -> list[dict]:
                         f"NIGHT ALERT (repeat): {task_type} still unresolved",
                         night=True,
                     )
+                # Mark night alert mode as REPEAT for kiln night repeats
+                if not task.metadata_json or not isinstance(task.metadata_json, dict):
+                    task.metadata_json = {}
+                task.metadata_json["night_alert_mode"] = NightAlertLevel.REPEAT.value
                 actions.append({
                     "task_id": str(task.id),
                     "task_type": task_type,
@@ -226,12 +230,31 @@ def _get_escalation_level(task: Task) -> int:
     return 0
 
 
-def _set_escalation_level(task: Task, level: int):
+def _level_to_night_alert(level: int, is_kiln: bool, night: bool) -> Optional[str]:
+    """Map escalation level to NightAlertLevel value for night escalations."""
+    if not night:
+        return None
+    if not is_kiln:
+        return NightAlertLevel.MORNING.value
+    # Kiln tasks at night: level 2+ repeat, level 3 = call
+    if level >= 3:
+        return NightAlertLevel.CALL.value
+    if level >= 2:
+        return NightAlertLevel.REPEAT.value
+    return NightAlertLevel.MORNING.value
+
+
+def _set_escalation_level(task: Task, level: int, night: bool = False):
     """Set escalation level in task metadata."""
     if not task.metadata_json or not isinstance(task.metadata_json, dict):
         task.metadata_json = {}
     task.metadata_json["escalation_level"] = level
     task.metadata_json["escalated_at"] = datetime.now(timezone.utc).isoformat()
+    task_type = task.type.value if hasattr(task.type, "value") else str(task.type)
+    is_kiln = task_type in NIGHT_ALERT_TASK_TYPES
+    alert_mode = _level_to_night_alert(level, is_kiln, night)
+    if alert_mode:
+        task.metadata_json["night_alert_mode"] = alert_mode
 
 
 def _get_last_notification_time(task: Task) -> Optional[datetime]:
@@ -329,5 +352,5 @@ def _request_voice_call(db: Session, task: Task, user: User):
                 f"🚨🚨🚨 CRITICAL: {task.description or task.type}\n\n"
                 f"Voice call attempted. Please respond immediately!",
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to send escalation call notification: %s", e)

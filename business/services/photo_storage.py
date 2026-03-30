@@ -15,7 +15,7 @@ import hashlib
 import logging
 from pathlib import Path
 from uuid import UUID, uuid4
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Optional
 
 import httpx
@@ -193,12 +193,18 @@ def _validate_path(path: str) -> Path:
     return resolved
 
 
-def get_public_url(path: str) -> str:
+def get_public_url(path: str) -> str:  # noqa: dead-code — URL reconstruction utility
     """
     Get public URL for a stored photo.
 
+    Use this when you only have the storage *path* (e.g. from a DB column
+    that stores ``upload_photo()["path"]``) and need the full URL.
+    Currently ``upload_photo()`` returns the URL directly, so most callers
+    don't need this.  It exists for cases where only the path was persisted
+    (e.g. retention cleanup, future migrations).
+
     Args:
-        path: The storage path (as returned by upload_photo)
+        path: The storage path (as returned by upload_photo()["path"])
 
     Returns:
         Full public URL for the photo

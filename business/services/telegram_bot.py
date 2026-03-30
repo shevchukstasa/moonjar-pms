@@ -701,10 +701,10 @@ MESSAGES: dict[str, dict[str, str]] = {
 _DEFAULT_LANG = "id"
 
 
-def get_user_language(db: Session, telegram_user_id: Optional[int] = None, chat_id: Optional[int] = None) -> str:
+def get_user_language(db: Session, telegram_user_id: Optional[int] = None, chat_id: Optional[int] = None, message_text: Optional[str] = None) -> str:
     """
     Determine user language from their PMS profile.
-    Falls back to factory telegram_language, then to 'id'.
+    Falls back to factory telegram_language, then detect_language(message_text), then 'id'.
     """
     if telegram_user_id:
         user = (
@@ -731,6 +731,13 @@ def get_user_language(db: Session, telegram_user_id: Optional[int] = None, chat_
             lang = factory.telegram_language
             if lang in ("en", "id", "ru"):
                 return lang
+
+    # Detect language from message text as last resort before hard default
+    if message_text:
+        from business.services.telegram_ai import detect_language
+        detected = detect_language(message_text)
+        if detected in ("en", "id", "ru"):
+            return detected
 
     return _DEFAULT_LANG
 
@@ -889,7 +896,7 @@ async def handle_command(db: Session, message: dict) -> None:
         await _cmd_photo(db, message)
     else:
         _from = message.get("from", {})
-        lang = get_user_language(db, _from.get("id"), chat_id)
+        lang = get_user_language(db, _from.get("id"), chat_id, message_text=text)
         await _send_message(chat_id, msg("unknown_command", lang))
 
 
@@ -972,8 +979,8 @@ async def handle_photo(db: Session, message: dict) -> None:
     if position_id:
         try:
             photo.position_id = position_id
-        except Exception:
-            pass  # Column may not exist on model yet
+        except Exception as e:
+            logger.debug("Could not set position_id on photo (column may not exist): %s", e)
 
     db.add(photo)
     db.commit()
@@ -1122,8 +1129,10 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
             if not cb_chat_id:
                 await answer_callback_query(callback_id, msg("error_occurred", _cb_lang))
                 return
+            cb_message_id = cb_message.get("message_id")
             await _handle_delivery_callback(
                 db, data, callback_id, cb_chat_id, telegram_user_id,
+                message_id=cb_message_id,
             )
         except Exception as e:
             logger.error(f"Delivery callback error for data={data}: {e}", exc_info=True)
@@ -1413,6 +1422,8 @@ async def _cmd_status(db: Session, message: dict) -> None:
             material_stock={},
         )
         if recommendation:
+            from business.services.telegram_ai import translate_response
+            recommendation = await translate_response(recommendation, lang)
             await _send_message(chat_id, f"\U0001f9e0 AI: {recommendation}", parse_mode="")
     except Exception as e:
         logger.debug("AI task prioritization failed (non-fatal): %s", e)
@@ -1522,6 +1533,8 @@ async def _cmd_defect(db: Session, message: dict, args: str) -> None:
                 kiln_history=kiln_history,
             )
             if diagnosis:
+                from business.services.telegram_ai import translate_response
+                diagnosis = await translate_response(diagnosis, lang)
                 await _send_message(chat_id, f"\U0001f9e0 AI: {diagnosis}", parse_mode="")
         except Exception as e:
             logger.debug("AI defect diagnosis failed (non-fatal): %s", e)
@@ -2010,7 +2023,7 @@ async def _handle_private_text(db: Session, message: dict) -> None:
     telegram_user_id = from_user.get("id")
     text = (message.get("text") or "").strip()
 
-    lang = get_user_language(db, telegram_user_id, chat_id)
+    lang = get_user_language(db, telegram_user_id, chat_id, message_text=text)
 
     # Check if already linked
     existing = _find_user_by_telegram(db, telegram_user_id)
@@ -2155,8 +2168,8 @@ def _find_position_by_number_or_id(
         )
         if position:
             return position
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Position lookup by partial ID failed: %s", e)
 
     return None
 
@@ -2642,6 +2655,8 @@ async def _handle_delivery_callback(
     callback_id: str,
     chat_id: int,
     telegram_user_id: int,
+    *,
+    message_id: int | None = None,
 ) -> None:
     """
     Handle delivery confirmation inline button callbacks.
@@ -2674,6 +2689,10 @@ async def _handle_delivery_callback(
         # Clean up any active edit session for this chat
         if chat_id in _pending_edits and _pending_edits[chat_id].get("delivery_id") == delivery_id:
             del _pending_edits[chat_id]
+        # Remove inline buttons from the message
+        if message_id:
+            from business.services.notifications import edit_telegram_message_buttons
+            edit_telegram_message_buttons(str(chat_id), message_id)
         await answer_callback_query(callback_id, msg("cancel_btn", lang))
         await _send_message(chat_id, msg("receipt_cancelled", lang), parse_mode="")
         logger.info(f"Delivery {delivery_id} cancelled by user {telegram_user_id}")
@@ -2716,6 +2735,10 @@ async def _handle_delivery_callback(
             "unit": target_item.get("unit") or material.unit or "pcs",
         })
 
+        # Remove suggestion buttons from this message after selection
+        if message_id:
+            from business.services.notifications import edit_telegram_message_buttons
+            edit_telegram_message_buttons(str(chat_id), message_id)
         await answer_callback_query(
             callback_id,
             f"\"{target_item['original_name']}\" \u2192 {material.name}",
@@ -2769,6 +2792,10 @@ async def _handle_delivery_callback(
 
             db.commit()
 
+            # Remove suggestion buttons from this message after creation
+            if message_id:
+                from business.services.notifications import edit_telegram_message_buttons
+                edit_telegram_message_buttons(str(chat_id), message_id)
             await answer_callback_query(callback_id, f"Material \"{new_material.name}\" created")
             await _send_message(chat_id, msg("new_material_created", lang, name=new_material.name, original=target_item['original_name']))
             logger.info(
@@ -2800,6 +2827,11 @@ async def _handle_delivery_callback(
             # Clean up any active edit session
             if chat_id in _pending_edits and _pending_edits[chat_id].get("delivery_id") == delivery_id:
                 del _pending_edits[chat_id]
+
+            # Remove confirm/edit/cancel buttons from the preview message
+            if message_id:
+                from business.services.notifications import edit_telegram_message_buttons
+                edit_telegram_message_buttons(str(chat_id), message_id)
 
             await answer_callback_query(callback_id, "Penerimaan dikonfirmasi!")
 

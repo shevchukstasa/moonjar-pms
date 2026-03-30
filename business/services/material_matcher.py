@@ -619,46 +619,88 @@ async def find_best_match(
             "suggested_subtype": None,
             "candidates": candidates,
         }
-    else:
-        logger.info(
-            "No match for %r (best=%r, score=%.3f, threshold=%.2f). "
-            "Suggesting new: name=%r, type=%s, subtype=%s",
-            delivery_name,
-            best_match["name"] if best_match else None,
-            best_score,
-            threshold,
-            suggested_name,
-            suggested_type,
-            suggested_subtype,
-        )
-        return {
-            "matched": False,
-            "material_id": None,
-            "material_name": best_match["name"] if best_match else None,
-            "score": round(best_score, 3) if best_match else 0.0,
-            "translated_name": translated,
-            "delivery_name": delivery_name,
-            "quantity": delivery_qty,
-            "unit": translated_unit,
-            "suggested_name": suggested_name,
-            "suggested_type": suggested_type,
-            "suggested_subtype": suggested_subtype,
-            "candidates": candidates,
-        }
+
+    # ── LLM fallback for ambiguous matches (score 0.2–threshold) ──
+    # When fuzzy matching is uncertain, ask AI to decide among top candidates.
+    if candidates and best_score >= 0.2:
+        try:
+            from business.services.telegram_ai import ai_match_material
+            ai_result = await ai_match_material(
+                delivery_name=delivery_name,
+                top_candidates=candidates,
+                context=f"supplier: {supplier_name}" if supplier_name else "",
+            )
+            if ai_result and ai_result.get("confidence", 0) >= 0.6:
+                logger.info(
+                    "AI fallback matched: %r → %r (confidence=%.2f, reason=%s)",
+                    delivery_name, ai_result["material_name"],
+                    ai_result["confidence"], ai_result.get("reason", ""),
+                )
+                return {
+                    "matched": True,
+                    "material_id": ai_result["material_id"],
+                    "material_name": ai_result["material_name"],
+                    "score": round(ai_result["confidence"], 3),
+                    "translated_name": translated,
+                    "delivery_name": delivery_name,
+                    "quantity": delivery_qty,
+                    "unit": translated_unit,
+                    "suggested_name": None,
+                    "suggested_type": None,
+                    "suggested_subtype": None,
+                    "candidates": candidates,
+                }
+        except Exception as e:
+            logger.debug("AI material match fallback failed: %s", e)
+
+    logger.info(
+        "No match for %r (best=%r, score=%.3f, threshold=%.2f). "
+        "Suggesting new: name=%r, type=%s, subtype=%s",
+        delivery_name,
+        best_match["name"] if best_match else None,
+        best_score,
+        threshold,
+        suggested_name,
+        suggested_type,
+        suggested_subtype,
+    )
+    return {
+        "matched": False,
+        "material_id": None,
+        "material_name": best_match["name"] if best_match else None,
+        "score": round(best_score, 3) if best_match else 0.0,
+        "translated_name": translated,
+        "delivery_name": delivery_name,
+        "quantity": delivery_qty,
+        "unit": translated_unit,
+        "suggested_name": suggested_name,
+        "suggested_type": suggested_type,
+        "suggested_subtype": suggested_subtype,
+        "candidates": candidates,
+    }
 
 
 # ────────────────────────────────────────────────────────────────
 # Synchronous convenience wrapper
 # ────────────────────────────────────────────────────────────────
 
-def find_best_match_sync(
+def find_best_match_sync(  # noqa: dead-code — sync wrapper for batch scripts
     delivery_name: str,
     delivery_qty: float,
     delivery_unit: str,
     db_materials: list[dict],
     threshold: float = 0.4,
 ) -> dict:
-    """Synchronous version of find_best_match for non-async callers."""
+    """Synchronous version of find_best_match for non-async callers.
+
+    Currently unused — all callers (delivery router, telegram bot,
+    match_delivery_items) are async and call find_best_match directly.
+    Kept as a convenience wrapper for potential future sync contexts
+    (CLI scripts, management commands, etc.).
+
+    Note: uses deprecated ``get_event_loop().run_until_complete()`` pattern.
+    If a sync caller is added, prefer ``asyncio.run()`` instead.
+    """
     import asyncio
     return asyncio.get_event_loop().run_until_complete(
         find_best_match(delivery_name, delivery_qty, delivery_unit, db_materials, threshold)
@@ -763,6 +805,10 @@ def _guess_product_subtype(translated_name: str) -> Optional[str]:
     """
     Guess MaterialProductSubtype for stone materials.
 
+    Uses keyword matching first, then falls back to guess_subtype_from_size()
+    when a size pattern (e.g. "5x20", "Ø35") is present in the name but no
+    keyword gives a clear answer.
+
     Returns: "tiles", "sinks", "table_top", "custom", or None.
     """
     lower = translated_name.lower()
@@ -780,6 +826,12 @@ def _guess_product_subtype(translated_name: str) -> Optional[str]:
     # Default for generic stone references
     if any(w in lower for w in ("tile", "stone", "ceramic")):
         return "tiles"
+
+    # Fallback: try to infer subtype from size dimensions in the name
+    # e.g. "Lava 5x20" → tiles, "Andesite 60x90" → table_top
+    size_match = re.search(r'(\d+(?:\.\d+)?x\d+(?:\.\d+)?|[øØ]\s*\d+(?:\.\d+)?)', lower)
+    if size_match:
+        return guess_subtype_from_size(size_match.group(0))
 
     return None
 

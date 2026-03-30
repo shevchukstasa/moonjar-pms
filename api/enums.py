@@ -293,7 +293,7 @@ class ReferenceAction(str, Enum):
     UPDATE = 'update'
     DELETE = 'delete'
 
-class WebhookAuthMode(str, Enum):
+class WebhookAuthMode(str, Enum):  # noqa: dead-code — used in integration.py
     BEARER = 'bearer'
     HMAC = 'hmac'
 
@@ -345,7 +345,7 @@ class ReceivingApprovalMode(str, Enum):
     ALL = 'all'          # PM approves every delivery
     AUTO = 'auto'        # Auto-approve if no quality issues
 
-class ProblemCardMode(str, Enum):
+class ProblemCardMode(str, Enum):  # noqa: dead-code — used in ProblemCard.mode
     SIMPLE = 'simple'
     FULL_8D = 'full_8d'
 
@@ -443,7 +443,7 @@ class ApplicationCollectionCode(str, Enum):
     WASH_BASIN = 'wash_basin'
 
 
-class ConsumptionGroup(str, Enum):
+class ConsumptionGroup(str, Enum):  # noqa: dead-code — reference for ApplicationMethod
     SPRAY = 'spray'
     BRUSH = 'brush'
     SILK_SCREEN = 'silk_screen'

@@ -119,7 +119,7 @@ class Endpoint(NamedTuple):
     is_stub:    bool
     file:       str
 
-class ApiCall(NamedTuple):
+class ApiCall(NamedTuple):  # noqa: dead-code — used in parse_hook_calls
     method:   str   # get/post/patch/delete
     path:     str   # raw string e.g. '/orders' or f-string pattern
     page:     str   # source file
@@ -257,20 +257,6 @@ HOOK_USE_RE = re.compile(r'(use\w+)\(')
 IMPORT_API_RE = re.compile(r"from\s+['\"]@/api/(\w+)['\"]")
 IS_ERROR_RE = re.compile(r'isError')
 
-def parse_pm_api_calls() -> list[ApiCall]:
-    calls = []
-    for page_name in PM_PAGES:
-        page_path = FRONTEND_PAGES / page_name
-        content = _read(page_path)
-        if not content:
-            continue
-        for m in API_CALL_RE.finditer(content):
-            method = (m.group(1) or m.group(3) or "").lower()
-            path   = (m.group(2) or m.group(4) or "")
-            line_no = content[:m.start()].count("\n") + 1
-            calls.append(ApiCall(method=method, path=path, page=page_name, line=line_no))
-    return calls
-
 def parse_hook_calls_in_pm_pages() -> dict[str, list[str]]:
     """For each PM page, find which hooks are used."""
     result: dict[str, list[str]] = {}
@@ -280,7 +266,7 @@ def parse_hook_calls_in_pm_pages() -> dict[str, list[str]]:
         result[page_name] = [h for h in hooks if h.startswith("use")]
     return result
 
-def parse_api_module_calls() -> dict[str, list[str]]:
+def parse_api_module_calls() -> dict[str, list[str]]:  # noqa: dead-code — used via cross_reference
     """
     For each hook file referenced from PM pages, extract what API paths it calls.
     Returns: {hook_file: ["/path1", "/path2", ...]}

@@ -3,8 +3,7 @@ Stage Reconciliation service.
 Business Logic: §13, §26
 """
 from uuid import UUID
-from datetime import date, datetime, timedelta
-from math import ceil, floor
+from datetime import date, datetime, timezone
 from typing import Optional
 import logging
 
@@ -164,7 +163,7 @@ def inventory_reconciliation(
 
         # Update stock balance
         stock.balance = actual_qty
-        stock.updated_at = datetime.utcnow()
+        stock.updated_at = datetime.now(timezone.utc)
 
         adjustments_count += 1
         if difference > 0:

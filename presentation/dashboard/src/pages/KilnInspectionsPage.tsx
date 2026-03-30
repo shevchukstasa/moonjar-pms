@@ -12,6 +12,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
 import { FactorySelector } from '@/components/layout/FactorySelector';
+import { DatePicker } from '@/components/ui/DatePicker';
 
 const PAGE_TABS = [
   { id: 'inspections', label: 'Inspections' },
@@ -340,11 +341,10 @@ function NewInspectionForm({ factoryId, onDone }: { factoryId: string | null; on
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Inspection Date</label>
-            <input
-              type="date"
+            <DatePicker
               value={inspDate}
-              onChange={(e) => setInspDate(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              onChange={(v) => setInspDate(v)}
+              className="w-full"
             />
           </div>
           <div>

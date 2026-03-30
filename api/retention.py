@@ -176,9 +176,38 @@ async def run_retention_cleanup(db: Session):
 
     # -----------------------------------------------------------------------
     # 10. Worker media — 2 years
+    #     Delete actual photo files from storage before removing DB records.
     # -----------------------------------------------------------------------
     try:
         cutoff = now - timedelta(days=730)
+
+        # Fetch file_url values before deleting rows so we can remove
+        # the actual files from Supabase / local storage.
+        rows = db.execute(
+            text("SELECT file_url FROM worker_media WHERE created_at < :cutoff AND file_url IS NOT NULL"),
+            {"cutoff": cutoff},
+        ).fetchall()
+        photo_paths = [row[0] for row in rows if row[0]]
+
+        # Delete physical files (best-effort: log failures but continue)
+        if photo_paths:
+            from business.services.photo_storage import delete_photo
+            deleted_files = 0
+            for path in photo_paths:
+                try:
+                    # file_url may be a full URL or a relative storage path.
+                    # delete_photo expects the storage path (e.g. "photos/..." or
+                    # relative local path).  Strip /api/uploads/ prefix for local paths.
+                    storage_path = path
+                    if storage_path.startswith("/api/uploads/"):
+                        storage_path = storage_path[len("/api/uploads/"):]
+                    ok = await delete_photo(storage_path)
+                    if ok:
+                        deleted_files += 1
+                except Exception as photo_err:
+                    logger.warning("Retention: failed to delete photo file %s: %s", path, photo_err)
+            logger.info("Retention: deleted %d/%d worker media photo files", deleted_files, len(photo_paths))
+
         r = db.execute(
             text("DELETE FROM worker_media WHERE created_at < :cutoff"),
             {"cutoff": cutoff},

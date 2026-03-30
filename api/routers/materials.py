@@ -26,13 +26,36 @@ from api.models import (
     OrderPosition, RecipeMaterial, KilnMaintenanceMaterial,
     InventoryReconciliationItem,
     PackagingBoxType, PackagingSpacerRule,
+    ReferenceAuditLog,
 )
-from api.enums import PurchaseStatus
+from api.enums import PurchaseStatus, MaterialType
+
+import logging
+
+_logger = logging.getLogger("moonjar.routers.materials")
 
 router = APIRouter()
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
+
+_VALID_MATERIAL_TYPES = {e.value for e in MaterialType}
+
+
+def _validate_material_type(material_type: str | None) -> str | None:
+    """Validate material_type against MaterialType enum.
+
+    Returns the value as-is. Logs a warning for unknown values but does NOT block.
+    """
+    if not material_type:
+        return material_type
+    if material_type not in _VALID_MATERIAL_TYPES:
+        _logger.warning(
+            "Unknown material_type '%s' — valid values: %s",
+            material_type, sorted(_VALID_MATERIAL_TYPES),
+        )
+    return material_type
+
 
 def _ev(val):
     return val.value if hasattr(val, "value") else str(val) if val else None
@@ -417,8 +440,8 @@ async def get_effective_balance(
                     qty = float(pos.quantity or 0)
                     recipe_qty = float(rm.quantity_per_unit or 0)
                     reserved += qty * recipe_qty
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.warning("Failed to calculate reserved qty for material %s: %s", mat.id, e)
 
         effective = balance - reserved
         min_bal = float(stock.min_balance or 0)
@@ -1043,6 +1066,8 @@ async def create_material(
             raise HTTPException(404, "Material subgroup not found")
         material_type = sg.code  # sync material_type from subgroup.code
 
+    material_type = _validate_material_type(material_type)
+
     # Get or create catalog material
     mat = db.query(Material).filter(Material.name == data.name).first()
     is_new_mat = mat is None
@@ -1152,7 +1177,7 @@ async def update_material(
             if not sg:
                 raise HTTPException(404, "Material subgroup not found")
             mat.subgroup_id = new_sg_id
-            mat.material_type = sg.code
+            mat.material_type = _validate_material_type(sg.code)
         else:
             mat.subgroup_id = None
 
@@ -1186,6 +1211,10 @@ async def update_material(
             ).first()
 
         if stock:
+            # Capture old min_balance before applying updates (for audit log)
+            old_min_balance = float(stock.min_balance) if stock.min_balance is not None else None
+            old_min_balance_auto = stock.min_balance_auto
+
             for k, v in stock_updates.items():
                 if k in ("balance", "min_balance") and v is not None:
                     setattr(stock, k, Decimal(str(v)))
@@ -1193,10 +1222,65 @@ async def update_material(
                     setattr(stock, k, v)
             stock.updated_at = datetime.now(timezone.utc)
 
+            # Audit log for min_balance change
+            if "min_balance" in stock_updates:
+                from api.enums import ReferenceAction
+                new_min_val = stock_updates["min_balance"]
+                audit_old = {"min_balance": old_min_balance}
+                audit_new = {"min_balance": float(new_min_val) if new_min_val is not None else None}
+                if "min_balance_auto" in stock_updates:
+                    audit_old["min_balance_auto"] = old_min_balance_auto
+                    audit_new["min_balance_auto"] = stock_updates["min_balance_auto"]
+                audit_entry = ReferenceAuditLog(
+                    table_name="material_stock",
+                    record_id=stock.id,
+                    action=ReferenceAction.UPDATE,
+                    old_values_json=audit_old,
+                    new_values_json=audit_new,
+                    changed_by=current_user.id,
+                )
+                db.add(audit_entry)
+
     db.commit()
     db.refresh(mat)
     if stock:
         db.refresh(stock)
+    return _serialize_material(mat, stock, db)
+
+
+# ── Min-balance PM override ─────────────────────────────────────────────
+
+
+class MinBalanceOverrideInput(BaseModel):
+    min_balance: float = Field(..., ge=0, description="New minimum balance value")
+    notes: Optional[str] = Field(None, description="Optional reason for override")
+
+
+@router.put("/{material_id}/min-balance")
+async def override_min_balance(
+    material_id: UUID,
+    data: MinBalanceOverrideInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """PM manually overrides min_balance for a material. Disables auto-calculation."""
+    factory_id = apply_factory_filter(current_user, db)
+    if not factory_id:
+        raise HTTPException(400, "Factory context required")
+
+    from business.services.min_balance import pm_override_min_balance
+
+    try:
+        stock = pm_override_min_balance(
+            db, material_id, factory_id, data.min_balance, current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+    db.commit()
+    db.refresh(stock)
+
+    mat = db.query(Material).filter(Material.id == stock.material_id).first()
     return _serialize_material(mat, stock, db)
 
 

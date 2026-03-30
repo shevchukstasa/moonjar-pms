@@ -273,6 +273,34 @@ async def auto_assign_surplus(
     return result
 
 
+class SurplusBatchRequest(BaseModel):
+    position_ids: list[UUID]
+    factory_id: UUID
+
+
+@router.post("/surplus-dispositions/batch")
+async def batch_process_surplus(
+    data: SurplusBatchRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """
+    Process multiple surplus positions at once — assigns dispositions,
+    creates DB records and routing tasks for each position.
+    """
+    positions = (
+        db.query(OrderPosition)
+        .filter(OrderPosition.id.in_(data.position_ids))
+        .all()
+    )
+    if not positions:
+        raise HTTPException(404, "No matching positions found")
+
+    from business.services.surplus_handling import process_surplus_batch
+
+    return process_surplus_batch(db, positions, data.factory_id)
+
+
 # === SUPPLIER DEFECT REPORTS (Decision 2026-03-19) ===
 
 class SupplierReportGenerate(BaseModel):

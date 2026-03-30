@@ -22,9 +22,11 @@ interface Props {
   positions: PositionItem[];
   section: string;
   onSplitPosition?: (position: PositionItem) => void;
+  onMergePosition?: (position: PositionItem) => void;
+  onViewSplitTree?: (positionId: string) => void;
 }
 
-export function SectionTable({ positions: rawPositions, section, onSplitPosition }: Props) {
+export function SectionTable({ positions: rawPositions, section, onSplitPosition, onMergePosition, onViewSplitTree }: Props) {
   const positions = rawPositions ?? [];
   const reorder = useReorderPositions();
   const filters = useTabloStore((s) => s.filters);
@@ -121,6 +123,7 @@ export function SectionTable({ positions: rawPositions, section, onSplitPosition
                   <th className="px-3 py-2">Type</th>
                   <th className="px-3 py-2 text-right">Delay</th>
                   {onSplitPosition && <th className="w-10 px-2 py-2" />}
+                  {onMergePosition && <th className="w-10 px-2 py-2" />}
                 </tr>
               </thead>
               <tbody className="divide-y bg-white">
@@ -131,6 +134,8 @@ export function SectionTable({ positions: rawPositions, section, onSplitPosition
                     index={idx}
                     section={section}
                     onSplit={onSplitPosition}
+                    onMerge={onMergePosition}
+                    onViewSplitTree={onViewSplitTree}
                   />
                 ))}
               </tbody>
@@ -142,7 +147,7 @@ export function SectionTable({ positions: rawPositions, section, onSplitPosition
                   <td className="px-3 py-2 text-right text-xs font-semibold text-gray-600">
                     {totalPcs} pcs
                   </td>
-                  <td colSpan={onSplitPosition ? 4 : 3} />
+                  <td colSpan={3 + (onSplitPosition ? 1 : 0) + (onMergePosition ? 1 : 0) + (onViewSplitTree ? 1 : 0)} />
                 </tr>
               </tfoot>
             </table>
@@ -165,6 +170,8 @@ export function SectionTable({ positions: rawPositions, section, onSplitPosition
                 index={idx}
                 section={section}
                 onSplit={onSplitPosition}
+                onMerge={onMergePosition}
+                onViewSplitTree={onViewSplitTree}
                 mobileCard
               />
             ))}

@@ -3,13 +3,13 @@ Moonjar PMS — Pydantic schemas (auto-generated).
 Create / Update / Response for each database model.
 """
 
-from __future__ import annotations
-
 from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator
+
+from api.enums import ProblemCardStatus
 
 
 class FactoryCreate(BaseModel):
@@ -68,34 +68,6 @@ class FactoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class UserCreate(BaseModel):
-    email: str
-    name: str
-    role: str
-    google_id: Optional[str] = None
-    telegram_user_id: Optional[int] = None
-    language: Optional[str] = None
-    is_active: Optional[bool] = None
-    failed_login_count: Optional[int] = None
-    locked_until: Optional[datetime] = None
-    totp_enabled: Optional[bool] = None
-    last_password_change: Optional[datetime] = None
-
-
-class UserUpdate(BaseModel):
-    email: Optional[str] = None
-    name: Optional[str] = None
-    role: Optional[str] = None
-    google_id: Optional[str] = None
-    telegram_user_id: Optional[int] = None
-    language: Optional[str] = None
-    is_active: Optional[bool] = None
-    failed_login_count: Optional[int] = None
-    locked_until: Optional[datetime] = None
-    totp_enabled: Optional[bool] = None
-    last_password_change: Optional[datetime] = None
-
-
 class SupplierCreate(BaseModel):
     name: str
     contact_person: Optional[str] = None
@@ -122,25 +94,6 @@ class SupplierUpdate(BaseModel):
     notes: Optional[str] = None
     is_active: Optional[bool] = None
     subgroup_ids: Optional[list[UUID]] = None
-
-
-class SupplierResponse(BaseModel):
-    id: UUID
-    name: str
-    contact_person: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[str] = None
-    address: Optional[str] = None
-    material_types: Optional[list[str]] = None
-    default_lead_time_days: int
-    rating: Optional[float] = None
-    notes: Optional[str] = None
-    is_active: bool
-    subgroup_ids: Optional[list[str]] = None
-    subgroup_names: Optional[list[str]] = None
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
 
 
 class CollectionCreate(BaseModel):
@@ -171,19 +124,13 @@ class FinishingTypeUpdate(BaseModel):
     name: Optional[str] = None
 
 
-class SizeUpdate(BaseModel):
-    name: Optional[str] = None
-    width_mm: Optional[int] = None
-    height_mm: Optional[int] = None
-    is_custom: Optional[bool] = None
-
-
 class RecipeCreate(BaseModel):
     name: str
     color_collection: Optional[str] = None
     description: Optional[str] = None
     recipe_type: str = 'product'
     color_type: Optional[str] = None
+    engobe_type: Optional[str] = None  # 'standard', 'shelf_coating', 'hole_filler' — only when recipe_type='engobe'
     specific_gravity: Optional[float] = None
     consumption_spray_ml_per_sqm: Optional[float] = None
     consumption_brush_ml_per_sqm: Optional[float] = None
@@ -200,6 +147,7 @@ class RecipeUpdate(BaseModel):
     description: Optional[str] = None
     recipe_type: Optional[str] = None
     color_type: Optional[str] = None
+    engobe_type: Optional[str] = None
     specific_gravity: Optional[float] = None
     consumption_spray_ml_per_sqm: Optional[float] = None
     consumption_brush_ml_per_sqm: Optional[float] = None
@@ -216,6 +164,7 @@ class RecipeResponse(BaseModel):
     description: Optional[str] = None
     recipe_type: str
     color_type: Optional[str] = None
+    engobe_type: Optional[str] = None
     specific_gravity: Optional[float] = None
     consumption_spray_ml_per_sqm: Optional[float] = None
     consumption_brush_ml_per_sqm: Optional[float] = None
@@ -232,56 +181,6 @@ class RecipeResponse(BaseModel):
     @classmethod
     def _coerce_glaze_settings(cls, v):
         return v if v is not None else {}
-
-
-class MaterialCreate(BaseModel):
-    name: str
-    factory_id: UUID
-    balance: Optional[float] = None
-    min_balance: Optional[float] = None
-    min_balance_recommended: Optional[float] = None
-    min_balance_auto: Optional[bool] = None
-    avg_daily_consumption: Optional[float] = None
-    unit: Optional[str] = None
-    material_type: str
-    avg_monthly_consumption: Optional[float] = None
-    warehouse_section: Optional[str] = None
-    supplier_id: Optional[UUID] = None
-
-
-class MaterialUpdate(BaseModel):
-    name: Optional[str] = None
-    factory_id: Optional[UUID] = None
-    balance: Optional[float] = None
-    min_balance: Optional[float] = None
-    min_balance_recommended: Optional[float] = None
-    min_balance_auto: Optional[bool] = None
-    avg_daily_consumption: Optional[float] = None
-    unit: Optional[str] = None
-    material_type: Optional[str] = None
-    avg_monthly_consumption: Optional[float] = None
-    warehouse_section: Optional[str] = None
-    supplier_id: Optional[UUID] = None
-
-
-class MaterialResponse(BaseModel):
-    id: UUID
-    name: str
-    factory_id: UUID
-    balance: float
-    min_balance: float
-    min_balance_recommended: Optional[float] = None
-    min_balance_auto: bool
-    avg_daily_consumption: Optional[float] = None
-    unit: str
-    material_type: str
-    avg_monthly_consumption: Optional[float] = None
-    warehouse_section: Optional[str] = None
-    supplier_id: Optional[UUID] = None
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
 
 
 class RecipeMaterialBulkItem(BaseModel):
@@ -351,36 +250,6 @@ class BatchResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class TaskCreate(BaseModel):
-    factory_id: UUID
-    type: str
-    status: Optional[str] = None
-    assigned_to: Optional[UUID] = None
-    assigned_role: Optional[str] = None
-    related_order_id: Optional[UUID] = None
-    related_position_id: Optional[UUID] = None
-    blocking: Optional[bool] = None
-    description: Optional[str] = None
-    priority: Optional[int] = None
-    due_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-
-
-class TaskUpdate(BaseModel):
-    factory_id: Optional[UUID] = None
-    type: Optional[str] = None
-    status: Optional[str] = None
-    assigned_to: Optional[UUID] = None
-    assigned_role: Optional[str] = None
-    related_order_id: Optional[UUID] = None
-    related_position_id: Optional[UUID] = None
-    blocking: Optional[bool] = None
-    description: Optional[str] = None
-    priority: Optional[int] = None
-    due_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
 
 
 class ProductionStageCreate(BaseModel):
@@ -462,7 +331,17 @@ class ProblemCardCreate(BaseModel):
     description: str
     actions: Optional[str] = None
     status: Optional[str] = None
+    mode: Optional[str] = None
     created_by: Optional[UUID] = None
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str | None) -> str | None:
+        if v is not None:
+            _allowed = [e.value for e in ProblemCardStatus]
+            if v not in _allowed:
+                raise ValueError(f"status must be one of {_allowed}, got '{v}'")
+        return v
 
 
 class ProblemCardUpdate(BaseModel):
@@ -471,7 +350,17 @@ class ProblemCardUpdate(BaseModel):
     description: Optional[str] = None
     actions: Optional[str] = None
     status: Optional[str] = None
+    mode: Optional[str] = None
     created_by: Optional[UUID] = None
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str | None) -> str | None:
+        if v is not None:
+            _allowed = [e.value for e in ProblemCardStatus]
+            if v not in _allowed:
+                raise ValueError(f"status must be one of {_allowed}, got '{v}'")
+        return v
 
 
 class ProblemCardResponse(BaseModel):
@@ -481,6 +370,7 @@ class ProblemCardResponse(BaseModel):
     description: str
     actions: Optional[str] = None
     status: str
+    mode: Optional[str] = None
     created_by: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
@@ -951,30 +841,3 @@ class ManaShipmentResponse(BaseModel):
 
 # ── Quality Checklists ─────────────────────────────────────────
 
-class QualityChecklistCreate(BaseModel):
-    position_id: UUID
-    factory_id: UUID
-    checklist_results: dict  # {item_key: "pass"|"fail"|"na"}
-    overall_result: str  # "pass" | "fail" | "needs_rework"
-    notes: Optional[str] = None
-
-
-class QualityChecklistResponse(BaseModel):
-    id: UUID
-    position_id: UUID
-    factory_id: UUID
-    check_type: str
-    checklist_results: dict
-    overall_result: str
-    checked_by: Optional[UUID] = None
-    checked_by_name: Optional[str] = None
-    notes: Optional[str] = None
-    created_at: datetime
-    # Position context (populated by serializer)
-    order_number: Optional[str] = None
-    color: Optional[str] = None
-    size: Optional[str] = None
-    quantity: Optional[int] = None
-    position_status: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)

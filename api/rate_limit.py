@@ -11,7 +11,6 @@ import time
 import logging
 import threading
 from collections import defaultdict
-from datetime import datetime, timezone
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware

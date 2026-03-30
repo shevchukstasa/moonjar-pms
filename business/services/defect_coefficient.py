@@ -3,13 +3,12 @@ Stone Defect Coefficient service.
 Business Logic: §14
 """
 from uuid import UUID
-from datetime import date, datetime, timedelta
-from math import ceil, floor
+from datetime import date, datetime, timedelta, timezone
+from math import ceil
 from typing import Optional
 import logging
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sa_func
 
 from api.models import DefectRecord, StoneDefectCoefficient, OrderPosition
 from api.enums import DefectStage, DefectOutcome
@@ -90,7 +89,7 @@ def update_stone_defect_coefficient(db: Session, factory_id: UUID) -> None:
         if existing:
             existing.coefficient = round(coefficient, 3)
             existing.sample_size = total_inspected
-            existing.last_updated = datetime.utcnow()
+            existing.last_updated = datetime.now(timezone.utc)
             existing.calculation_period_days = period_days
         else:
             sdc = StoneDefectCoefficient(
@@ -99,7 +98,7 @@ def update_stone_defect_coefficient(db: Session, factory_id: UUID) -> None:
                 supplier_id=supplier_id,
                 coefficient=round(coefficient, 3),
                 sample_size=total_inspected,
-                last_updated=datetime.utcnow(),
+                last_updated=datetime.now(timezone.utc),
                 calculation_period_days=period_days,
             )
             db.add(sdc)

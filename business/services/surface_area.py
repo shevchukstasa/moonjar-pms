@@ -489,8 +489,8 @@ def calculate_glazeable_sqm_for_position(db, position) -> Optional[Decimal]:
                     pw, ph = parsed  # in cm
                     w_m = Decimal(str(pw)) / Decimal('100')
                     h_m = Decimal(str(ph)) / Decimal('100')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to parse size for surface area: %s", e)
 
         # Determine edge profile coefficient
         _edge_profile = getattr(position, 'edge_profile', None) or ''

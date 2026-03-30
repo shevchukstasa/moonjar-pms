@@ -22,11 +22,9 @@ Moonjar PMS — Dead Code Scanner
 import ast
 import os
 import re
-import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Optional
 
 # ─── Цвета терминала ───
 RED = "\033[91m"
@@ -911,6 +909,39 @@ def save_report():
 
 
 # ════════════════════════════════════════════
+# noqa: dead-code filter
+# ════════════════════════════════════════════
+
+_line_cache: dict[str, list[str]] = {}
+
+def _get_source_line(rel_path: str, lineno: int) -> str:
+    """Return the source line (1-based) for a file, with caching."""
+    if rel_path not in _line_cache:
+        full = PROJECT_ROOT / rel_path
+        try:
+            _line_cache[rel_path] = full.read_text(encoding="utf-8", errors="replace").splitlines()
+        except Exception:
+            _line_cache[rel_path] = []
+    lines = _line_cache[rel_path]
+    if 1 <= lineno <= len(lines):
+        return lines[lineno - 1]
+    return ""
+
+
+def _filter_noqa():
+    """Remove findings whose source line (or the line above) contains '# noqa: dead-code'."""
+    global findings
+    kept: list[Finding] = []
+    for f in findings:
+        line = _get_source_line(f.path, f.line)
+        line_above = _get_source_line(f.path, f.line - 1) if f.line > 1 else ""
+        if "# noqa: dead-code" in line or "# noqa: dead-code" in line_above:
+            continue
+        kept.append(f)
+    findings = kept
+
+
+# ════════════════════════════════════════════
 # Main
 # ════════════════════════════════════════════
 
@@ -944,6 +975,9 @@ def main():
 
     total_time = time.time() - start
     print(f"\n{DIM}Сканирование завершено за {total_time:.1f}с{RESET}")
+
+    # Filter out items marked with # noqa: dead-code
+    _filter_noqa()
 
     print_results()
     save_report()

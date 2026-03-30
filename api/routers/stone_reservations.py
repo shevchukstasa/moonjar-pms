@@ -9,7 +9,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func, case
+from sqlalchemy import case
 
 from api.database import get_db
 from api.models import StoneReservation, StoneReservationAdjustment, StoneDefectRate
@@ -317,4 +317,98 @@ def update_defect_rate(
         "size_category": size_category,
         "product_type": product_type,
         "defect_pct": defect_pct,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────
+# POST /stone-reservations/{reservation_id}/adjustments
+# ──────────────────────────────────────────────────────────────────
+
+@router.post("/{reservation_id}/adjustments", status_code=201)
+def create_adjustment(
+    reservation_id: UUID,
+    type: str = Body(..., description="writeoff | return"),
+    qty_sqm: float = Body(..., gt=0, description="Quantity in sqm (positive)"),
+    reason: Optional[str] = Body(None, description="Free-text reason"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Create a stone reservation adjustment (writeoff or return)."""
+    reservation = db.query(StoneReservation).filter(StoneReservation.id == reservation_id).first()
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Stone reservation not found")
+
+    valid_types = {"writeoff", "return"}
+    if type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"type must be one of {sorted(valid_types)}")
+
+    adj = StoneReservationAdjustment(
+        reservation_id=reservation_id,
+        type=type,
+        qty_sqm=qty_sqm,
+        reason=reason,
+        created_by=current_user.id,
+    )
+    db.add(adj)
+
+    try:
+        db.commit()
+        db.refresh(adj)
+    except Exception as e:
+        db.rollback()
+        logger.error("create_adjustment failed for reservation %s: %s", reservation_id, e)
+        raise HTTPException(status_code=500, detail="Database error creating adjustment")
+
+    logger.info(
+        "STONE_ADJUSTMENT_CREATED | reservation=%s | type=%s | qty_sqm=%.3f | by=%s",
+        reservation_id, type, qty_sqm, current_user.id,
+    )
+
+    return {
+        "id": str(adj.id),
+        "reservation_id": str(adj.reservation_id),
+        "type": adj.type,
+        "qty_sqm": float(adj.qty_sqm),
+        "reason": adj.reason,
+        "created_at": adj.created_at.isoformat() if adj.created_at else None,
+        "created_by": str(adj.created_by) if adj.created_by else None,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────
+# GET /stone-reservations/{reservation_id}/adjustments
+# ──────────────────────────────────────────────────────────────────
+
+@router.get("/{reservation_id}/adjustments")
+def list_adjustments(
+    reservation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """List all adjustments for a stone reservation."""
+    reservation = db.query(StoneReservation).filter(StoneReservation.id == reservation_id).first()
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Stone reservation not found")
+
+    adjustments = (
+        db.query(StoneReservationAdjustment)
+        .filter(StoneReservationAdjustment.reservation_id == reservation_id)
+        .order_by(StoneReservationAdjustment.created_at.asc())
+        .all()
+    )
+
+    return {
+        "items": [
+            {
+                "id": str(a.id),
+                "reservation_id": str(a.reservation_id),
+                "type": a.type,
+                "qty_sqm": float(a.qty_sqm),
+                "reason": a.reason,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+                "created_by": str(a.created_by) if a.created_by else None,
+            }
+            for a in adjustments
+        ],
+        "total": len(adjustments),
     }

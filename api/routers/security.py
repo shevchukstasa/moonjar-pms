@@ -19,7 +19,7 @@ from api.database import get_db
 from api.auth import get_current_user, log_security_event, hash_password, verify_password
 from api.roles import require_admin
 from api.models import SecurityAuditLog, ActiveSession, IpAllowlist, User, TotpBackupCode, RateLimitEvent
-from api.enums import AuditActionType, IpScope
+from api.enums import AuditActionType
 
 router = APIRouter()
 logger = logging.getLogger("moonjar.security")
@@ -85,8 +85,8 @@ def _verify_totp_or_backup(
             totp = pyotp.TOTP(secret)
             if totp.verify(code, valid_window=1):
                 return True, "totp"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("TOTP verification failed (decryption or verify error): %s", e)
 
     # Try backup codes
     unused_codes = db.query(TotpBackupCode).filter(
@@ -179,7 +179,7 @@ async def audit_log_summary(
     current_user=Depends(require_admin),
 ):
     """Audit log summary: failed logins, unique IPs, anomalies."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     last_24h = now - timedelta(hours=24)
 
     # Failed logins in last 24h
@@ -239,7 +239,7 @@ async def list_active_sessions(
     """List active sessions. Admins see all, users see own."""
     q = db.query(ActiveSession).filter(
         ActiveSession.revoked.is_(False),
-        ActiveSession.expires_at > datetime.utcnow(),
+        ActiveSession.expires_at > datetime.now(timezone.utc),
     ).order_by(ActiveSession.created_at.desc())
 
     # Non-admin users can only see their own sessions
@@ -286,7 +286,7 @@ async def revoke_session(
         raise HTTPException(403, "Cannot revoke another user's session")
 
     session.revoked = True
-    session.revoked_at = datetime.utcnow()
+    session.revoked_at = datetime.now(timezone.utc)
     session.revoked_reason = "manual_revoke"
     db.commit()
 
@@ -303,7 +303,7 @@ async def revoke_all_other_sessions(
     sessions = db.query(ActiveSession).filter(
         ActiveSession.user_id == current_user.id,
         ActiveSession.revoked.is_(False),
-        ActiveSession.expires_at > datetime.utcnow(),
+        ActiveSession.expires_at > datetime.now(timezone.utc),
     ).all()
 
     revoked = 0
@@ -317,7 +317,7 @@ async def revoke_all_other_sessions(
         sorted_sessions = sorted(sessions, key=lambda x: x.created_at or datetime.min)
         for s in sorted_sessions[:-1]:
             s.revoked = True
-            s.revoked_at = datetime.utcnow()
+            s.revoked_at = datetime.now(timezone.utc)
             s.revoked_reason = "revoke_all_others"
             revoked += 1
 

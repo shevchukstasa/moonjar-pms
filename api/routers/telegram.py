@@ -2,7 +2,6 @@
 
 import logging
 import time
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
@@ -377,8 +376,8 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
     # Record chat info for the "Discover Chat IDs" feature
     try:
         _record_chat_from_update(body)
-    except Exception:
-        pass  # never fail on recording
+    except Exception as e:
+        logger.debug("Failed to record chat from update: %s", e)
 
     # Dispatch to bot handler (fire-and-forget style, but we await to catch errors)
     try:

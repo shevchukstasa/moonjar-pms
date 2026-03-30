@@ -4,7 +4,6 @@ JWT HttpOnly cookies, Google OAuth, TOTP 2FA, CSRF, lockout.
 """
 
 import uuid
-import secrets
 import hmac
 import hashlib
 from datetime import datetime, timedelta, timezone
@@ -144,7 +143,7 @@ def generate_csrf_token(session_id: str) -> str:
         hashlib.sha256,
     ).hexdigest()
 
-def validate_csrf(request: Request):
+def validate_csrf(request: Request):  # noqa: dead-code — per-route CSRF alternative
     """Validate CSRF token on mutating requests.
 
     Supports two modes:
@@ -283,8 +282,6 @@ def apply_factory_filter(query, current_user, factory_id, model_class):
     - Other roles WITHOUT assigned factories → see all (not blocked;
       Admin can restrict later via Dashboard Constructor)
     """
-    from api.models import UserFactory
-
     if factory_id:
         return query.filter(model_class.factory_id == factory_id)
 

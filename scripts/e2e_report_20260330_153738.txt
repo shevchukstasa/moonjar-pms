@@ -1,0 +1,23 @@
+E2E Order Lifecycle Test Report
+Generated: 2026-03-30T15:37:38.551794
+API: https://moonjar-pms-production.up.railway.app/api
+Factory: Bali (a2045a5f-c5c3-465c-a953-2c16b5e4b418)
+Duration: 7.0s
+
+Order 1: Simple Tiles: 0/1 passed  [1 FAIL]
+  [FAIL] 1. Create order via webhook -- 'function' object has no attribute 'dumps'
+
+Order 2: Multi-position Engobe: 0/1 passed  [1 FAIL]
+  [FAIL] 1. Create 3-position order via webhook -- 'function' object has no attribute 'dumps'
+
+Order 3: Countertop: 0/1 passed  [1 FAIL]
+  [FAIL] 1. Create countertop order via webhook -- Webhook failed: 500
+
+Order 4: Gold+Raku: 0/1 passed  [1 FAIL]
+  [FAIL] 1. Create gold/raku order -- 'function' object has no attribute 'dumps'
+
+Order 5: Mixed + Service Items: 0/1 passed  [1 FAIL]
+  [FAIL] 1. Create mixed order (stencil + regular) -- 'function' object has no attribute 'dumps'
+
+Total: 0/5 passed, 5 failed
+5 STEPS FAILED

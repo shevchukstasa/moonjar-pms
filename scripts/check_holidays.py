@@ -13,7 +13,6 @@ Can be run manually or via scheduled task.
 
 import sys
 import os
-import json
 import logging
 from datetime import date, datetime
 from pathlib import Path

@@ -13,10 +13,10 @@ For each metric, maintain a rolling mean + stddev over last 30 data points.
 Flag as anomaly when |current - mean| > 2 * stddev.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 from uuid import UUID
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from math import sqrt
 import logging
 

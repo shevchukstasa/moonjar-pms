@@ -36,7 +36,6 @@ from business.services.kiln_breakdown import (
     find_alternative_kilns,
     reassign_batch_to_kiln,
     create_breakdown_maintenance,
-    get_affected_positions,
     _create_escalation_task,
     _reschedule_affected_positions,
 )

@@ -5,7 +5,6 @@ Supports both formal employees and contractors.
 """
 
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Optional
 
 
 # ── Constants ────────────────────────────────────────────────────────────────

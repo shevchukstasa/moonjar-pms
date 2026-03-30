@@ -241,8 +241,8 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
                     session.revoked_at = datetime.now(timezone.utc)
                     session.revoked_reason = "logout"
                     db.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to revoke session on logout: %s", e)
     clear_auth_cookies(response)
     return {"detail": "Logged out"}
 

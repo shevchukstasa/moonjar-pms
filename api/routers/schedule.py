@@ -1,5 +1,6 @@
 """Schedule router — resources, batches, section schedules."""
 
+import logging
 from datetime import date
 from uuid import UUID
 from typing import Optional
@@ -13,6 +14,8 @@ from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
 from api.models import Resource, Batch, OrderPosition, ProductionOrder
 from api.enums import ResourceType, BatchStatus, BatchCreator, PositionStatus
+
+logger = logging.getLogger("moonjar.schedule")
 
 router = APIRouter()
 
@@ -372,8 +375,8 @@ async def reorder_positions(
         for pos in reordered:
             reschedule_position(db, pos)
         db.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to reschedule reordered positions: %s", e)
 
     return {"ok": True, "count": len(data.position_ids)}
 

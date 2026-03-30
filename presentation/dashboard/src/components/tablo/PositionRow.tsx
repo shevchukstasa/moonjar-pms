@@ -120,10 +120,11 @@ interface Props {
   section: string;
   onSplit?: (position: PositionItem) => void;
   onMerge?: (position: PositionItem) => void;
+  onViewSplitTree?: (positionId: string) => void;
   mobileCard?: boolean;
 }
 
-export function PositionRow({ position, index, section, onSplit, onMerge, mobileCard }: Props) {
+export function PositionRow({ position, index, section, onSplit, onMerge, onViewSplitTree, mobileCard }: Props) {
   const delayUnit = useTabloStore((s) => s.delayUnit);
   const {
     attributes,
@@ -245,6 +246,15 @@ export function PositionRow({ position, index, section, onSplit, onMerge, mobile
                 &#x2934;
               </button>
             )}
+            {onViewSplitTree && (position.parent_position_id || position.split_index != null) && (
+              <button
+                onClick={() => onViewSplitTree(position.id)}
+                className="rounded p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-gray-400 hover:bg-indigo-50 hover:text-indigo-600"
+                title="View split tree"
+              >
+                &#x1F333;
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -343,6 +353,17 @@ export function PositionRow({ position, index, section, onSplit, onMerge, mobile
             title="Merge back into parent"
           >
             &#x2934;
+          </button>
+        </td>
+      )}
+      {onViewSplitTree && (position.parent_position_id || position.split_index != null) && (
+        <td className="w-10 px-2 py-2 text-center">
+          <button
+            onClick={() => onViewSplitTree(position.id)}
+            className="rounded p-1 text-gray-400 hover:bg-indigo-50 hover:text-indigo-600"
+            title="View split tree"
+          >
+            &#x1F333;
           </button>
         </td>
       )}

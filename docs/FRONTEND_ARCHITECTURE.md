@@ -48,6 +48,28 @@ Three-tab layout:
 
 ---
 
+### QualityCheckDialog (UPDATED — Session 2)
+
+**File:** `src/components/QualityCheckDialog.tsx`
+
+Wired to two pages:
+- **ManagerSchedulePage** — QC tab: PM can trigger pre-kiln or final QC from the schedule view
+- **QualityManagerDashboard** — Quality manager's primary workflow for reviewing and completing QC checklists
+
+### BatchGroup (UPDATED — Session 2)
+
+**File:** `src/components/BatchGroup.tsx`
+
+Wired to **TabloDashboard** (Firing tab). Displays batch grouping for kiln firing view — groups positions by batch with summary of items, fill %, and firing profile.
+
+### DatePicker (NOTE — Session 2)
+
+**File:** `src/components/DatePicker.tsx`
+
+Component exists but is currently **unused**. All pages use native `<input type="date">` instead. Candidate for removal in dead code cleanup.
+
+---
+
 ## Routing (additions)
 
 | Path | Component | Role Guard |

@@ -5,7 +5,6 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_
 
 from api.database import get_db
 from api.auth import get_current_user

@@ -18,6 +18,7 @@ from api.models import (
     ProductionOrderStatusLog,
 )
 from api.enums import OrderStatus, PositionStatus
+from business.services.status_machine import transition_position_status
 
 router = APIRouter()
 _logger = logging.getLogger("moonjar.shipments")
@@ -186,7 +187,7 @@ async def list_shipments(
     }
 
 
-@router.get("/{shipment_id}")
+@router.get("/{shipment_id}", response_model=ShipmentResponse)
 async def get_shipment(
     shipment_id: UUID,
     db: Session = Depends(get_db),
@@ -369,7 +370,7 @@ async def mark_shipped(
 
     for p in positions:
         if _ev(p.status) == "ready_for_shipment":
-            p.status = PositionStatus.SHIPPED
+            transition_position_status(db, p.id, PositionStatus.SHIPPED.value, changed_by=current_user.id)
 
     # Check if ALL order positions are now shipped → update order status
     all_positions = db.query(OrderPosition).filter(
@@ -399,8 +400,8 @@ async def mark_shipped(
                 new_status=order.status,
                 changed_by=current_user.id,
             ))
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.warning("Failed to log order status change: %s", e)
 
     db.commit()
 

@@ -14,9 +14,9 @@ from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
 from api.models import (
     TpsParameter, TpsShiftMetric, TpsDeviation, Factory,
-    OperationLog, Operation, OrderPosition,
+    OperationLog, Operation, OrderPosition, MasterPermission, User,
 )
-from api.enums import TpsStatus, TpsDeviationType
+from api.enums import TpsDeviationType
 from business.services.tps_metrics import (
     collect_shift_metrics as _collect_shift_metrics,
     record_shift_metric as _record_shift_metric,
@@ -531,6 +531,15 @@ async def record_operation_time(
     if not operation:
         raise HTTPException(404, "Operation not found")
 
+    # Check master/senior_master has permission for this operation
+    if current_user.role in ("master", "senior_master"):
+        has_perm = db.query(MasterPermission).filter(
+            MasterPermission.user_id == current_user.id,
+            MasterPermission.operation_id == data.operation_id,
+        ).first()
+        if not has_perm:
+            raise HTTPException(403, "You do not have permission to perform this operation")
+
     # Validate position if provided
     if data.position_id:
         position = db.query(OrderPosition).filter(OrderPosition.id == data.position_id).first()
@@ -771,3 +780,148 @@ async def get_operation_time_deviations(
     paged = deviations[start:start + per_page]
 
     return {"items": paged, "total": total, "page": page, "per_page": per_page}
+
+
+# ── Operations ──────────────────────────────────────────────────────────
+
+def _serialize_operation(op) -> dict:
+    return {
+        "id": str(op.id),
+        "factory_id": str(op.factory_id),
+        "name": op.name,
+        "description": op.description,
+        "default_time_minutes": float(op.default_time_minutes) if op.default_time_minutes else None,
+        "is_active": op.is_active,
+        "sort_order": op.sort_order or 0,
+        "created_at": op.created_at.isoformat() if op.created_at else None,
+    }
+
+
+@router.get("/operations")
+async def list_operations(
+    factory_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """List all operations for a factory."""
+    query = db.query(Operation).filter(Operation.is_active == True)
+    if factory_id:
+        query = query.filter(Operation.factory_id == factory_id)
+    else:
+        query = apply_factory_filter(query, Operation, current_user, db)
+
+    items = query.order_by(Operation.sort_order.asc(), Operation.name.asc()).all()
+    return {"items": [_serialize_operation(op) for op in items], "total": len(items)}
+
+
+# ── Master Permissions ──────────────────────────────────────────────────
+
+class MasterPermissionCreate(BaseModel):
+    user_id: UUID
+    operation_id: UUID
+
+
+def _serialize_permission(perm, operation_name: str | None = None, granted_by_name: str | None = None) -> dict:
+    return {
+        "id": str(perm.id),
+        "user_id": str(perm.user_id),
+        "operation_id": str(perm.operation_id),
+        "operation_name": operation_name or (perm.operation.name if perm.operation else None),
+        "granted_by": str(perm.granted_by),
+        "granted_by_name": granted_by_name or (perm.grantor.name if perm.grantor else None),
+        "granted_at": perm.granted_at.isoformat() if perm.granted_at else None,
+    }
+
+
+@router.get("/master-permissions/check/{user_id}/{operation_id}")
+async def check_master_permission(
+    user_id: UUID,
+    operation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Check if a user has permission for a specific operation."""
+    perm = db.query(MasterPermission).filter(
+        MasterPermission.user_id == user_id,
+        MasterPermission.operation_id == operation_id,
+    ).first()
+    return {"permitted": perm is not None, "user_id": str(user_id), "operation_id": str(operation_id)}
+
+
+@router.get("/master-permissions/{user_id}")
+async def list_master_permissions(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """List all operation permissions for a master/senior_master."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    perms = (
+        db.query(MasterPermission)
+        .filter(MasterPermission.user_id == user_id)
+        .all()
+    )
+
+    return {
+        "items": [_serialize_permission(p) for p in perms],
+        "total": len(perms),
+        "user_id": str(user_id),
+        "user_name": user.name,
+    }
+
+
+@router.post("/master-permissions", status_code=201)
+async def grant_master_permission(
+    data: MasterPermissionCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Grant an operation permission to a master/senior_master."""
+    # Validate user exists and is master/senior_master
+    user = db.query(User).filter(User.id == data.user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+    if user.role not in ("master", "senior_master"):
+        raise HTTPException(400, "Permissions can only be assigned to master or senior_master roles")
+
+    # Validate operation exists
+    operation = db.query(Operation).filter(Operation.id == data.operation_id).first()
+    if not operation:
+        raise HTTPException(404, "Operation not found")
+
+    # Check for duplicate
+    existing = db.query(MasterPermission).filter(
+        MasterPermission.user_id == data.user_id,
+        MasterPermission.operation_id == data.operation_id,
+    ).first()
+    if existing:
+        raise HTTPException(409, "Permission already granted")
+
+    perm = MasterPermission(
+        user_id=data.user_id,
+        operation_id=data.operation_id,
+        granted_by=current_user.id,
+    )
+    db.add(perm)
+    db.commit()
+    db.refresh(perm)
+    return _serialize_permission(perm, operation_name=operation.name, granted_by_name=current_user.name)
+
+
+@router.delete("/master-permissions/{permission_id}")
+async def revoke_master_permission(
+    permission_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Revoke an operation permission from a master/senior_master."""
+    perm = db.query(MasterPermission).filter(MasterPermission.id == permission_id).first()
+    if not perm:
+        raise HTTPException(404, "Permission not found")
+
+    db.delete(perm)
+    db.commit()
+    return {"ok": True, "message": "Permission revoked"}

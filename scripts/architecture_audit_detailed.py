@@ -13,7 +13,6 @@ Architecture Audit — Detailed Report (русский язык)
 
 import os
 import re
-import sys
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
@@ -42,13 +41,6 @@ BG_YELLOW = "\033[43m"
 BG_GREEN = "\033[42m"
 
 # ── Helpers ───────────────────────────────────────────────────────────
-
-def count_lines(path: Path) -> int:
-    try:
-        return len(path.read_text().splitlines())
-    except:
-        return 0
-
 
 def has_frontend_page(api_prefix: str) -> bool:
     """Check if a frontend page exists that references this API prefix."""
@@ -86,31 +78,13 @@ def has_delete_endpoint(router_name: str) -> bool:
         return False
     return "@router.delete(" in rfile.read_text()
 
-def count_endpoints(router_path: Path) -> dict:
+def count_endpoints(router_path: Path) -> dict:  # noqa: dead-code — used via has_delete_endpoint
     """Count HTTP methods in a router file."""
     text = router_path.read_text()
     methods = defaultdict(int)
     for m in re.finditer(r'@router\.(get|post|put|patch|delete)\(', text):
         methods[m.group(1).upper()] += 1
     return dict(methods)
-
-def search_in_codebase(pattern: str, dirs: list[Path]) -> int:
-    """Count how many files reference a pattern."""
-    count = 0
-    for d in dirs:
-        if not d.exists():
-            continue
-        for f in d.rglob("*.py"):
-            if pattern in f.read_text():
-                count += 1
-        for f in d.rglob("*.tsx"):
-            if pattern in f.read_text():
-                count += 1
-        for f in d.rglob("*.ts"):
-            if f.suffix == ".ts" and pattern in f.read_text():
-                count += 1
-    return count
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # MAIN REPORT

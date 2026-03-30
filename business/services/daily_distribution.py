@@ -6,9 +6,8 @@ Generates tomorrow's task list per factory, formats as Telegram message,
 sends to masters group chat, and saves record to daily_task_distributions table.
 """
 from uuid import UUID
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from math import ceil
 from typing import Optional
 import logging
 
@@ -754,7 +753,7 @@ def _save_distribution_record(
         existing.glazing_tasks_json = distribution.get("glazing_tasks")
         existing.kiln_loading_json = distribution.get("kiln_loading")
         existing.glaze_recipes_json = extra_json
-        existing.sent_at = datetime.utcnow()
+        existing.sent_at = datetime.now(timezone.utc)
         existing.sent_to_chat = True
     else:
         record = DailyTaskDistribution(
@@ -763,7 +762,7 @@ def _save_distribution_record(
             glazing_tasks_json=distribution.get("glazing_tasks"),
             kiln_loading_json=distribution.get("kiln_loading"),
             glaze_recipes_json=extra_json,
-            sent_at=datetime.utcnow(),
+            sent_at=datetime.now(timezone.utc),
             sent_to_chat=True,
         )
         db.add(record)

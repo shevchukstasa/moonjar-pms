@@ -297,8 +297,6 @@ def _find_by_uuid_prefix(db: Session, model, prefix: str, extra_filters=None):
     Uses PostgreSQL text cast for efficient prefix matching.
     Falls back to in-memory scan for small tables if SQL cast fails.
     """
-    from sqlalchemy import text as sa_text
-
     try:
         query = db.query(model).filter(
             cast(model.id, sa.String).like(f"{prefix}%")
@@ -309,8 +307,8 @@ def _find_by_uuid_prefix(db: Session, model, prefix: str, extra_filters=None):
         result = query.limit(1).first()
         if result:
             return result
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Entity lookup failed: %s", e)
 
     # Fallback: in-memory scan (only viable for small tables like Factory)
     try:

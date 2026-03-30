@@ -4,12 +4,11 @@ from uuid import UUID
 from typing import Optional
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.auth import get_current_user
 from api.roles import require_admin_or_pm
 from api.models import (
     PackagingBoxType, PackagingBoxCapacity, PackagingSpacerRule,

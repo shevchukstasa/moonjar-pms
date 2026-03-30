@@ -6,13 +6,12 @@ Core KPI engine for Owner and CEO dashboards.
 All calculations are LIVE from existing tables (no snapshot).
 """
 from uuid import UUID
-from datetime import date, datetime, timedelta
-from math import ceil
+from datetime import date, timedelta
 from typing import Optional
 import logging
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sa_func, case, and_, or_
+from sqlalchemy import func as sa_func, and_, or_
 
 from api.models import (
     ProductionOrder, OrderPosition, Resource, Batch,
@@ -22,6 +21,9 @@ from api.models import (
 from api.enums import (
     OrderStatus, PositionStatus, ResourceType, BatchStatus,
     DefectStage, ExpenseType, ExpenseCategory, BufferHealth,
+)
+from business.planning_engine.optimizer import (
+    calculate_kiln_utilization as _calculate_kiln_utilization_detailed,
 )
 
 logger = logging.getLogger("moonjar.daily_kpi")
@@ -184,50 +186,31 @@ def calculate_kiln_utilization(
     date_from: date,
     date_to: date,
 ) -> float:
-    """Avg kiln utilization % = avg(loaded/capacity) × 100."""
-    # Get kilns
-    kiln_q = db.query(Resource).filter(
-        Resource.resource_type == ResourceType.KILN.value,
-        Resource.is_active.is_(True),
-    )
-    if factory_id:
-        kiln_q = kiln_q.filter(Resource.factory_id == factory_id)
-    kilns = kiln_q.all()
+    """Avg kiln utilization % — delegates to planning_engine.optimizer.
 
-    if not kilns:
+    The canonical implementation lives in optimizer.calculate_kiln_utilization
+    (detailed per-kiln analytics dict). This wrapper extracts the summary
+    avg_utilization_pct float for dashboard use.
+    """
+    period_days = max(1, (date_to - date_from).days)
+
+    if factory_id:
+        result = _calculate_kiln_utilization_detailed(db, factory_id, period_days)
+        return result["summary"]["avg_utilization_pct"]
+
+    # No factory filter — aggregate across all active factories
+    factories = db.query(Factory).filter(Factory.is_active.is_(True)).all()
+    if not factories:
         return 0.0
 
-    utilizations = []
-    for kiln in kilns:
-        capacity = float(kiln.capacity_sqm or 0)
-        if capacity <= 0:
-            continue
+    all_fills = []
+    for f in factories:
+        result = _calculate_kiln_utilization_detailed(db, f.id, period_days)
+        avg = result["summary"]["avg_utilization_pct"]
+        if avg > 0:
+            all_fills.append(avg)
 
-        # Batches done in period
-        batches = db.query(Batch).filter(
-            Batch.resource_id == kiln.id,
-            Batch.status == BatchStatus.DONE.value,
-            Batch.batch_date >= date_from,
-            Batch.batch_date <= date_to,
-        ).all()
-
-        if not batches:
-            utilizations.append(0.0)
-            continue
-
-        batch_ids = [b.id for b in batches]
-        loaded_sqm = db.query(
-            sa_func.sum(OrderPosition.quantity_sqm)
-        ).filter(
-            OrderPosition.batch_id.in_(batch_ids),
-        ).scalar()
-
-        loaded_sqm = float(loaded_sqm or 0)
-        avg_load = loaded_sqm / len(batches)
-        util = (avg_load / capacity) * 100
-        utilizations.append(min(util, 100.0))
-
-    return sum(utilizations) / len(utilizations) if utilizations else 0.0
+    return round(sum(all_fills) / len(all_fills), 1) if all_fills else 0.0
 
 
 def calculate_production_metrics(

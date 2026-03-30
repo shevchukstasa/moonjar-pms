@@ -198,21 +198,9 @@ def process_sorting_split(db: Session, position_id: UUID, split_data: dict) -> d
             )
             sub_positions.append(sub)
 
-            # Repair queue for SLA tracking
-            rq = RepairQueue(
-                id=uuid_mod.uuid4(),
-                factory_id=position.factory_id,
-                color=position.color,
-                size=position.size,
-                quantity=count,
-                defect_type="glaze_defect",
-                source_order_id=position.order_id,
-                source_position_id=position.id,
-                status=RepairStatus.IN_REPAIR,
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(rq)
+            # Repair queue + SLA task
+            from business.services.repair_monitoring import create_repair_queue_entry
+            create_repair_queue_entry(db, sub.id, repair_type="reglaze")
 
             # Defect record
             dr = DefectRecord(
@@ -239,21 +227,9 @@ def process_sorting_split(db: Session, position_id: UUID, split_data: dict) -> d
             )
             sub_positions.append(sub)
 
-            # Repair queue
-            rq = RepairQueue(
-                id=uuid_mod.uuid4(),
-                factory_id=position.factory_id,
-                color=position.color,
-                size=position.size,
-                quantity=count,
-                defect_type="shape_defect",
-                source_order_id=position.order_id,
-                source_position_id=position.id,
-                status=RepairStatus.IN_REPAIR,
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(rq)
+            # Repair queue + SLA task
+            from business.services.repair_monitoring import create_repair_queue_entry
+            create_repair_queue_entry(db, sub.id, repair_type="reshape")
 
             # Defect record
             dr = DefectRecord(

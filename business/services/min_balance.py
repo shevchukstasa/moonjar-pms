@@ -3,10 +3,10 @@ Min Balance Auto-Calculation service.
 Business Logic: §18
 """
 from uuid import UUID
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from math import ceil
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any, List
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
@@ -39,7 +39,7 @@ def get_effective_lead_time(db: Session, material_id: UUID, factory_id: UUID) ->
     2. Material's supplier default_lead_time_days
     3. Hardcoded defaults by material_type
     """
-    six_months_ago = datetime.utcnow() - timedelta(days=180)
+    six_months_ago = datetime.now(timezone.utc) - timedelta(days=180)
 
     # --- Priority 1: historical purchase requests with actual delivery ---
     # MaterialPurchaseRequest.materials_json is a list of dicts containing material_id.
@@ -112,7 +112,7 @@ def recalculate_min_balance_recommendations(
         .all()
     )
 
-    ninety_days_ago = datetime.utcnow() - timedelta(days=90)
+    ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
     updated_count = 0
     alerts: List[Dict[str, Any]] = []
 
@@ -150,7 +150,7 @@ def recalculate_min_balance_recommendations(
         if stock.min_balance_auto:
             stock.min_balance = min_balance_recommended
 
-        stock.updated_at = datetime.utcnow()
+        stock.updated_at = datetime.now(timezone.utc)
         updated_count += 1
 
         # Check if current balance is below min_balance
@@ -203,7 +203,7 @@ def pm_override_min_balance(
     # Apply override
     stock.min_balance = Decimal(str(new_min_balance))
     stock.min_balance_auto = False
-    stock.updated_at = datetime.utcnow()
+    stock.updated_at = datetime.now(timezone.utc)
 
     # Audit log
     audit_entry = ReferenceAuditLog(

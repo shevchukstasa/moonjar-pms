@@ -216,6 +216,34 @@ async def get_inspection(
     return _serialize_inspection(insp)
 
 
+@router.delete("/{inspection_id}")
+async def delete_inspection(
+    inspection_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Delete a kiln inspection and its results."""
+    insp = db.query(KilnInspection).filter(KilnInspection.id == inspection_id).first()
+    if not insp:
+        raise HTTPException(404, "Inspection not found")
+
+    # Factory scoping: check inspection belongs to user's factory
+    if (
+        hasattr(current_user, "factory_id")
+        and current_user.factory_id
+        and str(insp.factory_id) != str(current_user.factory_id)
+    ):
+        raise HTTPException(403, "Cannot delete inspection from another factory")
+
+    logger.info(
+        "DELETE_INSPECTION | id=%s kiln=%s date=%s by=%s",
+        inspection_id, insp.resource_id, insp.inspection_date, current_user.full_name,
+    )
+    db.delete(insp)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("", status_code=201)
 async def create_inspection(
     data: InspectionCreateInput,

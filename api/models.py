@@ -15,7 +15,8 @@ from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import relationship
 
 from api.database import Base
-from api.enums import AuditActionType, BackupStatus, BackupType, BatchCreator, BatchMode, BatchStatus, BufferHealth, CastersRemovedReason, ChangeRequestStatus, DashboardType, DefectOutcome, DefectStage, ExpenseCategory, ExpenseType, GrindingStatus, IpScope, KilnConstantsMode, LanguagePreference, MaintenanceStatus, ManaShipmentStatus, MaterialType, MediaType, NotificationChannel, NotificationType, OrderSource, OrderStatus, PositionStatus, ProductType, PurchaseStatus, QcResult, QcStage, QmBlockType, ReconciliationStatus, ReferenceAction, RelatedEntityType, RepairStatus, ResourceStatus, ResourceType, ScheduleSlotStatus, ShapeType, SplitCategory, SurplusDispositionType, TaskStatus, TaskType, TpsDeviationType, TpsStatus, TransactionType, UserRole, WriteOffReason
+# noqa: dead-code — all enums needed for PgEnum declarations
+from api.enums import AuditActionType, BackupStatus, BackupType, BatchCreator, BatchMode, BatchStatus, BufferHealth, CastersRemovedReason, ChangeRequestStatus, DashboardType, DefectOutcome, DefectStage, EngobeType, ExpenseCategory, ExpenseType, GrindingStatus, IpScope, KilnConstantsMode, LanguagePreference, MaintenanceStatus, ManaShipmentStatus, MaterialType, MediaType, NotificationChannel, NotificationType, OrderSource, OrderStatus, PositionStatus, ProblemCardMode, ProductType, PurchaseStatus, QcResult, QcStage, QmBlockType, ReconciliationStatus, ReferenceAction, RelatedEntityType, RepairStatus, ResourceStatus, ResourceType, ScheduleSlotStatus, ShapeType, SplitCategory, SurplusDispositionType, TaskStatus, TaskType, TpsDeviationType, TpsStatus, TransactionType, UserRole, WriteOffReason
 
 
 def PgEnum(enum_class, **kwargs):
@@ -276,13 +277,13 @@ class ProductionOrder(Base):
     # "pending" | "accepted" | "rejected" | None
     cancellation_decision = Column(sa.String(20), nullable=True)
     cancellation_decided_at = Column(sa.DateTime(timezone=True), nullable=True)
-    cancellation_decided_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    cancellation_decided_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     # Change request fields (set by Sales App via webhook when order already exists)
     change_req_payload = Column(JSONB, nullable=True)
     change_req_status = Column(sa.String(20), nullable=False, server_default='none')
     change_req_requested_at = Column(sa.DateTime(timezone=True), nullable=True)
     change_req_decided_at = Column(sa.DateTime(timezone=True), nullable=True)
-    change_req_decided_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    change_req_decided_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
@@ -334,6 +335,8 @@ class SalesWebhookEvent(Base):
     payload_json = Column(JSONB, nullable=False)
     processed = Column(sa.Boolean, nullable=False, default=False)
     error_message = Column(sa.Text)
+    retry_count = Column(sa.Integer, nullable=False, default=0, server_default=sa.text("0"))
+    permanently_failed = Column(sa.Boolean, nullable=False, default=False, server_default=sa.text("false"))
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 
@@ -388,6 +391,8 @@ class Recipe(Base):
     # Spray application consumption rate in ml per m²
     consumption_brush_ml_per_sqm = Column(sa.Numeric(8, 2))
     # Brush application consumption rate in ml per m²
+    engobe_type = Column(PgEnum(EngobeType), nullable=True)
+    # Only set when recipe_type='engobe': 'standard', 'shelf_coating', 'hole_filler'
     is_default = Column(sa.Boolean, nullable=False, default=False)
     # Default recipe flag — system auto-picks this recipe for given recipe_type (e.g. engobe)
     client_name = Column(sa.String(200))
@@ -605,8 +610,8 @@ class OrderPosition(Base):
     parent_position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id'))
     factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
     status = Column(PgEnum(PositionStatus), nullable=False, default=PositionStatus.PLANNED)
-    batch_id = Column(UUID(as_uuid=True), ForeignKey('batches.id'))
-    resource_id = Column(UUID(as_uuid=True), ForeignKey('resources.id'))
+    batch_id = Column(UUID(as_uuid=True), ForeignKey('batches.id', ondelete='SET NULL'))
+    resource_id = Column(UUID(as_uuid=True), ForeignKey('resources.id', ondelete='SET NULL'))
     placement_position = Column(sa.String(100))
     placement_level = Column(sa.Integer)
     delay_hours = Column(sa.Numeric(8, 1), default=0)
@@ -641,7 +646,7 @@ class OrderPosition(Base):
     edge_profile_notes = Column(sa.String(255), nullable=True)    # description for custom profile
     glazeable_sqm = Column(sa.Numeric(10, 4))        # Glazeable surface area per piece (m²)
     thickness_mm = Column(sa.Numeric(5, 1), nullable=False, default=11.0)
-    recipe_id = Column(UUID(as_uuid=True), ForeignKey('recipes.id'))
+    recipe_id = Column(UUID(as_uuid=True), ForeignKey('recipes.id', ondelete='SET NULL'))
     size_id = Column(UUID(as_uuid=True), ForeignKey('sizes.id'), nullable=True)
     mandatory_qc = Column(sa.Boolean, nullable=False, default=False)
     split_category = Column(PgEnum(SplitCategory))
@@ -657,7 +662,7 @@ class OrderPosition(Base):
     planned_kiln_date = Column(sa.Date)             # when kiln firing should happen
     planned_sorting_date = Column(sa.Date)          # when sorting should happen
     planned_completion_date = Column(sa.Date)       # when position should be complete
-    estimated_kiln_id = Column(UUID(as_uuid=True), ForeignKey('resources.id'))
+    estimated_kiln_id = Column(UUID(as_uuid=True), ForeignKey('resources.id', ondelete='SET NULL'))
     schedule_version = Column(sa.Integer, nullable=False, default=1)
     # Human-readable position numbering within the order:
     #   position_number — sequential integer for root positions (1, 2, 3, …)
@@ -686,10 +691,10 @@ class Task(Base):
     factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
     type = Column(PgEnum(TaskType), nullable=False)
     status = Column(PgEnum(TaskStatus), nullable=False, default=TaskStatus.PENDING)
-    assigned_to = Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    assigned_to = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'))
     assigned_role = Column(PgEnum(UserRole))
-    related_order_id = Column(UUID(as_uuid=True), ForeignKey('production_orders.id'))
-    related_position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id'))
+    related_order_id = Column(UUID(as_uuid=True), ForeignKey('production_orders.id', ondelete='SET NULL'))
+    related_position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id', ondelete='SET NULL'))
     blocking = Column(sa.Boolean, nullable=False, default=False)
     description = Column(sa.Text)
     priority = Column(sa.Integer, nullable=False, default=0)
@@ -734,17 +739,17 @@ class MaterialTransaction(Base):
     factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'))
     type = Column(PgEnum(TransactionType), nullable=False)
     quantity = Column(sa.Numeric(12, 3), nullable=False)
-    related_order_id = Column(UUID(as_uuid=True), ForeignKey('production_orders.id'))
-    related_position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id'))
+    related_order_id = Column(UUID(as_uuid=True), ForeignKey('production_orders.id', ondelete='SET NULL'))
+    related_position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id', ondelete='SET NULL'))
     reason = Column(PgEnum(WriteOffReason))
     notes = Column(sa.Text)
-    created_by = Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    created_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'))
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     # Receiving approval fields
     defect_percent = Column(sa.Numeric(5, 2), nullable=True)
     quality_notes = Column(sa.Text, nullable=True)
     approval_status = Column(sa.String(20), nullable=True)  # 'pending', 'approved', 'rejected', 'partial'
-    approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     approved_at = Column(sa.DateTime(timezone=True), nullable=True)
     accepted_quantity = Column(sa.Numeric(12, 3), nullable=True)
 
@@ -858,6 +863,7 @@ class ProblemCard(Base):
     description = Column(sa.Text, nullable=False)
     actions = Column(sa.Text)
     status = Column(sa.String(50), nullable=False, default='open')
+    mode = Column(PgEnum(ProblemCardMode), nullable=True, default=ProblemCardMode.SIMPLE)
     created_by = Column(UUID(as_uuid=True), ForeignKey('users.id'))
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
@@ -1445,8 +1451,8 @@ class KilnCalculationLog(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     calculation_type = Column(sa.String(100), nullable=False)
-    batch_id = Column(UUID(as_uuid=True), ForeignKey('batches.id'))
-    resource_id = Column(UUID(as_uuid=True), ForeignKey('resources.id'))
+    batch_id = Column(UUID(as_uuid=True), ForeignKey('batches.id', ondelete='SET NULL'))
+    resource_id = Column(UUID(as_uuid=True), ForeignKey('resources.id', ondelete='SET NULL'))
     input_json = Column(JSONB, nullable=False)
     output_json = Column(JSONB, nullable=False)
     duration_ms = Column(sa.Integer)
@@ -1594,7 +1600,7 @@ class InventoryReconciliation(Base):
     notes = Column(sa.Text)
     staff_count = Column(sa.Integer, nullable=True)
     scheduled_date = Column(sa.Date, nullable=True)
-    approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     approved_at = Column(sa.DateTime(timezone=True), nullable=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
@@ -1616,7 +1622,7 @@ class InventoryReconciliationItem(Base):
     adjustment_applied = Column(sa.Boolean, nullable=False, default=False)
     reason = Column(sa.String(50), nullable=True)  # 'natural_losses', 'formula_inaccuracy', 'counting_error', 'theft_damage', 'other'
     explanation = Column(sa.Text, nullable=True)
-    explained_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    explained_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     explained_at = Column(sa.DateTime(timezone=True), nullable=True)
 
     reconciliation = relationship('InventoryReconciliation', foreign_keys=[reconciliation_id])
@@ -2051,8 +2057,8 @@ class PositionPhoto(Base):
     telegram_file_id = Column(sa.String(200), nullable=True)  # nullable for web uploads
     telegram_chat_id = Column(sa.BigInteger)
     uploaded_by_telegram_id = Column(sa.BigInteger)
-    uploaded_by_user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'))
-    batch_id = Column(UUID(as_uuid=True), ForeignKey('batches.id'), nullable=True)
+    uploaded_by_user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'))
+    batch_id = Column(UUID(as_uuid=True), ForeignKey('batches.id', ondelete='SET NULL'), nullable=True)
     photo_type = Column(sa.String(30))  # glazing, firing, defect, packing, other
     photo_url = Column(sa.String(2048), nullable=True)  # For web-uploaded photos
     caption = Column(sa.Text)
@@ -2135,7 +2141,7 @@ class FactoryCalendar(Base):
     num_shifts = Column(sa.Integer, default=2, nullable=False)
     holiday_name = Column(sa.String(200), nullable=True)
     holiday_source = Column(sa.String(50), nullable=True)  # 'government', 'balinese', 'manual'
-    approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     approved_at = Column(sa.DateTime(timezone=True), nullable=True)
     notes = Column(sa.Text, nullable=True)
     created_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -2171,6 +2177,7 @@ class MasterPermission(Base):
 
     user = relationship('User', foreign_keys=[user_id])
     operation = relationship('Operation', foreign_keys=[operation_id])
+    grantor = relationship('User', foreign_keys=[granted_by])
     __table_args__ = (UniqueConstraint('user_id', 'operation_id'),)
 
 
@@ -2181,8 +2188,8 @@ class OperationLog(Base):
     factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
     operation_id = Column(UUID(as_uuid=True), ForeignKey('operations.id'), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
-    position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id'), nullable=True)
-    batch_id = Column(UUID(as_uuid=True), ForeignKey('batches.id'), nullable=True)
+    position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id', ondelete='SET NULL'), nullable=True)
+    batch_id = Column(UUID(as_uuid=True), ForeignKey('batches.id', ondelete='SET NULL'), nullable=True)
     shift_date = Column(sa.Date, nullable=False)
     shift_number = Column(sa.Integer, nullable=True)
     started_at = Column(sa.DateTime(timezone=True), nullable=True)
@@ -2217,7 +2224,7 @@ class ReceivingSetting(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False, unique=True)
     approval_mode = Column(sa.String(20), nullable=False, default='all')  # 'all' or 'auto'
-    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     updated_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     factory = relationship('Factory', foreign_keys=[factory_id])
@@ -2229,7 +2236,7 @@ class MaterialDefectThreshold(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     material_id = Column(UUID(as_uuid=True), ForeignKey('materials.id'), nullable=False, unique=True)
     max_defect_percent = Column(sa.Numeric(5, 2), nullable=False, default=3.0)
-    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     updated_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     material = relationship('Material', foreign_keys=[material_id])
@@ -2263,7 +2270,7 @@ class StoneDefectRate(Base):
     product_type = Column(sa.String(50), nullable=False)
     defect_pct = Column(sa.Numeric(5, 4), nullable=False)
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
-    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
 
     __table_args__ = (
         UniqueConstraint('factory_id', 'size_category', 'product_type'),
@@ -2299,7 +2306,7 @@ class StoneReservationAdjustment(Base):
     qty_sqm = Column(sa.Numeric(10, 3), nullable=False)
     reason = Column(sa.Text, nullable=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
-    created_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
 
     reservation = relationship('StoneReservation', back_populates='adjustments')
     user = relationship('User', foreign_keys=[created_by])
@@ -2336,7 +2343,7 @@ class ServiceLeadTime(Base):
     service_type = Column(sa.String(50), nullable=False)
     lead_time_days = Column(sa.Integer, nullable=False, server_default=sa.text("3"))
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
-    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
 
     __table_args__ = (
         UniqueConstraint('factory_id', 'service_type'),
@@ -2351,7 +2358,7 @@ class PurchaseConsolidationSetting(Base):
     consolidation_window_days = Column(sa.Integer, nullable=False, default=7)
     urgency_threshold_days = Column(sa.Integer, nullable=False, default=5)
     planning_horizon_days = Column(sa.Integer, nullable=False, default=30)
-    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     updated_at = Column(sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     factory = relationship('Factory', foreign_keys=[factory_id])
@@ -2473,7 +2480,7 @@ class Attendance(Base):
     status = Column(sa.String(20), nullable=False)  # present, absent, sick, leave, half_day
     overtime_hours = Column(sa.Numeric(4, 1), nullable=False, server_default='0')
     notes = Column(sa.Text, nullable=True)
-    recorded_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    recorded_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     __table_args__ = (
@@ -2510,7 +2517,7 @@ class Shipment(Base):
     delivered_at = Column(sa.DateTime(timezone=True), nullable=True)
 
     # People
-    shipped_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    shipped_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     received_by = Column(sa.String(200), nullable=True)  # client's receiver name
 
     # Documents
@@ -2561,12 +2568,12 @@ class FiringLog(Base):
     temperature_readings = Column(JSONB, nullable=True)
 
     # Firing profile used
-    firing_profile_id = Column(UUID(as_uuid=True), ForeignKey('firing_profiles.id'), nullable=True)
+    firing_profile_id = Column(UUID(as_uuid=True), ForeignKey('firing_profiles.id', ondelete='SET NULL'), nullable=True)
 
     # Result
     result = Column(sa.String(30), nullable=True)  # success, partial_failure, abort
     notes = Column(sa.Text, nullable=True)
-    recorded_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    recorded_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     batch = relationship('Batch', backref='firing_logs')

@@ -5,12 +5,12 @@ from typing import Optional
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from api.database import get_db
-from api.auth import get_current_user, hash_password, log_security_event
+from api.auth import hash_password, log_security_event
 from api.roles import require_admin
 from api.models import User, UserFactory, Factory, ActiveSession
 from api.enums import UserRole, LanguagePreference

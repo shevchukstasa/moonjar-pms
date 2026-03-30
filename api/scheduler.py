@@ -8,7 +8,13 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 logger = logging.getLogger("moonjar.scheduler")
-scheduler = AsyncIOScheduler()
+scheduler = AsyncIOScheduler(
+    job_defaults={
+        "misfire_grace_time": 900,   # 15 min grace period
+        "coalesce": True,            # if multiple misfired, run once
+        "max_instances": 1,          # no concurrent execution
+    },
+)
 
 # Backup status tracking — updated by daily_database_backup(), read by health endpoint
 _last_backup_status: dict | None = None
@@ -184,9 +190,9 @@ async def daily_overdue_tasks():
     try:
         from api.models import Task, Notification
         from api.enums import TaskStatus, NotificationType
-        from datetime import datetime
+        from datetime import datetime, timezone
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         overdue = db.query(Task).filter(
             Task.status.in_([TaskStatus.PENDING.value, TaskStatus.IN_PROGRESS.value]),
             Task.due_at.isnot(None),
@@ -219,9 +225,9 @@ async def cleanup_expired_sessions():
     db = _get_db_session()
     try:
         from api.models import ActiveSession
-        from datetime import datetime
+        from datetime import datetime, timezone
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         deleted = db.query(ActiveSession).filter(
             ActiveSession.expires_at < now,
         ).delete()
@@ -289,22 +295,87 @@ async def weekly_min_balance_recalc():
 
 
 async def hourly_webhook_retry():
-    """Retry failed webhook deliveries."""
+    """Retry failed webhook deliveries (max 3 attempts per event)."""
     logger.info("Retrying failed webhooks")
     db = _get_db_session()
     try:
         from api.models import SalesWebhookEvent
+        from business.services.order_intake import process_incoming_order
+
+        MAX_RETRIES = 3
 
         failed = db.query(SalesWebhookEvent).filter(
             SalesWebhookEvent.processed.is_(False),
+            SalesWebhookEvent.permanently_failed.is_(False),
             SalesWebhookEvent.error_message.isnot(None),
-        ).limit(10).all()
+            SalesWebhookEvent.retry_count < MAX_RETRIES,
+        ).order_by(SalesWebhookEvent.created_at).limit(10).all()
 
-        # Log for now — full retry logic requires webhook processing service
-        if failed:
-            logger.info("Found %d failed webhooks to retry", len(failed))
+        if not failed:
+            logger.info("No failed webhooks to retry")
+            return
 
-        db.commit()
+        logger.info("Found %d failed webhooks to retry", len(failed))
+        retried = 0
+        succeeded = 0
+        permanently_failed_count = 0
+
+        for event in failed:
+            event.retry_count = (event.retry_count or 0) + 1
+            try:
+                payload = event.payload_json
+                order_data = payload.get("order", payload)
+                source = payload.get("source", "sales_webhook_retry")
+
+                process_incoming_order(
+                    db,
+                    payload=order_data,
+                    source=source,
+                    skip_duplicate_check=False,
+                )
+                event.processed = True
+                event.error_message = None
+                db.commit()
+                succeeded += 1
+                logger.info(
+                    "Webhook retry SUCCESS: event_id=%s (attempt %d)",
+                    event.event_id, event.retry_count,
+                )
+            except Exception as e:
+                db.rollback()
+                event.error_message = f"Retry #{event.retry_count}: {str(e)[:500]}"
+
+                if event.retry_count >= MAX_RETRIES:
+                    event.permanently_failed = True
+                    permanently_failed_count += 1
+                    logger.warning(
+                        "Webhook PERMANENTLY FAILED after %d attempts: event_id=%s — %s",
+                        event.retry_count, event.event_id, str(e)[:200],
+                    )
+                else:
+                    logger.info(
+                        "Webhook retry FAILED (attempt %d/%d): event_id=%s — %s",
+                        event.retry_count, MAX_RETRIES, event.event_id, str(e)[:200],
+                    )
+                db.add(event)
+                db.commit()
+            retried += 1
+
+        logger.info(
+            "Webhook retry complete: %d retried, %d succeeded, %d permanently failed",
+            retried, succeeded, permanently_failed_count,
+        )
+
+        # Send Telegram alert for permanently failed events
+        if permanently_failed_count > 0:
+            perm_failed = db.query(SalesWebhookEvent).filter(
+                SalesWebhookEvent.permanently_failed.is_(True),
+            ).order_by(SalesWebhookEvent.created_at.desc()).limit(5).all()
+            alert_lines = [f"[Moonjar PMS] {permanently_failed_count} webhook(s) permanently failed:"]
+            for ev in perm_failed:
+                alert_lines.append(f"  - {ev.event_id}: {(ev.error_message or '')[:100]}")
+            _send_backup_telegram_alert("\n".join(alert_lines))
+
     except Exception as e:
         logger.error("Webhook retry failed: %s", e)
         db.rollback()
@@ -441,9 +512,47 @@ async def daily_database_backup(backup_type: str = "scheduled"):
         file_size_mb = file_size_bytes / (1024 * 1024)
         logger.info("pg_dump complete: %s (%.1f MB)", backup_file, file_size_mb)
 
+        # --- Encrypt backup if BACKUP_ENCRYPTION_KEY is set ---
+        encrypted = False
+        upload_file = backup_file
+        encryption_key = os.getenv("BACKUP_ENCRYPTION_KEY", "")
+        if encryption_key:
+            try:
+                from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+                import hashlib
+                import secrets as secrets_mod
+
+                # Derive a 256-bit key from the passphrase
+                derived_key = hashlib.sha256(encryption_key.encode()).digest()
+                aesgcm = AESGCM(derived_key)
+                nonce = secrets_mod.token_bytes(12)  # 96-bit nonce for AES-GCM
+
+                with open(backup_file, "rb") as f:
+                    plaintext = f.read()
+
+                ciphertext = aesgcm.encrypt(nonce, plaintext, None)
+
+                encrypted_file = backup_file + ".enc"
+                with open(encrypted_file, "wb") as f:
+                    # Format: 12-byte nonce + ciphertext (includes 16-byte auth tag)
+                    f.write(nonce + ciphertext)
+
+                encrypted = True
+                upload_file = encrypted_file
+                enc_size = os.path.getsize(encrypted_file)
+                logger.info(
+                    "Backup encrypted: %s (%.1f MB)",
+                    encrypted_file, enc_size / (1024 * 1024),
+                )
+            except Exception as e:
+                logger.error("Backup encryption failed: %s — uploading unencrypted", e)
+                # Fall back to unencrypted upload
+                upload_file = backup_file
+
         # Upload to S3
         s3_uploaded = False
         s3_key = None
+        s3_ext = ".dump.enc" if encrypted else ".dump"
         if s3_bucket:
             try:
                 import boto3
@@ -451,8 +560,8 @@ async def daily_database_backup(backup_type: str = "scheduled"):
                     "s3",
                     region_name=os.getenv("AWS_DEFAULT_REGION", "ap-southeast-1"),
                 )
-                s3_key = f"moonjar-backups/{datetime.now(timezone.utc).strftime('%Y-%m-%d')}/moonjar_{ts}.dump"
-                s3.upload_file(backup_file, s3_bucket, s3_key)
+                s3_key = f"moonjar-backups/{datetime.now(timezone.utc).strftime('%Y-%m-%d')}/moonjar_{ts}{s3_ext}"
+                s3.upload_file(upload_file, s3_bucket, s3_key)
                 s3_uploaded = True
                 logger.info("Backup uploaded to s3://%s/%s", s3_bucket, s3_key)
             except Exception as e:
@@ -479,6 +588,7 @@ async def daily_database_backup(backup_type: str = "scheduled"):
             "s3_uploaded": s3_uploaded,
             "s3_key": f"s3://{s3_bucket}/{s3_key}" if s3_uploaded else None,
             "local_file": backup_file if not is_railway else None,
+            "encrypted": encrypted,
         }
         logger.info(
             "Database backup SUCCESS: %.1f MB, s3=%s",
@@ -515,12 +625,13 @@ async def daily_database_backup(backup_type: str = "scheduled"):
         _send_backup_telegram_alert(f"Backup exception: {error_msg}")
         return backup_log_id
     finally:
-        # On Railway, always clean up temp file (filesystem is ephemeral anyway)
-        if is_railway and backup_file and os.path.exists(backup_file):
-            try:
-                os.remove(backup_file)
-            except OSError:
-                pass
+        # Clean up temp files (on Railway filesystem is ephemeral anyway)
+        for f in [backup_file, (backup_file + ".enc") if backup_file else None]:
+            if f and os.path.exists(f):
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
 
 
 def _create_backup_log(backup_type: str = "scheduled"):
@@ -669,7 +780,7 @@ async def daily_task_distribution_dispatcher():
     This approach supports factories across different timezones.
     """
     import pytz
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     logger.info("Running daily task distribution dispatcher")
     db = _get_db_session()
@@ -913,6 +1024,47 @@ async def monthly_holiday_check():
         db.close()
 
 
+async def daily_overdue_purchase_check():
+    """Daily check for overdue purchase orders — notify relevant users."""
+    logger.info("Running overdue purchase check")
+    db = _get_db_session()
+    try:
+        from business.services.purchaser_lifecycle import check_and_notify_overdue
+        check_and_notify_overdue(db)
+        db.commit()
+        logger.info("Overdue purchase check completed")
+    except Exception as e:
+        logger.error("Overdue purchase check failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def weekly_purchase_consolidation():
+    """Weekly auto-consolidation of purchase requests per factory."""
+    logger.info("Running weekly purchase consolidation")
+    db = _get_db_session()
+    try:
+        from api.models import Factory
+        from business.services.purchase_consolidation import auto_consolidate_on_schedule
+
+        factories = db.query(Factory).filter(Factory.is_active.is_(True)).all()
+        for factory in factories:
+            try:
+                auto_consolidate_on_schedule(db, factory.id)
+                db.commit()
+            except Exception as e:
+                logger.error("Purchase consolidation failed for factory %s: %s", factory.id, e)
+                db.rollback()
+
+        logger.info("Purchase consolidation completed for %d factories", len(factories))
+    except Exception as e:
+        logger.error("Weekly purchase consolidation failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 # --- Scheduler setup ---
 
 def setup_scheduler():
@@ -935,8 +1087,8 @@ def setup_scheduler():
     # Every 15 min — escalation check
     scheduler.add_job(escalation_check, IntervalTrigger(minutes=15), id="escalation_check")
 
-    # Morning at 06:00 Bali (22:00 UTC) — deferred alerts
-    scheduler.add_job(morning_deferred_alerts, CronTrigger(hour=22, minute=0), id="morning_alerts")
+    # Morning at 06:05 Bali (22:05 UTC) — deferred alerts (offset from daily_backup at 22:00)
+    scheduler.add_job(morning_deferred_alerts, CronTrigger(hour=22, minute=5), id="morning_alerts")
 
     # Hourly — webhook retry + daily task distribution per-factory timezone
     scheduler.add_job(hourly_webhook_retry, IntervalTrigger(hours=1), id="webhook_retry")
@@ -963,6 +1115,12 @@ def setup_scheduler():
 
     # Monthly (1st of month at 04:00 UTC) — check factory calendar has all holidays
     scheduler.add_job(monthly_holiday_check, CronTrigger(day=1, hour=4, minute=0), id="holiday_check")
+
+    # Daily at 10:00 UTC — overdue purchase orders check
+    scheduler.add_job(daily_overdue_purchase_check, CronTrigger(hour=10, minute=0), id="overdue_purchase_check")
+
+    # Weekly Monday 08:00 UTC — purchase consolidation per factory
+    scheduler.add_job(weekly_purchase_consolidation, CronTrigger(day_of_week="mon", hour=8, minute=0), id="purchase_consolidation")
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

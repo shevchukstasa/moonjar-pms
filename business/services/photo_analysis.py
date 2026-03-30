@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import re
-from typing import Optional
 
 import httpx
 
@@ -379,13 +378,23 @@ def format_analysis_message(result: dict, position_ref: str | None = None) -> st
     return "\n".join(lines)
 
 
-def format_delivery_message(
+def format_delivery_message(  # noqa: dead-code — for API/non-Telegram channels
     result: dict,
     matched_items: list[dict] | None = None,
     unmatched_items: list[dict] | None = None,
 ) -> str:
     """
     Format delivery analysis result as a Telegram message in Indonesian (Bahasa).
+
+    NOTE: The main Telegram delivery flow in telegram_bot._handle_delivery_photo()
+    uses its own richer inline formatting with msg() localization, size labels,
+    suggestion hints, and inline keyboard buttons.  This function is a simpler,
+    non-interactive variant useful for:
+      - Server-side API responses (e.g. /api/delivery/process-photo text preview)
+      - Non-Telegram channels that don't support inline keyboards
+      - Post-confirmation summary when no buttons are needed
+
+    See also: format_analysis_message() — handles scale/quality/packing photo types.
 
     Args:
         result: Analysis result from analyze_photo(analysis_type="delivery").

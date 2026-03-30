@@ -18,6 +18,8 @@ from typing import Optional
 from sqlalchemy.orm import Session
 import logging
 
+from api.unit_conversion import get_calculation_unit, convert_to_stock_unit
+
 logger = logging.getLogger("moonjar.material_reservation")
 
 
@@ -187,13 +189,19 @@ def _get_area_for_position(position, db=None) -> Decimal:
     Edge height is determined by EdgeHeightRule for the tile thickness,
     or defaults to tile thickness if no rule exists.
     """
-    # Face area
+    # Face area — use defect-adjusted quantity when available
+    effective_quantity = (
+        getattr(position, 'quantity_with_defect_margin', None) or position.quantity
+    )
     if position.glazeable_sqm and position.glazeable_sqm > 0:
-        face_total = Decimal(str(position.glazeable_sqm)) * Decimal(str(position.quantity))
+        face_total = Decimal(str(position.glazeable_sqm)) * Decimal(str(effective_quantity))
     elif position.quantity_sqm and position.quantity_sqm > 0:
-        face_total = Decimal(str(position.quantity_sqm))
+        # quantity_sqm is total area for the order line; scale by defect ratio
+        base_qty = position.quantity or 1
+        defect_ratio = Decimal(str(effective_quantity)) / Decimal(str(base_qty))
+        face_total = Decimal(str(position.quantity_sqm)) * defect_ratio
     else:
-        face_total = Decimal(str(position.quantity))
+        face_total = Decimal(str(effective_quantity))
 
     # Edge area — only when edge profile requires glazing
     edge_profile = getattr(position, 'edge_profile', None) or 'straight'
@@ -222,7 +230,7 @@ def _get_area_for_position(position, db=None) -> Decimal:
                 edge_per_piece = calculate_edge_surface(
                     shape, length_cm, width_cm, edge_height_cm, edge_sides
                 )
-                edge_total = Decimal(str(edge_per_piece)) * Decimal(str(position.quantity))
+                edge_total = Decimal(str(edge_per_piece)) * Decimal(str(effective_quantity))
                 face_total += edge_total
         except Exception as exc:
             logger.debug("Edge area calculation failed: %s", exc)
@@ -334,8 +342,8 @@ def _calculate_required(rm, position, recipe=None, db=None) -> Decimal:
             try:
                 if hasattr(rm, 'recipe') and rm.recipe:
                     r = rm.recipe
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to resolve recipe from rm: %s", e)
 
         # Check for ConsumptionRule override (pre-attached by caller)
         cr = getattr(position, '_consumption_rule', None)
@@ -387,8 +395,11 @@ def _calculate_required(rm, position, recipe=None, db=None) -> Decimal:
         total_grams = total_ml * sg
         return (effective_qty / Decimal("100")) * total_grams
 
-    # Default: per_piece
-    return qty * Decimal(str(position.quantity))
+    # Default: per_piece — use defect-adjusted quantity when available
+    effective_quantity = (
+        getattr(position, 'quantity_with_defect_margin', None) or position.quantity
+    )
+    return qty * Decimal(str(effective_quantity))
 
 
 # ────────────────────────────────────────────────────────────────
@@ -618,7 +629,16 @@ def reserve_materials_for_position(
             position._consumption_rule = None
 
         # --- Calculate required quantity (with edge area via EdgeHeightRule) ---
-        required = _calculate_required(rm, position, recipe=recipe, db=db)
+        required_calc = _calculate_required(rm, position, recipe=recipe, db=db)
+
+        # --- Convert to stock unit ---
+        calc_unit = get_calculation_unit(rm.unit)
+        stock_unit = (material.unit or "pcs").lower().strip()
+        sg = recipe.specific_gravity if recipe else None
+        required = convert_to_stock_unit(
+            required_calc, calc_unit, stock_unit,
+            specific_gravity=sg, material_name=material.name,
+        )
 
         # --- Current stock balance ---
         stock = (
@@ -738,10 +758,17 @@ def force_reserve_materials(
         if not material:
             continue
 
-        # Calculate required quantity
-        required = _calculate_required(rm, position, recipe=recipe)
+        # Calculate required quantity and convert to stock unit
+        required_calc = _calculate_required(rm, position, recipe=recipe)
+        calc_unit = get_calculation_unit(rm.unit)
+        stock_unit = (material.unit or "pcs").lower().strip()
+        sg = recipe.specific_gravity if recipe else None
+        required = convert_to_stock_unit(
+            required_calc, calc_unit, stock_unit,
+            specific_gravity=sg, material_name=material.name,
+        )
 
-        # Create reserve transaction regardless of balance
+        # Create reserve transaction regardless of balance (in stock unit)
         txn = MaterialTransaction(
             material_id=rm.material_id,
             factory_id=factory_id,
@@ -1000,7 +1027,14 @@ def check_and_unblock_positions_after_receive(
                 if not material:
                     continue
 
-                required = _calculate_required(rm, position, recipe=recipe)
+                required_calc = _calculate_required(rm, position, recipe=recipe)
+                calc_unit = get_calculation_unit(rm.unit)
+                stock_unit = (material.unit or "pcs").lower().strip()
+                sg = recipe.specific_gravity if recipe else None
+                required = convert_to_stock_unit(
+                    required_calc, calc_unit, stock_unit,
+                    specific_gravity=sg, material_name=material.name,
+                )
 
                 # Current stock balance
                 stock = (

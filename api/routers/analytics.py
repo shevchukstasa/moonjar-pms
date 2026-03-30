@@ -2,6 +2,7 @@
 See API_CONTRACTS.md for full specification.
 """
 
+import logging
 from uuid import UUID
 from datetime import date
 
@@ -23,7 +24,9 @@ from business.services.buffer_health import calculate_buffer_health
 from business.services.anomaly_detection import (
     run_all_anomaly_checks, anomaly_to_dict,
 )
-from api.models import Factory, Resource, MaterialTransaction, Material, User
+from api.models import Factory, MaterialTransaction, Material, User
+
+logger = logging.getLogger("moonjar.analytics")
 
 router = APIRouter()
 
@@ -308,8 +311,8 @@ async def get_anomalies(
         try:
             anomalies = run_all_anomaly_checks(db, fid)
             all_anomalies.extend(anomalies)
-        except Exception:
-            pass  # Logged inside run_all_anomaly_checks
+        except Exception as e:
+            logger.warning("Anomaly check failed for factory %s: %s", fid, e)
 
     # Apply filters
     if severity:
@@ -326,3 +329,20 @@ async def get_anomalies(
         "critical_count": sum(1 for a in all_anomalies if a.severity == "critical"),
         "warning_count": sum(1 for a in all_anomalies if a.severity == "warning"),
     }
+
+
+@router.get("/lead-time/{factory_id}")
+async def factory_lead_time(
+    factory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Factory lead time estimate: active positions, avg cycle, queue days."""
+    from business.services.order_intake import estimate_factory_lead_time
+
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory:
+        from fastapi import HTTPException
+        raise HTTPException(404, "Factory not found")
+
+    return estimate_factory_lead_time(db, factory_id)

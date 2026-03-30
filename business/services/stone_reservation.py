@@ -14,10 +14,8 @@ Lifecycle:
   2. reconcile_stone_after_firing() — called after firing result is known
   3. get_weekly_stone_waste_report() — reporting
 """
-import math
 import logging
 from datetime import date, timedelta
-from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 

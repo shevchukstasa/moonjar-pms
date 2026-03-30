@@ -9,6 +9,7 @@ import { Tabs } from '@/components/ui/Tabs';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useUiStore } from '@/stores/uiStore';
 import { usePositionsForQc, useQualityStats, useCreateInspection, type QcPositionItem } from '@/hooks/useQuality';
+import { QualityCheckDialog } from '@/components/quality/QualityCheckDialog';
 import { useQmBlocks, useResolveQmBlock, type QmBlockItem } from '@/hooks/useQmBlocks';
 import { useProblemCards, useCreateProblemCard, useUpdateProblemCard, type ProblemCardItem } from '@/hooks/useProblemCards';
 import apiClient from '@/api/client';
@@ -78,6 +79,10 @@ function QcQueueTab({ positions, isLoading }: { positions: QcPositionItem[]; isL
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = positions.find((p) => p.id === selectedId) || null;
 
+  // QC Checklist dialog state
+  const [qcOpen, setQcOpen] = useState(false);
+  const [qcCheckType, setQcCheckType] = useState<'pre_kiln' | 'final'>('pre_kiln');
+
   if (isLoading) {
     return <div className="flex justify-center py-8"><Spinner className="h-8 w-8" /></div>;
   }
@@ -88,6 +93,8 @@ function QcQueueTab({ positions, isLoading }: { positions: QcPositionItem[]; isL
       </div>
     );
   }
+
+  const PRE_KILN_STATUSES = ['glazing', 'drying', 'ready_to_fire', 'pending_pre_kiln_qc'];
 
   return (
     <div className="space-y-4">
@@ -112,7 +119,38 @@ function QcQueueTab({ positions, isLoading }: { positions: QcPositionItem[]; isL
         ))}
       </div>
 
-      {selected && <InspectionForm position={selected} onDone={() => setSelectedId(null)} />}
+      {selected && (
+        <>
+          {/* Structured QC checklist buttons */}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => { setQcCheckType('pre_kiln'); setQcOpen(true); }}
+            >
+              Pre-Kiln QC Checklist
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => { setQcCheckType('final'); setQcOpen(true); }}
+            >
+              Final QC Checklist
+            </Button>
+          </div>
+
+          <InspectionForm position={selected} onDone={() => setSelectedId(null)} />
+
+          <QualityCheckDialog
+            open={qcOpen}
+            onClose={() => setQcOpen(false)}
+            checkType={qcCheckType}
+            positionId={selected.id}
+            factoryId={selected.factory_id}
+            positionLabel={`${selected.order_number ?? ''} · ${selected.color} · ${selected.size}`}
+          />
+        </>
+      )}
     </div>
   );
 }

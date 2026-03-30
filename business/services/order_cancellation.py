@@ -7,7 +7,6 @@ and cancels linked tasks.
 """
 from uuid import UUID
 from datetime import datetime, timezone
-from typing import Optional
 
 from sqlalchemy.orm import Session
 import logging
@@ -65,8 +64,8 @@ def process_order_cancellation(db: Session, order_id: UUID, confirmed_by: UUID) 
             new_status=OrderStatus.CANCELLED,
             changed_by=confirmed_by,
         ))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to log cancellation status change: %s", e)
 
     logger.info(
         "ORDER_CANCELLED | order=%s | positions=%d | tasks=%d | by=%s",

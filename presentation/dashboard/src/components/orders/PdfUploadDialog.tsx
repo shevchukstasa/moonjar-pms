@@ -8,6 +8,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { useUploadPdf, useConfirmPdf } from '@/hooks/useOrders';
 import { useFactories } from '@/hooks/useFactories';
 import type { PdfParsedOrder, PdfParsedItem, FieldConfidence } from '@/api/orders';
+import { DatePicker } from '@/components/ui/DatePicker';
 
 interface Props {
   open: boolean;
@@ -329,22 +330,20 @@ export function PdfUploadDialog({ open, onClose, defaultFactoryId }: Props) {
               <label className="mb-1 block text-sm font-medium text-gray-700">
                 Document Date <ConfidenceBadge fc={headerFc?.document_date} />
               </label>
-              <input
-                type="date"
+              <DatePicker
                 value={parsedOrder.document_date || ''}
-                onChange={(e) => updateField('document_date', e.target.value || null)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                onChange={(v) => updateField('document_date', v || null)}
+                className="w-full"
               />
             </div>
             <div className={`rounded-md ${confidenceRing(headerFc?.final_deadline)}`}>
               <label className="mb-1 block text-sm font-medium text-gray-700">
                 Deadline <ConfidenceBadge fc={headerFc?.final_deadline} />
               </label>
-              <input
-                type="date"
+              <DatePicker
                 value={parsedOrder.final_deadline || ''}
-                onChange={(e) => updateField('final_deadline', e.target.value || null)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                onChange={(v) => updateField('final_deadline', v || null)}
+                className="w-full"
               />
             </div>
           </div>

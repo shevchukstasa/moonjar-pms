@@ -5,12 +5,11 @@ See API_CONTRACTS.md for full specification.
 from uuid import UUID
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sa_func
 
 from api.database import get_db
-from api.auth import get_current_user
 from api.roles import require_management
 from api.models import (
     ProductionOrder, OrderPosition, Resource, Batch,

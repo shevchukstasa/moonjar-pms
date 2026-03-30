@@ -34,9 +34,52 @@ from api.enums import (
     ShapeType,
     UserRole,
     is_stock_collection,
+    EdgeProfileType,
+    ApplicationMethodCode,
+    ApplicationCollectionCode,
 )
 
 logger = logging.getLogger("moonjar.order_intake")
+
+
+# ────────────────────────────────────────────────────────────────
+# Service item detection helpers
+# ────────────────────────────────────────────────────────────────
+
+_SERVICE_KEYWORDS = [
+    "design", "matching service", "color matching", "design&production",
+    "design & production", "stencil design", "silkscreen design",
+]
+
+
+def is_service_item(item_data: dict) -> bool:
+    """Detect non-production service items (stencil design, silkscreen design, color matching).
+
+    These items create Tasks instead of production positions.
+    """
+    # Explicit flag from Sales
+    if item_data.get("is_additional_item") or item_data.get("is_service"):
+        return True
+    # Heuristic: keywords in application/description/name
+    app = (item_data.get("application") or "").strip().lower()
+    desc = (item_data.get("description") or "").strip().lower()
+    name = (item_data.get("name") or "").strip().lower()
+    combined = f"{desc} {name} {app}"
+    return any(kw in combined for kw in _SERVICE_KEYWORDS)
+
+
+def detect_service_task_type(item_data: dict) -> Optional[TaskType]:
+    """Determine task type for a service item."""
+    app = (item_data.get("application") or "").strip().lower()
+    desc = (item_data.get("description") or item_data.get("name") or "").strip().lower()
+    combined = f"{desc} {app}"
+    if "stencil" in combined:
+        return TaskType.STENCIL_ORDER
+    if "silkscreen" in combined or "silk_screen" in combined or "silk screen" in combined:
+        return TaskType.SILK_SCREEN_ORDER
+    if "color matching" in combined or "color_matching" in combined:
+        return TaskType.COLOR_MATCHING
+    return None
 
 
 # ────────────────────────────────────────────────────────────────
@@ -83,52 +126,73 @@ def _get_defect_coefficient(db: Session, factory_id, size: str) -> float:
 # §1  Main entry point
 # ────────────────────────────────────────────────────────────────
 
-def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
+def process_incoming_order(
+    db: Session,
+    payload: dict,
+    source: str,
+    *,
+    skip_scheduling: bool = False,
+    skip_duplicate_check: bool = False,
+    factory_id_override: Optional[UUID] = None,
+    return_order: bool = False,
+) -> dict:
     """
     Entry point: webhook/PDF/manual → order + positions.
+
+    Args:
+        skip_scheduling: If True, skip immediate TOC/DBR scheduling (caller handles it).
+        skip_duplicate_check: If True, skip idempotency and existing-order checks (caller already verified).
+        factory_id_override: Pre-resolved factory UUID (skips auto-assignment).
+        return_order: If True, include the ORM order object under key "_order".
 
     Steps:
     1. Idempotency check (webhook only)
     2. Check if order already exists → create change request
     3. Create new production order
     4. Auto-assign factory
-    5. Create order items
-    6. Process each item → create positions
-    7. Notify PM
+    5. Create order items (separate service items from product items)
+    6. Process product items → create positions
+    7. Create Tasks for service items
+    8. Link service tasks to matching positions
+    9. Schedule (unless skip_scheduling)
+    10. Notify PM
     """
-    # 1. Idempotency (webhook)
-    if source == OrderSource.SALES_WEBHOOK.value:
-        event_id = payload.get("event_id")
-        if event_id:
-            existing_event = (
-                db.query(SalesWebhookEvent)
-                .filter(SalesWebhookEvent.event_id == event_id)
+    external_id = payload.get("external_id")
+
+    # 1-2. Idempotency & existence checks (skipped when caller already verified)
+    if not skip_duplicate_check:
+        # 1. Idempotency (webhook)
+        if source == OrderSource.SALES_WEBHOOK.value:
+            event_id = payload.get("event_id")
+            if event_id:
+                existing_event = (
+                    db.query(SalesWebhookEvent)
+                    .filter(SalesWebhookEvent.event_id == event_id)
+                    .first()
+                )
+                if existing_event:
+                    return {"status": "duplicate", "event_id": event_id}
+
+        # 2. Check existing order by external_id
+        if external_id:
+            existing_order = (
+                db.query(ProductionOrder)
+                .filter(
+                    ProductionOrder.source == source,
+                    ProductionOrder.external_id == external_id,
+                )
                 .first()
             )
-            if existing_event:
-                return {"status": "duplicate", "event_id": event_id}
-
-    # 2. Check existing order by external_id
-    external_id = payload.get("external_id")
-    if external_id:
-        existing_order = (
-            db.query(ProductionOrder)
-            .filter(
-                ProductionOrder.source == source,
-                ProductionOrder.external_id == external_id,
-            )
-            .first()
-        )
-        if existing_order:
-            # Order exists — for now, return info (change request handling is separate)
-            return {
-                "status": "exists",
-                "order_id": str(existing_order.id),
-                "order_number": existing_order.order_number,
-            }
+            if existing_order:
+                # Order exists — for now, return info (change request handling is separate)
+                return {
+                    "status": "exists",
+                    "order_id": str(existing_order.id),
+                    "order_number": existing_order.order_number,
+                }
 
     # 3. Determine factory
-    factory_id = payload.get("factory_id")
+    factory_id = factory_id_override or payload.get("factory_id")
     if not factory_id:
         client_location = payload.get("client_location", "")
         factory = assign_factory(db, client_location)
@@ -149,17 +213,26 @@ def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
         status=OrderStatus.NEW,
         source=source,
         external_id=external_id,
-        sales_payload_json=payload if source == OrderSource.SALES_WEBHOOK.value else None,
+        sales_payload_json=(
+            payload.get("sales_payload_json")
+            or (payload if source == OrderSource.SALES_WEBHOOK.value else None)
+        ),
         mandatory_qc=payload.get("mandatory_qc", False),
         notes=payload.get("notes"),
     )
     db.add(order)
     db.flush()  # Get order.id
 
-    # 5. Create order items
+    # 5. Create order items — separate service items from product items
     items_data = payload.get("items", [])
-    created_items = []
+    created_items = []       # (item_orm, item_data_dict) — product items
+    service_items_data = []  # raw dicts for service items
     for item_data in items_data:
+        # ── Detect service items (stencil design, silkscreen design, color matching) ──
+        if is_service_item(item_data):
+            service_items_data.append(item_data)
+            continue
+
         # Parse thickness: prefer thickness_mm, accept string "11mm" or number
         _raw_t = item_data.get("thickness", 11.0)
         if isinstance(_raw_t, str):
@@ -229,36 +302,105 @@ def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
         item._sales_is_additional_item = item_data.get("is_additional_item")
         item._sales_description = item_data.get("description")
 
-        created_items.append(item)
+        created_items.append((item, item_data))
 
-    # 6. Process each item → positions
+    # 6. Process product items → positions
     positions = []
-    for item in created_items:
-        position = process_order_item(db, order, item)
-        if position:
-            positions.append(position)
+    for item, _item_data in created_items:
+        try:
+            position = process_order_item(db, order, item)
+            if position:
+                positions.append(position)
+        except Exception as e:
+            logger.error(
+                "process_order_item failed for order %s item %s: %s",
+                order.order_number, item.id, e,
+            )
 
-    # 7. Upfront scheduling (TOC/DBR backward scheduling)
+    # 7. Create Tasks for service items (stencil design, silkscreen design, color matching)
+    created_service_tasks = []
+    for svc_data in service_items_data:
+        task_type = detect_service_task_type(svc_data) or TaskType.STENCIL_ORDER
+        # Create a lightweight OrderItem record for audit trail
+        svc_item = ProductionOrderItem(
+            order_id=order.id,
+            color=svc_data.get("color", ""),
+            color_2=svc_data.get("color_2"),
+            application=svc_data.get("application"),
+            quantity_pcs=svc_data.get("quantity_pcs") or svc_data.get("quantity", 0),
+            product_type=svc_data.get("product_type", ProductType.TILE.value),
+        )
+        db.add(svc_item)
+        db.flush()
+
+        task = Task(
+            factory_id=order.factory_id,
+            type=task_type,
+            status=TaskStatus.PENDING,
+            assigned_role=UserRole.PRODUCTION_MANAGER,
+            related_order_id=order.id,
+            blocking=True,
+            description=(
+                f"[{task_type.value.replace('_', ' ').title()}] "
+                f"Order {order.order_number}: "
+                f"{svc_data.get('application', '')} — "
+                f"{svc_data.get('color', '')} "
+                f"{'/ ' + svc_data.get('color_2') if svc_data.get('color_2') else ''}"
+            ).strip(),
+            priority=10,
+            metadata_json={
+                "order_item_id": str(svc_item.id),
+                "application": svc_data.get("application"),
+                "color": svc_data.get("color"),
+                "color_2": svc_data.get("color_2"),
+                "source": f"{source}_auto",
+            },
+        )
+        db.add(task)
+        db.flush()
+        created_service_tasks.append(task)
+        logger.info("Created service task %s for order %s", task_type.value, order.order_number)
+
+    # 8. Link service tasks to matching positions (same order)
+    for task in created_service_tasks:
+        if task.type in (TaskType.STENCIL_ORDER, TaskType.SILK_SCREEN_ORDER):
+            for pos in positions:
+                _pos_status = pos.status.value if hasattr(pos.status, "value") else str(pos.status)
+                if _pos_status == PositionStatus.AWAITING_STENCIL_SILKSCREEN.value:
+                    task.related_position_id = pos.id
+                    break
+        elif task.type == TaskType.COLOR_MATCHING:
+            for pos in positions:
+                _pos_status = pos.status.value if hasattr(pos.status, "value") else str(pos.status)
+                if _pos_status == PositionStatus.AWAITING_COLOR_MATCHING.value:
+                    task.related_position_id = pos.id
+                    break
+
+    # 9. Upfront scheduling (TOC/DBR backward scheduling)
     #    Calculate planned dates for every position immediately so Sales
     #    can see a real-time production plan.
-    try:
-        from business.services.production_scheduler import schedule_order
-        schedule_order(db, order)
-    except Exception as e:
-        logger.warning("Failed to schedule order %s: %s", order.order_number, e)
+    #    Skip when caller handles scheduling separately (e.g. webhook with deferred estimation).
+    if not skip_scheduling:
+        try:
+            from business.services.production_scheduler import schedule_order
+            schedule_order(db, order)
+        except Exception as e:
+            logger.warning("Failed to schedule order %s: %s", order.order_number, e)
 
-    # 8. Update order status
+    # 10. Update order status
     old_status = order.status
-    if any(
-        p.status == PositionStatus.INSUFFICIENT_MATERIALS
-        or p.status == PositionStatus.AWAITING_RECIPE
-        or p.status == PositionStatus.AWAITING_STENCIL_SILKSCREEN
-        or p.status == PositionStatus.AWAITING_COLOR_MATCHING
-        or p.status == PositionStatus.AWAITING_SIZE_CONFIRMATION
+    if positions and any(
+        p.status in (
+            PositionStatus.INSUFFICIENT_MATERIALS,
+            PositionStatus.AWAITING_RECIPE,
+            PositionStatus.AWAITING_STENCIL_SILKSCREEN,
+            PositionStatus.AWAITING_COLOR_MATCHING,
+            PositionStatus.AWAITING_SIZE_CONFIRMATION,
+        )
         for p in positions
     ):
         order.status = OrderStatus.NEW
-    else:
+    elif positions:
         order.status = OrderStatus.IN_PRODUCTION
 
     # Log order status change
@@ -269,12 +411,12 @@ def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
                 old_status=old_status,
                 new_status=order.status,
             ))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to log order status change: %s", e)
 
     db.commit()
 
-    # 9. Notify PM (best-effort)
+    # 11. Notify PM (best-effort)
     try:
         from business.services.notifications import notify_pm
         notify_pm(
@@ -289,12 +431,15 @@ def process_incoming_order(db: Session, payload: dict, source: str) -> dict:
     except Exception as e:
         logger.warning(f"Failed to notify PM: {e}")
 
-    return {
+    result = {
         "status": "created",
         "order_id": str(order.id),
         "order_number": order.order_number,
         "positions_count": len(positions),
     }
+    if return_order:
+        result["_order"] = order
+    return result
 
 
 # ────────────────────────────────────────────────────────────────
@@ -530,9 +675,29 @@ def process_order_item(
     )
 
     if hasattr(position, 'application_collection_code') and _app_collection:
-        position.application_collection_code = _app_collection.strip().lower()
+        _acc_val = _app_collection.strip().lower()
+        position.application_collection_code = _acc_val
+        if _acc_val not in [e.value for e in ApplicationCollectionCode]:
+            logger.warning(
+                "UNKNOWN_COLLECTION | order=%s position=%s | application_collection_code='%s' not in enum",
+                order.order_number, position.id, _acc_val,
+            )
     if hasattr(position, 'application_method_code') and _app_method:
-        position.application_method_code = _app_method.strip().lower()
+        _amc_val = _app_method.strip().lower()
+        position.application_method_code = _amc_val
+        if _amc_val not in [e.value for e in ApplicationMethodCode]:
+            logger.warning(
+                "UNKNOWN_METHOD | order=%s position=%s | application_method_code='%s' not in enum",
+                order.order_number, position.id, _amc_val,
+            )
+
+    # Warn if edge_profile from Sales is unknown
+    _edge_val = getattr(position, 'edge_profile', None)
+    if _edge_val and _edge_val not in [e.value for e in EdgeProfileType]:
+        logger.warning(
+            "UNKNOWN_EDGE_PROFILE | order=%s position=%s | edge_profile='%s' not in enum",
+            order.order_number, position.id, _edge_val,
+        )
 
     # Auto-detect Exclusive collection if not explicitly set
     if not _app_collection or _app_collection.strip().lower() == 'authentic':
@@ -554,10 +719,9 @@ def process_order_item(
             order.order_number, position.id, _final_method, _final_collection,
         )
 
-    # Calculate defect margin
-    from math import ceil
-    defect_coeff = _get_defect_coefficient(db, order.factory_id, item.size or '')
-    position.quantity_with_defect_margin = ceil(item.quantity_pcs * (1 + defect_coeff))
+    # Calculate defect margin (2D: glaze + product type coefficients)
+    from business.services.defect_coefficient import calculate_production_quantity_with_defects
+    calculate_production_quantity_with_defects(db, position)
 
     # Stock items: done, no further processing
     if is_stock_collection(item.collection):

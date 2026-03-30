@@ -20,6 +20,7 @@ from api.enums import (
     QcResult, QcStage, PositionStatus, QmBlockType, NotificationType,
     RelatedEntityType, UserRole,
 )
+from business.services.status_machine import transition_position_status
 
 require_qm_or_admin = require_role("owner", "administrator", "quality_manager")
 
@@ -313,9 +314,9 @@ async def create_inspection(
     db.add(qc)
 
     if data.result == "ok":
-        pos.status = PositionStatus.QUALITY_CHECK_DONE
+        transition_position_status(db, pos.id, PositionStatus.QUALITY_CHECK_DONE.value, changed_by=current_user.id)
     else:
-        pos.status = PositionStatus.BLOCKED_BY_QM
+        transition_position_status(db, pos.id, PositionStatus.BLOCKED_BY_QM.value, changed_by=current_user.id)
         # Auto-create QmBlock
         block = QmBlock(
             factory_id=data.factory_id,
@@ -355,7 +356,7 @@ async def update_inspection(
     if old_result == "defect" and new_result == "ok" and qc.position_id:
         pos = db.query(OrderPosition).filter(OrderPosition.id == qc.position_id).first()
         if pos and _ev(pos.status) == "blocked_by_qm":
-            pos.status = PositionStatus.QUALITY_CHECK_DONE
+            transition_position_status(db, pos.id, PositionStatus.QUALITY_CHECK_DONE.value, changed_by=current_user.id)
 
         # Resolve any active QmBlock for this position
         block = db.query(QmBlock).filter(
@@ -370,7 +371,7 @@ async def update_inspection(
     elif old_result == "ok" and new_result == "defect" and qc.position_id:
         pos = db.query(OrderPosition).filter(OrderPosition.id == qc.position_id).first()
         if pos:
-            pos.status = PositionStatus.BLOCKED_BY_QM
+            transition_position_status(db, pos.id, PositionStatus.BLOCKED_BY_QM.value, changed_by=current_user.id)
             block = QmBlock(
                 factory_id=qc.factory_id,
                 block_type=QmBlockType.POSITION,
@@ -705,7 +706,7 @@ async def create_pre_kiln_check(
     db.add(cl)
 
     if data.overall_result == "pass":
-        pos.status = PositionStatus.PRE_KILN_CHECK
+        transition_position_status(db, pos.id, PositionStatus.PRE_KILN_CHECK.value, changed_by=current_user.id)
     else:
         # Position stays at 'glazed', notify PM
         _notify_pm_on_fail(db, pos, "pre_kiln", data.factory_id)
@@ -791,7 +792,7 @@ async def create_final_check(
     db.add(cl)
 
     if data.overall_result == "pass":
-        pos.status = PositionStatus.READY_FOR_SHIPMENT
+        transition_position_status(db, pos.id, PositionStatus.READY_FOR_SHIPMENT.value, changed_by=current_user.id)
     else:
         # Position stays at 'packed', notify PM
         _notify_pm_on_fail(db, pos, "final", data.factory_id)

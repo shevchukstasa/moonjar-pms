@@ -60,7 +60,7 @@ def _mock_sdc(stone_type="Red_20x20", factory_id=None, supplier_id=None,
     s.supplier_id = supplier_id
     s.coefficient = coefficient
     s.sample_size = sample_size
-    s.last_updated = datetime.utcnow()
+    s.last_updated = datetime.now(timezone.utc)
     s.calculation_period_days = 30
     return s
 

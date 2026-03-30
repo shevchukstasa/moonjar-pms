@@ -17,6 +17,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
 import { FactorySelector } from '@/components/layout/FactorySelector';
+import { DatePicker } from '@/components/ui/DatePicker';
 
 const PAGE_TABS = [
   { id: 'upcoming', label: 'Upcoming' },
@@ -463,11 +464,10 @@ function ScheduleMaintenanceForm({
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Scheduled Date *</label>
-          <input
-            type="date"
+          <DatePicker
             value={scheduledDate}
-            onChange={(e) => setScheduledDate(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            onChange={(v) => setScheduledDate(v)}
+            className="w-full"
           />
         </div>
         <div>
@@ -605,20 +605,18 @@ function HistoryTab({ factoryId }: { factoryId: string | null }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">From Date</label>
-            <input
-              type="date"
+            <DatePicker
               value={filterFrom}
-              onChange={(e) => setFilterFrom(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              onChange={(v) => setFilterFrom(v)}
+              className="w-full"
             />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">To Date</label>
-            <input
-              type="date"
+            <DatePicker
               value={filterTo}
-              onChange={(e) => setFilterTo(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              onChange={(v) => setFilterTo(v)}
+              className="w-full"
             />
           </div>
         </div>

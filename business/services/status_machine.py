@@ -4,6 +4,7 @@ Business Logic: Implementation Guide §4.1, §32b
 
 Defines allowed transitions and provides validated transition logic.
 """
+import logging
 from uuid import UUID
 from datetime import datetime, timezone
 from typing import Optional
@@ -12,6 +13,8 @@ from sqlalchemy.orm import Session
 
 from api.models import OrderPosition, OrderStageHistory, ProductionStage
 from api.enums import PositionStatus
+
+logger = logging.getLogger("moonjar.status_machine")
 
 
 # ────────────────────────────────────────────────────────────────
@@ -378,9 +381,9 @@ def _send_realtime_alerts(
     _logger = logging.getLogger("moonjar.realtime_alerts")
 
     try:
-        from business.services.notifications import notify_pm, create_notification
+        from business.services.notifications import notify_pm, create_notification  # noqa: dead-code
         from api.models import ProductionOrder, Factory
-        from api.enums import NotificationType, RelatedEntityType
+        from api.enums import NotificationType, RelatedEntityType  # noqa: dead-code
 
         order = db.query(ProductionOrder).get(position.order_id) if position.order_id else None
         order_num = order.order_number if order else "?"
@@ -495,8 +498,8 @@ def _send_to_factory_chat(
             else:
                 from business.services.notifications import send_telegram_message
                 send_telegram_message(chat_id, text)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to send Telegram notification to masters group: %s", e)
 
 
 # ────────────────────────────────────────────────────────────────

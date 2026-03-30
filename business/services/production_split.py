@@ -6,7 +6,7 @@ Decision 2026-03-19.
 """
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 from uuid import UUID
 
 from sqlalchemy.orm import Session

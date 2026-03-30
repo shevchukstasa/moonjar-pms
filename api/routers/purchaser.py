@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.auth import get_current_user, apply_factory_filter
+from api.auth import get_current_user
 from api.models import (
     MaterialPurchaseRequest, Supplier, Material, MaterialStock, MaterialTransaction, User,
 )
@@ -181,8 +181,6 @@ async def get_material_deficits(
     current_user=Depends(get_current_user),
 ):
     """Material deficits — materials where current balance < min_balance."""
-    from sqlalchemy import and_
-
     query = db.query(MaterialStock, Material).join(
         Material, MaterialStock.material_id == Material.id
     ).filter(MaterialStock.balance < MaterialStock.min_balance)

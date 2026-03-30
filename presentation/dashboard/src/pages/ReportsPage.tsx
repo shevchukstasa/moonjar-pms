@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { reportsApi, type ReportParams } from '@/api/reports';
 import { factoriesApi } from '@/api/factories';
+import { DatePicker } from '@/components/ui/DatePicker';
 
 function formatDate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -83,20 +84,18 @@ export default function ReportsPage() {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
-            <input
-              type="date"
+            <DatePicker
               value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              onChange={(v) => setDateFrom(v)}
+              className="rounded-lg shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
-            <input
-              type="date"
+            <DatePicker
               value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              onChange={(v) => setDateTo(v)}
+              className="rounded-lg shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
         </div>

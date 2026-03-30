@@ -794,9 +794,14 @@ async def create_order(
     if not data.items:
         raise HTTPException(400, "Order must have at least one item")
 
+    # Normalize product_type: table_top → countertop (unified name, PG enum uses 'countertop')
+    for item in data.items:
+        if item.product_type == "table_top":
+            item.product_type = "countertop"
+
     # Auto-derive dimensions from size for large-format products
     for item in data.items:
-        if item.product_type in ("table_top", "countertop", "sink") and not (item.length_cm and item.width_cm):
+        if item.product_type in ("countertop", "sink") and not (item.length_cm and item.width_cm):
             if item.size and "x" in item.size.lower():
                 try:
                     parts = item.size.lower().replace(" ", "").split("x")

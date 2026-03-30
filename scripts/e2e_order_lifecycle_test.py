@@ -166,12 +166,15 @@ class E2ETest:
         """Create order via POST /orders (manual) as fallback when webhook auth unavailable."""
         items = []
         for item in webhook_payload.get("items", []):
+            pt = item.get("product_type", "tile")
+            if pt == "table_top":
+                pt = "countertop"  # PG enum uses 'countertop'
             entry = {
                 "color": item.get("color", "Unknown"),
                 "size": item.get("size", "20x20"),
                 "quantity_pcs": item.get("quantity_pcs", 1),
                 "collection": item.get("collection", "Standard"),
-                "product_type": item.get("product_type", "tile"),
+                "product_type": pt,
                 "thickness": float(item.get("thickness", 11.0)),
             }
             for opt in ("finishing", "application", "application_type", "shape",

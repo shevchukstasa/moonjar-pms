@@ -144,14 +144,6 @@ class PayrollTotals(BaseModel):
     total_commission: float = 0.0
 
 
-class PayrollSummaryResponse(BaseModel):
-    items: list[PayrollSummaryItem]
-    totals: PayrollTotals
-    factory_id: Optional[str] = None
-    year: int
-    month: int
-
-
 class PayrollSummaryItem(BaseModel):
     employee_id: str
     full_name: str
@@ -190,6 +182,14 @@ class PayrollSummaryItem(BaseModel):
     total_deductions: float
     net_salary: float
     total_cost_to_company: float
+
+
+class PayrollSummaryResponse(BaseModel):
+    items: list[PayrollSummaryItem]
+    totals: PayrollTotals
+    factory_id: Optional[str] = None
+    year: int
+    month: int
 
 
 # ── Helpers ───────────────────────────────────────────────────

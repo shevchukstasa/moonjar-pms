@@ -253,7 +253,7 @@ function SidebarSection({
     // Collapsed sidebar: show divider between sections
     return (
       <>
-        <div className="my-1 border-t border-gray-100" />
+        <div className="my-1 border-t border-gray-100 dark:border-stone-800" />
         {section.items.map((item) => (
           <NavLink
             key={item.to}
@@ -262,7 +262,7 @@ function SidebarSection({
             className={({ isActive }) =>
               cn(
                 'flex items-center justify-center rounded-md p-2 text-base transition-colors',
-                isActive ? 'bg-blue-50 text-blue-700' : 'text-gray-500 hover:bg-gray-100',
+                isActive ? 'bg-blue-50 text-blue-700 dark:bg-gold-500/10 dark:text-gold-400' : 'text-gray-500 hover:bg-gray-100 dark:text-stone-500 dark:hover:bg-stone-800',
               )
             }
           >
@@ -278,11 +278,11 @@ function SidebarSection({
       {/* Section header — clickable to collapse/expand */}
       <button
         onClick={onToggle}
-        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors"
+        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors dark:text-stone-500 dark:hover:bg-stone-800 dark:hover:text-stone-300"
       >
         <span className="text-xs">{section.icon}</span>
         <span className="flex-1 text-left">{section.section}</span>
-        <span className={cn('text-[9px] text-gray-300 transition-transform', isExpanded ? 'rotate-0' : '-rotate-90')}>
+        <span className={cn('text-[9px] text-gray-300 transition-transform dark:text-stone-600', isExpanded ? 'rotate-0' : '-rotate-90')}>
           ▼
         </span>
       </button>
@@ -298,8 +298,8 @@ function SidebarSection({
                 cn(
                   'flex items-center gap-2 rounded-md px-3 py-1 text-[13px] font-medium transition-colors',
                   isActive
-                    ? 'bg-blue-50 text-blue-700'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
+                    ? 'bg-blue-50 text-blue-700 dark:bg-gold-500/10 dark:text-gold-400'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
                 )
               }
             >
@@ -352,21 +352,21 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        'fixed left-0 top-0 z-40 flex h-screen flex-col border-r bg-white transition-all',
+        'fixed left-0 top-0 z-40 flex h-screen flex-col border-r bg-white transition-all dark:border-stone-800 dark:bg-stone-950',
         sidebarOpen ? 'w-56' : 'w-14',
       )}
     >
       {/* Logo */}
-      <div className="flex h-14 items-center justify-between border-b px-3">
+      <div className="flex h-14 items-center justify-between border-b px-3 dark:border-stone-800">
         {sidebarOpen && (
           <span className="text-base font-semibold">
-            <span className="text-blue-600">Moonjar</span>{' '}
-            <span className="font-bold text-gray-900">PMS</span>
+            <span className="text-blue-600 dark:text-gold-500">Moonjar</span>{' '}
+            <span className="font-bold text-gray-900 dark:text-stone-100">PMS</span>
           </span>
         )}
         <button
           onClick={toggleSidebar}
-          className="rounded p-1 text-gray-400 hover:bg-gray-100"
+          className="rounded p-1 text-gray-400 hover:bg-gray-100 dark:text-stone-500 dark:hover:bg-stone-800"
         >
           {sidebarOpen ? '←' : '→'}
         </button>

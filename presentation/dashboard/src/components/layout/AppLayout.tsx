@@ -9,7 +9,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const sidebarOpen = useUiStore((s) => s.sidebarOpen);
   useWebSocket();
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-stone-950">
       <Sidebar />
       <div className={cn('flex flex-1 flex-col overflow-hidden transition-all', sidebarOpen ? 'ml-56' : 'ml-14')}>
         <Header />

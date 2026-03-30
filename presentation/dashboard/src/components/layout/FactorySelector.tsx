@@ -40,7 +40,7 @@ export function FactorySelector() {
     <select
       value={activeFactoryId || ''}
       onChange={(e) => setActiveFactory(e.target.value || null)}
-      className="w-full sm:w-auto rounded-md border border-gray-300 px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
+      className="w-full sm:w-auto rounded-md border border-gray-300 px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
     >
       {isGlobalRole && <option value="">All Factories</option>}
       {factories.map((f) => (

@@ -34,16 +34,16 @@ export const statusColors: Record<string, string> = {
   suggested: 'bg-violet-100 text-violet-700',
   in_progress: 'bg-yellow-100 text-yellow-700',
   done: 'bg-green-100 text-green-700',
-  // Resource statuses
-  active: 'bg-green-500 text-white',
-  inactive: 'bg-gray-100 text-gray-500',
+  // Resource statuses — premium palette
+  active: 'bg-gradient-to-r from-amber-500 to-yellow-500 text-white dark:from-amber-600 dark:to-yellow-600',
+  inactive: 'bg-stone-100 text-stone-400 dark:bg-stone-800 dark:text-stone-500',
   maintenance_planned: 'bg-yellow-100 text-yellow-700',
   maintenance_emergency: 'bg-red-100 text-red-700',
-  // Semantic aliases (for components using non-domain status strings)
-  error: 'bg-red-100 text-red-700',
-  warning: 'bg-amber-100 text-amber-700',
-  success: 'bg-green-100 text-green-700',
-  info: 'bg-blue-100 text-blue-700',
+  // Semantic aliases — premium palette
+  error: 'bg-red-900/10 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  warning: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+  success: 'bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-800 dark:from-amber-900/30 dark:to-yellow-900/20 dark:text-amber-300',
+  info: 'bg-stone-100 text-stone-600 dark:bg-stone-800/50 dark:text-stone-300',
   // Generic
   draft: 'bg-gray-100 text-gray-700',
   confirmed: 'bg-blue-100 text-blue-700',
@@ -62,4 +62,4 @@ export const statusColors: Record<string, string> = {
   master: 'bg-emerald-100 text-emerald-700',
   senior_master: 'bg-emerald-200 text-emerald-800',
 };
-export function getStatusColor(status: string): string { return statusColors[status] || 'bg-gray-100 text-gray-700'; }
+export function getStatusColor(status: string): string { return statusColors[status] || 'bg-gray-100 text-gray-700 dark:bg-stone-800 dark:text-stone-300'; }

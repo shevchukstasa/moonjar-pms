@@ -1065,6 +1065,86 @@ async def weekly_purchase_consolidation():
         db.close()
 
 
+async def weekly_summary_dispatcher():
+    """Weekly summary: send to PM + CEO for all active factories.
+
+    Runs Sunday 20:00 UTC (Monday 04:00 Bali).
+    """
+    logger.info("Running weekly summary dispatcher")
+    db = _get_db_session()
+    try:
+        from api.models import Factory
+        from business.services.weekly_summary import send_weekly_summary
+
+        factories = db.query(Factory).filter(Factory.is_active.is_(True)).all()
+        total_sent = 0
+        for factory in factories:
+            try:
+                sent = send_weekly_summary(db, factory.id)
+                total_sent += sent
+            except Exception as e:
+                logger.error("Weekly summary failed for factory %s: %s", factory.name, e)
+
+        logger.info("Weekly summary dispatched: %d messages across %d factories", total_sent, len(factories))
+    except Exception as e:
+        logger.error("Weekly summary dispatcher failed: %s", e)
+    finally:
+        db.close()
+
+
+async def daily_streak_update():
+    """Update streaks, evaluate daily challenges, and update achievements for all factories."""
+    logger.info("Running daily streak update")
+    db = _get_db_session()
+    try:
+        from datetime import date as date_cls
+        from business.services.streaks import (
+            update_streaks_for_factory, get_daily_challenge, evaluate_challenge,
+        )
+        from business.services.achievements import update_achievements_for_user
+        from api.models import User, UserFactory
+        from api.enums import UserRole
+
+        today = date_cls.today()
+        factory_ids = _get_all_factory_ids(db)
+
+        for fid in factory_ids:
+            try:
+                # Ensure challenge exists for today
+                get_daily_challenge(db, fid, today)
+                # Update streaks
+                update_streaks_for_factory(db, fid, today)
+                # Evaluate challenge completion
+                evaluate_challenge(db, fid, today)
+                db.commit()
+            except Exception as e:
+                logger.error("Streak update failed for factory %s: %s", fid, e)
+                db.rollback()
+
+            # Update achievements for all relevant users in this factory
+            try:
+                users = db.query(User).join(UserFactory).filter(
+                    UserFactory.factory_id == fid,
+                    User.is_active.is_(True),
+                ).all()
+                for user in users:
+                    try:
+                        update_achievements_for_user(db, user.id)
+                    except Exception as e:
+                        logger.warning("Achievement update failed for user %s: %s", user.id, e)
+                db.commit()
+            except Exception as e:
+                logger.error("Achievement update failed for factory %s: %s", fid, e)
+                db.rollback()
+
+        logger.info("Streak + achievement update completed for %d factories", len(factory_ids))
+    except Exception as e:
+        logger.error("Daily streak update failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 # --- Scheduler setup ---
 
 def setup_scheduler():
@@ -1121,6 +1201,12 @@ def setup_scheduler():
 
     # Weekly Monday 08:00 UTC — purchase consolidation per factory
     scheduler.add_job(weekly_purchase_consolidation, CronTrigger(day_of_week="mon", hour=8, minute=0), id="purchase_consolidation")
+
+    # Daily 22:30 UTC (06:30 Bali) — streak update + daily challenge evaluation
+    scheduler.add_job(daily_streak_update, CronTrigger(hour=22, minute=30), id="streak_update")
+
+    # Weekly Sunday 20:00 UTC (Monday 04:00 Bali) — weekly summary to PM + CEO
+    scheduler.add_job(weekly_summary_dispatcher, CronTrigger(day_of_week="sun", hour=20, minute=0), id="weekly_summary")
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

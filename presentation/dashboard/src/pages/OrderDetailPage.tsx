@@ -1,5 +1,6 @@
 import { formatDate } from "@/lib/format";
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useOrder, useUpdateOrder } from '@/hooks/useOrders';
@@ -17,6 +18,7 @@ import { StatusDropdown } from '@/components/tablo/StatusDropdown';
 import { formatEdgeProfile, formatPlaceOfApplication, formatShape, MaterialStatusBadge } from '@/components/tablo/PositionRow';
 import { PositionEditDialog } from '@/components/orders/PositionEditDialog';
 import { DatePicker } from '@/components/ui/DatePicker';
+import { OrderProgressRing } from '@/components/orders/OrderProgressRing';
 
 /** Format ISO date string as DD/MM (short, year omitted). */
 function fmtShortDate(iso: string | null | undefined): string {
@@ -196,6 +198,7 @@ export default function OrderDetailPage() {
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" onClick={() => navigate('/manager')}>&larr; Back</Button>
+        <OrderProgressRing positions={positions} size={72} />
         <div className="flex-1">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">Order {order.order_number}</h1>
@@ -574,6 +577,11 @@ export default function OrderDetailPage() {
             data: { status: overrideStatus, status_override: true },
           });
           setOverrideSuccess(true);
+          if (overrideStatus === 'shipped') {
+            toast.success(`\uD83D\uDCE6 Order ${order.order_number} shipped — great work!`);
+          } else if (overrideStatus === 'ready_for_shipment') {
+            toast.success(`\u2705 Order ${order.order_number} ready for shipment`);
+          }
         }}
         title="Override Order Status"
         message={`Manually set order #${order.order_number} status to "${VALID_STATUSES.find((s) => s.value === overrideStatus)?.label ?? overrideStatus}"? This bypasses automatic status calculation.`}

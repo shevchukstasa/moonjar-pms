@@ -2580,3 +2580,69 @@ class FiringLog(Base):
     kiln = relationship('Resource', foreign_keys=[kiln_id])
     firing_profile = relationship('FiringProfile', foreign_keys=[firing_profile_id])
     recorded_by_user = relationship('User', foreign_keys=[recorded_by])
+
+
+# ──────────────────────────────────────────────────────────────────
+# Gamification — Streaks & Daily Challenges
+# ──────────────────────────────────────────────────────────────────
+
+class UserStreak(Base):
+    """Track PM streak metrics per user + factory."""
+    __tablename__ = 'user_streaks'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id', ondelete='CASCADE'), nullable=False)
+    streak_type = Column(sa.String(30), nullable=False)  # on_time_delivery, zero_defects, daily_login, batch_utilization
+    current_streak = Column(sa.Integer, nullable=False, default=0)
+    best_streak = Column(sa.Integer, nullable=False, default=0)
+    last_activity_date = Column(sa.Date)
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'factory_id', 'streak_type'),
+    )
+
+    user = relationship('User', foreign_keys=[user_id])
+    factory = relationship('Factory', foreign_keys=[factory_id])
+
+
+class DailyChallenge(Base):
+    """One challenge per factory per day (deterministic from date hash)."""
+    __tablename__ = 'daily_challenges'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id', ondelete='CASCADE'), nullable=False)
+    challenge_date = Column(sa.Date, nullable=False)
+    challenge_type = Column(sa.String(30), nullable=False)
+    title = Column(sa.String(300), nullable=False)
+    description = Column(sa.Text)
+    target_value = Column(sa.Integer, nullable=False, default=1)
+    actual_value = Column(sa.Integer, nullable=False, default=0)
+    completed = Column(sa.Boolean, nullable=False, default=False)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('factory_id', 'challenge_date'),
+    )
+
+
+class MasterAchievement(Base):
+    """Master achievement tracking -- gamification Phase 6."""
+    __tablename__ = 'master_achievements'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    achievement_type = Column(sa.String(30), nullable=False)
+    level = Column(sa.Integer, nullable=False, default=0)
+    unlocked_at = Column(sa.DateTime(timezone=True))
+    progress_current = Column(sa.Integer, nullable=False, default=0)
+    progress_target = Column(sa.Integer, nullable=False, default=100)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'achievement_type'),
+    )
+
+    user = relationship('User', foreign_keys=[user_id])

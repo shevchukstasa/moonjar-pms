@@ -331,6 +331,21 @@ async def get_anomalies(
     }
 
 
+@router.get("/factory-leaderboard")
+async def factory_leaderboard(
+    period: str = Query("week", pattern="^(week|month)$"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Factory leaderboard: compare factories across key metrics.
+
+    CEO/Owner/Admin/PM access. Returns ranked factories with delta vs previous period.
+    """
+    from business.services.factory_leaderboard import calculate_factory_leaderboard
+
+    return calculate_factory_leaderboard(db, period)
+
+
 @router.get("/lead-time/{factory_id}")
 async def factory_lead_time(
     factory_id: UUID,
@@ -346,3 +361,39 @@ async def factory_lead_time(
         raise HTTPException(404, "Factory not found")
 
     return estimate_factory_lead_time(db, factory_id)
+
+
+@router.get("/streaks")
+async def streaks(
+    factory_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Streaks + daily challenge for the logged-in PM user.
+
+    Returns current streaks and today's daily challenge for the selected factory.
+    """
+    from datetime import date as date_cls
+    from api.models import UserFactory
+    from business.services.streaks import get_user_streaks, get_daily_challenge
+
+    # Resolve factory
+    if not factory_id:
+        uf = db.query(UserFactory).filter(
+            UserFactory.user_id == current_user.id
+        ).first()
+        if uf:
+            factory_id = uf.factory_id
+
+    if not factory_id:
+        return {"streaks": [], "daily_challenge": None}
+
+    today = date_cls.today()
+    streaks_data = get_user_streaks(db, current_user.id, factory_id)
+    challenge = get_daily_challenge(db, factory_id, today)
+    db.commit()
+
+    return {
+        "streaks": streaks_data,
+        "daily_challenge": challenge,
+    }

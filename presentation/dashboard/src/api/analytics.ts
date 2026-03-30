@@ -111,6 +111,72 @@ export interface AnomalyResponse {
   warning_count: number;
 }
 
+// --- Factory Leaderboard ---
+
+export interface LeaderboardMetric {
+  value: number;
+  prev: number;
+  delta: number;
+  lower_is_better: boolean;
+  rank: number;
+}
+
+export interface LeaderboardFactory {
+  factory_id: string;
+  factory_name: string;
+  factory_location: string | null;
+  overall_rank: number;
+  overall_rank_score: number;
+  metrics: Record<string, LeaderboardMetric>;
+}
+
+export interface LeaderboardResponse {
+  items: LeaderboardFactory[];
+  period: string;
+  date_from: string;
+  date_to: string;
+}
+
+// --- Achievements ---
+
+export interface AchievementItem {
+  id: string;
+  achievement_type: string;
+  level: number;
+  level_name: string;
+  unlocked_at: string | null;
+  progress_current: number;
+  progress_target: number;
+  next_target: number | null;
+}
+
+export interface AchievementsResponse {
+  items: AchievementItem[];
+  user_name: string;
+}
+
+export interface StreakItem {
+  type: string;
+  current: number;
+  best: number;
+  last_date: string | null;
+}
+
+export interface DailyChallengeItem {
+  type: string;
+  title: string;
+  description: string;
+  target_value: number;
+  actual_value: number;
+  completed: boolean;
+  date: string | null;
+}
+
+export interface StreaksResponse {
+  streaks: StreakItem[];
+  daily_challenge: DailyChallengeItem | null;
+}
+
 // --- API Functions ---
 
 export const analyticsApi = {
@@ -137,4 +203,13 @@ export const analyticsApi = {
 
   getAnomalies: (params?: { factory_id?: string; severity?: string; anomaly_type?: string }) =>
     apiClient.get<AnomalyResponse>('/analytics/anomalies', { params }).then((r) => r.data),
+
+  getStreaks: (params?: { factory_id?: string }) =>
+    apiClient.get<StreaksResponse>('/analytics/streaks', { params }).then((r) => r.data),
+
+  getFactoryLeaderboard: (period?: string) =>
+    apiClient.get<LeaderboardResponse>('/analytics/factory-leaderboard', { params: { period } }).then((r) => r.data),
+
+  getAchievements: (userId: string) =>
+    apiClient.get<AchievementsResponse>(`/tps/achievements/${userId}`).then((r) => r.data),
 };

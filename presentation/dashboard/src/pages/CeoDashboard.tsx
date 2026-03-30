@@ -249,12 +249,12 @@ export default function CeoDashboard() {
       {/* KPI Cards */}
       {summary && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          <KpiCard title="Active Orders" value={summary.orders_in_progress} subtitle={`of ${summary.total_orders} total`} color="blue" icon={<BarChart3 className="h-4 w-4" />} />
-          <KpiCard title="Output m²" value={summary.output_sqm.toFixed(0)} subtitle="last 30 days" color="green" />
-          <KpiCard title="On-Time" value={`${summary.on_time_rate.toFixed(0)}%`} color={summary.on_time_rate >= 90 ? 'green' : 'yellow'} icon={<Percent className="h-4 w-4" />} />
-          <KpiCard title="Defect Rate" value={`${summary.defect_rate.toFixed(1)}%`} color={summary.defect_rate <= 5 ? 'green' : 'red'} icon={<AlertTriangle className="h-4 w-4" />} />
-          <KpiCard title="Kiln Util." value={`${summary.kiln_utilization.toFixed(0)}%`} color={summary.kiln_utilization >= 70 ? 'green' : 'yellow'} icon={<Flame className="h-4 w-4" />} />
-          <KpiCard title="OEE" value={`${summary.oee.toFixed(0)}%`} color={summary.oee >= 85 ? 'green' : 'yellow'} icon={<Zap className="h-4 w-4" />} />
+          <KpiCard title="Active Orders" value={summary.orders_in_progress} subtitle={`of ${summary.total_orders} total`} variant="glass" icon={<BarChart3 className="h-4 w-4" />} />
+          <KpiCard title="Output m²" value={summary.output_sqm.toFixed(0)} subtitle="last 30 days" variant="glass" />
+          <KpiCard title="On-Time" value={`${summary.on_time_rate.toFixed(0)}%`} variant="glass" icon={<Percent className="h-4 w-4" />} />
+          <KpiCard title="Defect Rate" value={`${summary.defect_rate.toFixed(1)}%`} variant="glass" icon={<AlertTriangle className="h-4 w-4" />} />
+          <KpiCard title="Kiln Util." value={`${summary.kiln_utilization.toFixed(0)}%`} variant="glass" icon={<Flame className="h-4 w-4" />} />
+          <KpiCard title="OEE" value={`${summary.oee.toFixed(0)}%`} variant="glass" icon={<Zap className="h-4 w-4" />} />
         </div>
       )}
 

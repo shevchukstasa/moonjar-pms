@@ -9,6 +9,7 @@ import { KpiCard } from '@/components/dashboard/KpiCard';
 import { PeriodSelector, periodToDateRange } from '@/components/dashboard/PeriodSelector';
 import { FinancialBlock } from '@/components/dashboard/FinancialBlock';
 import { FactoryComparisonCards } from '@/components/dashboard/FactoryComparisonCards';
+import { FactoryLeaderboard } from '@/components/dashboard/FactoryLeaderboard';
 import { CriticalPositionsTable } from '@/components/dashboard/CriticalPositionsTable';
 import { MaterialDeficitsTable } from '@/components/dashboard/MaterialDeficitsTable';
 import { OutputTrendChart } from '@/components/charts/OutputTrendChart';
@@ -130,34 +131,34 @@ export default function OwnerDashboard() {
           <KpiCard
             title="Revenue"
             value={formatCurrency(financials.revenue)}
-            color="green"
+            variant="glass"
             icon={<DollarSign className="h-4 w-4" />}
           />
           <KpiCard
             title="Expenses"
             value={formatCurrency(financials.opex_total + financials.capex_total)}
             subtitle={`OPEX ${formatCurrency(financials.opex_total)} + CAPEX ${formatCurrency(financials.capex_total)}`}
-            color="red"
+            variant="glass"
           />
           <KpiCard
             title="Profit Margin"
             value={`${financials.margin_percent.toFixed(1)}%`}
             subtitle={formatCurrency(financials.margin)}
-            color={financials.margin_percent >= 15 ? 'green' : financials.margin_percent >= 0 ? 'yellow' : 'red'}
+            variant="glass"
             icon={<Percent className="h-4 w-4" />}
           />
           <KpiCard
             title="Output m²"
             value={financials.output_sqm.toFixed(0)}
             subtitle={`Cost ${(financials.cost_per_sqm).toFixed(2)}/m²`}
-            color="blue"
+            variant="glass"
             icon={<Package className="h-4 w-4" />}
           />
           <KpiCard
             title="Orders Completed"
             value={summary?.total_orders ?? 0}
             subtitle={`${summary?.orders_in_progress ?? 0} in progress`}
-            color="purple"
+            variant="glass"
             icon={<BarChart3 className="h-4 w-4" />}
           />
         </div>
@@ -166,10 +167,10 @@ export default function OwnerDashboard() {
       {/* Operational KPI row (if no financials, show these as primary) */}
       {summary && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <KpiCard title="On-Time" value={`${summary.on_time_rate.toFixed(0)}%`} color={summary.on_time_rate >= 90 ? 'green' : 'yellow'} icon={<TrendingUp className="h-4 w-4" />} />
-          <KpiCard title="Defect Rate" value={`${summary.defect_rate.toFixed(1)}%`} color={summary.defect_rate <= 5 ? 'green' : 'red'} icon={<AlertTriangle className="h-4 w-4" />} />
-          <KpiCard title="Kiln Util." value={`${summary.kiln_utilization.toFixed(0)}%`} color={summary.kiln_utilization >= 70 ? 'green' : 'yellow'} icon={<Flame className="h-4 w-4" />} />
-          <KpiCard title="OEE" value={`${summary.oee.toFixed(0)}%`} color={summary.oee >= 85 ? 'green' : 'yellow'} />
+          <KpiCard title="On-Time" value={`${summary.on_time_rate.toFixed(0)}%`} variant="glass" icon={<TrendingUp className="h-4 w-4" />} />
+          <KpiCard title="Defect Rate" value={`${summary.defect_rate.toFixed(1)}%`} variant="glass" icon={<AlertTriangle className="h-4 w-4" />} />
+          <KpiCard title="Kiln Util." value={`${summary.kiln_utilization.toFixed(0)}%`} variant="glass" icon={<Flame className="h-4 w-4" />} />
+          <KpiCard title="OEE" value={`${summary.oee.toFixed(0)}%`} variant="glass" />
         </div>
       )}
 
@@ -207,6 +208,11 @@ export default function OwnerDashboard() {
           <OpexBreakdownChart data={opexBreakdown} />
         </Card>
       )}
+
+      {/* ================================================================ */}
+      {/* Section: Factory Leaderboard                                     */}
+      {/* ================================================================ */}
+      <FactoryLeaderboard />
 
       {/* ================================================================ */}
       {/* Section 2: Factory Performance Matrix                             */}

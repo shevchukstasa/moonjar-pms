@@ -391,40 +391,81 @@ async def delete_order(
         .all()
     ]
 
-    # ── Purge all FK references from non-CASCADE tables ──
-    ref_counts = _purge_order_refs(db, order_id, position_ids)
-
-    # ── Delete tasks (also no CASCADE) ──
-    tasks_deleted = 0
-    if position_ids:
-        tasks_deleted += (
-            db.query(Task)
-            .filter(Task.related_position_id.in_(position_ids))
-            .delete(synchronize_session="fetch")
-        )
-    tasks_deleted += (
-        db.query(Task)
-        .filter(Task.related_order_id == order_id)
-        .delete(synchronize_session="fetch")
-    )
-
+    # ── Aggressive FK cleanup via raw SQL (avoids session corruption) ──
+    from sqlalchemy import text as sa_text
     pos_count = len(position_ids)
+    tasks_deleted = 0
+
+    try:
+        # Nullify FK refs on positions first
+        if position_ids:
+            pids_str = ",".join(f"'{p}'" for p in position_ids)
+            for stmt in [
+                f"UPDATE order_positions SET batch_id = NULL, resource_id = NULL, estimated_kiln_id = NULL WHERE id IN ({pids_str})",
+                f"DELETE FROM material_transactions WHERE related_position_id IN ({pids_str})",
+                f"DELETE FROM material_transactions WHERE related_order_id = '{order_id}'",
+                f"DELETE FROM quality_checks WHERE position_id IN ({pids_str})",
+                f"DELETE FROM defect_records WHERE position_id IN ({pids_str})",
+                f"DELETE FROM grinding_stock WHERE source_position_id IN ({pids_str})",
+                f"DELETE FROM repair_queue WHERE source_position_id IN ({pids_str})",
+                f"DELETE FROM surplus_dispositions WHERE position_id IN ({pids_str})",
+                f"DELETE FROM order_packing_photos WHERE position_id IN ({pids_str})",
+                f"DELETE FROM worker_media WHERE related_position_id IN ({pids_str})",
+                f"DELETE FROM qm_blocks WHERE position_id IN ({pids_str})",
+                f"DELETE FROM notifications WHERE related_entity_id IN ({pids_str})",
+                f"DELETE FROM kiln_calculation_logs WHERE position_id IN ({pids_str})",
+                f"DELETE FROM operation_logs WHERE position_id IN ({pids_str})",
+                f"DELETE FROM stone_reservations WHERE position_id IN ({pids_str})",
+                f"DELETE FROM position_photos WHERE position_id IN ({pids_str})",
+                f"DELETE FROM shipment_items WHERE position_id IN ({pids_str})",
+                f"DELETE FROM order_stage_history WHERE position_id IN ({pids_str})",
+                f"DELETE FROM consumption_adjustments WHERE position_id IN ({pids_str})",
+                f"DELETE FROM master_achievements WHERE user_id IN (SELECT DISTINCT created_by FROM order_positions WHERE id IN ({pids_str})) AND 1=0",
+            ]:
+                try:
+                    db.execute(sa_text(stmt))
+                except Exception as e:
+                    logger.debug("Cleanup SQL skip: %s", str(e)[:80])
+
+        # Delete shipments for order
+        try:
+            db.execute(sa_text(f"DELETE FROM shipment_items WHERE shipment_id IN (SELECT id FROM shipments WHERE order_id = '{order_id}')"))
+            db.execute(sa_text(f"DELETE FROM shipments WHERE order_id = '{order_id}'"))
+        except Exception:
+            pass
+
+        # Delete tasks
+        if position_ids:
+            try:
+                r = db.execute(sa_text(f"DELETE FROM tasks WHERE related_position_id IN ({pids_str})"))
+                tasks_deleted += r.rowcount
+            except Exception:
+                pass
+        try:
+            r = db.execute(sa_text(f"DELETE FROM tasks WHERE related_order_id = '{order_id}'"))
+            tasks_deleted += r.rowcount
+        except Exception:
+            pass
+
+        # Delete order + CASCADE
+        db.execute(sa_text(f"DELETE FROM production_orders WHERE id = '{order_id}'"))
+        db.commit()
+
+    except Exception as e:
+        db.rollback()
+        logger.error("CLEANUP DELETE order FAILED | id=%s: %s", order_id, e)
+        raise HTTPException(500, f"Cleanup failed: {str(e)[:200]}")
 
     logger.warning(
         "CLEANUP DELETE order | id=%s number=%s client=%s "
-        "positions=%d tasks=%d refs=%s | by %s",
+        "positions=%d tasks=%d | by %s",
         order_id,
         order.order_number,
         order.client,
         pos_count,
         tasks_deleted,
-        ref_counts,
         current_user.email,
     )
-
-    # Delete order — CASCADE removes positions, items, status_logs automatically
-    db.delete(order)
-    db.commit()
 
     return {
         "deleted": "order",

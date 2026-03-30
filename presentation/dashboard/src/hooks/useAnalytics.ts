@@ -56,3 +56,29 @@ export function useActivityFeed(params?: { factory_id?: string; limit?: number }
     refetchInterval: 30_000,
   });
 }
+
+export function useStreaks(params?: { factory_id?: string }) {
+  return useQuery({
+    queryKey: ['streaks', params],
+    queryFn: () => analyticsApi.getStreaks(params),
+    staleTime: 5 * 60_000,
+    refetchInterval: 5 * 60_000,
+  });
+}
+
+export function useFactoryLeaderboard(period?: string) {
+  return useQuery({
+    queryKey: ['factory-leaderboard', period],
+    queryFn: () => analyticsApi.getFactoryLeaderboard(period),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useAchievements(userId?: string) {
+  return useQuery({
+    queryKey: ['achievements', userId],
+    queryFn: () => analyticsApi.getAchievements(userId!),
+    enabled: !!userId,
+    staleTime: 5 * 60_000,
+  });
+}

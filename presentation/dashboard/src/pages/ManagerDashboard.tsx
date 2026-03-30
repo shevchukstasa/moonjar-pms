@@ -3,6 +3,7 @@ import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Trash2 } from 'lucide-react';
+import { FadeIn } from '@/components/ui/AnimatedSection';
 import apiClient from '@/api/client';
 import { useOrders, useCancellationRequests, useChangeRequests } from '@/hooks/useOrders';
 import { usePositions, useBlockingSummary, type PositionItem } from '@/hooks/usePositions';
@@ -45,6 +46,10 @@ import { StoneReservationTab } from '@/components/dashboard/StoneReservationTab'
 import { DefectAlertBanner } from '@/components/dashboard/DefectAlertBanner';
 import { AnomalyAlertBanner } from '@/components/dashboard/AnomalyAlertBanner';
 import { ConsumptionAdjustmentsPanel } from '@/components/materials/ConsumptionAdjustmentsPanel';
+import { OrderProgressRing } from '@/components/orders/OrderProgressRing';
+import { StreakCard } from '@/components/dashboard/StreakCard';
+import { AchievementGrid } from '@/components/dashboard/AchievementBadge';
+import { useStreaks, useAchievements } from '@/hooks/useAnalytics';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -189,6 +194,12 @@ export default function ManagerDashboard() {
   );
   const { data: dashboardSummary } = useDashboardSummary(factoryParams);
 
+  // --- Streaks & Daily Challenge ---
+  const { data: streaksData } = useStreaks(factoryParams);
+
+  // --- Achievements ---
+  const { data: achievementsData } = useAchievements(currentUser?.id);
+
   // --- Cancellation requests (poll every 30s) ---
   const cancelParams = useMemo(
     () => ({ ...(activeFactoryId ? { factory_id: activeFactoryId } : {}), decision: 'pending' }),
@@ -299,6 +310,17 @@ export default function ManagerDashboard() {
       render: (item) => <Badge status={item.status} />,
     },
     {
+      key: 'progress',
+      header: 'Progress',
+      render: (item) => (
+        <OrderProgressRing
+          readyCount={item.positions_ready || 0}
+          totalCount={item.positions_count || 1}
+          size={36}
+        />
+      ),
+    },
+    {
       key: 'positions',
       header: 'Positions',
       render: (item) => (
@@ -332,54 +354,74 @@ export default function ManagerDashboard() {
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-gray-900">Production Dashboard</h1>
-          <p className="mt-0.5 md:mt-1 text-xs md:text-sm text-gray-500">Manage orders, positions, and production schedule</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <NotificationsBell />
-          <div className="flex-1 sm:flex-none">
-            <FactorySelector />
+      <FadeIn>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold text-gray-900">Production Dashboard</h1>
+            <p className="mt-0.5 md:mt-1 text-xs md:text-sm text-gray-500">Manage orders, positions, and production schedule</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <NotificationsBell />
+            <div className="flex-1 sm:flex-none">
+              <FactorySelector />
+            </div>
           </div>
         </div>
-      </div>
+      </FadeIn>
 
       {/* KPI Cards — dashboard-wide, shown above all tabs */}
+      <FadeIn delay={0.05}>
       <div className="grid grid-cols-2 gap-2 md:gap-4 sm:grid-cols-3 lg:grid-cols-6">
-        <Card>
-          <div className="text-[10px] md:text-xs text-gray-500">Active Orders</div>
-          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">{orderTab === 'current' ? activeOrders : '\u2014'}</div>
+        <Card variant="glass">
+          <div className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400">Active Orders</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{orderTab === 'current' ? activeOrders : '\u2014'}</div>
         </Card>
-        <Card>
-          <div className="text-[10px] md:text-xs text-gray-500">Total Positions</div>
-          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">{positionsTotal}</div>
+        <Card variant="glass">
+          <div className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400">Total Positions</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{positionsTotal}</div>
         </Card>
-        <Card>
-          <div className="text-[10px] md:text-xs text-gray-500">On-Time Rate</div>
-          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">
+        <Card variant="glass">
+          <div className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400">On-Time Rate</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">
             {dashboardSummary?.on_time_rate != null ? `${Math.round(dashboardSummary.on_time_rate)}%` : '\u2014'}
           </div>
         </Card>
-        <Card>
-          <div className="text-[10px] md:text-xs text-gray-500">Defect Rate</div>
-          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">
+        <Card variant="glass">
+          <div className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400">Defect Rate</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">
             {dashboardSummary?.defect_rate != null ? `${Number(dashboardSummary.defect_rate).toFixed(1)}%` : '\u2014'}
           </div>
         </Card>
-        <Card>
-          <div className="text-[10px] md:text-xs text-gray-500">Kiln Utilization</div>
-          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">
+        <Card variant="glass">
+          <div className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400">Kiln Utilization</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">
             {dashboardSummary?.kiln_utilization != null ? `${Math.round(dashboardSummary.kiln_utilization)}%` : '\u2014'}
           </div>
         </Card>
-        <Card>
-          <div className="text-[10px] md:text-xs text-gray-500">OEE</div>
-          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">
+        <Card variant="glass">
+          <div className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400">OEE</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">
             {dashboardSummary?.oee != null ? `${Math.round(dashboardSummary.oee)}%` : '\u2014'}
           </div>
         </Card>
       </div>
+      </FadeIn>
+
+      {/* Streaks & Daily Challenge */}
+      {streaksData && (streaksData.streaks.length > 0 || streaksData.daily_challenge) && (
+        <StreakCard
+          streaks={streaksData.streaks}
+          challenge={streaksData.daily_challenge}
+        />
+      )}
+
+      {/* Achievements */}
+      {achievementsData?.items && achievementsData.items.length > 0 && (
+        <div className="rounded-xl border border-gray-200/60 bg-white/80 dark:bg-stone-900/60 dark:border-stone-700/50 p-4 shadow-sm">
+          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3">Achievements</h3>
+          <AchievementGrid achievements={achievementsData.items} />
+        </div>
+      )}
 
       {/* API Error banner */}
       {ordersError && (
@@ -462,11 +504,13 @@ export default function ManagerDashboard() {
       )}
 
       {/* Main Dashboard Tabs */}
-      <Tabs
-        tabs={DASHBOARD_TABS}
-        activeTab={activeTab}
-        onChange={(id) => setActiveTab(id as DashboardTab)}
-      />
+      <FadeIn delay={0.1}>
+        <Tabs
+          tabs={DASHBOARD_TABS}
+          activeTab={activeTab}
+          onChange={(id) => setActiveTab(id as DashboardTab)}
+        />
+      </FadeIn>
 
       {/* Tab Content */}
       {activeTab === 'orders' && (

@@ -3,6 +3,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useNotificationStore } from '@/stores/notificationStore';
 import { Avatar } from '@/components/ui/Avatar';
 import { DropdownMenu } from '@/components/ui/DropdownMenu';
+import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { useNavigate } from 'react-router-dom';
 import { Bell } from 'lucide-react';
 import apiClient from '@/api/client';
@@ -46,12 +47,13 @@ export function Header() {
   };
 
   return (
-    <header className="flex h-16 items-center justify-between border-b bg-white px-6">
+    <header className="flex h-16 items-center justify-between border-b bg-white px-6 dark:border-stone-800 dark:bg-stone-950">
       <div />
       <div className="flex items-center gap-4">
+        <ThemeToggle />
         <div className="relative" ref={panelRef}>
           <button
-            className="relative rounded-full p-2 text-gray-400 hover:bg-gray-100"
+            className="relative rounded-full p-2 text-gray-400 hover:bg-gray-100 dark:text-stone-500 dark:hover:bg-stone-800"
             aria-label="Notifications"
             onClick={toggleNotifications}
           >
@@ -64,22 +66,22 @@ export function Header() {
           </button>
 
           {showNotifications && (
-            <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border bg-white shadow-lg">
-              <div className="border-b px-4 py-3">
-                <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
+            <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border bg-white shadow-lg dark:border-stone-700 dark:bg-stone-900">
+              <div className="border-b px-4 py-3 dark:border-stone-700">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-stone-100">Notifications</h3>
               </div>
               <div className="max-h-72 overflow-y-auto">
                 {notifications.length === 0 ? (
-                  <p className="px-4 py-6 text-center text-sm text-gray-400">No notifications yet</p>
+                  <p className="px-4 py-6 text-center text-sm text-gray-400 dark:text-stone-500">No notifications yet</p>
                 ) : (
                   notifications.slice(0, 20).map((n) => (
                     <div
                       key={n.id}
-                      className={`border-b px-4 py-3 text-sm last:border-b-0 ${n.read ? 'bg-white' : 'bg-blue-50'}`}
+                      className={`border-b px-4 py-3 text-sm last:border-b-0 dark:border-stone-800 ${n.read ? 'bg-white dark:bg-transparent' : 'bg-blue-50 dark:bg-gold-500/5'}`}
                     >
-                      <p className="font-medium text-gray-900">{n.title}</p>
-                      {n.body && <p className="mt-0.5 text-gray-500">{n.body}</p>}
-                      <p className="mt-1 text-xs text-gray-400">
+                      <p className="font-medium text-gray-900 dark:text-stone-100">{n.title}</p>
+                      {n.body && <p className="mt-0.5 text-gray-500 dark:text-stone-400">{n.body}</p>}
+                      <p className="mt-1 text-xs text-gray-400 dark:text-stone-600">
                         {new Date(n.timestamp).toLocaleTimeString()}
                       </p>
                     </div>

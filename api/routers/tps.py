@@ -925,3 +925,28 @@ async def revoke_master_permission(
     db.delete(perm)
     db.commit()
     return {"ok": True, "message": "Permission revoked"}
+
+
+# ── Master Achievements ──────────────────────────────────────
+
+
+@router.get("/achievements/{user_id}")
+async def get_achievements(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Get achievements for a user with level, progress, next milestone."""
+    from business.services.achievements import get_user_achievements
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    achievements = get_user_achievements(db, user_id)
+    db.commit()
+
+    return {
+        "items": achievements,
+        "user_name": user.name,
+    }

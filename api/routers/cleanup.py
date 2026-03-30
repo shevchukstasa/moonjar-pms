@@ -383,6 +383,10 @@ async def delete_order(
     if not order:
         raise HTTPException(404, "Order not found")
 
+    # Cache order info BEFORE deletion (object becomes detached after raw SQL delete)
+    order_number = order.order_number
+    order_client = order.client
+
     # Gather all position IDs (to purge FK refs before CASCADE removes positions)
     position_ids = [
         row[0]
@@ -460,8 +464,8 @@ async def delete_order(
         "CLEANUP DELETE order | id=%s number=%s client=%s "
         "positions=%d tasks=%d | by %s",
         order_id,
-        order.order_number,
-        order.client,
+        order_number,
+        order_client,
         pos_count,
         tasks_deleted,
         current_user.email,
@@ -470,7 +474,7 @@ async def delete_order(
     return {
         "deleted": "order",
         "id": str(order_id),
-        "order_number": order.order_number,
+        "order_number": order_number,
         "positions_deleted": pos_count,
         "tasks_deleted": tasks_deleted,
     }

@@ -37,6 +37,16 @@ logger = logging.getLogger("moonjar.cleanup")
 
 router = APIRouter()
 
+
+def _sql_safe(db, stmt: str):
+    """Execute SQL silently, skip on error (table/column may not exist)."""
+    from sqlalchemy import text as sa_text
+    try:
+        db.execute(sa_text(stmt))
+    except Exception as e:
+        logger.debug("Cleanup SQL skip: %s", str(e)[:100])
+
+
 # ── Role dependencies ──────────────────────────────────────────────────────
 _require_management_roles = require_role(
     "owner", "administrator", "ceo", "production_manager"
@@ -395,63 +405,75 @@ async def delete_order(
         .all()
     ]
 
-    # ── Aggressive FK cleanup via raw SQL (avoids session corruption) ──
+    # ── Aggressive FK cleanup via raw SQL ──
     from sqlalchemy import text as sa_text
     pos_count = len(position_ids)
     tasks_deleted = 0
 
+    # Include ALL positions: root + split children (parent_position_id)
+    all_pos_ids = list(position_ids)
+    if position_ids:
+        child_rows = db.execute(sa_text(
+            f"SELECT id FROM order_positions WHERE parent_position_id IN "
+            f"({','.join(repr(str(p)) for p in position_ids)})"
+        )).fetchall()
+        for row in child_rows:
+            cid = row[0]
+            if cid not in all_pos_ids:
+                all_pos_ids.append(cid)
+
     try:
-        # Nullify FK refs on positions first
-        if position_ids:
-            pids_str = ",".join(f"'{p}'" for p in position_ids)
-            for stmt in [
-                f"UPDATE order_positions SET batch_id = NULL, resource_id = NULL, estimated_kiln_id = NULL WHERE id IN ({pids_str})",
-                f"DELETE FROM material_transactions WHERE related_position_id IN ({pids_str})",
-                f"DELETE FROM material_transactions WHERE related_order_id = '{order_id}'",
-                f"DELETE FROM quality_checks WHERE position_id IN ({pids_str})",
-                f"DELETE FROM defect_records WHERE position_id IN ({pids_str})",
-                f"DELETE FROM grinding_stock WHERE source_position_id IN ({pids_str})",
-                f"DELETE FROM repair_queue WHERE source_position_id IN ({pids_str})",
-                f"DELETE FROM surplus_dispositions WHERE position_id IN ({pids_str})",
-                f"DELETE FROM order_packing_photos WHERE position_id IN ({pids_str})",
-                f"DELETE FROM worker_media WHERE related_position_id IN ({pids_str})",
-                f"DELETE FROM qm_blocks WHERE position_id IN ({pids_str})",
-                f"DELETE FROM notifications WHERE related_entity_id IN ({pids_str})",
-                f"DELETE FROM kiln_calculation_logs WHERE position_id IN ({pids_str})",
-                f"DELETE FROM operation_logs WHERE position_id IN ({pids_str})",
-                f"DELETE FROM stone_reservations WHERE position_id IN ({pids_str})",
-                f"DELETE FROM position_photos WHERE position_id IN ({pids_str})",
-                f"DELETE FROM shipment_items WHERE position_id IN ({pids_str})",
-                f"DELETE FROM order_stage_history WHERE position_id IN ({pids_str})",
-                f"DELETE FROM consumption_adjustments WHERE position_id IN ({pids_str})",
-                f"DELETE FROM master_achievements WHERE user_id IN (SELECT DISTINCT created_by FROM order_positions WHERE id IN ({pids_str})) AND 1=0",
-            ]:
-                try:
-                    db.execute(sa_text(stmt))
-                except Exception as e:
-                    logger.debug("Cleanup SQL skip: %s", str(e)[:80])
+        if all_pos_ids:
+            pids_str = ",".join(f"'{p}'" for p in all_pos_ids)
 
-        # Delete shipments for order
-        try:
-            db.execute(sa_text(f"DELETE FROM shipment_items WHERE shipment_id IN (SELECT id FROM shipments WHERE order_id = '{order_id}')"))
-            db.execute(sa_text(f"DELETE FROM shipments WHERE order_id = '{order_id}'"))
-        except Exception:
-            pass
+            # 1. Nullify self-referencing FK (parent_position_id) to break circular deps
+            _sql_safe(db, f"UPDATE order_positions SET parent_position_id = NULL WHERE parent_position_id IN ({pids_str})")
+            _sql_safe(db, f"UPDATE order_positions SET batch_id = NULL, resource_id = NULL, estimated_kiln_id = NULL, recipe_id = NULL WHERE id IN ({pids_str})")
 
-        # Delete tasks
-        if position_ids:
-            try:
-                r = db.execute(sa_text(f"DELETE FROM tasks WHERE related_position_id IN ({pids_str})"))
-                tasks_deleted += r.rowcount
-            except Exception:
-                pass
-        try:
-            r = db.execute(sa_text(f"DELETE FROM tasks WHERE related_order_id = '{order_id}'"))
-            tasks_deleted += r.rowcount
-        except Exception:
-            pass
+            # 2. Delete from ALL FK tables
+            fk_tables = [
+                ("material_transactions", "related_position_id"),
+                ("quality_checks", "position_id"),
+                ("defect_records", "position_id"),
+                ("grinding_stock", "source_position_id"),
+                ("repair_queue", "source_position_id"),
+                ("surplus_dispositions", "position_id"),
+                ("order_packing_photos", "position_id"),
+                ("worker_media", "related_position_id"),
+                ("qm_blocks", "position_id"),
+                ("notifications", "related_entity_id"),
+                ("kiln_calculation_logs", "position_id"),
+                ("operation_logs", "position_id"),
+                ("stone_reservations", "position_id"),
+                ("position_photos", "position_id"),
+                ("shipment_items", "position_id"),
+                ("order_stage_history", "position_id"),
+                ("consumption_adjustments", "position_id"),
+                ("tasks", "related_position_id"),
+            ]
+            for table, col in fk_tables:
+                _sql_safe(db, f"DELETE FROM {table} WHERE {col} IN ({pids_str})")
 
-        # Delete order + CASCADE
+        # Order-level FK refs
+        _sql_safe(db, f"DELETE FROM material_transactions WHERE related_order_id = '{order_id}'")
+        _sql_safe(db, f"DELETE FROM grinding_stock WHERE source_order_id = '{order_id}'")
+        _sql_safe(db, f"DELETE FROM repair_queue WHERE source_order_id = '{order_id}'")
+        _sql_safe(db, f"DELETE FROM surplus_dispositions WHERE order_id = '{order_id}'")
+        _sql_safe(db, f"DELETE FROM casters_boxes WHERE source_order_id = '{order_id}'")
+        _sql_safe(db, f"DELETE FROM order_packing_photos WHERE order_id = '{order_id}'")
+        _sql_safe(db, f"DELETE FROM worker_media WHERE related_order_id = '{order_id}'")
+        _sql_safe(db, f"DELETE FROM order_financials WHERE order_id = '{order_id}'")
+        r = db.execute(sa_text(f"DELETE FROM tasks WHERE related_order_id = '{order_id}'"))
+        tasks_deleted = r.rowcount
+
+        # Shipments
+        _sql_safe(db, f"DELETE FROM shipment_items WHERE shipment_id IN (SELECT id FROM shipments WHERE order_id = '{order_id}')")
+        _sql_safe(db, f"DELETE FROM shipments WHERE order_id = '{order_id}'")
+
+        # Status logs (may not CASCADE)
+        _sql_safe(db, f"DELETE FROM production_order_status_logs WHERE order_id = '{order_id}'")
+
+        # Finally delete order (CASCADE removes positions + items)
         db.execute(sa_text(f"DELETE FROM production_orders WHERE id = '{order_id}'"))
         db.commit()
 

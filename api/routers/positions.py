@@ -574,6 +574,7 @@ async def change_position_status(
     # consume BOM materials and release reservations.
     if new_status in (PositionStatus.ENGOBE_APPLIED, PositionStatus.GLAZED):
         if not p.materials_written_off_at:
+            _nested = None
             try:
                 from business.services.material_consumption import on_glazing_start
                 # Use a savepoint so partial failures don't pollute the session
@@ -581,10 +582,11 @@ async def change_position_status(
                 on_glazing_start(db, p.id)
                 _nested.commit()
             except Exception as _mc_err:
-                try:
-                    _nested.rollback()
-                except Exception:
-                    pass
+                if _nested is not None:
+                    try:
+                        _nested.rollback()
+                    except Exception:
+                        pass
                 import logging
                 logging.getLogger("moonjar.positions").warning(
                     "Failed to consume materials for position %s on glazing start: %s",
@@ -592,16 +594,18 @@ async def change_position_status(
                 )
         elif (p.firing_round or 1) > 1:
             # Refire/reglaze cycle — consume only surface materials
+            _nested = None
             try:
                 from business.services.material_consumption import consume_refire_materials
                 _nested = db.begin_nested()
                 consume_refire_materials(db, p.id)
                 _nested.commit()
             except Exception as _mc_err:
-                try:
-                    _nested.rollback()
-                except Exception:
-                    pass
+                if _nested is not None:
+                    try:
+                        _nested.rollback()
+                    except Exception:
+                        pass
                 import logging
                 logging.getLogger("moonjar.positions").warning(
                     "Failed to consume refire materials for position %s: %s",

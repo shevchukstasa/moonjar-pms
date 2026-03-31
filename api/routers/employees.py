@@ -38,6 +38,7 @@ class EmployeeOut(BaseModel):
     bpjs_mode: Optional[str] = None
     employment_category: Optional[str] = None
     commission_rate: Optional[float] = None
+    pay_period: Optional[str] = None
     base_salary: Optional[float] = None
     allowance_bike: Optional[float] = None
     allowance_housing: Optional[float] = None
@@ -66,6 +67,7 @@ class EmployeeCreateInput(BaseModel):
     bpjs_mode: str = "company_pays"
     employment_category: str = "formal"
     commission_rate: Optional[float] = None
+    pay_period: str = "calendar_month"
     base_salary: float = 0
     allowance_bike: float = 0
     allowance_housing: float = 0
@@ -91,6 +93,7 @@ class EmployeeUpdateInput(BaseModel):
     bpjs_mode: Optional[str] = None
     employment_category: Optional[str] = None
     commission_rate: Optional[float] = None
+    pay_period: Optional[str] = None
     base_salary: Optional[float] = None
     allowance_bike: Optional[float] = None
     allowance_housing: Optional[float] = None
@@ -220,6 +223,7 @@ def _serialize_employee(emp: Employee, db: Session) -> dict:
         "bpjs_mode": emp.bpjs_mode or "company_pays",
         "employment_category": emp.employment_category or "formal",
         "commission_rate": float(emp.commission_rate) if emp.commission_rate is not None else None,
+        "pay_period": emp.pay_period or "calendar_month",
         "base_salary": float(emp.base_salary or 0),
         "allowance_bike": float(emp.allowance_bike or 0),
         "allowance_housing": float(emp.allowance_housing or 0),
@@ -336,6 +340,7 @@ async def payroll_summary(
     """Calculate full payroll summary with Indonesian tax/BPJS for a given month."""
     from business.services.payroll import calculate_monthly_payroll
     import calendar
+    from datetime import date as _date
 
     query = db.query(Employee).filter(Employee.is_active == True)
     if factory_id:
@@ -344,12 +349,25 @@ async def payroll_summary(
 
     employees = query.order_by(Employee.full_name).all()
 
-    # Working days in month (simplified: weekdays for 5-day, Mon-Sat for 6-day)
-    # In production, this should come from factory calendar
+    # Pre-compute working days for calendar month
     cal = calendar.Calendar()
-    month_days = cal.itermonthdays2(year, month)
-    weekdays_in_month = sum(1 for day, weekday in month_days if day != 0 and weekday < 5)
-    six_day_working = sum(1 for day, weekday in month_days if day != 0 and weekday < 6)
+    month_days_list = list(cal.itermonthdays2(year, month))
+    weekdays_in_month = sum(1 for day, wd in month_days_list if day != 0 and wd < 5)
+    six_day_working = sum(1 for day, wd in month_days_list if day != 0 and wd < 6)
+
+    # Pre-compute working days for 25-to-24 period
+    def _working_days_in_range(start: _date, end: _date, six_day: bool) -> int:
+        count = 0
+        cur = start
+        while cur <= end:
+            wd = cur.weekday()
+            if six_day and wd < 6:
+                count += 1
+            elif not six_day and wd < 5:
+                count += 1
+            from datetime import timedelta
+            cur += timedelta(days=1)
+        return count
 
     result = []
     totals = {
@@ -368,18 +386,37 @@ async def payroll_summary(
     }
 
     for emp in employees:
-        attendance_records = (
-            db.query(Attendance)
-            .filter(
-                Attendance.employee_id == emp.id,
-                extract("year", Attendance.date) == year,
-                extract("month", Attendance.date) == month,
-            )
-            .all()
-        )
-
+        pay_period = getattr(emp, 'pay_period', 'calendar_month') or 'calendar_month'
         ws = getattr(emp, 'work_schedule', 'six_day') or 'six_day'
-        working_days = six_day_working if ws == 'six_day' else weekdays_in_month
+
+        if pay_period == '25_to_24':
+            # Period: 25th of previous month to 24th of current month
+            prev_month = month - 1 if month > 1 else 12
+            prev_year = year if month > 1 else year - 1
+            period_start = _date(prev_year, prev_month, 25)
+            period_end = _date(year, month, 24)
+            attendance_records = (
+                db.query(Attendance)
+                .filter(
+                    Attendance.employee_id == emp.id,
+                    Attendance.date >= period_start,
+                    Attendance.date <= period_end,
+                )
+                .all()
+            )
+            working_days = _working_days_in_range(period_start, period_end, ws == 'six_day')
+        else:
+            # Calendar month
+            attendance_records = (
+                db.query(Attendance)
+                .filter(
+                    Attendance.employee_id == emp.id,
+                    extract("year", Attendance.date) == year,
+                    extract("month", Attendance.date) == month,
+                )
+                .all()
+            )
+            working_days = six_day_working if ws == 'six_day' else weekdays_in_month
 
         payroll = calculate_monthly_payroll(
             employee=emp,
@@ -413,6 +450,50 @@ async def payroll_summary(
         "year": year,
         "month": month,
     }
+
+
+@router.get("/payroll-pdf")
+async def payroll_pdf(
+    factory_id: Optional[str] = Query(None),
+    year: int = Query(...),
+    month: int = Query(..., ge=1, le=12),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Generate and return payroll summary as PDF."""
+    from fastapi.responses import StreamingResponse
+    from business.services.payroll_pdf import generate_payroll_summary_pdf
+
+    # Reuse payroll_summary logic — call the existing endpoint function
+    summary = await payroll_summary(
+        factory_id=factory_id,
+        year=year,
+        month=month,
+        db=db,
+        current_user=current_user,
+    )
+
+    factory_name = ""
+    if factory_id:
+        from api.models import Factory
+        fac = db.query(Factory).filter(Factory.id == UUID(factory_id)).first()
+        factory_name = fac.name if fac else ""
+
+    buf = generate_payroll_summary_pdf(
+        payroll_items=summary["items"],
+        totals=summary["totals"],
+        year=year,
+        month=month,
+        factory_name=factory_name,
+    )
+
+    month_str = str(month).zfill(2)
+    filename = f"payroll_{year}_{month_str}.pdf"
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{employee_id}", response_model=EmployeeOut)
@@ -468,6 +549,7 @@ async def create_employee(
         bpjs_mode=data.bpjs_mode,
         employment_category=data.employment_category,
         commission_rate=data.commission_rate,
+        pay_period=data.pay_period,
         base_salary=data.base_salary,
         allowance_bike=data.allowance_bike,
         allowance_housing=data.allowance_housing,

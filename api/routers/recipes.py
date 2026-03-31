@@ -612,6 +612,10 @@ async def delete_recipes_item(
     item = db.query(Recipe).filter(Recipe.id == item_id).first()
     if not item:
         raise HTTPException(404, "Recipe not found")
+    # Clear child records before deleting (mirrors bulk_delete_recipes logic)
+    db.query(RecipeMaterial).filter(RecipeMaterial.recipe_id == item_id).delete(synchronize_session=False)
+    db.query(FiringTemperatureGroupRecipe).filter(FiringTemperatureGroupRecipe.recipe_id == item_id).delete(synchronize_session=False)
+    db.query(RecipeFiringStage).filter(RecipeFiringStage.recipe_id == item_id).delete(synchronize_session=False)
     db.delete(item)
     db.commit()
 

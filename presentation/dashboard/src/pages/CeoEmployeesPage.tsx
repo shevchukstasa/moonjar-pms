@@ -51,6 +51,11 @@ const EMPLOYMENT_CATEGORIES = [
   { value: 'contractor', label: 'Contractor' },
 ];
 
+const PAY_PERIODS = [
+  { value: 'calendar_month', label: 'Calendar Month (paid last day)' },
+  { value: '25_to_24', label: '25th–24th (paid on 25th)' },
+];
+
 const DEPARTMENT_FILTERS = ['all', 'production', 'sales', 'administration'];
 
 function formatIDR(n: number) {
@@ -201,6 +206,7 @@ export default function CeoEmployeesPage() {
       work_schedule: 'six_day',
       bpjs_mode: 'company_pays',
       employment_category: 'formal',
+      pay_period: 'calendar_month',
       commission_rate: null,
       base_salary: 0,
       allowance_bike: 0,
@@ -227,6 +233,7 @@ export default function CeoEmployeesPage() {
       work_schedule: emp.work_schedule || 'six_day',
       bpjs_mode: emp.bpjs_mode || 'company_pays',
       employment_category: emp.employment_category || 'formal',
+      pay_period: emp.pay_period || 'calendar_month',
       commission_rate: emp.commission_rate,
       base_salary: emp.base_salary,
       allowance_bike: emp.allowance_bike,
@@ -377,6 +384,7 @@ export default function CeoEmployeesPage() {
           year={year}
           month={month}
           departmentFilter={departmentFilter}
+          factoryId={factoryFilter === 'all' ? undefined : factoryFilter}
         />
       )}
 
@@ -509,6 +517,18 @@ export default function CeoEmployeesPage() {
                 })}
               />
             )}
+            <div className="col-span-2">
+              <label className="mb-1 block text-sm font-medium text-gray-700">Pay Period</label>
+              <select
+                value={(formData as any).pay_period || 'calendar_month'}
+                onChange={(e) => setFormData({ ...formData, pay_period: e.target.value } as any)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+              >
+                {PAY_PERIODS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Contractor notice */}
@@ -712,6 +732,7 @@ function PayrollTab({
   year,
   month,
   departmentFilter,
+  factoryId,
 }: {
   items: PayrollItem[];
   totals: PayrollTotals | null;
@@ -719,7 +740,27 @@ function PayrollTab({
   year: number;
   month: number;
   departmentFilter: string;
+  factoryId?: string;
 }) {
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  const downloadPdf = async () => {
+    setPdfLoading(true);
+    try {
+      const blob = await employeesApi.payrollPdf({ factory_id: factoryId, year, month });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payroll_${year}_${String(month).padStart(2, '0')}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('PDF download failed', e);
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   if (loading) {
     return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
   }
@@ -770,13 +811,18 @@ function PayrollTab({
   return (
     <div className="space-y-6">
       {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-        <SummaryCard label="Employees" value={String(localTotals.total_employees)} sub={`${localTotals.formal_count}F / ${localTotals.contractor_count}C`} />
-        <SummaryCard label="Total Gross" value={formatIDR(localTotals.total_gross)} />
-        <SummaryCard label="BPJS (Employer)" value={formatIDR(localTotals.total_bpjs_employer)} color="text-orange-600" />
-        <SummaryCard label="Tax (PPh 21+23)" value={formatIDR(localTotals.total_pph21 + localTotals.total_contractor_tax)} color="text-red-600" />
-        <SummaryCard label="Total Net" value={formatIDR(localTotals.total_net)} color="text-green-600" />
-        <SummaryCard label="Total Cost" value={formatIDR(localTotals.total_cost)} color="text-blue-600" />
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6 flex-1">
+          <SummaryCard label="Employees" value={String(localTotals.total_employees)} sub={`${localTotals.formal_count}F / ${localTotals.contractor_count}C`} />
+          <SummaryCard label="Total Gross" value={formatIDR(localTotals.total_gross)} />
+          <SummaryCard label="BPJS (Employer)" value={formatIDR(localTotals.total_bpjs_employer)} color="text-orange-600" />
+          <SummaryCard label="Tax (PPh 21+23)" value={formatIDR(localTotals.total_pph21 + localTotals.total_contractor_tax)} color="text-red-600" />
+          <SummaryCard label="Total Net" value={formatIDR(localTotals.total_net)} color="text-green-600" />
+          <SummaryCard label="Total Cost" value={formatIDR(localTotals.total_cost)} color="text-blue-600" />
+        </div>
+        <Button variant="secondary" onClick={downloadPdf} disabled={pdfLoading || items.length === 0}>
+          {pdfLoading ? 'Generating...' : '↓ PDF'}
+        </Button>
       </div>
 
       {/* Formal employees table */}

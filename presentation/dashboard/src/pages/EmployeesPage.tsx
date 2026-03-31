@@ -37,6 +37,32 @@ const EMPLOYMENT_TYPES = [
   { value: 'contract', label: 'Contract' },
 ];
 
+const EMPLOYMENT_CATEGORIES = [
+  { value: 'formal', label: 'Formal (PPh 21)' },
+  { value: 'contractor', label: 'Contractor (PPh 23)' },
+];
+
+const DEPARTMENTS = [
+  { value: 'production', label: 'Production' },
+  { value: 'sales', label: 'Sales' },
+  { value: 'administration', label: 'Administration' },
+];
+
+const WORK_SCHEDULES = [
+  { value: 'five_day', label: '5-Day (Mon–Fri)' },
+  { value: 'six_day', label: '6-Day (Mon–Sat)' },
+];
+
+const BPJS_MODES = [
+  { value: 'company_pays', label: 'Company Pays' },
+  { value: 'reimburse', label: 'Reimburse Employee' },
+];
+
+const PAY_PERIODS = [
+  { value: 'calendar_month', label: 'Calendar Month (paid last day)' },
+  { value: '25_to_24', label: '25th–24th (paid on 25th)' },
+];
+
 const ATTENDANCE_STATUSES = [
   { value: 'present', label: 'P', color: 'bg-emerald-100 text-emerald-800' },
   { value: 'absent', label: 'A', color: 'bg-red-100 text-red-800' },
@@ -96,6 +122,7 @@ export default function EmployeesPage() {
     work_schedule: 'six_day',
     bpjs_mode: 'company_pays',
     employment_category: 'formal',
+    pay_period: 'calendar_month',
     commission_rate: null,
     base_salary: 0,
     allowance_bike: 0,
@@ -300,6 +327,7 @@ export default function EmployeesPage() {
       bpjs_mode: emp.bpjs_mode || 'company_pays',
       employment_category: emp.employment_category || 'formal',
       commission_rate: emp.commission_rate,
+      pay_period: emp.pay_period || 'calendar_month',
       base_salary: emp.base_salary,
       allowance_bike: emp.allowance_bike,
       allowance_housing: emp.allowance_housing,
@@ -480,6 +508,7 @@ export default function EmployeesPage() {
           loading={payrollLoading}
           year={year}
           month={month}
+          factoryId={factoryId}
         />
       )}
 
@@ -551,6 +580,66 @@ export default function EmployeesPage() {
               >
                 {EMPLOYMENT_TYPES.map((t) => (
                   <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Employment Category</label>
+              <select
+                value={(formData as any).employment_category || 'formal'}
+                onChange={(e) => setFormData({ ...formData, employment_category: e.target.value } as any)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+              >
+                {EMPLOYMENT_CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Department</label>
+              <select
+                value={(formData as any).department || 'production'}
+                onChange={(e) => setFormData({ ...formData, department: e.target.value } as any)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+              >
+                {DEPARTMENTS.map((d) => (
+                  <option key={d.value} value={d.value}>{d.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Work Schedule</label>
+              <select
+                value={(formData as any).work_schedule || 'six_day'}
+                onChange={(e) => setFormData({ ...formData, work_schedule: e.target.value } as any)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+              >
+                {WORK_SCHEDULES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">BPJS Mode</label>
+              <select
+                value={(formData as any).bpjs_mode || 'company_pays'}
+                onChange={(e) => setFormData({ ...formData, bpjs_mode: e.target.value } as any)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+              >
+                {BPJS_MODES.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Pay Period</label>
+              <select
+                value={(formData as any).pay_period || 'calendar_month'}
+                onChange={(e) => setFormData({ ...formData, pay_period: e.target.value } as any)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+              >
+                {PAY_PERIODS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
                 ))}
               </select>
             </div>
@@ -998,12 +1087,33 @@ function PayrollTab({
   loading,
   year,
   month,
+  factoryId,
 }: {
   data: PayrollSummaryItem[];
   loading: boolean;
   year: number;
   month: number;
+  factoryId?: string;
 }) {
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  const downloadPdf = async () => {
+    setPdfLoading(true);
+    try {
+      const blob = await employeesApi.payrollPdf({ factory_id: factoryId, year, month });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payroll_${year}_${String(month).padStart(2, '0')}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('PDF download failed', e);
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   if (loading) {
     return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
   }
@@ -1021,9 +1131,12 @@ function PayrollTab({
         <p className="text-sm text-gray-500">
           Payroll for {MONTH_NAMES[month - 1]} {year} -- {data.length} employees
         </p>
-        <div className="flex gap-4 text-sm">
+        <div className="flex items-center gap-4 text-sm">
           <span className="text-gray-700">Gross: <strong>{formatIDR(grandGross)}</strong></span>
           {grandNet > 0 && <span className="text-green-700">Net: <strong>{formatIDR(grandNet)}</strong></span>}
+          <Button variant="secondary" onClick={downloadPdf} disabled={pdfLoading || data.length === 0}>
+            {pdfLoading ? 'Generating...' : '↓ PDF'}
+          </Button>
         </div>
       </div>
       <div className="overflow-x-auto">

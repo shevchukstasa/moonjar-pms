@@ -17,6 +17,7 @@ export interface Employee {
   bpjs_mode: string;
   employment_category: string;
   commission_rate: number | null;
+  pay_period: string;
   base_salary: number;
   allowance_bike: number;
   allowance_housing: number;
@@ -48,6 +49,7 @@ export interface EmployeeCreatePayload {
   bpjs_mode?: string;
   employment_category?: string;
   commission_rate?: number | null;
+  pay_period?: string;
   base_salary?: number;
   allowance_bike?: number;
   allowance_housing?: number;
@@ -69,6 +71,7 @@ export interface EmployeeUpdatePayload {
   bpjs_mode?: string;
   employment_category?: string;
   commission_rate?: number | null;
+  pay_period?: string;
   base_salary?: number;
   allowance_bike?: number;
   allowance_housing?: number;
@@ -218,4 +221,13 @@ export const employeesApi = {
     month: number;
   }): Promise<PayrollSummaryResponse> =>
     apiClient.get('/employees/payroll-summary', { params }).then((r) => r.data),
+
+  payrollPdf: (params: {
+    factory_id?: string;
+    year: number;
+    month: number;
+  }): Promise<Blob> =>
+    apiClient
+      .get('/employees/payroll-pdf', { params, responseType: 'blob' })
+      .then((r) => r.data),
 };

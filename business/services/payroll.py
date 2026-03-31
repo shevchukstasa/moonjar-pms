@@ -298,13 +298,25 @@ def calculate_monthly_payroll(
     hourly_rate = _round(base_salary / HOURS_DIVISOR)
 
     # ── Overtime pay ─────────────────────────────────────────────────────
-    # Simplified: treat all OT as weekday OT (per-day records)
-    # For a more accurate implementation, each attendance record could flag is_holiday
+    # For 6-day schedule: Saturdays where status=present and no manual OT entered
+    # automatically get 2 hours OT (1st hour 1.5x, 2nd hour 2x) per Indonesian law.
     overtime_pay = ZERO
+    saturday_auto_overtime_hours = Decimal("0")
     for att in attendance_records:
         ot = float(getattr(att, 'overtime_hours', 0) or 0)
+        att_date = getattr(att, 'date', None)
+        att_status = getattr(att, 'status', '') or ''
+
+        # Auto-OT for 6-day Saturday: only if no manual OT already recorded
+        if (work_schedule == 'six_day'
+                and att_date is not None
+                and getattr(att_date, 'weekday', lambda: -1)() == 5  # Saturday
+                and att_status == 'present'
+                and ot == 0):
+            ot = 2.0
+            saturday_auto_overtime_hours += Decimal("2")
+
         if ot > 0:
-            # Check if day is a holiday/rest day (simplified: not tracked per record yet)
             overtime_pay += calculate_overtime_pay(hourly_rate, ot, work_schedule, is_holiday=False)
 
     # ── Commission (sales department only) ───────────────────────────────
@@ -389,6 +401,7 @@ def calculate_monthly_payroll(
 
         # Overtime
         "overtime_pay": float(overtime_pay),
+        "saturday_auto_overtime_hours": float(saturday_auto_overtime_hours),
 
         # Commission
         "commission_rate": float(commission_rate),

@@ -2451,6 +2451,7 @@ class Employee(Base):
     bpjs_mode = Column(sa.String(20), nullable=False, server_default="'company_pays'")  # company_pays (company pays BPJS) or reimburse (company reimburses employee)
     employment_category = Column(sa.String(20), nullable=False, server_default="'formal'")  # formal, contractor
     commission_rate = Column(sa.Numeric(5, 2), nullable=True)  # % commission for sales (e.g., 5.00 = 5%)
+    pay_period = Column(sa.String(20), nullable=False, server_default="'calendar_month'")  # calendar_month | 25_to_24
 
     # Salary
     base_salary = Column(sa.Numeric(12, 2), nullable=False, server_default='0')  # Monthly base IDR

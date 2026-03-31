@@ -167,6 +167,149 @@ def calculate_pph21_monthly(
     return monthly_tax
 
 
+# ── TER (Tarif Efektif Rata-rata) — PMK 168/2023, effective Jan 2024 ────────
+# Category A: TK/0
+# Category B: TK/1, TK/2, TK/3, K/0
+# Category C: K/1, K/2, K/3
+# Each entry: (upper_limit_inclusive, rate_decimal)
+# Last entry has upper_limit = None (open-ended)
+
+_TER_A = [
+    (5_400_000, Decimal("0.0000")),
+    (5_650_000, Decimal("0.0025")),
+    (5_950_000, Decimal("0.0050")),
+    (6_300_000, Decimal("0.0075")),
+    (6_750_000, Decimal("0.0100")),
+    (7_500_000, Decimal("0.0125")),
+    (8_550_000, Decimal("0.0150")),
+    (9_650_000, Decimal("0.0200")),
+    (10_050_000, Decimal("0.0250")),
+    (10_350_000, Decimal("0.0300")),
+    (10_700_000, Decimal("0.0350")),
+    (11_050_000, Decimal("0.0400")),
+    (11_600_000, Decimal("0.0450")),
+    (12_500_000, Decimal("0.0500")),
+    (13_750_000, Decimal("0.0550")),
+    (15_100_000, Decimal("0.0600")),
+    (16_950_000, Decimal("0.0650")),
+    (19_750_000, Decimal("0.0700")),
+    (24_150_000, Decimal("0.0750")),
+    (26_450_000, Decimal("0.0800")),
+    (28_000_000, Decimal("0.0850")),
+    (30_050_000, Decimal("0.0900")),
+    (32_400_000, Decimal("0.0950")),
+    (35_400_000, Decimal("0.1000")),
+    (39_100_000, Decimal("0.1050")),
+    (43_850_000, Decimal("0.1100")),
+    (47_800_000, Decimal("0.1150")),
+    (51_400_000, Decimal("0.1200")),
+    (56_300_000, Decimal("0.1250")),
+    (62_200_000, Decimal("0.1300")),
+    (69_200_000, Decimal("0.1350")),
+    (79_000_000, Decimal("0.1400")),
+    (93_200_000, Decimal("0.1450")),
+    (None, Decimal("0.1500")),
+]
+
+_TER_B = [
+    (6_200_000, Decimal("0.0000")),
+    (6_500_000, Decimal("0.0025")),
+    (6_850_000, Decimal("0.0050")),
+    (7_300_000, Decimal("0.0075")),
+    (9_200_000, Decimal("0.0100")),
+    (10_750_000, Decimal("0.0150")),
+    (11_250_000, Decimal("0.0200")),
+    (11_600_000, Decimal("0.0250")),
+    (12_600_000, Decimal("0.0300")),
+    (13_600_000, Decimal("0.0350")),
+    (14_950_000, Decimal("0.0400")),
+    (16_400_000, Decimal("0.0450")),
+    (18_450_000, Decimal("0.0500")),
+    (21_850_000, Decimal("0.0550")),
+    (26_000_000, Decimal("0.0600")),
+    (27_700_000, Decimal("0.0650")),
+    (29_350_000, Decimal("0.0700")),
+    (31_450_000, Decimal("0.0750")),
+    (33_950_000, Decimal("0.0800")),
+    (37_100_000, Decimal("0.0850")),
+    (41_100_000, Decimal("0.0900")),
+    (45_800_000, Decimal("0.0950")),
+    (49_500_000, Decimal("0.1000")),
+    (53_800_000, Decimal("0.1050")),
+    (58_500_000, Decimal("0.1100")),
+    (64_000_000, Decimal("0.1150")),
+    (71_000_000, Decimal("0.1200")),
+    (80_000_000, Decimal("0.1250")),
+    (93_000_000, Decimal("0.1300")),
+    (107_000_000, Decimal("0.1400")),
+    (None, Decimal("0.1500")),
+]
+
+_TER_C = [
+    (7_050_000, Decimal("0.0000")),
+    (7_450_000, Decimal("0.0025")),
+    (7_800_000, Decimal("0.0050")),
+    (8_250_000, Decimal("0.0075")),
+    (8_850_000, Decimal("0.0100")),
+    (9_800_000, Decimal("0.0125")),
+    (10_950_000, Decimal("0.0150")),
+    (11_200_000, Decimal("0.0175")),
+    (12_050_000, Decimal("0.0200")),
+    (12_950_000, Decimal("0.0250")),
+    (14_150_000, Decimal("0.0300")),
+    (15_550_000, Decimal("0.0350")),
+    (17_050_000, Decimal("0.0400")),
+    (19_500_000, Decimal("0.0450")),
+    (22_700_000, Decimal("0.0500")),
+    (26_600_000, Decimal("0.0550")),
+    (28_100_000, Decimal("0.0600")),
+    (30_100_000, Decimal("0.0650")),
+    (32_600_000, Decimal("0.0700")),
+    (35_400_000, Decimal("0.0750")),
+    (38_900_000, Decimal("0.0800")),
+    (43_000_000, Decimal("0.0850")),
+    (47_400_000, Decimal("0.0900")),
+    (51_200_000, Decimal("0.0950")),
+    (55_800_000, Decimal("0.1000")),
+    (60_400_000, Decimal("0.1050")),
+    (66_700_000, Decimal("0.1100")),
+    (74_500_000, Decimal("0.1150")),
+    (83_200_000, Decimal("0.1200")),
+    (95_600_000, Decimal("0.1250")),
+    (110_000_000, Decimal("0.1300")),
+    (134_000_000, Decimal("0.1400")),
+    (None, Decimal("0.1500")),
+]
+
+_TER_CATEGORY_MAP = {
+    "TK/0": _TER_A,
+    "TK/1": _TER_B, "TK/2": _TER_B, "TK/3": _TER_B, "K/0": _TER_B,
+    "K/1": _TER_C, "K/2": _TER_C, "K/3": _TER_C,
+}
+
+
+def _ter_rate(monthly_gross: Decimal, ptkp_status: str) -> Decimal:
+    """Look up TER rate for given monthly gross and PTKP status."""
+    table = _TER_CATEGORY_MAP.get(ptkp_status, _TER_A)
+    gross_int = int(monthly_gross)
+    for upper, rate in table:
+        if upper is None or gross_int <= upper:
+            return rate
+    return _TER_A[-1][1]  # fallback
+
+
+def calculate_pph21_ter(monthly_gross: Decimal, ptkp_status: str = "TK/0") -> Decimal:
+    """Calculate monthly PPh 21 using TER method (PMK 168/2023).
+
+    TER rate is applied to monthly bruto (gross before BPJS deduction).
+    Company bears the tax (gross-up): not deducted from employee's take-home.
+    """
+    if monthly_gross <= ZERO:
+        return ZERO
+    rate = _ter_rate(monthly_gross, ptkp_status)
+    return _round(monthly_gross * rate)
+
+
 # ── Overtime Calculation ─────────────────────────────────────────────────────
 
 def calculate_overtime_pay(
@@ -231,8 +374,17 @@ def calculate_monthly_payroll(
     working_days_in_month: int,
     ptkp_status: str = "TK/0",
     sales_revenue: float = 0,
+    payroll_year: int = 0,
+    payroll_month: int = 0,
 ) -> dict:
     """Calculate full monthly payroll for one employee.
+
+    Rules:
+    - Probation (<90 days from hire_date): no BPJS, PPh21 gross-up by company
+    - After probation, has_own_bpjs=False: company pays both BPJS employer+employee, PPh21 gross-up
+    - After probation, has_own_bpjs=True: company compensates allowance_bpjs (already in gross), PPh21 gross-up
+    - PPh21 calculated via TER method (PMK 168/2023) — always borne by company
+    - Contractor: PPh 23 still deducted from payment
 
     Args:
         employee: Employee ORM object or dict-like with salary/allowance fields
@@ -240,6 +392,8 @@ def calculate_monthly_payroll(
         working_days_in_month: Total working days in the month (from factory calendar)
         ptkp_status: Tax status for PPh 21 (default TK/0)
         sales_revenue: Revenue for commission calculation (sales department)
+        payroll_year: Year of payroll period (for probation check)
+        payroll_month: Month of payroll period (for probation check)
 
     Returns:
         Comprehensive payroll breakdown dict.
@@ -250,6 +404,16 @@ def calculate_monthly_payroll(
     department = getattr(employee, 'department', 'production') or 'production'
     work_schedule = getattr(employee, 'work_schedule', 'six_day') or 'six_day'
     commission_rate = _d(getattr(employee, 'commission_rate', None))
+    has_own_bpjs = bool(getattr(employee, 'has_own_bpjs', False))
+
+    # ── Probation detection (first 90 days from hire_date) ──────────────
+    is_on_probation = False
+    hire_date = getattr(employee, 'hire_date', None)
+    if hire_date and payroll_year and payroll_month:
+        from datetime import date as _date, timedelta as _td
+        payroll_period_start = _date(payroll_year, payroll_month, 1)
+        probation_end = hire_date + _td(days=90)
+        is_on_probation = probation_end > payroll_period_start
 
     allowance_bike = _d(getattr(employee, 'allowance_bike', 0) or 0)
     allowance_housing = _d(getattr(employee, 'allowance_housing', 0) or 0)
@@ -328,41 +492,57 @@ def calculate_monthly_payroll(
     prorated_allowances = _round(total_allowances * proration_factor)
     gross_salary = prorated_salary + prorated_allowances + overtime_pay + commission
 
-    # ── Category-specific calculations ───────────────────────────────────
+    # ── BPJS + PPh21 ─────────────────────────────────────────────────────
     bpjs_employee_total = ZERO
     bpjs_employer_total = ZERO
     bpjs_breakdown = {}
     pph21 = ZERO
     contractor_tax = ZERO
+    # company_bpjs_for_employee: BPJS employee share borne by company (not from employee net)
+    company_bpjs_for_employee = ZERO
 
     if employment_category == 'formal':
-        # BPJS calculations on base salary (not prorated — BPJS is on contractual salary)
-        bpjs = calculate_bpjs(base_salary)
-        bpjs_breakdown = bpjs
-        bpjs_employee_total = _d(bpjs["employee_total"])
-        bpjs_employer_total = _d(bpjs["employer_total"])
+        if not is_on_probation:
+            # BPJS on contractual base salary (not prorated)
+            bpjs = calculate_bpjs(base_salary)
+            bpjs_breakdown = bpjs
+            bpjs_employer_total = _d(bpjs["employer_total"])
 
-        # PPh 21
-        pph21 = calculate_pph21_monthly(gross_salary, bpjs_employee_total, ptkp_status)
+            if has_own_bpjs:
+                # Employee has own BPJS — company compensates via allowance_bpjs (already in gross)
+                # No additional BPJS employee deduction needed
+                bpjs_employee_total = ZERO
+                company_bpjs_for_employee = ZERO
+            else:
+                # Company pays employee's BPJS share too → not deducted from net
+                bpjs_employee_total = _d(bpjs["employee_total"])
+                company_bpjs_for_employee = bpjs_employee_total
+                bpjs_employee_total = ZERO  # not charged to employee net
+
+        # PPh21 via TER — always gross-up (company bears, not deducted from employee)
+        pph21 = calculate_pph21_ter(gross_salary, ptkp_status)
 
     elif employment_category == 'contractor':
-        # Contractor: 2.5% PPh 23 on total payment
+        # PPh 23: 2.5% deducted from contractor payment
         contractor_tax = _round(gross_salary * CONTRACTOR_TAX_RATE)
 
     # ── Absence deduction ────────────────────────────────────────────────
     absence_deduction = _round(daily_rate * Decimal(str(absent_days)))
 
-    # ── Deductions ───────────────────────────────────────────────────────
-    total_deductions = bpjs_employee_total + pph21 + contractor_tax + absence_deduction
+    # ── Deductions from employee (take-home perspective) ─────────────────
+    # Formal: company pays PPh21 + BPJS employee → only absence reduces net
+    # Contractor: PPh23 still deducted from payment
+    total_deductions = bpjs_employee_total + contractor_tax + absence_deduction
 
     # ── Net salary (take home pay) ───────────────────────────────────────
     net_salary = _round(gross_salary - total_deductions)
 
     # ── Total cost to company ────────────────────────────────────────────
     if employment_category == 'formal':
-        total_cost = _round(gross_salary + bpjs_employer_total + pph21)
+        # Gross + BPJS employer + BPJS employee (if company pays it) + PPh21 (gross-up)
+        total_cost = _round(gross_salary + bpjs_employer_total + company_bpjs_for_employee + pph21)
     else:
-        total_cost = _round(gross_salary)  # contractor: company pays gross amount
+        total_cost = _round(gross_salary)  # contractor: company pays gross, PPh23 is withheld
 
     return {
         # Employee info
@@ -410,16 +590,22 @@ def calculate_monthly_payroll(
         # Gross
         "gross_salary": float(gross_salary),
 
-        # BPJS (formal only)
+        # Probation / BPJS flags
+        "is_on_probation": is_on_probation,
+        "has_own_bpjs": has_own_bpjs,
+
+        # BPJS (formal only; bpjs_employee=0 since company covers it)
         "bpjs_employee": float(bpjs_employee_total),
         "bpjs_employer": float(bpjs_employer_total),
+        "company_bpjs_for_employee": float(company_bpjs_for_employee),
         "bpjs_breakdown": bpjs_breakdown,
 
-        # Tax
+        # Tax (PPh21 gross-up: borne by company, not deducted from employee)
         "pph21": float(pph21),
+        "pph21_borne_by_company": float(pph21) if employment_category == 'formal' else 0.0,
         "contractor_tax": float(contractor_tax),
 
-        # Deductions
+        # Deductions (from employee net — formal: only absences; contractor: PPh23+absences)
         "absence_deduction": float(absence_deduction),
         "total_deductions": float(total_deductions),
 

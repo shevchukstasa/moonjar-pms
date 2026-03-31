@@ -2,7 +2,7 @@
 
 from uuid import UUID
 from typing import Optional, List
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -377,7 +377,9 @@ async def payroll_summary(
         "total_gross": 0.0,
         "total_bpjs_employer": 0.0,
         "total_bpjs_employee": 0.0,
+        "total_company_bpjs_for_employee": 0.0,
         "total_pph21": 0.0,
+        "total_pph21_borne_by_company": 0.0,
         "total_contractor_tax": 0.0,
         "total_net": 0.0,
         "total_cost": 0.0,
@@ -422,6 +424,8 @@ async def payroll_summary(
             employee=emp,
             attendance_records=attendance_records,
             working_days_in_month=working_days,
+            payroll_year=year,
+            payroll_month=month,
         )
 
         result.append(payroll)
@@ -436,7 +440,9 @@ async def payroll_summary(
         totals["total_gross"] += payroll["gross_salary"]
         totals["total_bpjs_employer"] += payroll["bpjs_employer"]
         totals["total_bpjs_employee"] += payroll["bpjs_employee"]
+        totals["total_company_bpjs_for_employee"] += payroll.get("company_bpjs_for_employee", 0)
         totals["total_pph21"] += payroll["pph21"]
+        totals["total_pph21_borne_by_company"] += payroll.get("pph21_borne_by_company", 0)
         totals["total_contractor_tax"] += payroll["contractor_tax"]
         totals["total_net"] += payroll["net_salary"]
         totals["total_cost"] += payroll["total_cost_to_company"]
@@ -489,6 +495,64 @@ async def payroll_pdf(
 
     month_str = str(month).zfill(2)
     filename = f"payroll_{year}_{month_str}.pdf"
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/payroll-pdf-employee")
+async def payroll_pdf_employee(
+    employee_id: str = Query(...),
+    year: int = Query(...),
+    month: int = Query(..., ge=1, le=12),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Generate and return individual employee payslip as PDF."""
+    from fastapi.responses import StreamingResponse
+    from business.services.payroll_pdf import generate_payslip_pdf
+    from api.models import Employee as EmployeeModel, Factory
+
+    emp = db.query(EmployeeModel).filter(EmployeeModel.id == UUID(employee_id)).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    factory_name = ""
+    if emp.factory_id:
+        fac = db.query(Factory).filter(Factory.id == emp.factory_id).first()
+        factory_name = fac.name if fac else ""
+
+    # Calculate payroll for this employee
+    from business.services.payroll import calculate_monthly_payroll
+    payroll = calculate_monthly_payroll(emp, year, month, db, payroll_year=year, payroll_month=month)
+
+    # Apply pay period filtering for attendance
+    pay_period = getattr(emp, "pay_period", "calendar_month")
+    if pay_period == "25_to_24":
+        import calendar as _cal
+        prev_month = month - 1 if month > 1 else 12
+        prev_year = year if month > 1 else year - 1
+        period_start = date(prev_year, prev_month, 25)
+        period_end = date(year, month, 24)
+        last_day = _cal.monthrange(year, month)[1]
+        working_days = sum(
+            1 for d in range((period_end - period_start).days + 1)
+            if (period_start + timedelta(days=d)).weekday() < 5
+        )
+        payroll["working_days"] = working_days
+
+    buf = generate_payslip_pdf(
+        item=payroll,
+        year=year,
+        month=month,
+        factory_name=factory_name,
+    )
+
+    emp_name = (emp.name or "employee").replace(" ", "_")
+    month_str = str(month).zfill(2)
+    filename = f"payslip_{emp_name}_{year}_{month_str}.pdf"
     return StreamingResponse(
         buf,
         media_type="application/pdf",

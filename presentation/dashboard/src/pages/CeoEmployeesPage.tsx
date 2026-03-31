@@ -831,6 +831,8 @@ function PayrollTab({
           title={`Formal Employees (${formalItems.length})`}
           items={formalItems}
           showBpjs
+          year={year}
+          month={month}
         />
       )}
 
@@ -840,6 +842,8 @@ function PayrollTab({
           title={`Contractors (${contractorItems.length})`}
           items={contractorItems}
           showBpjs={false}
+          year={year}
+          month={month}
         />
       )}
 
@@ -858,11 +862,34 @@ function PayrollTable({
   title,
   items,
   showBpjs,
+  year,
+  month,
 }: {
   title: string;
   items: PayrollItem[];
   showBpjs: boolean;
+  year: number;
+  month: number;
 }) {
+  const [slipLoading, setSlipLoading] = useState<string | null>(null);
+
+  const downloadPayslip = async (employeeId: string, employeeName: string) => {
+    setSlipLoading(employeeId);
+    try {
+      const blob = await employeesApi.payrollPdfEmployee({ employee_id: employeeId, year, month });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payslip_${employeeName.replace(/\s+/g, '_')}_${year}_${String(month).padStart(2, '0')}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Payslip download failed', e);
+    } finally {
+      setSlipLoading(null);
+    }
+  };
+
   // Subtotals
   const sub = useMemo(() => {
     const s = { gross: 0, bpjsEmp: 0, bpjsEr: 0, tax: 0, net: 0, cost: 0, ot: 0, comm: 0 };
@@ -904,6 +931,7 @@ function PayrollTable({
               <th className="px-2 py-1.5 text-right">Tax</th>
               <th className="px-2 py-1.5 text-right font-bold">Net</th>
               <th className="px-2 py-1.5 text-right">Cost</th>
+              <th className="px-2 py-1.5 text-center">Slip</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -931,6 +959,16 @@ function PayrollTable({
                 </td>
                 <td className="px-2 py-1.5 text-right font-mono text-green-700 font-bold">{formatIDR(row.net_salary)}</td>
                 <td className="px-2 py-1.5 text-right font-mono text-blue-600">{formatIDR(row.total_cost_to_company)}</td>
+                <td className="px-2 py-1.5 text-center">
+                  <button
+                    onClick={() => downloadPayslip(row.employee_id, row.full_name)}
+                    disabled={slipLoading === row.employee_id}
+                    className="rounded px-2 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-40"
+                    title="Download payslip"
+                  >
+                    {slipLoading === row.employee_id ? '...' : '↓'}
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -951,6 +989,7 @@ function PayrollTable({
               <td className="px-2 py-2 text-right font-mono text-red-600">{formatIDR(sub.tax)}</td>
               <td className="px-2 py-2 text-right font-mono text-green-700">{formatIDR(sub.net)}</td>
               <td className="px-2 py-2 text-right font-mono text-blue-600">{formatIDR(sub.cost)}</td>
+              <td className="px-2 py-2"></td>
             </tr>
           </tfoot>
         </table>

@@ -230,4 +230,13 @@ export const employeesApi = {
     apiClient
       .get('/employees/payroll-pdf', { params, responseType: 'blob' })
       .then((r) => r.data),
+
+  payrollPdfEmployee: (params: {
+    employee_id: string;
+    year: number;
+    month: number;
+  }): Promise<Blob> =>
+    apiClient
+      .get('/employees/payroll-pdf-employee', { params, responseType: 'blob' })
+      .then((r) => r.data),
 };

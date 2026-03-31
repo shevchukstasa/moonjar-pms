@@ -1096,6 +1096,24 @@ function PayrollTab({
   factoryId?: string;
 }) {
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [slipLoading, setSlipLoading] = useState<string | null>(null);
+
+  const downloadPayslip = async (employeeId: string, employeeName: string) => {
+    setSlipLoading(employeeId);
+    try {
+      const blob = await employeesApi.payrollPdfEmployee({ employee_id: employeeId, year, month });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payslip_${employeeName.replace(/\s+/g, '_')}_${year}_${String(month).padStart(2, '0')}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Payslip download failed', e);
+    } finally {
+      setSlipLoading(null);
+    }
+  };
 
   const downloadPdf = async () => {
     setPdfLoading(true);
@@ -1154,6 +1172,7 @@ function PayrollTab({
               <th className="px-3 py-2 text-right">Gross</th>
               <th className="px-3 py-2 text-right">Deductions</th>
               <th className="px-3 py-2 text-right font-bold">Net</th>
+              <th className="px-3 py-2 text-center">Slip</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -1172,11 +1191,21 @@ function PayrollTab({
                 <td className="px-3 py-2 text-right font-mono font-medium text-gray-800">{formatIDR(getGross(row))}</td>
                 <td className="px-3 py-2 text-right font-mono text-red-600">{(row.total_deductions ?? 0) > 0 ? formatIDR(row.total_deductions) : '-'}</td>
                 <td className="px-3 py-2 text-right font-mono font-bold text-green-700">{formatIDR(getNet(row))}</td>
+                <td className="px-3 py-2 text-center">
+                  <button
+                    onClick={() => downloadPayslip(row.employee_id, row.full_name)}
+                    disabled={slipLoading === row.employee_id}
+                    className="rounded px-2 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-40"
+                    title="Download payslip"
+                  >
+                    {slipLoading === row.employee_id ? '...' : '↓'}
+                  </button>
+                </td>
               </tr>
             ))}
             {data.length === 0 && (
               <tr>
-                <td colSpan={11} className="py-8 text-center text-gray-400">
+                <td colSpan={12} className="py-8 text-center text-gray-400">
                   No payroll data for this period.
                 </td>
               </tr>
@@ -1200,6 +1229,7 @@ function PayrollTab({
                 <td className="px-3 py-2 text-right font-mono font-bold text-green-700">
                   {formatIDR(grandNet)}
                 </td>
+                <td className="px-3 py-2"></td>
               </tr>
             </tfoot>
           )}

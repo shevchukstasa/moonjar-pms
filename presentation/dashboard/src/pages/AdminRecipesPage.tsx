@@ -29,6 +29,7 @@ interface RecipeForm {
   name: string;
   color_collection: string;
   recipe_type: string;
+  engobe_type: string;
   client_name: string;
   specific_gravity: string;
   consumption_spray_ml_per_sqm: string;
@@ -52,10 +53,17 @@ const RECIPE_TYPE_OPTIONS = [
   { value: 'engobe', label: 'Engobe' },
 ];
 
+const ENGOBE_TYPE_OPTIONS = [
+  { value: 'standard', label: 'Main Engobe (основной)' },
+  { value: 'shelf_coating', label: 'Kiln Shelf Engobe (для полок)' },
+  { value: 'hole_filler', label: 'Pore Filler Engobe (для заделки пор)' },
+];
+
 const emptyForm: RecipeForm = {
   name: '',
   color_collection: '',
   recipe_type: 'product',
+  engobe_type: '',
   client_name: '',
   specific_gravity: '',
   consumption_spray_ml_per_sqm: '',
@@ -233,6 +241,7 @@ export default function AdminRecipesPage() {
       name: item.name,
       color_collection: item.color_collection ?? '',
       recipe_type: item.recipe_type || 'product',
+      engobe_type: item.engobe_type ?? '',
       client_name: item.client_name ?? '',
       specific_gravity: item.specific_gravity != null ? String(item.specific_gravity) : '',
       consumption_spray_ml_per_sqm: item.consumption_spray_ml_per_sqm != null ? String(item.consumption_spray_ml_per_sqm) : '',
@@ -268,6 +277,7 @@ export default function AdminRecipesPage() {
       name: `${item.name} (copy)`,
       color_collection: item.color_collection ?? '',
       recipe_type: item.recipe_type || 'product',
+      engobe_type: item.engobe_type ?? '',
       client_name: item.client_name ?? '',
       specific_gravity: item.specific_gravity != null ? String(item.specific_gravity) : '',
       consumption_spray_ml_per_sqm: item.consumption_spray_ml_per_sqm != null ? String(item.consumption_spray_ml_per_sqm) : '',
@@ -320,6 +330,7 @@ export default function AdminRecipesPage() {
       name: form.name,
       color_collection: form.color_collection || null,
       recipe_type: form.recipe_type || 'product',
+      engobe_type: form.recipe_type === 'engobe' ? (form.engobe_type || null) : null,
       client_name: form.client_name || null,
       specific_gravity: form.specific_gravity ? parseFloat(form.specific_gravity) : null,
       consumption_spray_ml_per_sqm: form.consumption_spray_ml_per_sqm ? parseFloat(form.consumption_spray_ml_per_sqm) : null,
@@ -368,7 +379,15 @@ export default function AdminRecipesPage() {
       { key: 'name', header: 'Name' },
       { key: 'recipe_type', header: 'Type', render: (r: RecipeItem) => {
         const labels: Record<string, string> = { product: 'Product', glaze: 'Glaze', engobe: 'Engobe' };
-        return <span className="text-sm">{labels[r.recipe_type] || r.recipe_type}</span>;
+        const engobeLabels: Record<string, string> = { standard: 'Main', shelf_coating: 'Shelf Coating', hole_filler: 'Pore Filler' };
+        return (
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm">{labels[r.recipe_type] || r.recipe_type}</span>
+            {r.recipe_type === 'engobe' && r.engobe_type && (
+              <span className="text-xs text-orange-600 font-medium">{engobeLabels[r.engobe_type] || r.engobe_type}</span>
+            )}
+          </div>
+        );
       }},
       { key: 'color_collection', header: 'Color Collection', render: (r: RecipeItem) => r.color_collection || <span className="text-gray-400">&mdash;</span> },
       { key: 'client_name', header: 'Client', render: (r: RecipeItem) => r.client_name || <span className="text-gray-400">&mdash;</span> },
@@ -484,7 +503,7 @@ export default function AdminRecipesPage() {
               <label className="mb-1 block text-sm font-medium text-gray-700">Recipe Type</label>
               <select
                 value={form.recipe_type}
-                onChange={(e) => setForm({ ...form, recipe_type: e.target.value })}
+                onChange={(e) => setForm({ ...form, recipe_type: e.target.value, engobe_type: '' })}
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
               >
                 {RECIPE_TYPE_OPTIONS.map((o) => (
@@ -492,6 +511,21 @@ export default function AdminRecipesPage() {
                 ))}
               </select>
             </div>
+            {form.recipe_type === 'engobe' && (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">Engobe Category</label>
+                <select
+                  value={form.engobe_type}
+                  onChange={(e) => setForm({ ...form, engobe_type: e.target.value })}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="">-- Select category --</option>
+                  {ENGOBE_TYPE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-3 gap-4">
             <Input label="Specific Gravity (SG)" type="number" step="0.001" placeholder="e.g. 1.450" value={form.specific_gravity} onChange={(e) => setForm({ ...form, specific_gravity: e.target.value })} />

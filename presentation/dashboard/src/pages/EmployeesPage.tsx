@@ -424,7 +424,7 @@ export default function EmployeesPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{isStaffView ? 'Production Staff' : 'Employees'}</h1>
           <p className="mt-1 text-sm text-gray-500">
-            {isStaffView ? 'Manage production workers, attendance, and payroll' : 'Manage employees, attendance, and payroll'}
+            {isStaffView ? 'Manage production staff, attendance, and payroll' : 'Manage employees, attendance, and payroll'}
           </p>
         </div>
         <div className="flex gap-2">

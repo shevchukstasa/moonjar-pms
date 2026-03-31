@@ -105,6 +105,7 @@ export default function EmployeesPage() {
   const [attStatus, setAttStatus] = useState('present');
   const [attOvertime, setAttOvertime] = useState('0');
   const [attNotes, setAttNotes] = useState('');
+  const [attExistingId, setAttExistingId] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState<EmployeeCreatePayload>({
@@ -242,12 +243,15 @@ export default function EmployeesPage() {
   });
 
   const attendanceMutation = useMutation({
-    mutationFn: ({ empId, data }: { empId: string; data: { date: string; status: string; overtime_hours: number; notes?: string } }) =>
-      employeesApi.recordAttendance(empId, data),
+    mutationFn: ({ empId, existingId, data }: { empId: string; existingId: string | null; data: { date: string; status: string; overtime_hours: number; notes?: string } }) =>
+      existingId
+        ? employeesApi.updateAttendance(existingId, { status: data.status, overtime_hours: data.overtime_hours, notes: data.notes })
+        : employeesApi.recordAttendance(empId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['attendance-grid'] });
       queryClient.invalidateQueries({ queryKey: ['payroll-summary'] });
       setAttDialogOpen(false);
+      setAttExistingId(null);
     },
     onError: (err: unknown) => {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -357,10 +361,11 @@ export default function EmployeesPage() {
     }
   }, [formData, editingEmployee, factoryId, createMutation, updateMutation]);
 
-  const openAttendanceDialog = useCallback((emp: Employee, dateStr: string, existingRecord?: { status: string; overtime_hours?: number; notes?: string }) => {
+  const openAttendanceDialog = useCallback((emp: Employee, dateStr: string, existingRecord?: { id?: string; status: string; overtime_hours?: number; notes?: string }) => {
     setAttEmployee(emp);
     setAttDate(dateStr);
     setFormError('');
+    setAttExistingId(existingRecord?.id ?? null);
 
     if (existingRecord) {
       // Pre-fill from existing record (editing mode)
@@ -394,6 +399,7 @@ export default function EmployeesPage() {
     if (!attEmployee || !attDate) return;
     attendanceMutation.mutate({
       empId: attEmployee.id,
+      existingId: attExistingId,
       data: {
         date: attDate,
         status: attStatus,
@@ -401,7 +407,7 @@ export default function EmployeesPage() {
         notes: attNotes || undefined,
       },
     });
-  }, [attEmployee, attDate, attStatus, attOvertime, attNotes, attendanceMutation]);
+  }, [attEmployee, attDate, attStatus, attOvertime, attNotes, attExistingId, attendanceMutation]);
 
   // Month nav
   const prevMonth = () => {
@@ -701,8 +707,8 @@ export default function EmployeesPage() {
       {/* Attendance Record Dialog */}
       <Dialog
         open={attDialogOpen}
-        onClose={() => setAttDialogOpen(false)}
-        title="Record Attendance"
+        onClose={() => { setAttDialogOpen(false); setAttExistingId(null); }}
+        title={attExistingId ? 'Edit Attendance' : 'Record Attendance'}
         className="w-full max-w-md"
       >
         <div className="space-y-4">
@@ -892,7 +898,7 @@ function AttendanceTab({
   year: number;
   month: number;
   daysInMonth: number;
-  onCellClick: (emp: Employee, dateStr: string, existingRecord?: { status: string; overtime_hours?: number; notes?: string }) => void;
+  onCellClick: (emp: Employee, dateStr: string, existingRecord?: { id?: string; status: string; overtime_hours?: number; notes?: string }) => void;
   calendarMap: Map<string, CalendarEntry>;
   workingDaysData: WorkingDaysResponse | null;
 }) {

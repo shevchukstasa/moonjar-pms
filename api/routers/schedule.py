@@ -13,7 +13,7 @@ from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management
 from api.models import Resource, Batch, OrderPosition, ProductionOrder
-from api.enums import ResourceType, BatchStatus, BatchCreator, PositionStatus
+from api.enums import ResourceType, BatchStatus, BatchCreator, PositionStatus, ResourceStatus
 
 logger = logging.getLogger("moonjar.schedule")
 
@@ -231,6 +231,32 @@ async def create_batch(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
+    # Block batch creation on kilns under maintenance
+    kiln = db.query(Resource).filter(
+        Resource.id == UUID(data.resource_id),
+        Resource.resource_type == ResourceType.KILN,
+    ).first()
+    if kiln and kiln.status in (
+        ResourceStatus.MAINTENANCE_PLANNED,
+        ResourceStatus.MAINTENANCE_EMERGENCY,
+    ):
+        other_kilns = db.query(Resource).filter(
+            Resource.factory_id == kiln.factory_id,
+            Resource.resource_type == ResourceType.KILN,
+            Resource.status == ResourceStatus.ACTIVE,
+            Resource.id != kiln.id,
+        ).all()
+        if other_kilns:
+            alternatives = ", ".join(f"'{k.name}'" for k in other_kilns)
+            raise HTTPException(
+                400,
+                detail=f"Kiln '{kiln.name}' is under {kiln.status.value}. Available alternatives: {alternatives}.",
+            )
+        raise HTTPException(
+            400,
+            detail=f"Kiln '{kiln.name}' is under {kiln.status.value} and no other active kilns are available.",
+        )
+
     batch = Batch(
         resource_id=UUID(data.resource_id),
         factory_id=UUID(data.factory_id),

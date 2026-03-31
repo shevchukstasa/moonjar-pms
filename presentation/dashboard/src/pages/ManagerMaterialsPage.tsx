@@ -143,6 +143,92 @@ export default function ManagerMaterialsPage() {
   const { data: txHistoryData, isLoading: txHistoryLoading } = useMaterialTransactions(historyDialog.item?.id);
   const txHistoryItems = txHistoryData?.items ?? [];
 
+  // OCR delivery scan dialog
+  interface OcrMatchedItem {
+    ocr_name: string;
+    quantity: number;
+    unit: string;
+    matched: boolean;
+    matched_material_id: string | null;
+    matched_material_name: string | null;
+    confidence: number | null;
+    // editable overrides
+    _qty: string;
+    _material_id: string;
+    _included: boolean;
+  }
+  const [ocrDialog, setOcrDialog] = useState(false);
+  const [ocrStage, setOcrStage] = useState<'upload' | 'loading' | 'confirm' | 'saving'>('upload');
+  const [ocrItems, setOcrItems] = useState<OcrMatchedItem[]>([]);
+  const [ocrMeta, setOcrMeta] = useState<{ supplier?: string; delivery_date?: string; reference?: string }>({});
+  const [ocrError, setOcrError] = useState('');
+  const [ocrFactoryId, setOcrFactoryId] = useState(effectiveFactoryId);
+  const ocrFileRef = { current: null as HTMLInputElement | null };
+
+  const handleOcrFile = useCallback(async (file: File) => {
+    if (!file) return;
+    setOcrError('');
+    setOcrStage('loading');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const resp = await apiClient.post('/delivery/process-photo', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const data = resp.data;
+      const mapped: OcrMatchedItem[] = (data.items ?? []).map((it: Record<string, unknown>) => ({
+        ocr_name: String(it.name ?? it.ocr_name ?? ''),
+        quantity: Number(it.quantity ?? 0),
+        unit: String(it.unit ?? 'kg'),
+        matched: Boolean(it.matched),
+        matched_material_id: (it.matched_material_id as string) ?? null,
+        matched_material_name: (it.matched_material_name as string) ?? null,
+        confidence: it.confidence != null ? Number(it.confidence) : null,
+        _qty: String(it.quantity ?? ''),
+        _material_id: (it.matched_material_id as string) ?? '',
+        _included: Boolean(it.matched),
+      }));
+      setOcrItems(mapped);
+      setOcrMeta({
+        supplier: data.supplier ?? '',
+        delivery_date: data.delivery_date ?? '',
+        reference: data.reference_number ?? '',
+      });
+      setOcrStage('confirm');
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setOcrError(detail ?? 'OCR processing failed. Check file format.');
+      setOcrStage('upload');
+    }
+  }, []);
+
+  const ocrQc = useQueryClient();
+  const handleOcrConfirm = useCallback(async () => {
+    const included = ocrItems.filter((it) => it._included && it._material_id && parseFloat(it._qty) > 0);
+    if (included.length === 0) { setOcrError('Select at least one item with a material and quantity.'); return; }
+    setOcrError('');
+    setOcrStage('saving');
+    try {
+      for (const it of included) {
+        await apiClient.post('/materials/transactions', {
+          material_id: it._material_id,
+          factory_id: ocrFactoryId || effectiveFactoryId,
+          type: 'receive',
+          quantity: parseFloat(it._qty),
+          notes: `Delivery scan: ${it.ocr_name}${ocrMeta.reference ? ` | Ref: ${ocrMeta.reference}` : ''}${ocrMeta.supplier ? ` | ${ocrMeta.supplier}` : ''}`,
+        });
+      }
+      ocrQc.invalidateQueries({ queryKey: ['materials'] });
+      setOcrDialog(false);
+      setOcrStage('upload');
+      setOcrItems([]);
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setOcrError(detail ?? 'Failed to save transactions.');
+      setOcrStage('confirm');
+    }
+  }, [ocrItems, ocrFactoryId, effectiveFactoryId, ocrMeta, ocrQc]);
+
   // Delete material (owner/admin only)
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const matQc = useQueryClient();
@@ -381,6 +467,14 @@ export default function ManagerMaterialsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={() => navigate('/manager')}>{'\u2190'} Dashboard</Button>
+          {isPM && (
+            <Button
+              variant="secondary"
+              onClick={() => { setOcrDialog(true); setOcrStage('upload'); setOcrItems([]); setOcrError(''); setOcrMeta({}); setOcrFactoryId(effectiveFactoryId); }}
+            >
+              📷 Scan Delivery
+            </Button>
+          )}
           <Button onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}>
             + Add Material
           </Button>
@@ -823,6 +917,146 @@ export default function ManagerMaterialsPage() {
         title="Delete Material"
         message="Are you sure you want to delete this material? This action cannot be undone."
       />
+
+      {/* OCR Delivery Scan Dialog */}
+      <Dialog
+        open={ocrDialog}
+        onClose={() => { if (ocrStage !== 'loading' && ocrStage !== 'saving') { setOcrDialog(false); setOcrStage('upload'); setOcrItems([]); }}}
+        title="📷 Scan Delivery Note"
+        className="w-full max-w-3xl"
+      >
+        {ocrStage === 'upload' && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-500">Upload a photo of the delivery note. AI will recognize materials and quantities automatically.</p>
+            <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 p-10 transition-colors hover:border-blue-400 hover:bg-blue-50">
+              <span className="text-4xl mb-3">📄</span>
+              <span className="text-sm font-medium text-gray-700">Click to select photo</span>
+              <span className="mt-1 text-xs text-gray-400">JPEG, PNG, WebP supported</span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleOcrFile(f); }}
+              />
+            </label>
+            {ocrError && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{ocrError}</p>}
+            <div className="flex justify-end">
+              <Button variant="secondary" onClick={() => setOcrDialog(false)}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {ocrStage === 'loading' && (
+          <div className="flex flex-col items-center gap-4 py-12">
+            <Spinner className="h-10 w-10" />
+            <p className="text-sm text-gray-500">Analyzing delivery note with AI…</p>
+            <p className="text-xs text-gray-400">This takes 5–15 seconds</p>
+          </div>
+        )}
+
+        {(ocrStage === 'confirm' || ocrStage === 'saving') && (
+          <div className="space-y-4">
+            {/* Meta info */}
+            <div className="rounded-lg bg-gray-50 px-4 py-3 text-sm flex flex-wrap gap-4">
+              {ocrMeta.supplier && <span><span className="font-medium text-gray-600">Supplier:</span> {ocrMeta.supplier}</span>}
+              {ocrMeta.delivery_date && <span><span className="font-medium text-gray-600">Date:</span> {ocrMeta.delivery_date}</span>}
+              {ocrMeta.reference && <span><span className="font-medium text-gray-600">Ref:</span> {ocrMeta.reference}</span>}
+            </div>
+
+            {/* Factory selector */}
+            {showFactoryFilter && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-600">Post to factory:</span>
+                <select
+                  value={ocrFactoryId}
+                  onChange={(e) => setOcrFactoryId(e.target.value)}
+                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+                >
+                  {factories.map((f: { id: string; name: string }) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Items table */}
+            <div className="max-h-96 overflow-y-auto rounded-lg border border-gray-200">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-gray-50 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  <tr>
+                    <th className="w-8 px-3 py-2 text-center">✓</th>
+                    <th className="px-3 py-2 text-left">From document</th>
+                    <th className="px-3 py-2 text-left">Matched material</th>
+                    <th className="px-3 py-2 text-right w-28">Quantity</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {ocrItems.map((it, idx) => (
+                    <tr key={idx} className={it._included ? 'bg-white' : 'bg-gray-50 opacity-60'}>
+                      <td className="px-3 py-2 text-center">
+                        <input
+                          type="checkbox"
+                          checked={it._included}
+                          onChange={(e) => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _included: e.target.checked } : x))}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="text-gray-800">{it.ocr_name}</span>
+                        {it.confidence != null && (
+                          <span className={`ml-2 text-xs ${it.confidence >= 0.8 ? 'text-green-500' : it.confidence >= 0.5 ? 'text-amber-500' : 'text-red-500'}`}>
+                            {Math.round(it.confidence * 100)}%
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <select
+                          value={it._material_id}
+                          onChange={(e) => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _material_id: e.target.value, _included: !!e.target.value } : x))}
+                          className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-blue-400 focus:outline-none"
+                        >
+                          <option value="">— not matched —</option>
+                          {items.map((m) => (
+                            <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          value={it._qty}
+                          onChange={(e) => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _qty: e.target.value } : x))}
+                          className="w-full rounded border border-gray-200 px-2 py-1 text-right text-xs focus:border-blue-400 focus:outline-none"
+                        />
+                        <span className="text-xs text-gray-400"> {it.unit}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <p className="text-xs text-gray-400">
+              {ocrItems.filter((x) => x._included).length} of {ocrItems.length} items selected.
+              Confirm to post as &ldquo;receive&rdquo; transactions.
+            </p>
+
+            {ocrError && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{ocrError}</p>}
+
+            <div className="flex justify-between border-t pt-3">
+              <Button variant="secondary" onClick={() => setOcrStage('upload')} disabled={ocrStage === 'saving'}>
+                ← Re-scan
+              </Button>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={() => setOcrDialog(false)} disabled={ocrStage === 'saving'}>Cancel</Button>
+                <Button onClick={handleOcrConfirm} disabled={ocrStage === 'saving'}>
+                  {ocrStage === 'saving' ? 'Saving…' : `✓ Confirm Receipt (${ocrItems.filter((x) => x._included && x._material_id && parseFloat(x._qty) > 0).length} items)`}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Dialog>
     </div>
   );
 }

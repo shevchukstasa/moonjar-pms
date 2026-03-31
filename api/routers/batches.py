@@ -11,7 +11,7 @@ Endpoints:
   POST /api/batches/{id}/reject  — PM rejects a suggested batch
 """
 
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 from typing import Optional
 
@@ -85,8 +85,10 @@ class BatchDetailResponse(BaseModel):
     total_area_sqm: Optional[float] = None
     kiln_capacity_sqm: Optional[float] = None
     loading_plan: Optional[dict] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: Optional[str | datetime] = None
+    updated_at: Optional[str | datetime] = None
+
+    model_config = {"from_attributes": True}
 
 
 def _ev(val):

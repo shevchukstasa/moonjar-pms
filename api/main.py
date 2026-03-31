@@ -1868,6 +1868,7 @@ async def lifespan(app: FastAPI):
         logger.warning("Enum values patch warning: %s", e)
 
     def _webhook_retry_patch(conn):
+        from sqlalchemy import text
         conn.execute(text("""
             DO $$ BEGIN
                 ALTER TABLE sales_webhook_events ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;

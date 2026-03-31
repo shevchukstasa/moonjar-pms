@@ -1054,8 +1054,13 @@ function AttendanceTab({
           <>
             <div className="flex items-center gap-2 text-sm">
               <span className="inline-block h-3 w-3 rounded bg-emerald-200" />
-              <span className="text-gray-600">Working days:</span>
-              <span className="font-bold text-emerald-700">{workingDaysData.working_days}</span>
+              <span className="text-gray-600">5-day:</span>
+              <span className="font-bold text-emerald-700">{workingDaysData.working_days_5day ?? workingDaysData.working_days}</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="inline-block h-3 w-3 rounded bg-blue-200" />
+              <span className="text-gray-600">6-day:</span>
+              <span className="font-bold text-blue-600">{workingDaysData.working_days_6day ?? workingDaysData.working_days}</span>
             </div>
             <div className="flex items-center gap-2 text-sm">
               <span className="inline-block h-3 w-3 rounded bg-red-200" />

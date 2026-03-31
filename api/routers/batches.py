@@ -466,7 +466,22 @@ async def create_batch(
     current_user=Depends(require_management),
 ):
     """Manually create a batch."""
-    from api.enums import BatchCreator
+    from api.enums import BatchCreator, ResourceStatus
+
+    # Block batch creation when kiln is under maintenance
+    kiln = db.query(Resource).filter(
+        Resource.id == data.resource_id,
+        Resource.resource_type == ResourceType.KILN,
+    ).first()
+    if kiln and kiln.status in (
+        ResourceStatus.MAINTENANCE_PLANNED,
+        ResourceStatus.MAINTENANCE_EMERGENCY,
+    ):
+        raise HTTPException(
+            400,
+            f"Kiln '{kiln.name}' is currently under {kiln.status.value} — "
+            "cannot create a batch. Set kiln to 'active' first.",
+        )
 
     batch = Batch(
         resource_id=data.resource_id,

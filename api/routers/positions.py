@@ -569,6 +569,15 @@ async def change_position_status(
         from business.services.status_machine import route_after_firing
         route_after_firing(db, p)
 
+    # ── Recipe required before glazing / engobe ───────────────────
+    if new_status in (PositionStatus.ENGOBE_APPLIED, PositionStatus.GLAZED):
+        if not p.recipe_id:
+            raise HTTPException(
+                400,
+                "Cannot start engobe/glazing: position has no recipe assigned. "
+                "Assign a recipe first (glazed tile must have a recipe for material deduction).",
+            )
+
     # ── Material consumption on glazing start ─────────────────────
     # When position transitions to ENGOBE_APPLIED or GLAZED (first time),
     # consume BOM materials and release reservations.

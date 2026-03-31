@@ -947,6 +947,49 @@ async def create_order(
     except Exception as e:
         _logger.warning("Failed to notify PM about manual order %s: %s", order.order_number, e)
 
+    # Immediate overdue alert if deadline is already in the past
+    if order.final_deadline and order.final_deadline < date.today():
+        try:
+            from api.models import Notification, User, UserFactory
+            from api.enums import NotificationType, UserRole
+            days_late = (date.today() - order.final_deadline).days
+            alert_title = f"OVERDUE ORDER: {order.order_number} ({days_late}d late)"
+            alert_msg = (
+                f"Order created with a past deadline! "
+                f"Client: {order.client}, Deadline: {order.final_deadline}"
+            )
+            notify_roles = [
+                UserRole.PRODUCTION_MANAGER.value,
+                UserRole.CEO.value,
+                UserRole.OWNER.value,
+            ]
+            notified: set = set()
+            for role in notify_roles:
+                for uf in (
+                    db.query(UserFactory)
+                    .join(User)
+                    .filter(
+                        UserFactory.factory_id == order.factory_id,
+                        User.role == role,
+                        User.is_active.is_(True),
+                    )
+                    .all()
+                ):
+                    if uf.user_id in notified:
+                        continue
+                    notified.add(uf.user_id)
+                    db.add(Notification(
+                        user_id=uf.user_id,
+                        factory_id=order.factory_id,
+                        type=NotificationType.ALERT,
+                        title=alert_title,
+                        message=alert_msg,
+                    ))
+            if notified:
+                db.commit()
+        except Exception as e:
+            _logger.warning("Failed to send overdue alert for order %s: %s", order.order_number, e)
+
     # RAG indexing (background, best-effort)
     try:
         import os

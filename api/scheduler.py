@@ -64,21 +64,41 @@ async def daily_sla_check():
             else:
                 title = f"Due in {days_left}d: Order {order.order_number}"
 
-            # Notify PM
-            uf = db.query(UserFactory).join(User).filter(
-                UserFactory.factory_id == order.factory_id,
-                User.role == UserRole.PRODUCTION_MANAGER.value,
-                User.is_active.is_(True),
-            ).first()
-            if uf:
-                notif = Notification(
-                    user_id=uf.user_id,
-                    factory_id=order.factory_id,
-                    type=NotificationType.ALERT,
-                    title=title,
-                    message=f"Client: {order.client}, Deadline: {order.final_deadline}",
+            msg = f"Client: {order.client}, Deadline: {order.final_deadline}"
+
+            # Notify PM, CEO, and Owner
+            notify_roles = [
+                UserRole.PRODUCTION_MANAGER.value,
+                UserRole.CEO.value,
+                UserRole.OWNER.value,
+            ]
+            # For truly overdue orders also notify administrator
+            if days_left < 0:
+                notify_roles.append(UserRole.ADMINISTRATOR.value)
+
+            notified_users: set = set()
+            for role in notify_roles:
+                users_in_factory = (
+                    db.query(UserFactory)
+                    .join(User)
+                    .filter(
+                        UserFactory.factory_id == order.factory_id,
+                        User.role == role,
+                        User.is_active.is_(True),
+                    )
+                    .all()
                 )
-                db.add(notif)
+                for uf in users_in_factory:
+                    if uf.user_id in notified_users:
+                        continue
+                    notified_users.add(uf.user_id)
+                    db.add(Notification(
+                        user_id=uf.user_id,
+                        factory_id=order.factory_id,
+                        type=NotificationType.ALERT,
+                        title=title,
+                        message=msg,
+                    ))
 
         db.commit()
         logger.info("SLA check: %d orders flagged", len(orders))

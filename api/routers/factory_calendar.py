@@ -116,30 +116,41 @@ async def count_working_days(
     )
     override_map = {entry.date: entry.is_working_day for entry in overrides}
 
-    working = 0
+    five_day = 0
+    six_day = 0
     holidays = 0
     current = d_start
     while current <= d_end:
+        wd = current.weekday()  # 0=Mon … 6=Sun
         if current in override_map:
             if override_map[current]:
-                working += 1
+                # Explicitly marked as working — counts for both schedules
+                five_day += 1
+                six_day += 1
             else:
                 holidays += 1
         else:
-            # Default: Mon-Sat working, Sunday off
-            if current.weekday() < 6:  # 0=Mon … 5=Sat
-                working += 1
+            # Default: Mon-Fri for 5-day, Mon-Sat for 6-day
+            if wd < 5:  # Mon–Fri
+                five_day += 1
+                six_day += 1
+            elif wd == 5:  # Saturday — only 6-day
+                six_day += 1
+            # Sunday: neither
         current += timedelta(days=1)
 
     total_days = (d_end - d_start).days + 1
+    sundays = total_days - six_day - holidays  # days that are neither working (6day) nor holiday
     return {
         "factory_id": factory_id,
         "start_date": start_date,
         "end_date": end_date,
         "total_days": total_days,
-        "working_days": working,
+        "working_days": six_day,          # backward compat
+        "working_days_5day": five_day,
+        "working_days_6day": six_day,
         "holidays": holidays,
-        "sundays": total_days - working - holidays,
+        "sundays": sundays,
     }
 
 

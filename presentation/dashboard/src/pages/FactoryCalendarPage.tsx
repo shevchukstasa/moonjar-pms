@@ -550,10 +550,19 @@ export default function FactoryCalendarPage() {
         <Card>
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-6">
-              <div className="text-center">
-                <p className="text-2xl font-bold text-emerald-700">{workingDaysData.working_days}</p>
+              {/* 5-day schedule */}
+              <div className="text-center border-r border-gray-200 pr-6">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">5-Day Schedule</p>
+                <p className="text-2xl font-bold text-emerald-700">{workingDaysData.working_days_5day ?? workingDaysData.working_days}</p>
                 <p className="text-xs text-gray-500">Working Days</p>
               </div>
+              {/* 6-day schedule */}
+              <div className="text-center border-r border-gray-200 pr-6">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">6-Day Schedule</p>
+                <p className="text-2xl font-bold text-blue-600">{workingDaysData.working_days_6day ?? workingDaysData.working_days}</p>
+                <p className="text-xs text-gray-500">Working Days</p>
+              </div>
+              {/* Common stats */}
               <div className="text-center">
                 <p className="text-2xl font-bold text-red-600">{workingDaysData.holidays}</p>
                 <p className="text-xs text-gray-500">Holidays</p>

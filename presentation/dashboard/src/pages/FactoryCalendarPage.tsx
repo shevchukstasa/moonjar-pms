@@ -471,6 +471,7 @@ export default function FactoryCalendarPage() {
               const dateObj = new Date(year, month - 1, day);
               const dow = (dateObj.getDay() + 6) % 7; // 0=Mon, 6=Sun
               const isSunday = dow === 6;
+              const isSaturday = dow === 5;
               const entry = entryMap.get(dateStr);
               const isToday = dateStr === todayISO;
 
@@ -495,6 +496,10 @@ export default function FactoryCalendarPage() {
                 bgClass = 'bg-gray-100 hover:bg-gray-200 border-gray-300';
                 textClass = 'text-gray-500';
                 statusLabel = 'Sunday (default off)';
+              } else if (isSaturday) {
+                bgClass = 'bg-blue-50 hover:bg-blue-100 border-blue-200';
+                textClass = 'text-blue-700';
+                statusLabel = 'Saturday (5-day: off, 6-day: working)';
               } else {
                 bgClass = 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200';
                 textClass = 'text-emerald-800';
@@ -515,8 +520,12 @@ export default function FactoryCalendarPage() {
                       {entry.holiday_name}
                     </span>
                   )}
-                  {isSunday && !entry && (
-                    <span className="mt-0.5 text-[10px] text-gray-400">Sun</span>
+                  {/* Always show Sun label on Sundays, even when it's also a holiday */}
+                  {isSunday && (
+                    <span className={`mt-0.5 text-[10px] ${entry && !entry.is_working_day ? 'text-red-400' : 'text-gray-400'}`}>Sun</span>
+                  )}
+                  {isSaturday && !entry && (
+                    <span className="mt-0.5 text-[10px] text-blue-400">Sat</span>
                   )}
                 </button>
               );
@@ -579,6 +588,9 @@ export default function FactoryCalendarPage() {
             <div className="flex gap-3 text-xs text-gray-500">
               <span className="flex items-center gap-1">
                 <span className="inline-block h-3 w-3 rounded bg-emerald-100 border border-emerald-300" /> Working
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-3 w-3 rounded bg-blue-50 border border-blue-200" /> Saturday
               </span>
               <span className="flex items-center gap-1">
                 <span className="inline-block h-3 w-3 rounded bg-red-100 border border-red-300" /> Holiday

@@ -1811,18 +1811,30 @@ async def lifespan(app: FastAPI):
 
     # Inline patches (too small for separate files)
 
-    # Drop legacy trigger that updates materials.balance (wrong table — should be material_stocks)
+    # Drop ALL legacy triggers on material_transactions that update materials.balance
     try:
         raw = engine.raw_connection()
         raw.set_session(autocommit=True)
         cur = raw.cursor()
-        cur.execute("DROP TRIGGER IF EXISTS trg_update_material_balance ON material_transactions")
-        cur.execute("DROP FUNCTION IF EXISTS fn_update_material_balance()")
+        # Find and drop all triggers on material_transactions
+        cur.execute("""
+            SELECT tgname FROM pg_trigger
+            WHERE tgrelid = 'material_transactions'::regclass
+            AND NOT tgisinternal
+        """)
+        triggers = cur.fetchall()
+        for (tname,) in triggers:
+            cur.execute(f"DROP TRIGGER IF EXISTS {tname} ON material_transactions")
+            logger.info("Dropped trigger: %s", tname)
+        # Also drop common function names
+        for fn in ('fn_update_material_balance', 'update_material_balance',
+                    'trg_material_balance_fn', 'material_balance_trigger'):
+            cur.execute(f"DROP FUNCTION IF EXISTS {fn}() CASCADE")
         cur.close()
         raw.close()
-        logger.info("Legacy material balance trigger dropped")
+        logger.info("Legacy material triggers cleanup done")
     except Exception as e:
-        logger.debug("Drop legacy trigger: %s", e)
+        logger.warning("Drop legacy triggers: %s", e)
 
     # Add missing enum values to PostgreSQL enums
     def _enum_values_patch(conn):

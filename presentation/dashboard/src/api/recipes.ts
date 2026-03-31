@@ -16,6 +16,7 @@ export interface RecipeItem {
   color_collection: string | null;
   description: string | null;
   recipe_type: string;
+  engobe_type: string | null;  // 'standard' | 'shelf_coating' | 'hole_filler' — only for engobe recipes
   color_type: string | null;
   client_name: string | null;
   specific_gravity: number | null;

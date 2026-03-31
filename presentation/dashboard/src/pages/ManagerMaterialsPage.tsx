@@ -1090,7 +1090,9 @@ function MaterialsTable({ items, subgroups, isAggregate, isPM, hideNames, canDel
             <th className="px-4 py-3">Code</th>
             {!hideNames && <th className="px-4 py-3">Name</th>}
             <th className="px-4 py-3">Type</th>
-            <th className="px-4 py-3 text-right">Balance</th>
+            <th className="px-4 py-3 text-right">Total</th>
+            <th className="px-4 py-3 text-right text-blue-600">Reserved</th>
+            <th className="px-4 py-3 text-right text-emerald-600">Available</th>
             <th className="px-4 py-3 text-right">Min</th>
             <th className="px-4 py-3">Unit</th>
             {!hideNames && <th className="px-4 py-3">Supplier</th>}
@@ -1109,8 +1111,14 @@ function MaterialsTable({ items, subgroups, isAggregate, isPM, hideNames, canDel
                   {typeIcon(m.material_type)} {typeLabel(m.material_type)}
                 </span>
               </td>
-              <td className={`px-4 py-3 text-right font-mono font-semibold ${m.is_low_stock ? 'text-red-600' : 'text-gray-900'}`}>
+              <td className="px-4 py-3 text-right font-mono text-gray-500">
                 {Number(m.balance).toFixed(3)}
+              </td>
+              <td className="px-4 py-3 text-right font-mono text-blue-600">
+                {(m.reserved_qty ?? 0) > 0 ? Number(m.reserved_qty).toFixed(3) : <span className="text-gray-300">—</span>}
+              </td>
+              <td className={`px-4 py-3 text-right font-mono font-semibold ${m.is_low_stock ? 'text-red-600' : 'text-emerald-700'}`}>
+                {Number(m.available_qty ?? m.balance).toFixed(3)}
               </td>
               <td className="px-4 py-3 text-right font-mono text-gray-500">
                 {Number(m.min_balance).toFixed(3)}
@@ -1128,7 +1136,7 @@ function MaterialsTable({ items, subgroups, isAggregate, isPM, hideNames, canDel
               )}
               <td className="px-4 py-3">
                 {m.is_low_stock ? (
-                  <Badge status="error" label={`Deficit: ${(Number(m.min_balance) - Number(m.balance)).toFixed(1)} ${m.unit}`} />
+                  <Badge status="error" label={`Deficit: ${(Number(m.min_balance) - Number(m.available_qty ?? m.balance)).toFixed(1)} ${m.unit}`} />
                 ) : (
                   <Badge status="active" label="OK" />
                 )}

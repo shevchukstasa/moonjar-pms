@@ -19,6 +19,8 @@ export interface MaterialItem {
   name: string;
   factory_id: string | null;
   balance: number;
+  reserved_qty: number;
+  available_qty: number;
   min_balance: number;
   min_balance_recommended: number | null;
   min_balance_auto: boolean;

@@ -78,7 +78,7 @@ def _next_material_code(db: Session) -> str:
     return f"M-{next_num:04d}"
 
 
-def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session) -> dict:
+def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session, reserved_qty: float = 0.0) -> dict:
     """Serialize catalog Material + optional per-factory MaterialStock into flat dict."""
     supplier_name = None
     if mat.supplier_id:
@@ -87,6 +87,7 @@ def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session)
 
     balance = float(stock.balance or 0) if stock else 0
     min_bal = float(stock.min_balance or 0) if stock else 0
+    available = round(max(0.0, balance - reserved_qty), 3)
 
     # Subgroup / group info
     subgroup_id = None
@@ -106,6 +107,8 @@ def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session)
         "name": mat.name,
         "factory_id": str(stock.factory_id) if stock else None,
         "balance": balance,
+        "reserved_qty": round(reserved_qty, 3),
+        "available_qty": available,
         "min_balance": min_bal,
         "min_balance_recommended": float(stock.min_balance_recommended) if stock and stock.min_balance_recommended else None,
         "min_balance_auto": stock.min_balance_auto if stock else True,
@@ -121,13 +124,13 @@ def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session)
         "supplier_id": str(mat.supplier_id) if mat.supplier_id else None,
         "supplier_name": supplier_name,
         "size_id": str(mat.size_id) if mat.size_id else None,
-        "is_low_stock": balance < min_bal if min_bal > 0 else False,
+        "is_low_stock": available < min_bal if min_bal > 0 else False,
         "created_at": mat.created_at.isoformat() if mat.created_at else None,
         "updated_at": (stock.updated_at if stock else mat.updated_at).isoformat() if (stock or mat) else None,
     }
 
 
-def _serialize_material_aggregate(mat: Material, stocks: list[MaterialStock], db: Session) -> dict:
+def _serialize_material_aggregate(mat: Material, stocks: list[MaterialStock], db: Session, reserved_qty: float = 0.0) -> dict:
     """Serialize catalog Material with aggregated data from ALL factory stocks."""
     supplier_name = None
     if mat.supplier_id:
@@ -136,6 +139,7 @@ def _serialize_material_aggregate(mat: Material, stocks: list[MaterialStock], db
 
     total_balance = sum(float(s.balance or 0) for s in stocks)
     total_min_bal = sum(float(s.min_balance or 0) for s in stocks)
+    available = round(max(0.0, total_balance - reserved_qty), 3)
     is_low = any(
         float(s.balance or 0) < float(s.min_balance or 0) and float(s.min_balance or 0) > 0
         for s in stocks
@@ -158,6 +162,8 @@ def _serialize_material_aggregate(mat: Material, stocks: list[MaterialStock], db
         "name": mat.name,
         "factory_id": None,  # aggregate mode
         "balance": total_balance,
+        "reserved_qty": round(reserved_qty, 3),
+        "available_qty": available,
         "min_balance": total_min_bal,
         "min_balance_recommended": None,
         "min_balance_auto": True,
@@ -317,8 +323,22 @@ async def list_materials(
         for s in all_stocks:
             stocks_map.setdefault(s.material_id, []).append(s)
 
+        # Bulk-load reserved amounts (net reserve - unreserve per material)
+        from sqlalchemy import func, case as sa_case
+        agg_reserved = db.query(
+            MaterialTransaction.material_id,
+            func.sum(sa_case(
+                (MaterialTransaction.type == 'reserve', MaterialTransaction.quantity),
+                else_=-MaterialTransaction.quantity,
+            )).label('net_reserved'),
+        ).filter(
+            MaterialTransaction.material_id.in_(mat_ids),
+            MaterialTransaction.type.in_(['reserve', 'unreserve']),
+        ).group_by(MaterialTransaction.material_id).all()
+        reserved_map_agg: dict = {str(r.material_id): max(0.0, float(r.net_reserved or 0)) for r in agg_reserved}
+
         items = [
-            _serialize_material_aggregate(mat, stocks_map.get(mat.id, []), db)
+            _serialize_material_aggregate(mat, stocks_map.get(mat.id, []), db, reserved_qty=reserved_map_agg.get(str(mat.id), 0.0))
             for mat in mats
         ]
 
@@ -351,8 +371,37 @@ async def list_materials(
     total = query.count()
     items = query.order_by(Material.name).offset((page - 1) * per_page).limit(per_page).all()
 
+    # Bulk-load reserved amounts (net reserve - unreserve per material+factory)
+    from sqlalchemy import func, case as sa_case
+    mat_ids_pf = [mat.id for mat, stock in items if stock]
+    factory_ids_pf = list({stock.factory_id for mat, stock in items if stock})
+    reserved_rows = db.query(
+        MaterialTransaction.material_id,
+        MaterialTransaction.factory_id,
+        func.sum(sa_case(
+            (MaterialTransaction.type == 'reserve', MaterialTransaction.quantity),
+            else_=-MaterialTransaction.quantity,
+        )).label('net_reserved'),
+    ).filter(
+        MaterialTransaction.material_id.in_(mat_ids_pf),
+        MaterialTransaction.factory_id.in_(factory_ids_pf),
+        MaterialTransaction.type.in_(['reserve', 'unreserve']),
+    ).group_by(
+        MaterialTransaction.material_id, MaterialTransaction.factory_id,
+    ).all() if mat_ids_pf else []
+    reserved_map_pf: dict = {
+        (str(r.material_id), str(r.factory_id)): max(0.0, float(r.net_reserved or 0))
+        for r in reserved_rows
+    }
+
     return {
-        "items": [_serialize_material(mat, stock, db) for mat, stock in items],
+        "items": [
+            _serialize_material(
+                mat, stock, db,
+                reserved_qty=reserved_map_pf.get((str(mat.id), str(stock.factory_id) if stock else ''), 0.0),
+            )
+            for mat, stock in items
+        ],
         "total": total,
         "page": page,
         "per_page": per_page,

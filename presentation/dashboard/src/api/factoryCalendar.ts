@@ -28,6 +28,8 @@ export interface WorkingDaysResponse {
   end_date: string;
   total_days: number;
   working_days: number;
+  working_days_5day: number;
+  working_days_6day: number;
   holidays: number;
   sundays: number;
 }

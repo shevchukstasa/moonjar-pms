@@ -1579,16 +1579,18 @@ async def delete_transaction(
     if not txn:
         raise HTTPException(404, "Transaction not found")
 
-    # Reverse stock effect
+    # Reverse stock effect — ALL balance-affecting types
     stock = db.query(MaterialStock).filter(
         MaterialStock.material_id == txn.material_id,
         MaterialStock.factory_id == txn.factory_id,
     ).first()
     if stock:
-        if txn.type in ("receive",):
+        if txn.type == "receive":
             stock.balance -= txn.quantity
-        elif txn.type in ("manual_write_off",):
+        elif txn.type in ("consume", "manual_write_off"):
             stock.balance += txn.quantity
+        elif txn.type == "inventory":
+            stock.balance -= txn.quantity  # reverse the delta
         stock.updated_at = datetime.now(timezone.utc)
 
     db.delete(txn)

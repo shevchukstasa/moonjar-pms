@@ -1811,6 +1811,19 @@ async def lifespan(app: FastAPI):
 
     # Inline patches (too small for separate files)
 
+    # Drop legacy trigger that updates materials.balance (wrong table — should be material_stocks)
+    try:
+        raw = engine.raw_connection()
+        raw.set_session(autocommit=True)
+        cur = raw.cursor()
+        cur.execute("DROP TRIGGER IF EXISTS trg_update_material_balance ON material_transactions")
+        cur.execute("DROP FUNCTION IF EXISTS fn_update_material_balance()")
+        cur.close()
+        raw.close()
+        logger.info("Legacy material balance trigger dropped")
+    except Exception as e:
+        logger.debug("Drop legacy trigger: %s", e)
+
     # Add missing enum values to PostgreSQL enums
     def _enum_values_patch(conn):
         for stmt in [

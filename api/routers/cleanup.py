@@ -39,11 +39,17 @@ router = APIRouter()
 
 
 def _sql_safe(db, stmt: str):
-    """Execute SQL silently, skip on error (table/column may not exist)."""
+    """Execute SQL in savepoint — skip on error without corrupting transaction."""
     from sqlalchemy import text as sa_text
     try:
+        nested = db.begin_nested()
         db.execute(sa_text(stmt))
+        nested.commit()
     except Exception as e:
+        try:
+            nested.rollback()
+        except Exception:
+            pass
         logger.debug("Cleanup SQL skip: %s", str(e)[:100])
 
 

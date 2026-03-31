@@ -1464,8 +1464,8 @@ async def create_transaction(
         except ValueError as e:
             raise HTTPException(400, str(e))
         except Exception as e:
-            _logger.error("Warehouse receive_material failed: %s", e)
-            raise HTTPException(500, "Material receiving failed")
+            _logger.error("Warehouse receive_material failed: %s", e, exc_info=True)
+            raise HTTPException(500, f"Material receiving failed: {str(e)[:200]}")
 
     if data.type != "receive":
         stock.updated_at = datetime.now(timezone.utc)

@@ -2,7 +2,7 @@
 Daily Task Distribution service.
 Business Logic: §11, §34
 
-Generates tomorrow's task list per factory, formats as Telegram message,
+Generates today's task list per factory (morning briefing), formats as Telegram message,
 sends to masters group chat, and saves record to daily_task_distributions table.
 """
 from uuid import UUID
@@ -68,10 +68,10 @@ DEFAULT_ROPE_MAX_POSITIONS = 20
 # ────────────────────────────────────────────────────────────────
 
 def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
-    """Generate tomorrow's task distribution for a factory.
+    """Generate today's task distribution for a factory (morning briefing).
 
-    1. Collects glazing positions eligible for tomorrow
-    2. Collects planned kiln batches for tomorrow
+    1. Collects glazing positions eligible for today
+    2. Collects planned kiln batches for today
     3. Checks for overdue/urgent orders
     4. Computes yesterday's KPI snapshot
     5. Saves distribution record
@@ -84,12 +84,12 @@ def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
         logger.error("Factory %s not found", factory_id)
         return {}
 
-    tomorrow = date.today() + timedelta(days=1)
+    target_date = date.today()
 
     # --- Build distribution ---
-    glazing_tasks = _collect_glazing_tasks(db, factory_id, tomorrow)
-    kiln_prep_tasks = _collect_kiln_prep_tasks(db, factory_id, tomorrow)
-    kiln_loading = _collect_kiln_loading(db, factory_id, tomorrow)
+    glazing_tasks = _collect_glazing_tasks(db, factory_id, target_date)
+    kiln_prep_tasks = _collect_kiln_prep_tasks(db, factory_id, target_date)
+    kiln_loading = _collect_kiln_loading(db, factory_id, target_date)
     urgent_alerts = _collect_urgent_alerts(db, factory_id)
 
     # Count urgent (behind schedule) positions
@@ -106,7 +106,7 @@ def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
     distribution = {
         "factory_id": str(factory_id),
         "factory_name": factory.name,
-        "distribution_date": tomorrow.isoformat(),
+        "distribution_date": target_date.isoformat(),
         "glazing_tasks": glazing_tasks,
         "kiln_prep_tasks": kiln_prep_tasks,
         "kiln_loading": kiln_loading,
@@ -117,7 +117,7 @@ def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
     }
 
     # --- Persist to daily_task_distributions ---
-    _save_distribution_record(db, factory_id, tomorrow, distribution)
+    _save_distribution_record(db, factory_id, target_date, distribution)
 
     # --- Send Telegram message with inline buttons ---
     language = factory.telegram_language or "id"
@@ -155,7 +155,7 @@ def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
         except Exception as e:
             logger.warning("AI daily insight failed (non-fatal): %s", e)
         chat_id = str(factory.masters_group_chat_id)
-        date_str = tomorrow.isoformat()
+        date_str = target_date.isoformat()
         fid = str(factory_id)
 
         # Compact callback_data (must be <= 64 bytes):
@@ -177,7 +177,7 @@ def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
                 telegram_message_id = result.get("message_id")
             # Store message_id on the distribution record
             if telegram_message_id:
-                _update_distribution_message_id(db, factory_id, tomorrow, telegram_message_id)
+                _update_distribution_message_id(db, factory_id, target_date, telegram_message_id)
             logger.info(
                 "Daily distribution sent to factory %s (chat %s, msg_id=%s)",
                 factory.name, factory.masters_group_chat_id, telegram_message_id,
@@ -200,21 +200,22 @@ def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
 # §2  Glazing tasks collection
 # ────────────────────────────────────────────────────────────────
 
-def get_glazing_positions_for_tomorrow(db: Session, factory_id: UUID) -> list:
+def get_glazing_positions_for_tomorrow(db: Session, factory_id: UUID, target_date: Optional[date] = None) -> list:
     """Get positions eligible for glazing, filtered through TOC rope limit.
 
     Filters:
       - Status in GLAZING_ELIGIBLE_STATUSES (planned, sent_to_glazing,
         engobe_applied, engobe_check)
-      - planned_glazing_date <= tomorrow (due or overdue for glazing)
+      - planned_glazing_date <= target_date (due or overdue for glazing)
       - Order is in active production
       - Not cancelled / not shipped
 
-    Returns list of OrderPosition objects ready for glazing work tomorrow.
+    Returns list of OrderPosition objects ready for glazing work.
     """
     from sqlalchemy import or_
 
-    tomorrow = date.today() + timedelta(days=1)
+    if target_date is None:
+        target_date = date.today()
 
     positions = (
         db.query(OrderPosition)
@@ -226,10 +227,10 @@ def get_glazing_positions_for_tomorrow(db: Session, factory_id: UUID) -> list:
                 OrderStatus.IN_PRODUCTION.value,
                 OrderStatus.PARTIALLY_READY.value,
             ]),
-            # Position is scheduled for glazing by tomorrow or has no date
+            # Position is scheduled for glazing by target_date or has no date
             # (unscheduled positions are included so they don't get lost)
             or_(
-                OrderPosition.planned_glazing_date <= tomorrow,
+                OrderPosition.planned_glazing_date <= target_date,
                 OrderPosition.planned_glazing_date.is_(None),
             ),
         )
@@ -257,13 +258,16 @@ def get_glazing_positions_for_tomorrow(db: Session, factory_id: UUID) -> list:
 
 
 def _collect_glazing_tasks(db: Session, factory_id: UUID, target_date: date) -> list:
-    """Build glazing task list for tomorrow."""
-    positions = get_glazing_positions_for_tomorrow(db, factory_id)
+    """Build glazing task list for the target date."""
+    positions = get_glazing_positions_for_tomorrow(db, factory_id, target_date)
     tasks = []
 
     for pos in positions:
         order = pos.order
         recipe = pos.recipe
+        # Fallback: if recipe_id is set but relationship not loaded, query directly
+        if recipe is None and pos.recipe_id:
+            recipe = db.query(Recipe).filter(Recipe.id == pos.recipe_id).first()
 
         # Estimate glaze quantity (kg)
         glaze_qty_kg = _estimate_glaze_qty_kg(pos, recipe)
@@ -447,7 +451,7 @@ def _collect_kiln_prep_tasks(db: Session, factory_id: UUID, target_date: date) -
     """Collect positions ready for kiln preparation (GLAZED / PRE_KILN_CHECK).
 
     These are positions that have been glazed and need to be prepared
-    for kiln loading by tomorrow.
+    for kiln loading by the target date.
     """
     from sqlalchemy import or_
 
@@ -505,7 +509,7 @@ def _collect_kiln_prep_tasks(db: Session, factory_id: UUID, target_date: date) -
 # ────────────────────────────────────────────────────────────────
 
 def _collect_kiln_loading(db: Session, factory_id: UUID, target_date: date) -> list:
-    """Collect planned kiln batches for tomorrow."""
+    """Collect planned kiln batches for the target date."""
     batches = (
         db.query(Batch)
         .join(Resource, Batch.resource_id == Resource.id)
@@ -644,7 +648,11 @@ def _collect_urgent_alerts(db: Session, factory_id: UUID) -> list:
 
     for task in blocking_tasks:
         order = task.related_order
-        order_num = order.order_number if order else "???"
+        if not order and task.related_position_id:
+            pos = db.query(OrderPosition).filter(OrderPosition.id == task.related_position_id).first()
+            if pos:
+                order = db.query(ProductionOrder).filter(ProductionOrder.id == pos.order_id).first()
+        order_num = order.order_number if order else f"Task #{str(task.id)[:8]}"
         task_label = task.type.replace("_", " ").title() if isinstance(task.type, str) else task.type.value.replace("_", " ").title()
         alerts.append({
             "order": order_num,
@@ -693,20 +701,24 @@ def _compute_kpi_yesterday(db: Session, factory_id: UUID) -> dict:
     if processed > 0:
         defect_rate = round((defects / processed) * 100, 1)
 
-    # Kiln utilization: batches done yesterday / total kiln slots yesterday
-    batches_done = db.query(sa_func.count(Batch.id)).filter(
+    # Kiln utilization: average fill percentage from completed batches yesterday
+    done_batches = db.query(Batch).filter(
         Batch.factory_id == factory_id,
         Batch.status == BatchStatus.DONE.value,
         Batch.batch_date == yesterday,
-    ).scalar() or 0
+    ).all()
+    batches_done = len(done_batches)
 
-    total_kilns = db.query(sa_func.count(Resource.id)).filter(
-        Resource.factory_id == factory_id,
-        Resource.resource_type == ResourceType.KILN.value,
-        Resource.is_active.is_(True),
-    ).scalar() or 1
-
-    kiln_utilization = round((batches_done / max(total_kilns, 1)) * 100, 1)
+    if done_batches:
+        fill_pcts = []
+        for b in done_batches:
+            meta = b.metadata_json or {}
+            pct = meta.get("kiln_utilization_pct")
+            if pct is not None:
+                fill_pcts.append(float(pct))
+        kiln_utilization = round(sum(fill_pcts) / len(fill_pcts), 1) if fill_pcts else 0
+    else:
+        kiln_utilization = 0
 
     # Orders completed yesterday
     orders_completed = db.query(sa_func.count(ProductionOrder.id)).filter(
@@ -799,16 +811,14 @@ def _update_distribution_message_id(
 # ────────────────────────────────────────────────────────────────
 
 def format_daily_message(distribution: dict, language: str = "id") -> str:
-    """Format distribution as Telegram message.
+    """Format distribution as bilingual Telegram message (English + Indonesian).
 
-    Language: 'id' = Indonesian (default), 'en' = English, 'ru' = Russian.
+    Always returns English first, then Indonesian.
     """
-    if language == "en":
-        return _format_message_en(distribution)
-    elif language == "ru":
-        return _format_message_ru(distribution)
-    else:
-        return _format_message_id(distribution)
+    en_msg = _format_message_en(distribution)
+    id_msg = _format_message_id(distribution)
+    separator = "\n\n" + "─" * 30 + "\n🇮🇩 Bahasa Indonesia:\n" + "─" * 30 + "\n\n"
+    return en_msg + separator + id_msg
 
 
 def _format_message_id(distribution: dict) -> str:
@@ -824,7 +834,7 @@ def _format_message_id(distribution: dict) -> str:
     separator = "\u2501" * 20  # ━━━━━━━━━━━━━━━━━━━━
 
     lines = [
-        f"\U0001f4cb *TUGAS BESOK \u2014 {dist_date}*",
+        f"\U0001f4cb *TUGAS HARI INI \u2014 {dist_date}*",
         f"\U0001f3ed Pabrik: {factory_name}",
     ]
 
@@ -904,16 +914,23 @@ def _format_message_id(distribution: dict) -> str:
     kpi = distribution.get("kpi_yesterday", {})
     if kpi:
         lines.append("")
+        pieces_processed = kpi.get('pieces_processed', 0)
+        if pieces_processed == 0:
+            defect_text = "Tidak ada data produksi kemarin"
+        else:
+            defect_text = (
+                f"{kpi.get('defect_rate', 0):.1f}% cacat "
+                f"({kpi.get('defect_count', 0)} pcs dari {pieces_processed})"
+            )
         lines.append(
             f"\U0001f4ca KPI kemarin: "
-            f"{kpi.get('defect_rate', 0):.1f}% cacat "
-            f"({kpi.get('defect_count', 0)} pcs dari {kpi.get('pieces_processed', 0)}) | "
+            f"{defect_text} | "
             f"Tungku {kpi.get('kiln_utilization', 0):.0f}% | "
             f"{kpi.get('orders_completed', 0)} pesanan selesai"
         )
 
     # ── Summary line ──
-    lines.append(f"\n\U0001f4ca Total: {total_positions} posisi untuk besok")
+    lines.append(f"\n\U0001f4ca Total: {total_positions} posisi untuk hari ini")
 
     return "\n".join(lines)
 
@@ -927,7 +944,7 @@ def _format_message_en(distribution: dict) -> str:
     separator = "\u2501" * 20
 
     lines = [
-        f"\U0001f4cb *TASKS FOR TOMORROW \u2014 {dist_date}*",
+        f"\U0001f4cb *TODAY'S TASKS \u2014 {dist_date}*",
         f"\U0001f3ed Factory: {factory_name}",
     ]
 
@@ -1004,15 +1021,22 @@ def _format_message_en(distribution: dict) -> str:
     kpi = distribution.get("kpi_yesterday", {})
     if kpi:
         lines.append("")
+        pieces_processed = kpi.get('pieces_processed', 0)
+        if pieces_processed == 0:
+            defect_text = "No production data yesterday"
+        else:
+            defect_text = (
+                f"{kpi.get('defect_rate', 0):.1f}% defect "
+                f"({kpi.get('defect_count', 0)} pcs of {pieces_processed})"
+            )
         lines.append(
             f"\U0001f4ca Yesterday's KPI: "
-            f"{kpi.get('defect_rate', 0):.1f}% defect "
-            f"({kpi.get('defect_count', 0)} pcs of {kpi.get('pieces_processed', 0)}) | "
+            f"{defect_text} | "
             f"Kiln {kpi.get('kiln_utilization', 0):.0f}% | "
             f"{kpi.get('orders_completed', 0)} orders completed"
         )
 
-    lines.append(f"\n\U0001f4ca Total: {total_positions} positions for tomorrow")
+    lines.append(f"\n\U0001f4ca Total: {total_positions} positions for today")
 
     return "\n".join(lines)
 
@@ -1026,7 +1050,7 @@ def _format_message_ru(distribution: dict) -> str:
     separator = "\u2501" * 20
 
     lines = [
-        f"\U0001f4cb *\u0417\u0410\u0414\u0410\u0427\u0418 \u041d\u0410 \u0417\u0410\u0412\u0422\u0420\u0410 \u2014 {dist_date}*",
+        f"\U0001f4cb *\u0417\u0410\u0414\u0410\u0427\u0418 \u041d\u0410 \u0421\u0415\u0413\u041e\u0414\u041d\u042f \u2014 {dist_date}*",
         f"\U0001f3ed \u0424\u0430\u0431\u0440\u0438\u043a\u0430: {factory_name}",
     ]
 
@@ -1103,14 +1127,21 @@ def _format_message_ru(distribution: dict) -> str:
     kpi = distribution.get("kpi_yesterday", {})
     if kpi:
         lines.append("")
+        pieces_processed = kpi.get('pieces_processed', 0)
+        if pieces_processed == 0:
+            defect_text = "\u041d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445 \u0437\u0430 \u0432\u0447\u0435\u0440\u0430"
+        else:
+            defect_text = (
+                f"{kpi.get('defect_rate', 0):.1f}% \u0431\u0440\u0430\u043a "
+                f"({kpi.get('defect_count', 0)} \u0448\u0442 \u0438\u0437 {pieces_processed})"
+            )
         lines.append(
             f"\U0001f4ca KPI \u0432\u0447\u0435\u0440\u0430: "
-            f"{kpi.get('defect_rate', 0):.1f}% \u0431\u0440\u0430\u043a "
-            f"({kpi.get('defect_count', 0)} \u0448\u0442 \u0438\u0437 {kpi.get('pieces_processed', 0)}) | "
+            f"{defect_text} | "
             f"\u041f\u0435\u0447\u044c {kpi.get('kiln_utilization', 0):.0f}% | "
             f"{kpi.get('orders_completed', 0)} \u0437\u0430\u043a\u0430\u0437\u043e\u0432 \u0433\u043e\u0442\u043e\u0432\u043e"
         )
 
-    lines.append(f"\n\U0001f4ca \u0418\u0442\u043e\u0433\u043e: {total_positions} \u043f\u043e\u0437\u0438\u0446\u0438\u0439 \u043d\u0430 \u0437\u0430\u0432\u0442\u0440\u0430")
+    lines.append(f"\n\U0001f4ca \u0418\u0442\u043e\u0433\u043e: {total_positions} \u043f\u043e\u0437\u0438\u0446\u0438\u0439 \u043d\u0430 \u0441\u0435\u0433\u043e\u0434\u043d\u044f")
 
     return "\n".join(lines)

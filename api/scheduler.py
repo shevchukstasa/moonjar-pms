@@ -793,10 +793,11 @@ async def morning_deferred_alerts():
 
 
 async def daily_task_distribution_dispatcher():
-    """Hourly dispatcher: send daily task distribution at 21:00 local time per factory.
+    """Hourly dispatcher: send daily task distribution at 07:00 local time per factory.
 
     Runs every hour at :00.  For each active factory, checks if local time
-    is 21:xx.  If so, generates and sends the daily distribution message.
+    is 07:xx.  If so, generates and sends the daily distribution message
+    with TODAY's tasks (morning briefing).
     This approach supports factories across different timezones.
     """
     import pytz
@@ -826,7 +827,7 @@ async def daily_task_distribution_dispatcher():
                 tz = pytz.timezone("Asia/Makassar")
 
             local_now = datetime.now(tz)
-            if local_now.hour == 21:
+            if local_now.hour == 7:
                 logger.info(
                     "Dispatching daily distribution for factory %s (tz=%s, local=%s)",
                     factory.name, tz_name, local_now.strftime("%H:%M"),

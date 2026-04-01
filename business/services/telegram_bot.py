@@ -858,10 +858,107 @@ async def handle_update(db: Session, update_data: dict) -> None:
             await _handle_private_text(db, message)
             return
 
+        # Group text — monitor for bug reports
+        if chat_type in ("group", "supergroup") and text:
+            await _handle_group_bug_report(db, message, text)
+            return
+
         logger.debug(f"Ignoring message type in update #{update_id}")
 
     except Exception as e:
         logger.error(f"Error handling update #{update_id}: {e}", exc_info=True)
+
+
+# ────────────────────────────────────────────────────────────────
+# Group Bug Report Monitor
+# ────────────────────────────────────────────────────────────────
+
+async def _handle_group_bug_report(db: Session, message: dict, text: str) -> None:
+    """Monitor ALL group messages — AI decides if action is needed, forwards to admin."""
+    if len(text.strip()) < 5:
+        return  # Too short to analyze
+
+    user = message.get("from", {})
+    reporter_name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or "Unknown"
+    chat_title = message.get("chat", {}).get("title", "Unknown Group")
+
+    # AI triage — decides if message needs attention
+    triage = None
+    try:
+        from business.services.telegram_ai import _call_llm
+        triage = await _call_llm(
+            system_prompt=(
+                "You are a production management assistant monitoring a factory group chat. "
+                "Analyze the message and decide if it requires ADMIN attention.\n\n"
+                "Categories:\n"
+                "- BUG: software error, UI problem, wrong calculation, crash\n"
+                "- ISSUE: production problem, material shortage, quality concern, process blocker\n"
+                "- REQUEST: feature request, change request, improvement suggestion\n"
+                "- INFO: general information, status update, question — NO action needed\n"
+                "- CHAT: casual conversation, greetings, thank you — NO action needed\n\n"
+                "Respond in JSON format ONLY:\n"
+                '{"category": "BUG|ISSUE|REQUEST|INFO|CHAT", "needs_action": true/false, '
+                '"severity": "critical|high|medium|low|none", '
+                '"summary_en": "brief English summary", '
+                '"suggested_action": "what should be done"}\n\n'
+                "If category is INFO or CHAT, set needs_action=false."
+            ),
+            user_message=f"Message from {reporter_name} in {chat_title}:\n\n{text}",
+            max_tokens=200,
+        )
+    except Exception as e:
+        logger.warning("Group message AI triage failed: %s", e)
+        return  # If AI unavailable, don't spam admin
+
+    if not triage:
+        return
+
+    # Parse AI response
+    import json as _json
+    try:
+        result = _json.loads(triage)
+    except (ValueError, TypeError):
+        # Try to extract JSON from text
+        import re
+        match = re.search(r'\{.*\}', triage, re.DOTALL)
+        if match:
+            try:
+                result = _json.loads(match.group())
+            except (ValueError, TypeError):
+                return
+        else:
+            return
+
+    needs_action = result.get("needs_action", False)
+    if not needs_action:
+        return  # AI says no action needed
+
+    category = result.get("category", "INFO")
+    severity = result.get("severity", "low")
+    summary = result.get("summary_en", text[:100])
+    action = result.get("suggested_action", "Review needed")
+
+    # Category emoji
+    emoji = {"BUG": "🔴", "ISSUE": "🟡", "REQUEST": "🔵"}.get(category, "⚪")
+
+    safe_text = text[:500].replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
+
+    admin_message = (
+        f"{emoji} *{category}* ({severity})\n\n"
+        f"👤 {reporter_name} in {chat_title}\n"
+        f"📝 _{safe_text}_\n\n"
+        f"🤖 *Summary:* {summary}\n"
+        f"💡 *Action:* {action}"
+    )
+
+    settings = get_settings()
+    admin_chat = settings.TELEGRAM_OWNER_CHAT_ID or "452576610"
+
+    try:
+        await _send_message(int(admin_chat), admin_message, parse_mode="Markdown")
+        logger.info("Bug report forwarded to admin from %s: %s", reporter_name, text[:100])
+    except Exception as e:
+        logger.error("Failed to forward bug report to admin: %s", e)
 
 
 async def handle_command(db: Session, message: dict) -> None:

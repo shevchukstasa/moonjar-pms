@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_OWNER_CHAT_ID: str = ""
 
+    # Telegram Forum Group (topics/threads)
+    TELEGRAM_FORUM_GROUP_ID: str = ""  # Group chat ID with forum enabled
+    TELEGRAM_FORUM_TOPIC_DAILY: int = 0  # message_thread_id for #daily-briefing
+    TELEGRAM_FORUM_TOPIC_GLAZING: int = 0  # #glazing
+    TELEGRAM_FORUM_TOPIC_KILN: int = 0  # #kiln
+    TELEGRAM_FORUM_TOPIC_QUALITY: int = 0  # #quality
+    TELEGRAM_FORUM_TOPIC_MATERIALS: int = 0  # #materials
+    TELEGRAM_FORUM_TOPIC_ACHIEVEMENTS: int = 0  # #achievements
+    TELEGRAM_FORUM_TOPIC_GENERAL: int = 0  # #general (default)
+
     # Public API URL (for Telegram webhook registration, etc.)
     # Auto-detected from RAILWAY_PUBLIC_DOMAIN if not set explicitly.
     API_BASE_URL: str = ""

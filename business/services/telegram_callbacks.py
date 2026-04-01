@@ -70,6 +70,12 @@ def handle_callback(db: Session, callback_query: dict) -> str:
             return _handle_alert_callback(db, callback_query, parts)
         elif action == "t":
             return _handle_task_callback(db, callback_query, parts)
+        elif action == "pos":
+            return _handle_position_detail(db, callback_query, parts)
+        elif action == "done":
+            return _handle_mark_done(db, callback_query, parts)
+        elif action == "prob":
+            return _handle_report_problem(db, callback_query, parts)
         else:
             logger.warning("Unknown callback action: %s", data)
             return "Aksi tidak dikenal"
@@ -642,3 +648,189 @@ def _notify_pm_problem_report(
         )
     except Exception as e:
         logger.warning("Failed to notify PM about problem report: %s", e)
+
+
+# ────────────────────────────────────────────────────────────────
+# Position detail / Mark Done / Report Problem callbacks
+# ────────────────────────────────────────────────────────────────
+
+def _handle_position_detail(db: Session, cq: dict, parts: list[str]) -> str:
+    """Show detailed position info with recipe and materials.
+    Callback: pos:{position_id_8chars}
+    """
+    from api.models import Recipe, RecipeMaterial, Material
+    from business.services.notifications import send_telegram_message
+
+    if len(parts) < 2:
+        return "Invalid"
+
+    pid_prefix = parts[1]
+    chat_id = cq.get("message", {}).get("chat", {}).get("id")
+    if not chat_id:
+        return "No chat"
+
+    pos = _find_position_by_prefix(db, pid_prefix)
+    if not pos:
+        send_telegram_message(chat_id, "❌ Position not found")
+        return "Not found"
+
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == pos.order_id).first()
+
+    # Build detail card
+    msg = f"📋 *Position #{pos.position_number}* — {pos.color}\n"
+    msg += "──────────────────\n"
+    msg += f"📐 Size: {pos.size}"
+    if pos.shape:
+        shape_val = pos.shape if isinstance(pos.shape, str) else pos.shape.value
+        msg += f" | Shape: {shape_val}"
+    msg += "\n"
+    msg += f"🎨 Color: {pos.color}"
+    if pos.collection:
+        msg += f" | {pos.collection}"
+    msg += "\n"
+    msg += f"📊 Qty: {pos.quantity} pcs"
+    if pos.quantity_sqm:
+        msg += f" | {float(pos.quantity_sqm):.3f} m²"
+    msg += "\n"
+    msg += f"🔥 Thickness: {float(pos.thickness_mm or 11)} mm\n"
+    if pos.edge_profile:
+        ep = pos.edge_profile if isinstance(pos.edge_profile, str) else pos.edge_profile
+        msg += f"📏 Edge: {ep}"
+        if pos.edge_profile_sides:
+            msg += f" ({pos.edge_profile_sides} sides)"
+        msg += "\n"
+    status_val = pos.status if isinstance(pos.status, str) else pos.status.value
+    msg += f"📌 Status: {status_val}\n"
+    if order:
+        msg += f"📦 Order: {order.order_number}\n"
+
+    # Recipe details
+    if pos.recipe_id:
+        recipe = db.query(Recipe).filter(Recipe.id == pos.recipe_id).first()
+        if recipe:
+            msg += f"\n📖 *RECIPE: {recipe.name}*\n"
+            rms = db.query(RecipeMaterial).filter(RecipeMaterial.recipe_id == recipe.id).all()
+            for rm in rms:
+                material = db.query(Material).filter(Material.id == rm.material_id).first()
+                if not material:
+                    continue
+                try:
+                    from business.services.material_reservation import _calculate_required
+                    from api.unit_conversion import get_calculation_unit, convert_to_stock_unit
+                    from decimal import Decimal
+                    req_calc = _calculate_required(rm, pos, recipe=recipe, db=db)
+                    calc_unit = get_calculation_unit(rm.unit)
+                    stock_unit = (material.unit or "pcs").lower().strip()
+                    sg = recipe.specific_gravity if recipe else None
+                    req = float(convert_to_stock_unit(Decimal(str(req_calc)), calc_unit, stock_unit, specific_gravity=sg))
+                    msg += f"  • {material.name}: {req:.3f} {material.unit}\n"
+                except Exception:
+                    msg += f"  • {material.name}: {rm.quantity_per_unit} ({rm.unit})\n"
+            if recipe.specific_gravity:
+                msg += f"  SG: {float(recipe.specific_gravity)}\n"
+    else:
+        msg += "\n⚠️ No recipe assigned\n"
+
+    # Buttons
+    pid8 = str(pos.id)[:8]
+    buttons = {
+        "inline_keyboard": [[
+            {"text": "✅ Mark Done", "callback_data": f"done:{pid8}"},
+            {"text": "⚠️ Problem", "callback_data": f"prob:{pid8}"},
+        ]]
+    }
+
+    send_telegram_message(chat_id, msg, parse_mode="Markdown", reply_markup=buttons)
+    return "Details shown"
+
+
+def _handle_mark_done(db: Session, cq: dict, parts: list[str]) -> str:
+    """Advance position to next status.
+    Callback: done:{position_id_8chars}
+    """
+    from datetime import datetime, timezone
+    from business.services.notifications import send_telegram_message
+
+    if len(parts) < 2:
+        return "Invalid"
+
+    pid_prefix = parts[1]
+    chat_id = cq.get("message", {}).get("chat", {}).get("id")
+    pos = _find_position_by_prefix(db, pid_prefix)
+    if not pos:
+        if chat_id:
+            send_telegram_message(chat_id, "❌ Position not found")
+        return "Not found"
+
+    # Status advance map
+    _ADVANCE = {
+        'planned': 'glazed',
+        'engobe_applied': 'engobe_check',
+        'engobe_check': 'glazed',
+        'glazed': 'pre_kiln_check',
+        'pre_kiln_check': 'loaded_in_kiln',
+        'transferred_to_sorting': 'packed',
+        'packed': 'sent_to_quality_check',
+        'sent_to_quality_check': 'quality_check_done',
+        'quality_check_done': 'ready_for_shipment',
+    }
+
+    current = pos.status if isinstance(pos.status, str) else pos.status.value
+    next_status = _ADVANCE.get(current)
+
+    if not next_status:
+        if chat_id:
+            send_telegram_message(chat_id, f"⚠️ Cannot advance from: {current}")
+        return f"No advance from {current}"
+
+    try:
+        from api.enums import PositionStatus
+        pos.status = PositionStatus(next_status)
+        pos.updated_at = datetime.now(timezone.utc)
+        db.commit()
+
+        if chat_id:
+            send_telegram_message(
+                chat_id,
+                f"✅ *Done!* Position #{pos.position_number} ({pos.color})\n"
+                f"{current} → {next_status}\n\n"
+                f"🎉 Great work!",
+                parse_mode="Markdown",
+            )
+        return f"Advanced to {next_status}"
+    except Exception as e:
+        db.rollback()
+        logger.error("Mark done failed: %s", e)
+        if chat_id:
+            send_telegram_message(chat_id, f"❌ Error: {str(e)[:100]}")
+        return "Error"
+
+
+def _handle_report_problem(db: Session, cq: dict, parts: list[str]) -> str:
+    """Report problem with a position.
+    Callback: prob:{position_id_8chars}
+    """
+    from business.services.notifications import send_telegram_message
+
+    if len(parts) < 2:
+        return "Invalid"
+
+    pid_prefix = parts[1]
+    chat_id = cq.get("message", {}).get("chat", {}).get("id")
+    pos = _find_position_by_prefix(db, pid_prefix)
+
+    if not pos:
+        if chat_id:
+            send_telegram_message(chat_id, "❌ Position not found")
+        return "Not found"
+
+    if chat_id:
+        send_telegram_message(
+            chat_id,
+            f"📝 *Report Problem*\n\n"
+            f"Position #{pos.position_number} — {pos.color} ({pos.size})\n\n"
+            f"Please send a text message describing the problem.\n"
+            f"Include: what happened, when, any photos if possible.",
+            parse_mode="Markdown",
+        )
+    return "Problem report started"

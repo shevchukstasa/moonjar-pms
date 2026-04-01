@@ -827,6 +827,8 @@ async def daily_task_distribution_dispatcher():
                 tz = pytz.timezone("Asia/Makassar")
 
             local_now = datetime.now(tz)
+
+            # Morning briefing at 7:00 AM local
             if local_now.hour == 7:
                 logger.info(
                     "Dispatching daily distribution for factory %s (tz=%s, local=%s)",
@@ -841,11 +843,86 @@ async def daily_task_distribution_dispatcher():
                         factory.name, e,
                     )
 
+            # Evening summary at 6:00 PM local
+            if local_now.hour == 18:
+                try:
+                    _send_evening_summary(db, factory)
+                except Exception as e:
+                    logger.error("Evening summary failed for %s: %s", factory.name, e)
+
         logger.info("Daily distribution dispatcher: %d factories dispatched", dispatched)
     except Exception as e:
         logger.error("Daily distribution dispatcher failed: %s", e)
     finally:
         db.close()
+
+
+def _send_evening_summary(db, factory):
+    """Send end-of-day summary to factory team."""
+    from api.models import OrderPosition, ProductionOrder, UserStreak, DailyChallenge
+    from api.enums import PositionStatus, OrderStatus
+    from business.services.notifications import send_telegram_message, get_forum_topic
+    from datetime import date as date_cls, time as time_cls
+
+    today = date_cls.today()
+    today_start = datetime.combine(today, time_cls.min).replace(tzinfo=timezone.utc)
+
+    # Count positions processed today
+    done_statuses = [
+        PositionStatus.GLAZED.value, PositionStatus.FIRED.value,
+        PositionStatus.TRANSFERRED_TO_SORTING.value, PositionStatus.PACKED.value,
+        PositionStatus.QUALITY_CHECK_DONE.value, PositionStatus.READY_FOR_SHIPMENT.value,
+        PositionStatus.SHIPPED.value,
+    ]
+    done_today = db.query(func.count(OrderPosition.id)).filter(
+        OrderPosition.factory_id == factory.id,
+        OrderPosition.updated_at >= today_start,
+        OrderPosition.status.in_(done_statuses),
+    ).scalar() or 0
+
+    # Orders shipped today
+    shipped = db.query(func.count(ProductionOrder.id)).filter(
+        ProductionOrder.factory_id == factory.id,
+        ProductionOrder.status == OrderStatus.SHIPPED.value,
+        ProductionOrder.updated_at >= today_start,
+    ).scalar() or 0
+
+    # Streak
+    streak = db.query(UserStreak).filter(
+        UserStreak.factory_id == factory.id,
+        UserStreak.streak_type == "zero_defects",
+    ).first()
+    streak_days = streak.current_streak if streak else 0
+
+    # Daily challenge
+    challenge = db.query(DailyChallenge).filter(
+        DailyChallenge.factory_id == factory.id,
+        DailyChallenge.challenge_date == today,
+    ).first()
+    challenge_text = ""
+    if challenge:
+        status = "✅ Completed!" if challenge.completed else f"❌ {challenge.actual_value or 0}/{challenge.target_value}"
+        challenge_text = f"\n🎯 Challenge: {status}"
+
+    msg = (
+        f"🌙 *Day Complete!* — {factory.name}\n\n"
+        f"✅ Positions processed: {done_today}\n"
+        f"📦 Orders shipped: {shipped}\n"
+        f"🔥 Zero defect streak: {streak_days} days\n"
+        f"{challenge_text}\n\n"
+        f"Great work today! See you tomorrow 💪"
+    )
+
+    # Send to masters group
+    if factory.masters_group_chat_id:
+        send_telegram_message(int(factory.masters_group_chat_id), msg, parse_mode="Markdown")
+
+    # Send to forum #daily-briefing
+    forum_group, daily_topic = get_forum_topic("daily")
+    if forum_group:
+        send_telegram_message(forum_group, msg, parse_mode="Markdown", message_thread_id=daily_topic)
+
+    logger.info("Evening summary sent for %s: %d done, %d shipped", factory.name, done_today, shipped)
 
 
 async def stone_waste_weekly_report():

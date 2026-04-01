@@ -3430,6 +3430,7 @@ async def _send_message(
     chat_id: int,
     text: str,
     parse_mode: str = "Markdown",
+    message_thread_id: Optional[int] = None,
 ) -> Optional[dict]:
     """Send a plain text message via Telegram Bot API (async)."""
     settings = get_settings()
@@ -3439,17 +3440,16 @@ async def _send_message(
         return None
 
     url = f"{TELEGRAM_API.format(token=token)}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": parse_mode,
+    }
+    if message_thread_id:
+        payload["message_thread_id"] = message_thread_id
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                url,
-                json={
-                    "chat_id": chat_id,
-                    "text": text,
-                    "parse_mode": parse_mode,
-                },
-                timeout=10.0,
-            )
+            resp = await client.post(url, json=payload, timeout=10.0)
             data = resp.json()
             if not data.get("ok"):
                 logger.warning(

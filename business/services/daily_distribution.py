@@ -44,7 +44,7 @@ from api.enums import (
     TaskType,
     TaskStatus,
 )
-from business.services.notifications import send_telegram_message, send_telegram_message_with_buttons
+from business.services.notifications import send_telegram_message, send_telegram_message_with_buttons, get_forum_topic
 
 logger = logging.getLogger("moonjar.daily_distribution")
 
@@ -227,6 +227,34 @@ def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
                 "Failed to send daily distribution for factory %s: %s",
                 factory.name, e,
             )
+
+        # ── Forum topic routing (additional, non-blocking) ────────
+        try:
+            # Daily briefing → #daily-briefing topic
+            forum_group, daily_topic = get_forum_topic("daily")
+            if forum_group:
+                send_telegram_message_with_buttons(
+                    str(forum_group), message, inline_keyboard,
+                    message_thread_id=daily_topic,
+                )
+
+            # Stock alerts → #materials topic (dedicated message)
+            if stock_alerts:
+                forum_group_m, materials_topic = get_forum_topic("materials")
+                if forum_group_m:
+                    stock_lines = [f"\U0001f4e6 *Stock Alerts — {factory.name}* ({target_date.isoformat()})"]
+                    for sa in stock_alerts:
+                        stock_lines.append(
+                            f"  \U0001f7e1 {sa['material_name']}: "
+                            f"{sa['balance']:.1f} {sa['unit']} "
+                            f"(min {sa['min_balance']:.0f})"
+                        )
+                    send_telegram_message(
+                        str(forum_group_m), "\n".join(stock_lines),
+                        message_thread_id=materials_topic,
+                    )
+        except Exception as e:
+            logger.warning("Forum topic routing failed (non-fatal): %s", e)
     else:
         logger.warning(
             "Factory %s has no masters_group_chat_id, skipping Telegram",

@@ -207,7 +207,34 @@ def _maybe_push_telegram(
         send_telegram_message(str(user.telegram_user_id), text)
 
 
-def send_telegram_message(chat_id: str, text: str) -> dict | None:
+def get_forum_topic(topic_type: str) -> tuple[int | None, int | None]:
+    """Get forum group_id and thread_id for a topic type.
+
+    Returns (group_id, thread_id) or (None, None) if forum not configured.
+    """
+    from api.config import get_settings
+
+    settings = get_settings()
+    group_id = settings.TELEGRAM_FORUM_GROUP_ID
+    if not group_id:
+        return None, None
+
+    topic_map = {
+        "daily": settings.TELEGRAM_FORUM_TOPIC_DAILY,
+        "glazing": settings.TELEGRAM_FORUM_TOPIC_GLAZING,
+        "kiln": settings.TELEGRAM_FORUM_TOPIC_KILN,
+        "quality": settings.TELEGRAM_FORUM_TOPIC_QUALITY,
+        "materials": settings.TELEGRAM_FORUM_TOPIC_MATERIALS,
+        "achievements": settings.TELEGRAM_FORUM_TOPIC_ACHIEVEMENTS,
+        "general": settings.TELEGRAM_FORUM_TOPIC_GENERAL,
+    }
+    thread_id = topic_map.get(topic_type, 0)
+    return int(group_id), thread_id if thread_id else None
+
+
+def send_telegram_message(
+    chat_id: str, text: str, message_thread_id: int | None = None,
+) -> dict | None:
     """
     Send message via Telegram Bot API.
     Uses TELEGRAM_BOT_TOKEN from config (cached via lru_cache).
@@ -224,16 +251,15 @@ def send_telegram_message(chat_id: str, text: str) -> dict | None:
         return None
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown",
+    }
+    if message_thread_id:
+        payload["message_thread_id"] = message_thread_id
     try:
-        resp = httpx.post(
-            url,
-            json={
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "Markdown",
-            },
-            timeout=10.0,
-        )
+        resp = httpx.post(url, json=payload, timeout=10.0)
         if resp.status_code != 200:
             logger.warning(f"Telegram API returned {resp.status_code}: {resp.text[:200]}")
             return None
@@ -250,6 +276,7 @@ def send_telegram_message_with_buttons(
     chat_id: str,
     text: str,
     inline_keyboard: list[list[dict]],
+    message_thread_id: int | None = None,
 ) -> dict | None:
     """Send Telegram message with inline keyboard buttons.
 
@@ -258,6 +285,7 @@ def send_telegram_message_with_buttons(
         text: Message text (Markdown formatted).
         inline_keyboard: Button rows, each row is a list of button dicts.
             Format: [[{"text": "Label", "callback_data": "action:data"}]]
+        message_thread_id: Telegram forum topic thread ID (optional).
 
     Returns:
         Telegram API response dict (contains message_id) on success, or None on failure.
@@ -271,17 +299,16 @@ def send_telegram_message_with_buttons(
         return None
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown",
+        "reply_markup": {"inline_keyboard": inline_keyboard},
+    }
+    if message_thread_id:
+        payload["message_thread_id"] = message_thread_id
     try:
-        resp = httpx.post(
-            url,
-            json={
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "Markdown",
-                "reply_markup": {"inline_keyboard": inline_keyboard},
-            },
-            timeout=10.0,
-        )
+        resp = httpx.post(url, json=payload, timeout=10.0)
         if resp.status_code != 200:
             logger.warning(f"Telegram API returned {resp.status_code}: {resp.text[:200]}")
             return None

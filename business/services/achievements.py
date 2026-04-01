@@ -27,7 +27,7 @@ from api.models import (
 from api.enums import (
     PositionStatus, BatchStatus, QcResult, UserRole,
 )
-from business.services.notifications import send_telegram_message
+from business.services.notifications import send_telegram_message, get_forum_topic
 
 logger = logging.getLogger("moonjar.achievements")
 
@@ -181,6 +181,21 @@ def _notify_achievement(db: Session, ach: MasterAchievement):
         send_telegram_message(str(user.telegram_user_id), text)
     except Exception as e:
         logger.warning("Achievement notification failed for user %s: %s", user.id, e)
+
+    # Also send to forum #achievements topic
+    try:
+        forum_group, achievements_topic = get_forum_topic("achievements")
+        if forum_group:
+            forum_text = (
+                f"\U0001F3C6 *{user.full_name}* unlocked: {label} {level_name} (Level {ach.level})!\n"
+                f"{icon} {ach.progress_current} total."
+            )
+            send_telegram_message(
+                str(forum_group), forum_text,
+                message_thread_id=achievements_topic,
+            )
+    except Exception as e:
+        logger.warning("Achievement forum notification failed: %s", e)
 
 
 # ── Progress measurement functions ─────────────────────────────

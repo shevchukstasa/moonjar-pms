@@ -3,7 +3,7 @@ Telegram Bot handler service.
 Business Logic: §27 (Notifications), §37 (Telegram Bot)
 
 Processes incoming Telegram webhook updates:
-- Commands: /start, /status, /help, /stop, /defect, /actual, /split, /glaze, /recipe, /plan, /photo
+- Commands: /start, /status, /help, /stop, /defect, /actual, /split, /glaze, /recipe, /plan, /photo, /mystats, /leaderboard, /stock, /challenge, /achievements
 - Photos: receive from masters, store with position linking
 - Callback queries: inline button presses
 """
@@ -26,6 +26,7 @@ from api.models import (
     Recipe, RecipeMaterial, RecipeKilnConfig, Material,
     Batch, Resource, DailyTaskDistribution,
     MaterialTransaction, MaterialStock, MaterialPurchaseRequest,
+    UserStreak, MasterAchievement, DailyChallenge,
 )
 from api.enums import (
     TaskStatus, PositionStatus, ResourceType, BatchStatus,
@@ -116,7 +117,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     "help_text": {
         "en": (
             "*Moonjar PMS Bot*\n\n"
-            "Available commands:\n"
+            "*Production:*\n"
             "/start — Link Telegram account\n"
             "/status — View pending tasks\n"
             "/defect <pos\\_id> <percent> — Report defect\n"
@@ -125,14 +126,20 @@ MESSAGES: dict[str, dict[str, str]] = {
             "/glaze <pos\\_id> — Position glaze info\n"
             "/recipe <collection> <color> [size] — Search recipe\n"
             "/plan — Tomorrow's production plan\n"
-            "/photo — Send photo for documentation\n"
+            "/photo — Send photo for documentation\n\n"
+            "*Gamification:*\n"
+            "\U0001f4ca /mystats — Your performance stats\n"
+            "\U0001f3c6 /leaderboard — Top performers this week\n"
+            "\U0001f4e6 /stock — Material stock alerts\n"
+            "\U0001f3af /challenge — Today's challenge\n"
+            "\U0001f3c5 /achievements — Your badges\n\n"
             "/help — Show this help\n"
             "/stop — Unlink account\n\n"
             "Send photos in group for production documentation."
         ),
         "id": (
             "*Moonjar PMS Bot*\n\n"
-            "Perintah yang tersedia:\n"
+            "*Produksi:*\n"
             "/start — Hubungkan akun Telegram\n"
             "/status — Lihat tugas yang tertunda\n"
             "/defect <pos\\_id> <persen> — Lapor defect\n"
@@ -141,14 +148,20 @@ MESSAGES: dict[str, dict[str, str]] = {
             "/glaze <pos\\_id> — Info glasir posisi\n"
             "/recipe <koleksi> <warna> [ukuran] — Cari resep\n"
             "/plan — Rencana produksi besok\n"
-            "/photo — Kirim foto untuk dokumentasi\n"
+            "/photo — Kirim foto untuk dokumentasi\n\n"
+            "*Gamifikasi:*\n"
+            "\U0001f4ca /mystats — Statistik kinerja Anda\n"
+            "\U0001f3c6 /leaderboard — Peringkat teratas minggu ini\n"
+            "\U0001f4e6 /stock — Peringatan stok material\n"
+            "\U0001f3af /challenge — Tantangan hari ini\n"
+            "\U0001f3c5 /achievements — Lencana Anda\n\n"
             "/help — Tampilkan bantuan ini\n"
             "/stop — Putuskan koneksi akun\n\n"
             "Kirim foto di grup untuk dokumentasi produksi."
         ),
         "ru": (
             "*Moonjar PMS Bot*\n\n"
-            "Доступные команды:\n"
+            "*Производство:*\n"
             "/start — Привязать аккаунт Telegram\n"
             "/status — Просмотреть задачи\n"
             "/defect <pos\\_id> <процент> — Сообщить о дефекте\n"
@@ -157,7 +170,13 @@ MESSAGES: dict[str, dict[str, str]] = {
             "/glaze <pos\\_id> — Информация о глазури\n"
             "/recipe <коллекция> <цвет> [размер] — Поиск рецепта\n"
             "/plan — Производственный план на завтра\n"
-            "/photo — Отправить фото\n"
+            "/photo — Отправить фото\n\n"
+            "*Геймификация:*\n"
+            "\U0001f4ca /mystats — Ваша статистика\n"
+            "\U0001f3c6 /leaderboard — Лидеры недели\n"
+            "\U0001f4e6 /stock — Оповещения по остаткам\n"
+            "\U0001f3af /challenge — Вызов дня\n"
+            "\U0001f3c5 /achievements — Ваши достижения\n\n"
             "/help — Показать справку\n"
             "/stop — Отвязать аккаунт\n\n"
             "Отправляйте фото в группе для документации."
@@ -991,6 +1010,16 @@ async def handle_command(db: Session, message: dict) -> None:
         await _cmd_plan(db, message)
     elif command == "/photo":
         await _cmd_photo(db, message)
+    elif command == "/mystats":
+        await _cmd_mystats(db, message)
+    elif command == "/leaderboard":
+        await _cmd_leaderboard(db, message)
+    elif command == "/stock":
+        await _cmd_stock(db, message)
+    elif command == "/challenge":
+        await _cmd_challenge(db, message)
+    elif command == "/achievements":
+        await _cmd_achievements(db, message)
     else:
         _from = message.get("from", {})
         lang = get_user_language(db, _from.get("id"), chat_id, message_text=text)
@@ -1532,6 +1561,314 @@ async def _cmd_help(db: Session, message: dict) -> None:
     from_user = message.get("from", {})
     lang = get_user_language(db, from_user.get("id"), chat_id)
     await _send_message(chat_id, msg("help_text", lang))
+
+
+# ────────────────────────────────────────────────────────────────
+# Gamification commands
+# ────────────────────────────────────────────────────────────────
+
+async def _cmd_mystats(db: Session, message: dict) -> None:
+    """/mystats — Show personal performance stats."""
+    chat_id = message["chat"]["id"]
+    from_user = message.get("from", {})
+    telegram_user_id = from_user.get("id")
+    lang = get_user_language(db, telegram_user_id, chat_id)
+
+    user = _find_user_by_telegram(db, telegram_user_id)
+    if not user:
+        await _send_message(chat_id, msg("account_not_linked", lang))
+        return
+
+    # Get user's factory
+    uf = db.query(UserFactory).filter(UserFactory.user_id == user.id).first()
+    factory_id = uf.factory_id if uf else None
+
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
+
+    # Positions processed this week
+    pos_filter = [
+        OrderPosition.assigned_user_id == user.id,
+        OrderPosition.updated_at >= week_start,
+    ]
+    if factory_id:
+        pos_filter.append(OrderPosition.factory_id == factory_id)
+
+    import sqlalchemy as sa
+    week_count = (
+        db.query(sa.func.count(OrderPosition.id))
+        .filter(*pos_filter)
+        .scalar() or 0
+    )
+
+    # Zero-defect streak
+    streak_filter = [
+        UserStreak.user_id == user.id,
+        UserStreak.streak_type == "zero_defects",
+    ]
+    if factory_id:
+        streak_filter.append(UserStreak.factory_id == factory_id)
+    streak_row = db.query(UserStreak).filter(*streak_filter).first()
+    current_streak = streak_row.current_streak if streak_row else 0
+    best_streak = streak_row.best_streak if streak_row else 0
+
+    # Achievement count
+    achievement_count = (
+        db.query(sa.func.count(MasterAchievement.id))
+        .filter(
+            MasterAchievement.user_id == user.id,
+            MasterAchievement.unlocked_at.isnot(None),
+        )
+        .scalar() or 0
+    )
+
+    # Rank among masters
+    rank = "-"
+    total_masters = 0
+    if factory_id:
+        from sqlalchemy import func as sqla_func
+        rank_rows = (
+            db.query(
+                OrderPosition.assigned_user_id,
+                sqla_func.count(OrderPosition.id).label("cnt"),
+            )
+            .filter(
+                OrderPosition.factory_id == factory_id,
+                OrderPosition.updated_at >= week_start,
+                OrderPosition.assigned_user_id.isnot(None),
+            )
+            .group_by(OrderPosition.assigned_user_id)
+            .order_by(sqla_func.count(OrderPosition.id).desc())
+            .all()
+        )
+        total_masters = len(rank_rows)
+        for i, (uid, _) in enumerate(rank_rows, 1):
+            if uid == user.id:
+                rank = str(i)
+                break
+
+    name = user.first_name or user.email.split("@")[0]
+    text = (
+        f"\U0001f4ca *Your Stats This Week*\n\n"
+        f"\u2705 Positions processed: {week_count}\n"
+        f"\U0001f525 Zero defect streak: {current_streak} days (best: {best_streak})\n"
+        f"\U0001f3c6 Achievements unlocked: {achievement_count}\n"
+        f"\U0001f4c8 Rank: #{rank} of {total_masters} masters"
+    )
+    await _send_message(chat_id, text)
+
+
+async def _cmd_leaderboard(db: Session, message: dict) -> None:
+    """/leaderboard — Show top 5 performers this week."""
+    chat_id = message["chat"]["id"]
+    from_user = message.get("from", {})
+    telegram_user_id = from_user.get("id")
+    lang = get_user_language(db, telegram_user_id, chat_id)
+
+    user = _find_user_by_telegram(db, telegram_user_id)
+    if not user:
+        await _send_message(chat_id, msg("account_not_linked", lang))
+        return
+
+    uf = db.query(UserFactory).filter(UserFactory.user_id == user.id).first()
+    if not uf:
+        await _send_message(chat_id, "\U0001f3c6 *Leaderboard*\n\nNo factory assigned.")
+        return
+
+    import sqlalchemy as sa
+    from sqlalchemy import func as sqla_func
+
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
+
+    top_users = (
+        db.query(
+            OrderPosition.assigned_user_id,
+            sqla_func.count(OrderPosition.id).label("cnt"),
+        )
+        .filter(
+            OrderPosition.factory_id == uf.factory_id,
+            OrderPosition.updated_at >= week_start,
+            OrderPosition.assigned_user_id.isnot(None),
+        )
+        .group_by(OrderPosition.assigned_user_id)
+        .order_by(sqla_func.count(OrderPosition.id).desc())
+        .limit(5)
+        .all()
+    )
+
+    if not top_users:
+        await _send_message(chat_id, "\U0001f3c6 *Leaderboard*\n\nNo data this week yet.")
+        return
+
+    medals = ["\U0001f947", "\U0001f948", "\U0001f949", "4.", "5."]
+    lines = ["\U0001f3c6 *Leaderboard This Week*\n"]
+
+    for i, (uid, cnt) in enumerate(top_users):
+        u = db.query(User).get(uid)
+        name = (u.first_name or u.email.split("@")[0]) if u else "?"
+        prefix = medals[i] if i < len(medals) else f"{i + 1}."
+        lines.append(f"{prefix} {name} — {cnt} positions")
+
+    await _send_message(chat_id, "\n".join(lines))
+
+
+async def _cmd_stock(db: Session, message: dict) -> None:
+    """/stock — Show materials below min_balance."""
+    chat_id = message["chat"]["id"]
+    from_user = message.get("from", {})
+    telegram_user_id = from_user.get("id")
+    lang = get_user_language(db, telegram_user_id, chat_id)
+
+    user = _find_user_by_telegram(db, telegram_user_id)
+    if not user:
+        await _send_message(chat_id, msg("account_not_linked", lang))
+        return
+
+    uf = db.query(UserFactory).filter(UserFactory.user_id == user.id).first()
+    if not uf:
+        await _send_message(chat_id, "\U0001f4e6 *Stock Check*\n\nNo factory assigned.")
+        return
+
+    low_stocks = (
+        db.query(MaterialStock)
+        .join(Material, Material.id == MaterialStock.material_id)
+        .filter(
+            MaterialStock.factory_id == uf.factory_id,
+            MaterialStock.balance < MaterialStock.min_balance,
+            MaterialStock.min_balance > 0,
+        )
+        .all()
+    )
+
+    if not low_stocks:
+        await _send_message(
+            chat_id,
+            "\U0001f4e6 *Stock Check*\n\n\u2705 All materials above minimum balance.",
+        )
+        return
+
+    lines = [f"\U0001f4e6 *Stock Alerts* ({len(low_stocks)} items)\n"]
+    for stock in low_stocks[:15]:
+        mat = stock.material
+        mat_name = mat.name if mat else f"ID:{stock.material_id}"
+        balance = float(stock.balance)
+        minimum = float(stock.min_balance)
+        severity = "\U0001f534" if balance < minimum * 0.5 else "\U0001f7e1"
+        lines.append(f"{severity} {mat_name}: {balance:.1f} kg (min {minimum:.1f} kg)")
+
+    if len(low_stocks) > 15:
+        lines.append(f"\n... and {len(low_stocks) - 15} more")
+
+    await _send_message(chat_id, "\n".join(lines))
+
+
+async def _cmd_challenge(db: Session, message: dict) -> None:
+    """/challenge — Show today's daily challenge + progress."""
+    chat_id = message["chat"]["id"]
+    from_user = message.get("from", {})
+    telegram_user_id = from_user.get("id")
+    lang = get_user_language(db, telegram_user_id, chat_id)
+
+    user = _find_user_by_telegram(db, telegram_user_id)
+    if not user:
+        await _send_message(chat_id, msg("account_not_linked", lang))
+        return
+
+    uf = db.query(UserFactory).filter(UserFactory.user_id == user.id).first()
+    if not uf:
+        await _send_message(chat_id, "\U0001f3af *Daily Challenge*\n\nNo factory assigned.")
+        return
+
+    today = date.today()
+    challenge = (
+        db.query(DailyChallenge)
+        .filter(
+            DailyChallenge.factory_id == uf.factory_id,
+            DailyChallenge.challenge_date == today,
+        )
+        .first()
+    )
+
+    if not challenge:
+        await _send_message(
+            chat_id,
+            "\U0001f3af *Daily Challenge*\n\nNo challenge set for today. Check back tomorrow!",
+        )
+        return
+
+    progress_pct = min(100, int(challenge.actual_value / max(challenge.target_value, 1) * 100))
+    bar_filled = progress_pct // 10
+    bar_empty = 10 - bar_filled
+    progress_bar = "\u2588" * bar_filled + "\u2591" * bar_empty
+
+    status = "\u2705 COMPLETED!" if challenge.completed else f"{progress_pct}%"
+    text = (
+        f"\U0001f3af *Daily Challenge*\n\n"
+        f"*{challenge.title}*\n"
+        f"{challenge.description or ''}\n\n"
+        f"Progress: {challenge.actual_value}/{challenge.target_value} ({status})\n"
+        f"`[{progress_bar}]`"
+    )
+    await _send_message(chat_id, text)
+
+
+async def _cmd_achievements(db: Session, message: dict) -> None:
+    """/achievements — Show user's achievement badges."""
+    chat_id = message["chat"]["id"]
+    from_user = message.get("from", {})
+    telegram_user_id = from_user.get("id")
+    lang = get_user_language(db, telegram_user_id, chat_id)
+
+    user = _find_user_by_telegram(db, telegram_user_id)
+    if not user:
+        await _send_message(chat_id, msg("account_not_linked", lang))
+        return
+
+    achievements = (
+        db.query(MasterAchievement)
+        .filter(MasterAchievement.user_id == user.id)
+        .order_by(MasterAchievement.unlocked_at.desc().nullslast())
+        .all()
+    )
+
+    if not achievements:
+        await _send_message(
+            chat_id,
+            "\U0001f3c5 *Achievements*\n\nNo achievements yet. Keep working to unlock badges!",
+        )
+        return
+
+    # Badge icons per achievement type
+    badge_icons = {
+        "speed_demon": "\u26a1",
+        "zero_defects": "\U0001f48e",
+        "consistent": "\U0001f4aa",
+        "team_player": "\U0001f91d",
+        "kiln_master": "\U0001f525",
+        "early_bird": "\U0001f305",
+        "marathon": "\U0001f3c3",
+    }
+
+    lines = ["\U0001f3c5 *Your Achievements*\n"]
+    unlocked = [a for a in achievements if a.unlocked_at]
+    in_progress = [a for a in achievements if not a.unlocked_at]
+
+    if unlocked:
+        for a in unlocked:
+            icon = badge_icons.get(a.achievement_type, "\U0001f3c5")
+            level_stars = "\u2b50" * min(a.level, 5)
+            lines.append(f"{icon} *{a.achievement_type.replace('_', ' ').title()}* {level_stars}")
+
+    if in_progress:
+        lines.append(f"\n\U0001f512 *In Progress:*")
+        for a in in_progress[:5]:
+            icon = badge_icons.get(a.achievement_type, "\u2b1c")
+            pct = min(100, int(a.progress_current / max(a.progress_target, 1) * 100))
+            lines.append(f"{icon} {a.achievement_type.replace('_', ' ').title()}: {pct}%")
+
+    lines.append(f"\n\U0001f4ca Total: {len(unlocked)} unlocked, {len(in_progress)} in progress")
+    await _send_message(chat_id, "\n".join(lines))
 
 
 async def _cmd_stop(db: Session, message: dict) -> None:

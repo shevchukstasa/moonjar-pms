@@ -9,6 +9,9 @@ Callback data format (compact, <= 64 bytes):
   d:a:{fid8}:{date}   — daily: acknowledge tasks
   d:p:{fid8}:{date}   — daily: report problem
   d:d:{fid8}:{date}   — daily: show task detail
+  d:s:{fid8}           — daily: my stats
+  d:l:{fid8}           — daily: leaderboard
+  d:k:{fid8}           — daily: stock check
   a:v:{pid8}           — alert: view position detail
   a:r:{kid8}           — alert: reschedule kiln
   t:s:{pid8}           — task: start
@@ -17,6 +20,7 @@ Callback data format (compact, <= 64 bytes):
 """
 from uuid import UUID
 from typing import Optional
+from datetime import date, timedelta
 import logging
 
 import sqlalchemy as sa
@@ -30,6 +34,11 @@ from api.models import (
     ProductionOrder,
     Resource,
     DailyTaskDistribution,
+    MaterialStock,
+    Material,
+    UserStreak,
+    MasterAchievement,
+    UserFactory,
 )
 from api.enums import ResourceType
 
@@ -79,13 +88,15 @@ def _handle_daily_callback(db: Session, cq: dict, parts: list[str]) -> str:
     d:a:{fid8}:{date} — Master acknowledges daily tasks
     d:p:{fid8}:{date} — Master reports problem (notify PM)
     d:d:{fid8}:{date} — Show detailed task summary
+    d:s:{fid8}         — My stats
+    d:l:{fid8}         — Leaderboard
+    d:k:{fid8}         — Stock check
     """
-    if len(parts) < 4:
+    if len(parts) < 3:
         return "Data tidak valid"
 
-    sub_action = parts[1]  # a / p / d
+    sub_action = parts[1]  # a / p / d / s / l / k
     fid_short = parts[2]
-    date_str = parts[3]
 
     from_user = cq.get("from", {})
     telegram_user_id = from_user.get("id")
@@ -95,6 +106,31 @@ def _handle_daily_callback(db: Session, cq: dict, parts: list[str]) -> str:
     factory = _find_factory_by_prefix(db, fid_short)
     if not factory:
         return "Pabrik tidak ditemukan"
+
+    # Gamification callbacks (no date param required)
+    if sub_action == "s":
+        chat_id = cq.get("message", {}).get("chat", {}).get("id")
+        if chat_id:
+            _handle_my_stats(db, chat_id, telegram_user_id, factory.id)
+        return "\U0001f4ca Statistik dikirim"
+
+    if sub_action == "l":
+        chat_id = cq.get("message", {}).get("chat", {}).get("id")
+        if chat_id:
+            _handle_leaderboard(db, chat_id, factory.id)
+        return "\U0001f3c6 Papan peringkat dikirim"
+
+    if sub_action == "k":
+        chat_id = cq.get("message", {}).get("chat", {}).get("id")
+        if chat_id:
+            _handle_stock_check(db, chat_id, factory.id)
+        return "\U0001f4e6 Status stok dikirim"
+
+    # Original callbacks require date (4 parts)
+    if len(parts) < 4:
+        return "Data tidak valid"
+
+    date_str = parts[3]
 
     if sub_action == "a":
         # Acknowledge — log and reply
@@ -285,6 +321,184 @@ def _handle_task_callback(db: Session, cq: dict, parts: list[str]) -> str:
         return f"\u26a0\ufe0f Masalah dilaporkan: {order_num} Pos {pos_label}"
 
     return "Aksi tidak dikenal"
+
+
+# ────────────────────────────────────────────────────────────────
+# Gamification handlers (d:s:, d:l:, d:k:)
+# ────────────────────────────────────────────────────────────────
+
+def _handle_my_stats(db: Session, chat_id: int, telegram_user_id: int, factory_id: UUID) -> None:
+    """Show personal stats for the user (d:s: callback)."""
+    try:
+        from business.services.notifications import send_telegram_message
+
+        user = db.query(User).filter(User.telegram_user_id == telegram_user_id).first()
+        if not user:
+            send_telegram_message(str(chat_id), "Account not linked. Use /start.")
+            return
+
+        # Positions processed this week
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+        week_count = (
+            db.query(sa.func.count(OrderPosition.id))
+            .filter(
+                OrderPosition.factory_id == factory_id,
+                OrderPosition.assigned_user_id == user.id,
+                OrderPosition.updated_at >= week_start,
+            )
+            .scalar() or 0
+        )
+
+        # Best zero-defect streak
+        streak_row = (
+            db.query(UserStreak)
+            .filter(
+                UserStreak.user_id == user.id,
+                UserStreak.factory_id == factory_id,
+                UserStreak.streak_type == "zero_defects",
+            )
+            .first()
+        )
+        current_streak = streak_row.current_streak if streak_row else 0
+        best_streak = streak_row.best_streak if streak_row else 0
+
+        # Achievement count
+        achievement_count = (
+            db.query(sa.func.count(MasterAchievement.id))
+            .filter(
+                MasterAchievement.user_id == user.id,
+                MasterAchievement.unlocked_at.isnot(None),
+            )
+            .scalar() or 0
+        )
+
+        # Rank among factory masters (by positions this week)
+        from sqlalchemy import func as sqla_func
+        rank_subq = (
+            db.query(
+                OrderPosition.assigned_user_id,
+                sqla_func.count(OrderPosition.id).label("cnt"),
+            )
+            .filter(
+                OrderPosition.factory_id == factory_id,
+                OrderPosition.updated_at >= week_start,
+                OrderPosition.assigned_user_id.isnot(None),
+            )
+            .group_by(OrderPosition.assigned_user_id)
+            .subquery()
+        )
+        all_counts = (
+            db.query(rank_subq.c.assigned_user_id, rank_subq.c.cnt)
+            .order_by(rank_subq.c.cnt.desc())
+            .all()
+        )
+        rank = 1
+        total_masters = len(all_counts)
+        for i, (uid, _cnt) in enumerate(all_counts, 1):
+            if uid == user.id:
+                rank = i
+                break
+
+        name = user.first_name or user.email.split("@")[0]
+        msg_text = (
+            f"\U0001f4ca *Your Stats This Week*\n\n"
+            f"\u2705 Positions processed: {week_count}\n"
+            f"\U0001f525 Zero defect streak: {current_streak} days (best: {best_streak})\n"
+            f"\U0001f3c6 Achievements unlocked: {achievement_count}\n"
+            f"\U0001f4c8 Rank: #{rank} of {total_masters} masters"
+        )
+        send_telegram_message(str(chat_id), msg_text)
+
+    except Exception as e:
+        logger.error("_handle_my_stats error: %s", e, exc_info=True)
+
+
+def _handle_leaderboard(db: Session, chat_id: int, factory_id: UUID) -> None:
+    """Show top 5 performers this week (d:l: callback)."""
+    try:
+        from business.services.notifications import send_telegram_message
+        from sqlalchemy import func as sqla_func
+
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+
+        top_users = (
+            db.query(
+                OrderPosition.assigned_user_id,
+                sqla_func.count(OrderPosition.id).label("cnt"),
+            )
+            .filter(
+                OrderPosition.factory_id == factory_id,
+                OrderPosition.updated_at >= week_start,
+                OrderPosition.assigned_user_id.isnot(None),
+            )
+            .group_by(OrderPosition.assigned_user_id)
+            .order_by(sqla_func.count(OrderPosition.id).desc())
+            .limit(5)
+            .all()
+        )
+
+        if not top_users:
+            send_telegram_message(str(chat_id), "\U0001f3c6 *Leaderboard*\n\nNo data this week yet.")
+            return
+
+        medals = ["\U0001f947", "\U0001f948", "\U0001f949", "4.", "5."]
+        lines = ["\U0001f3c6 *Leaderboard This Week*\n"]
+
+        for i, (uid, cnt) in enumerate(top_users):
+            user = db.query(User).get(uid)
+            name = (user.first_name or user.email.split("@")[0]) if user else "?"
+            prefix = medals[i] if i < len(medals) else f"{i + 1}."
+            lines.append(f"{prefix} {name} — {cnt} positions")
+
+        send_telegram_message(str(chat_id), "\n".join(lines))
+
+    except Exception as e:
+        logger.error("_handle_leaderboard error: %s", e, exc_info=True)
+
+
+def _handle_stock_check(db: Session, chat_id: int, factory_id: UUID) -> None:
+    """Show materials below min_balance (d:k: callback)."""
+    try:
+        from business.services.notifications import send_telegram_message
+
+        low_stocks = (
+            db.query(MaterialStock)
+            .join(Material, Material.id == MaterialStock.material_id)
+            .filter(
+                MaterialStock.factory_id == factory_id,
+                MaterialStock.balance < MaterialStock.min_balance,
+                MaterialStock.min_balance > 0,
+            )
+            .all()
+        )
+
+        if not low_stocks:
+            send_telegram_message(
+                str(chat_id),
+                "\U0001f4e6 *Stock Check*\n\n\u2705 All materials above minimum balance.",
+            )
+            return
+
+        lines = [f"\U0001f4e6 *Stock Alerts* ({len(low_stocks)} items)\n"]
+        for stock in low_stocks[:15]:  # cap at 15 to keep message readable
+            mat = stock.material
+            mat_name = mat.name if mat else f"ID:{stock.material_id}"
+            balance = float(stock.balance)
+            minimum = float(stock.min_balance)
+            severity = "\U0001f534" if balance < minimum * 0.5 else "\U0001f7e1"
+            lines.append(
+                f"{severity} {mat_name}: {balance:.1f} kg (min {minimum:.1f} kg)"
+            )
+
+        if len(low_stocks) > 15:
+            lines.append(f"\n... and {len(low_stocks) - 15} more")
+
+        send_telegram_message(str(chat_id), "\n".join(lines))
+
+    except Exception as e:
+        logger.error("_handle_stock_check error: %s", e, exc_info=True)
 
 
 # ────────────────────────────────────────────────────────────────

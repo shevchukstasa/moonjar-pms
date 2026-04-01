@@ -285,6 +285,41 @@ MESSAGES: dict[str, dict[str, str]] = {
         "id": "\u270f\ufe0f Edit Items",
         "ru": "\u270f\ufe0f Редактировать",
     },
+    "edit_supplier_btn": {
+        "en": "\u270f\ufe0f Supplier",
+        "id": "\u270f\ufe0f Supplier",
+        "ru": "\u270f\ufe0f Поставщик",
+    },
+    "edit_date_btn": {
+        "en": "\U0001f4c5 Date",
+        "id": "\U0001f4c5 Tanggal",
+        "ru": "\U0001f4c5 Дата",
+    },
+    "edit_ref_btn": {
+        "en": "#\ufe0f\u20e3 Ref",
+        "id": "#\ufe0f\u20e3 Ref",
+        "ru": "#\ufe0f\u20e3 Ссылка",
+    },
+    "enter_supplier_prompt": {
+        "en": "Enter new supplier name:",
+        "id": "Masukkan nama supplier baru:",
+        "ru": "Введите имя поставщика:",
+    },
+    "enter_date_prompt": {
+        "en": "Enter delivery date (DD/MM/YYYY):",
+        "id": "Masukkan tanggal pengiriman (DD/MM/YYYY):",
+        "ru": "Введите дату поставки (ДД/ММ/ГГГГ):",
+    },
+    "enter_ref_prompt": {
+        "en": "Enter reference number:",
+        "id": "Masukkan nomor referensi:",
+        "ru": "Введите номер ссылки:",
+    },
+    "header_updated": {
+        "en": "\u2705 {field} updated to: {value}",
+        "id": "\u2705 {field} diperbarui menjadi: {value}",
+        "ru": "\u2705 {field} обновлено: {value}",
+    },
     "cancel_btn": {
         "en": "\u274c Cancel",
         "id": "\u274c Batal",
@@ -881,6 +916,13 @@ def _cleanup_expired_deliveries() -> None:
 _pending_edits: dict[int, dict] = {}
 
 # ────────────────────────────────────────────────────────────────
+# Pending delivery HEADER edits (supplier / date / reference)
+# ────────────────────────────────────────────────────────────────
+# key = chat_id (int)
+# value = {"delivery_id": str, "field": "supplier" | "date" | "reference"}
+_pending_header_edits: dict[int, dict] = {}
+
+# ────────────────────────────────────────────────────────────────
 # Pending recipe verification sessions (in-memory)
 # ────────────────────────────────────────────────────────────────
 # key = chat_id (int)
@@ -952,8 +994,13 @@ async def handle_update(db: Session, update_data: dict) -> None:
             await handle_command(db, message)
             return
 
-        # Check if this chat has an active delivery edit session awaiting text input
+        # Check if this chat has a pending header edit (supplier/date/ref)
         msg_chat_id = message.get("chat", {}).get("id")
+        if msg_chat_id and msg_chat_id in _pending_header_edits and text:
+            await _handle_header_edit_text(msg_chat_id, text)
+            return
+
+        # Check if this chat has an active delivery edit session awaiting text input
         if msg_chat_id and msg_chat_id in _pending_edits and text:
             edit_session = _pending_edits[msg_chat_id]
             if edit_session.get("awaiting"):
@@ -1362,7 +1409,8 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
     # Delivery confirmation callbacks
     if action in (
         "delivery_confirm", "delivery_cancel", "delivery_match", "delivery_new",
-        "delivery_edit", "dedit",
+        "delivery_edit", "delivery_edit_supplier", "delivery_edit_date",
+        "delivery_edit_ref", "dedit",
     ):
         try:
             # Resolve chat_id from the callback_query message
@@ -3047,9 +3095,15 @@ async def _handle_delivery_photo(
     # Store language in pending delivery for use in callbacks
     _pending_deliveries[delivery_id]["lang"] = lang
 
+    did8 = delivery_id[:8]
     keyboard = [
         [
             {"text": msg("confirm_receipt_btn", lang), "callback_data": f"delivery_confirm:{delivery_id}"},
+        ],
+        [
+            {"text": msg("edit_supplier_btn", lang), "callback_data": f"delivery_edit_supplier:{did8}"},
+            {"text": msg("edit_date_btn", lang), "callback_data": f"delivery_edit_date:{did8}"},
+            {"text": msg("edit_ref_btn", lang), "callback_data": f"delivery_edit_ref:{did8}"},
         ],
         [
             {"text": msg("edit_items_btn", lang), "callback_data": f"delivery_edit:{delivery_id}"},
@@ -3245,6 +3299,15 @@ async def _handle_delivery_callback(
     delivery_id = parts[1] if len(parts) > 1 else ""
 
     pending = _pending_deliveries.get(delivery_id)
+
+    # Header edit callbacks use truncated 8-char ID — resolve to full key
+    if not pending and delivery_id:
+        for full_id in _pending_deliveries:
+            if full_id.startswith(delivery_id):
+                delivery_id = full_id
+                pending = _pending_deliveries[full_id]
+                break
+
     lang = get_user_language(db, telegram_user_id, chat_id)
     if pending:
         lang = pending.get("lang", lang)
@@ -3260,6 +3323,8 @@ async def _handle_delivery_callback(
         # Clean up any active edit session for this chat
         if chat_id in _pending_edits and _pending_edits[chat_id].get("delivery_id") == delivery_id:
             del _pending_edits[chat_id]
+        if chat_id in _pending_header_edits and _pending_header_edits[chat_id].get("delivery_id", "").startswith(delivery_id[:8]):
+            del _pending_header_edits[chat_id]
         # Remove inline buttons from the message
         if message_id:
             from business.services.notifications import edit_telegram_message_buttons
@@ -3398,6 +3463,8 @@ async def _handle_delivery_callback(
             # Clean up any active edit session
             if chat_id in _pending_edits and _pending_edits[chat_id].get("delivery_id") == delivery_id:
                 del _pending_edits[chat_id]
+            if chat_id in _pending_header_edits:
+                del _pending_header_edits[chat_id]
 
             # Remove confirm/edit/cancel buttons from the preview message
             if message_id:
@@ -3435,6 +3502,19 @@ async def _handle_delivery_callback(
             logger.error(f"Failed to commit delivery {delivery_id}: {e}", exc_info=True)
             await answer_callback_query(callback_id, msg("error_occurred", lang))
             await _send_message(chat_id, msg("receipt_save_failed", lang, error=str(e)), parse_mode="")
+        return
+
+    # ── delivery_edit_supplier / delivery_edit_date / delivery_edit_ref ──
+    if action in ("delivery_edit_supplier", "delivery_edit_date", "delivery_edit_ref"):
+        field_map = {
+            "delivery_edit_supplier": ("supplier", "enter_supplier_prompt"),
+            "delivery_edit_date": ("date", "enter_date_prompt"),
+            "delivery_edit_ref": ("reference", "enter_ref_prompt"),
+        }
+        field, prompt_key = field_map[action]
+        _pending_header_edits[chat_id] = {"delivery_id": delivery_id, "field": field}
+        await answer_callback_query(callback_id, "OK")
+        await _send_message(chat_id, msg(prompt_key, lang), parse_mode="")
         return
 
     # ── delivery_edit:{id} — start editing items ────────────────
@@ -3774,9 +3854,15 @@ async def _send_edit_summary(chat_id: int, delivery_id: str, edit_session: dict)
 
     preview_text = "\n".join(lines)
 
+    did8 = delivery_id[:8]
     keyboard = [
         [
             {"text": msg("confirm_receipt_btn", lang), "callback_data": f"delivery_confirm:{delivery_id}"},
+        ],
+        [
+            {"text": msg("edit_supplier_btn", lang), "callback_data": f"delivery_edit_supplier:{did8}"},
+            {"text": msg("edit_date_btn", lang), "callback_data": f"delivery_edit_date:{did8}"},
+            {"text": msg("edit_ref_btn", lang), "callback_data": f"delivery_edit_ref:{did8}"},
         ],
         [
             {"text": msg("edit_items_btn", lang), "callback_data": f"delivery_edit:{delivery_id}"},
@@ -3818,6 +3904,108 @@ def _sync_edit_to_pending(delivery_id: str, edit_session: dict) -> None:
 
     pending["matched_items"] = new_matched
     pending["unmatched_items"] = new_unmatched
+
+
+async def _handle_header_edit_text(chat_id: int, text: str) -> None:
+    """Handle text input for delivery header edits (supplier, date, reference)."""
+    edit = _pending_header_edits.pop(chat_id, None)
+    if not edit:
+        return
+
+    delivery_id = edit["delivery_id"]
+    field = edit["field"]
+
+    # Resolve truncated delivery_id to full key
+    pending = _pending_deliveries.get(delivery_id)
+    if not pending:
+        for full_id, p in _pending_deliveries.items():
+            if full_id.startswith(delivery_id):
+                delivery_id = full_id
+                pending = p
+                break
+
+    if not pending:
+        await _send_message(chat_id, "Delivery expired.", parse_mode="")
+        return
+
+    lang = pending.get("lang", "id")
+    readings = pending.get("readings", {})
+    text = text.strip()
+
+    field_labels = {"supplier": "Supplier", "date": "Date", "reference": "Reference"}
+
+    if field == "supplier":
+        readings["supplier"] = text
+    elif field == "date":
+        readings["date"] = text
+        readings["delivery_date"] = text
+    elif field == "reference":
+        readings["reference_number"] = text
+
+    await _send_message(
+        chat_id,
+        msg("header_updated", lang, field=field_labels.get(field, field), value=text),
+        parse_mode="",
+    )
+
+    # Re-show delivery preview
+    await _resend_delivery_preview(chat_id, delivery_id, pending)
+
+
+async def _resend_delivery_preview(chat_id: int, delivery_id: str, pending: dict) -> None:
+    """Re-render and send the delivery preview after a header edit."""
+    lang = pending.get("lang", "id")
+    readings = pending["readings"]
+
+    supplier = readings.get("supplier") or msg("unknown_supplier", lang)
+    ref_number = readings.get("reference_number") or "-"
+    delivery_date = readings.get("date") or "-"
+
+    matched = pending["matched_items"]
+    unmatched = pending["unmatched_items"]
+    total_items = len(matched) + len(unmatched)
+
+    lines = [
+        msg("delivery_header", lang, supplier=supplier),
+        msg("delivery_ref", lang, ref=ref_number, date=delivery_date),
+        "",
+        msg("found_items", lang, count=total_items),
+    ]
+
+    item_num = 0
+    for mi in matched:
+        item_num += 1
+        size_info = mi.get("size_label", "")
+        lines.append(
+            f"{item_num}. \u2705 {mi['original_name']} \u2014 {mi['quantity']} {mi['unit']}"
+            f" (\u2192 {mi['material_name']}{size_info})"
+        )
+    for ui in unmatched:
+        item_num += 1
+        lines.append(
+            f"{item_num}. \u26a0\ufe0f \"{ui['original_name']}\" \u2014 {ui['quantity']} {ui['unit']}"
+            f" ({msg('not_found_label', lang)})"
+        )
+
+    preview_text = "\n".join(lines)
+
+    did8 = delivery_id[:8]
+    keyboard = [
+        [
+            {"text": msg("confirm_receipt_btn", lang), "callback_data": f"delivery_confirm:{delivery_id}"},
+        ],
+        [
+            {"text": msg("edit_supplier_btn", lang), "callback_data": f"delivery_edit_supplier:{did8}"},
+            {"text": msg("edit_date_btn", lang), "callback_data": f"delivery_edit_date:{did8}"},
+            {"text": msg("edit_ref_btn", lang), "callback_data": f"delivery_edit_ref:{did8}"},
+        ],
+        [
+            {"text": msg("edit_items_btn", lang), "callback_data": f"delivery_edit:{delivery_id}"},
+            {"text": msg("cancel_btn", lang), "callback_data": f"delivery_cancel:{delivery_id}"},
+        ],
+    ]
+
+    await send_message_with_buttons(chat_id, preview_text, keyboard, parse_mode="")
 
 
 async def _handle_edit_text_input(db: Session, chat_id: int, text: str) -> None:

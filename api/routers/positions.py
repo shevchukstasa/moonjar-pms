@@ -535,7 +535,7 @@ async def change_position_status(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    from business.services.status_machine import validate_status_transition
+    from business.services.status_machine import transition_position_status
 
     p = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
     if not p:
@@ -547,27 +547,7 @@ async def change_position_status(
     except ValueError:
         raise HTTPException(400, f"Invalid status: {data.status}")
 
-    # Validate transition
-    current = _ev(p.status)
-    is_management = hasattr(current_user, 'role') and _ev(current_user.role) in (
-        'production_manager', 'administrator', 'owner'
-    )
-    if not is_management and not validate_status_transition(current, data.status):
-        from business.services.status_machine import get_allowed_transitions as _get_allowed
-        allowed = _get_allowed(current)
-        raise HTTPException(
-            400,
-            f"Invalid transition: {current} → {data.status}. Allowed: {allowed}",
-        )
-
-    old_status = current
-    p.status = new_status
-    p.updated_at = datetime.now(timezone.utc)
-
-    # Special routing: FIRED → multi-firing check
-    if new_status == PositionStatus.FIRED:
-        from business.services.status_machine import route_after_firing
-        route_after_firing(db, p)
+    old_status = _ev(p.status)
 
     # ── Recipe required before glazing / engobe ───────────────────
     if new_status in (PositionStatus.ENGOBE_APPLIED, PositionStatus.GLAZED):
@@ -578,70 +558,29 @@ async def change_position_status(
                 "Assign a recipe first (glazed tile must have a recipe for material deduction).",
             )
 
-    # ── Material consumption on glazing start ─────────────────────
-    # When position transitions to ENGOBE_APPLIED or GLAZED (first time),
-    # consume BOM materials and release reservations.
-    if new_status in (PositionStatus.ENGOBE_APPLIED, PositionStatus.GLAZED):
-        if not p.materials_written_off_at:
-            _nested = None
-            try:
-                from business.services.material_consumption import on_glazing_start
-                # Use a savepoint so partial failures don't pollute the session
-                _nested = db.begin_nested()
-                on_glazing_start(db, p.id)
-                _nested.commit()
-            except Exception as _mc_err:
-                if _nested is not None:
-                    try:
-                        _nested.rollback()
-                    except Exception:
-                        pass
-                import logging
-                logging.getLogger("moonjar.positions").warning(
-                    "Failed to consume materials for position %s on glazing start: %s",
-                    position_id, _mc_err,
-                )
-        elif (p.firing_round or 1) > 1:
-            # Refire/reglaze cycle — consume only surface materials
-            _nested = None
-            try:
-                from business.services.material_consumption import consume_refire_materials
-                _nested = db.begin_nested()
-                consume_refire_materials(db, p.id)
-                _nested.commit()
-            except Exception as _mc_err:
-                if _nested is not None:
-                    try:
-                        _nested.rollback()
-                    except Exception:
-                        pass
-                import logging
-                logging.getLogger("moonjar.positions").warning(
-                    "Failed to consume refire materials for position %s: %s",
-                    position_id, _mc_err,
-                )
+    # Determine if this is a management override (skip validation)
+    is_management = hasattr(current_user, 'role') and _ev(current_user.role) in (
+        'production_manager', 'administrator', 'owner'
+    )
 
-    # Unreserve materials when position is cancelled
-    if new_status == PositionStatus.CANCELLED:
-        try:
-            from business.services.material_reservation import unreserve_materials_for_position
-            unreserve_materials_for_position(db, p.id)
-        except Exception as _e:
-            import logging
-            logging.getLogger("moonjar.positions").warning(
-                "Failed to unreserve materials for position %s: %s", position_id, _e
-            )
+    # Delegate to status machine — handles validation, status assignment,
+    # stage history, material consumption, rescheduling, alerts, and commit.
+    try:
+        p = transition_position_status(
+            db, position_id, data.status, current_user.id,
+            is_override=is_management,
+            notes=data.notes,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
-    # Auto-recalculate parent order status
+    # Auto-recalculate parent order status (separate commit after transition)
     old_order_status, new_order_status, order = _recalculate_order_status(db, p.order_id)
-
     try:
         db.commit()
     except Exception as commit_err:
         db.rollback()
-        logger.warning("Status transition commit failed for position %s: %s", position_id, commit_err)
-        db.refresh(p)
-        raise HTTPException(status_code=500, detail=f"Status transition saved but commit failed: {str(commit_err)[:200]}")
+        logger.warning("Order status recalc commit failed for position %s: %s", position_id, commit_err)
     db.refresh(p)
 
     # Send order_ready webhook to Sales when all positions become ready_for_shipment

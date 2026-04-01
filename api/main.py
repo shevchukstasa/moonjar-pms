@@ -1758,6 +1758,40 @@ def _ensure_schema():
 
     _run_section("position_photo_telegram_nullable", _fix_position_photo_nullable)
 
+    # --- Section: Seed TPS operations ---
+    def _seed_operations(conn):
+        """Seed standard production operations for all active factories (idempotent)."""
+        existing = conn.execute(text("SELECT COUNT(*) FROM operations")).scalar() or 0
+        if existing > 0:
+            logger.debug(f"_seed_operations: {existing} operations already exist, skipping")
+            return
+
+        _OPS = [
+            ("Engobe Application", "Apply engobe coating to tiles before glazing", 15, 1),
+            ("Engobe Check", "Quality check of engobe coating", 5, 2),
+            ("Glazing", "Apply glaze to tiles using spray/brush/silk screen method", 20, 3),
+            ("Pre-Kiln Check", "Inspect glazed tiles before kiln loading", 5, 4),
+            ("Kiln Loading", "Load tiles into kiln for firing", 30, 5),
+            ("Firing", "Kiln firing cycle", 480, 6),
+            ("Kiln Unloading", "Unload fired tiles from kiln", 20, 7),
+            ("Sorting", "Sort fired tiles by quality grade", 3, 8),
+            ("Grinding", "Surface grinding for tiles that need it", 10, 9),
+            ("Packing", "Pack sorted tiles into boxes", 5, 10),
+            ("Quality Check", "Final quality inspection", 5, 11),
+            ("Stencil Application", "Apply stencil design to tiles", 15, 12),
+            ("Silk Screen", "Silk screen printing on tiles", 20, 13),
+        ]
+        for fname, fid in factory_ids.items():
+            for name, desc, mins, sort in _OPS:
+                conn.execute(text(
+                    "INSERT INTO operations (id, factory_id, name, description, "
+                    "default_time_minutes, sort_order, is_active, created_at, updated_at) "
+                    "VALUES (gen_random_uuid(), :fid, :name, :desc, :mins, :sort, TRUE, NOW(), NOW())"
+                ), {"fid": fid, "name": name, "desc": desc, "mins": mins, "sort": sort})
+            logger.info(f"_seed_operations: seeded {len(_OPS)} operations for {fname}")
+
+    _run_section("seed_operations", _seed_operations)
+
     # --- Section 11: Stamp alembic version ---
     def _stamp_alembic(conn):
         conn.execute(text("""

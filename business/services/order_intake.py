@@ -86,42 +86,6 @@ def detect_service_task_type(item_data: dict) -> Optional[TaskType]:
 # Defect margin calculation
 # ────────────────────────────────────────────────────────────────
 
-def _get_defect_coefficient(db: Session, factory_id, size: str) -> float:
-    """
-    Calculate stone defect coefficient from last 90 days of defect records.
-    Returns fraction (e.g., 0.05 for 5% defect rate).
-    If no data, returns default 0.05.
-    Capped at 0.30 (30%) to prevent extreme margins from bad data.
-    """
-    from api.models import DefectRecord
-
-    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
-
-    # Total produced pieces for this size at this factory in last 90 days
-    total_produced = db.query(func.coalesce(func.sum(OrderPosition.quantity), 0)).filter(
-        OrderPosition.factory_id == factory_id,
-        OrderPosition.size == size,
-        OrderPosition.created_at >= cutoff,
-        OrderPosition.status.notin_(['cancelled']),
-    ).scalar()
-
-    # Total defective pieces from DefectRecords linked to positions
-    # with matching size at this factory
-    total_defects = db.query(func.coalesce(func.sum(DefectRecord.quantity), 0)).join(
-        OrderPosition, DefectRecord.position_id == OrderPosition.id
-    ).filter(
-        OrderPosition.factory_id == factory_id,
-        OrderPosition.size == size,
-        DefectRecord.date >= cutoff.date(),
-    ).scalar()
-
-    if total_produced and int(total_produced) > 0 and total_defects:
-        coeff = float(total_defects) / float(total_produced)
-        return min(coeff, 0.30)  # cap at 30%
-
-    return 0.05  # default 5%
-
-
 # ────────────────────────────────────────────────────────────────
 # §1  Main entry point
 # ────────────────────────────────────────────────────────────────

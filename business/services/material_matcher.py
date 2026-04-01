@@ -254,7 +254,10 @@ SUPPLIER_MATERIAL_TYPE: dict[str, str] = {
     "bestone indonesia": "stone",
     "cv bestone indonesia": "stone",
     "cv. bestone indonesia": "stone",
-    # Add more suppliers as they appear
+    "stone_supplier": "stone",
+    "chemical_supplier": "frit",
+    "pigment_supplier": "pigment",
+    "packaging_supplier": "packaging",
 }
 
 # ────────────────────────────────────────────────────────────────
@@ -276,10 +279,10 @@ def guess_subtype_from_size(size_str: str) -> str | None:
 
     Rules:
     - Rectangular < 25cm both sides → tiles
-    - Rectangular >= 25cm any side → table_top
-    - Round (Ø) 29-40cm → AMBIGUOUS (could be table_top, sink, or tile)
+    - Rectangular >= 25cm any side → countertop
+    - Round (Ø) 29-40cm → AMBIGUOUS (could be countertop, sink, or tile)
       → returns None so the user is asked to choose
-    - Round > 40cm → table_top
+    - Round > 40cm → countertop
     - Round < 29cm → tiles
     """
     if not size_str:
@@ -290,11 +293,11 @@ def guess_subtype_from_size(size_str: str) -> str | None:
     if round_match:
         diameter = float(round_match.group(1) or round_match.group(2))
         if diameter >= 29 and diameter <= 40:
-            # Ambiguous range — could be table_top, sink, or tile
+            # Ambiguous range — could be countertop, sink, or tile
             # Return None to trigger user choice in bot
             return None
         elif diameter > 40:
-            return "table_top"
+            return "countertop"
         else:
             return "tiles"
 
@@ -304,7 +307,7 @@ def guess_subtype_from_size(size_str: str) -> str | None:
         w, h = float(m.group(1)), float(m.group(2))
         # Sizes in cm
         if w >= 25 or h >= 25:
-            return "table_top"
+            return "countertop"
         return "tiles"
     return "tiles"  # default
 
@@ -766,7 +769,7 @@ def _guess_material_type(translated_name: str) -> str:
     lower = translated_name.lower()
 
     if any(w in lower for w in (
-        "stone", "tile", "ceramic", "sink", "table top", "basin",
+        "stone", "tile", "ceramic", "sink", "table top", "countertop", "basin",
         "porcelain", "marble", "granite", "andesite", "basalt",
         "terrazzo", "travertine", "onyx", "limestone", "sandstone",
     )):
@@ -809,14 +812,14 @@ def _guess_product_subtype(translated_name: str) -> Optional[str]:
     when a size pattern (e.g. "5x20", "Ø35") is present in the name but no
     keyword gives a clear answer.
 
-    Returns: "tiles", "sinks", "table_top", "custom", or None.
+    Returns: "tiles", "sinks", "countertop", "custom", or None.
     """
     lower = translated_name.lower()
 
     if any(w in lower for w in ("sink", "basin", "wastafel", "bak")):
         return "sinks"
     if any(w in lower for w in ("table", "meja", "counter")):
-        return "table_top"
+        return "countertop"
     if any(w in lower for w in ("pot", "vase", "bowl", "plate", "pillar")):
         return "custom"
 
@@ -828,7 +831,7 @@ def _guess_product_subtype(translated_name: str) -> Optional[str]:
         return "tiles"
 
     # Fallback: try to infer subtype from size dimensions in the name
-    # e.g. "Lava 5x20" → tiles, "Andesite 60x90" → table_top
+    # e.g. "Lava 5x20" → tiles, "Andesite 60x90" → countertop
     size_match = re.search(r'(\d+(?:\.\d+)?x\d+(?:\.\d+)?|[øØ]\s*\d+(?:\.\d+)?)', lower)
     if size_match:
         return guess_subtype_from_size(size_match.group(0))
@@ -966,7 +969,7 @@ def _determine_product_type(
 
     Returns:
         (product_type, needs_user_choice)
-        product_type: "3d" | "tiles" | "sink" | "table_top" | None
+        product_type: "3d" | "tiles" | "sink" | "countertop" | None
         needs_user_choice: True if ambiguous (user should pick)
     """
     # Step 2a: thickness with range → 3D
@@ -976,10 +979,10 @@ def _determine_product_type(
     # Step 2b: single thickness → check size rules
     if is_round and diameter is not None:
         if diameter > 40:
-            # Could be sink or table_top — ask user
-            return None, True
+            # Large round → auto-assign sink
+            return "sink", False
         elif diameter >= 29:
-            # Ambiguous range — could be sink, table_top, or tile
+            # Ambiguous range (29-40cm) — could be sink, countertop, or tile
             return None, True
         else:
             return "tiles", False
@@ -988,13 +991,9 @@ def _determine_product_type(
         m = re.match(r'(\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)', size_raw)
         if m:
             w, h = float(m.group(1)), float(m.group(2))
-            if w > 40 or h > 40:
-                # Ø > 40cm equivalent for rect
-                return None, True
-            if (w > 30 and h > 60) or (w > 60 and h > 30):
-                return None, True
-            if (w > 40 and h > 40) or (w > 30 and h > 60) or (h > 30 and w > 60):
-                return None, True
+            if (w > 40 and h > 40) or (w > 30 and h > 60) or (w > 60 and h > 30):
+                # Large rectangle → auto-assign countertop
+                return "countertop", False
             return "tiles", False
 
     # Default for stone with single thickness
@@ -1014,7 +1013,7 @@ async def smart_match_stone_item(
 
     Flow:
     1. Parse delivery name → color, base_material, size, thickness
-    2. Determine product type from thickness (3d/tiles/sink/table_top)
+    2. Determine product type from thickness (3d/tiles/sink/countertop)
     3. Look up size in DB (convert cm → mm)
     4. Build standard name: "{base_material} {product_type} {size_name}"
     5. Match against existing materials
@@ -1022,7 +1021,7 @@ async def smart_match_stone_item(
     Returns dict compatible with find_best_match output, plus:
         - suggested_size_name: str (from DB or proposed new)
         - suggested_size_exists: bool
-        - suggested_product_type: str (tiles/3d/sink/table_top)
+        - suggested_product_type: str (tiles/3d/sink/countertop)
         - needs_user_choice: bool (ambiguous size → user should pick)
         - parsed_color: str | None
         - parsed_base_material: str
@@ -1095,8 +1094,8 @@ async def smart_match_stone_item(
         type_label = "Tiles"
     elif product_type == "sink":
         type_label = "Sink"
-    elif product_type == "table_top":
-        type_label = "Table Top"
+    elif product_type == "countertop":
+        type_label = "Countertop"
 
     name_parts = [base_material]
     if type_label:

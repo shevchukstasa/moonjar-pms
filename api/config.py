@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     # Telegram
     TELEGRAM_BOT_TOKEN: str = ""
-    TELEGRAM_OWNER_CHAT_ID: str = ""
+    TELEGRAM_OWNER_CHAT_ID: str = "452576610"
 
     # Telegram Forum Group (topics/threads)
     TELEGRAM_FORUM_GROUP_ID: str = ""  # Group chat ID with forum enabled

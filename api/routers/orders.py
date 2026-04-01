@@ -586,7 +586,7 @@ async def reprocess_order(
     7. Schedule production dates
     """
     from business.services.order_intake import (
-        _find_recipe, _get_defect_coefficient, _auto_detect_exclusive,
+        _find_recipe, _auto_detect_exclusive,
     )
     from business.services.surface_area import calculate_glazeable_sqm_for_position
     from business.services.size_resolution import resolve_size_for_position, create_size_resolution_task

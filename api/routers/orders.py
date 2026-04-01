@@ -641,14 +641,18 @@ async def reprocess_order(
                 create_size_resolution_task(db, p, order.id, order.factory_id, sr.reason, sr.candidates)
                 pos_result["actions"].append(f"size_task_created={sr.reason}")
 
-        # 5. Reserve materials (if recipe exists and status is planned or insufficient)
-        if p.recipe_id and _ev(p.status) in ("planned", "insufficient_materials"):
+        # 5. Reserve materials (if recipe exists and status allows re-reservation)
+        #    awaiting_recipe positions with newly-bound recipe should also be re-reserved
+        _reservable = ("planned", "insufficient_materials", "awaiting_recipe",
+                        "awaiting_consumption_data", "awaiting_size_confirmation")
+        if p.recipe_id and _ev(p.status) in _reservable:
             try:
                 from api.models import Recipe, MaterialTransaction
                 from api.enums import TransactionType
 
-                # If re-reserving (insufficient_materials), unreserve old reserves first
-                if _ev(p.status) == "insufficient_materials":
+                # If re-reserving from blocking status, clear old reserves + reset to planned
+                if _ev(p.status) in ("insufficient_materials", "awaiting_recipe",
+                                      "awaiting_consumption_data", "awaiting_size_confirmation"):
                     old_reserves = (
                         db.query(MaterialTransaction)
                         .filter(

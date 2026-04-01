@@ -1,0 +1,300 @@
+E2E Order Lifecycle Test Report
+Generated: 2026-03-31T16:35:18.862301
+API: https://moonjar-pms-production.up.railway.app/api
+Factory: Bali (a2045a5f-c5c3-465c-a953-2c16b5e4b418)
+Duration: 964.0s
+
+Order 1: Simple Tiles: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order via webhook
+  [PASS] 2. Verify order created
+  [PASS] 3. Transition to glazed
+  [PASS] 4. Pre-kiln QC check (pass)
+  [PASS] 5. Batch auto-form, start, complete
+  [PASS] 6. Post-fire -> transferred_to_sorting
+  [PASS] 7. Sorting split (all good)
+  [PASS] 8. Final QC check (pass)
+  [PASS] 9. Create shipment + ship
+  [PASS] 10. Verify final order state
+  [PASS] 11. Cleanup
+
+Order 2: Multi-position Engobe: 10/10 passed  [ALL PASS]
+  [PASS] 1. Create 3-position order via webhook
+  [PASS] 2. Verify 3 positions created
+  [PASS] 3. Engobe path (all 3 positions)
+  [PASS] 4. Pre-kiln QC (all 3)
+  [PASS] 5. Batch auto-form + start + complete
+  [PASS] 6. Post-fire -> sorting
+  [PASS] 7. Sorting split (all good)
+  [PASS] 8. Final QC (all pass)
+  [PASS] 9. Ship all positions
+  [PASS] 10. Verify + Cleanup
+
+Order 3: Countertop: 10/10 passed  [ALL PASS]
+  [PASS] 1. Create countertop order via webhook
+  [PASS] 2. Verify countertop order
+  [PASS] 3. Move to glazed
+  [PASS] 4. Pre-kiln QC
+  [PASS] 5. Batch + Fire
+  [PASS] 6. Post-fire -> sorting
+  [PASS] 7. Split (all good)
+  [PASS] 8. Final QC
+  [PASS] 9. Ship
+  [PASS] 10. Verify + Cleanup
+
+Order 4: Gold+Raku: 10/10 passed  [ALL PASS]
+  [PASS] 1. Create gold/raku order
+  [PASS] 2. Verify order
+  [PASS] 3. Move to glazed
+  [PASS] 4. Pre-kiln QC
+  [PASS] 5. Batch + Fire (round 1)
+  [PASS] 6. Handle post-fire (multi-round possible)
+  [PASS] 7. Split (all good)
+  [PASS] 8. Final QC
+  [PASS] 9. Ship
+  [PASS] 10. Verify + Cleanup
+
+Order 5: Mixed + Service Items: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create mixed order (stencil + regular)
+  [PASS] 2. Verify positions
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all)
+  [PASS] 10. Ship all
+  [PASS] 11. Verify + Cleanup
+
+Order 6: Large Authentic Collection: 5/11 passed  [6 FAIL]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [FAIL] 5. Pre-kiln QC (all) -- Connection error — server may be down or unreachable (ConnectionError)
+  [FAIL] 6. Batch + Fire -- Connection error — server may be down or unreachable (ConnectionError)
+  [FAIL] 7. Post-fire -> sorting -- Connection error — server may be down or unreachable (ConnectionError)
+  [FAIL] 8. Sorting split (all good) -- Connection error — server may be down or unreachable (ConnectionError)
+  [FAIL] 9. Final QC (all pass) -- Final check failed: 400 {"detail":"Position must be in 'packed' status for final check, got 'glazed'"}
+  [FAIL] 10. Ship all positions -- Create shipment failed: 400 {"detail":"Position #5 is not ready for shipment (status: glazed)"}
+  [PASS] 11. Verify + Cleanup
+
+Order 7: Creative Mix: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 8: Exclusive Countertops: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 9: Gold Collection: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 10: Raku + 3D: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 11: Stencil Collection: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 12: Silk Screen: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 13: Round + Triangle Shapes: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 14: Splashing + Brush: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+Order 15: Mixed Everything: 11/11 passed  [ALL PASS]
+  [PASS] 1. Create order (manual)
+  [PASS] 2. Verify positions created
+  [PASS] 3. Resolve blocking statuses/tasks
+  [PASS] 4. Move all to glazed
+  [PASS] 5. Pre-kiln QC (all)
+  [PASS] 6. Batch + Fire
+  [PASS] 7. Post-fire -> sorting
+  [PASS] 8. Sorting split (all good)
+  [PASS] 9. Final QC (all pass)
+  [PASS] 10. Ship all positions
+  [PASS] 11. Verify + Cleanup
+
+V2-16: Happy Path + Material Verify: 10/10 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Record stock before
+  [PASS] 3. Create order (3 positions)
+  [PASS] 4. Verify positions
+  [PASS] 5. Glaze all positions
+  [PASS] 6. Check stock after glazing
+  [PASS] 7. Pre-kiln QC + batch + fire
+  [PASS] 8. Sort all good
+  [PASS] 9. Final QC + ship all
+  [PASS] 10. Final verify + cleanup
+
+V2-17: Refire Full Cycle -> 100%: 10/10 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Record stock
+  [PASS] 3. Create order (100 pcs)
+  [PASS] 4. Verify position
+  [PASS] 5. Pipeline to sorting
+  [PASS] 6. Split: 70 good + 30 refire
+  [PASS] 7. Ship good (70 pcs)
+  [PASS] 8. Process refire sub-positions
+  [PASS] 9. Ship refire (30 pcs)
+  [PASS] 10. Verify + cleanup
+
+V2-18: Repair Re-glaze -> 100%: 10/10 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Record stock
+  [PASS] 3. Create order (80 pcs 30x30)
+  [PASS] 4. Verify position
+  [PASS] 5. Pipeline to sorting
+  [PASS] 6. Split: 60 good + 20 repair
+  [PASS] 7. Ship good (60 pcs)
+  [PASS] 8. Process repair (re-glaze + fire)
+  [PASS] 9. Ship repair (20 pcs)
+  [PASS] 10. Verify + cleanup
+
+V2-19: Color Mismatch -> Restart -> 100%: 9/9 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Create order (50 pcs)
+  [PASS] 3. Verify position
+  [PASS] 4. Pipeline to sorting
+  [PASS] 5. Split: 40 good + 10 color mismatch
+  [PASS] 6. Ship good (40 pcs)
+  [PASS] 7. Process color mismatch (full restart)
+  [PASS] 8. Ship color mismatch (10 pcs)
+  [PASS] 9. Cleanup
+
+V2-20: Mixed Defects -> All Paths: 8/8 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Create order (120 pcs)
+  [PASS] 3. Verify position
+  [PASS] 4. Pipeline to sorting
+  [PASS] 5. Split: 80g+15rf+10rp+5cm+5gr+5wo
+  [PASS] 6. Ship good (80 pcs)
+  [PASS] 7. Process all defect sub-paths
+  [PASS] 8. Cleanup
+
+V2-21: Engobe Path + Dual Material Consumption: 8/8 passed  [ALL PASS]
+  [PASS] 1. Setup glaze + engobe recipes
+  [PASS] 2. Record stock
+  [PASS] 3. Create order (3 positions)
+  [PASS] 4. Verify positions
+  [PASS] 5. Engobe + Glaze all positions
+  [PASS] 6. Check stock after engobe+glaze
+  [PASS] 7. Fire + sort + ship all
+  [PASS] 8. Final verify + cleanup
+
+V2-22: Countertops + Edge Profiles + Stock: 6/6 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Record stock
+  [PASS] 3. Create order (3 countertops)
+  [PASS] 4. Verify positions + glazeable_sqm
+  [PASS] 5. Full pipeline -> ship all
+  [PASS] 6. Stock verify + cleanup
+
+V2-23: Raku + Standard (Different Kilns): 5/5 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Create order (2 raku + 2 standard)
+  [PASS] 3. Verify positions
+  [PASS] 4. Pipeline (separate kiln batches) + ship
+  [PASS] 5. Verify kiln assignments + cleanup
+
+V2-24: Insufficient Materials -> Receive -> Ship: 8/8 passed  [ALL PASS]
+  [PASS] 1. Setup recipe with ZERO stock
+  [PASS] 2. Verify zero stock
+  [PASS] 3. Create order (50 pcs)
+  [PASS] 4. Verify positions (may be blocked)
+  [PASS] 5. Receive stock (200 kg)
+  [PASS] 6. Unblock + full pipeline
+  [PASS] 7. Ship all (50 pcs)
+  [PASS] 8. Verify stock + cleanup
+
+V2-25: Stencil Blocking -> Task -> Ship: 6/6 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Create stencil order (80 pcs)
+  [PASS] 3. Verify position (may be blocked)
+  [PASS] 4. Resolve stencil blocking task
+  [PASS] 5. Full pipeline + ship (80 pcs)
+  [PASS] 6. Cleanup
+
+Total: 236/242 passed, 6 failed
+6 STEPS FAILED

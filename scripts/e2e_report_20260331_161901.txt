@@ -1,0 +1,108 @@
+E2E Order Lifecycle Test Report
+Generated: 2026-03-31T16:19:01.689462
+API: https://moonjar-pms-production.up.railway.app/api
+Factory: Bali (a2045a5f-c5c3-465c-a953-2c16b5e4b418)
+Duration: 314.3s
+
+V2-16: Happy Path + Material Verify: 10/10 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Record stock before
+  [PASS] 3. Create order (3 positions)
+  [PASS] 4. Verify positions
+  [PASS] 5. Glaze all positions
+  [PASS] 6. Check stock after glazing
+  [PASS] 7. Pre-kiln QC + batch + fire
+  [PASS] 8. Sort all good
+  [PASS] 9. Final QC + ship all
+  [PASS] 10. Final verify + cleanup
+
+V2-17: Refire Full Cycle -> 100%: 10/10 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Record stock
+  [PASS] 3. Create order (100 pcs)
+  [PASS] 4. Verify position
+  [PASS] 5. Pipeline to sorting
+  [PASS] 6. Split: 70 good + 30 refire
+  [PASS] 7. Ship good (70 pcs)
+  [PASS] 8. Process refire sub-positions
+  [PASS] 9. Ship refire (30 pcs)
+  [PASS] 10. Verify + cleanup
+
+V2-18: Repair Re-glaze -> 100%: 10/10 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Record stock
+  [PASS] 3. Create order (80 pcs 30x30)
+  [PASS] 4. Verify position
+  [PASS] 5. Pipeline to sorting
+  [PASS] 6. Split: 60 good + 20 repair
+  [PASS] 7. Ship good (60 pcs)
+  [PASS] 8. Process repair (re-glaze + fire)
+  [PASS] 9. Ship repair (20 pcs)
+  [PASS] 10. Verify + cleanup
+
+V2-19: Color Mismatch -> Restart -> 100%: 9/9 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Create order (50 pcs)
+  [PASS] 3. Verify position
+  [PASS] 4. Pipeline to sorting
+  [PASS] 5. Split: 40 good + 10 color mismatch
+  [PASS] 6. Ship good (40 pcs)
+  [PASS] 7. Process color mismatch (full restart)
+  [PASS] 8. Ship color mismatch (10 pcs)
+  [PASS] 9. Cleanup
+
+V2-20: Mixed Defects -> All Paths: 8/8 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Create order (120 pcs)
+  [PASS] 3. Verify position
+  [PASS] 4. Pipeline to sorting
+  [PASS] 5. Split: 80g+15rf+10rp+5cm+5gr+5wo
+  [PASS] 6. Ship good (80 pcs)
+  [PASS] 7. Process all defect sub-paths
+  [PASS] 8. Cleanup
+
+V2-21: Engobe Path + Dual Material Consumption: 8/8 passed  [ALL PASS]
+  [PASS] 1. Setup glaze + engobe recipes
+  [PASS] 2. Record stock
+  [PASS] 3. Create order (3 positions)
+  [PASS] 4. Verify positions
+  [PASS] 5. Engobe + Glaze all positions
+  [PASS] 6. Check stock after engobe+glaze
+  [PASS] 7. Fire + sort + ship all
+  [PASS] 8. Final verify + cleanup
+
+V2-22: Countertops + Edge Profiles + Stock: 6/6 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Record stock
+  [PASS] 3. Create order (3 countertops)
+  [PASS] 4. Verify positions + glazeable_sqm
+  [PASS] 5. Full pipeline -> ship all
+  [PASS] 6. Stock verify + cleanup
+
+V2-23: Raku + Standard (Different Kilns): 5/5 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Create order (2 raku + 2 standard)
+  [PASS] 3. Verify positions
+  [PASS] 4. Pipeline (separate kiln batches) + ship
+  [PASS] 5. Verify kiln assignments + cleanup
+
+V2-24: Insufficient Materials -> Receive -> Ship: 8/8 passed  [ALL PASS]
+  [PASS] 1. Setup recipe with ZERO stock
+  [PASS] 2. Verify zero stock
+  [PASS] 3. Create order (50 pcs)
+  [PASS] 4. Verify positions (may be blocked)
+  [PASS] 5. Receive stock (200 kg)
+  [PASS] 6. Unblock + full pipeline
+  [PASS] 7. Ship all (50 pcs)
+  [PASS] 8. Verify stock + cleanup
+
+V2-25: Stencil Blocking -> Task -> Ship: 6/6 passed  [ALL PASS]
+  [PASS] 1. Setup recipe + materials
+  [PASS] 2. Create stencil order (80 pcs)
+  [PASS] 3. Verify position (may be blocked)
+  [PASS] 4. Resolve stencil blocking task
+  [PASS] 5. Full pipeline + ship (80 pcs)
+  [PASS] 6. Cleanup
+
+Total: 80/80 passed, 0 failed
+ALL PASSED

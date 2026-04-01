@@ -458,6 +458,7 @@
 | GET | /throughput | management | `[API-only / TPS integration]` | Throughput metrics |
 | GET | /deviations/operations | management | checkmark | Deviations by operation |
 | GET | /operations | management | checkmark | List operations |
+| GET | /achievements/{user_id} | any_auth | checkmark | Get user achievements, points, badges |
 | GET | /master-permissions/check/{user_id}/{operation_id} | any_auth | `[Frontend planned]` | Check user permission |
 | GET | /master-permissions/{user_id} | management | `[Frontend planned]` | List user permissions |
 | POST | /master-permissions | management | `[Frontend planned]` | Grant permission |
@@ -972,4 +973,18 @@
 
 ---
 
-*Generated 2026-03-30. Total: ~55 routers, ~350+ endpoints.*
+## Telegram Bot Commands (NEW — April 1-2, 2026)
+
+| Command | Description |
+|---------|-------------|
+| `/mystats` | Personal points breakdown and statistics |
+| `/leaderboard` | Top performers ranking |
+| `/stock` | Low stock materials summary |
+| `/challenge` | Current daily challenge details |
+| `/achievements` | Earned badges and milestones |
+| `/points` | Current points balance |
+| `/cancel_verify` | Cancel an in-progress recipe verification |
+
+---
+
+*Generated 2026-04-02. Total: ~55 routers, ~360+ endpoints.*

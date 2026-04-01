@@ -70,6 +70,40 @@ Component exists but is currently **unused**. All pages use native `<input type=
 
 ---
 
+## Smart Force Unblock Dialog (NEW — April 1-2, 2026)
+
+**Trigger:** PM clicks "Force Unblock" on a blocked position.
+
+Instead of a generic confirmation, the dialog now presents **3 context-aware options** based on the blocking type:
+
+- For `INSUFFICIENT_MATERIALS`: Proceed with available / Wait for delivery / Substitute material
+- For `AWAITING_RECIPE`: Use closest match / Create temporary / Skip glazing
+- For `AWAITING_STENCIL_SILKSCREEN`: Proceed without / Use alternative / Delay
+- For `AWAITING_COLOR_MATCHING`: Accept current / Re-match / Use standard
+- For `AWAITING_CONSUMPTION_DATA`: Use defaults / Measure now / Copy from similar
+
+Selection triggers `POST /positions/{id}/force-unblock` with the chosen option and sends CEO Telegram notification.
+
+---
+
+## Morning Briefing v2 — Telegram Format (NEW — April 1-2, 2026)
+
+The bot sends a daily morning briefing with 7 blocks (greeting, yesterday summary, today's plan, blocking issues, achievements, challenge, action buttons).
+
+### 6 Inline Buttons
+Rendered as Telegram inline keyboard below the briefing message:
+
+| Button | Callback Action |
+|--------|----------------|
+| Start Day | Confirms attendance, starts shift timer |
+| Details | Shows expanded schedule for today |
+| Problem | Opens problem report flow |
+| Stats | Shows personal statistics |
+| Leaders | Shows current leaderboard |
+| Stock | Shows low stock materials |
+
+---
+
 ## Routing (additions)
 
 | Path | Component | Role Guard |

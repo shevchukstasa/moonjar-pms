@@ -1,6 +1,6 @@
 # Production Manager (PM) Guide -- Moonjar PMS
 
-> Version: 1.2 | Date: 2026-03-26
+> Version: 1.3 | Date: 2026-04-02
 > Moonjar Production Management System
 
 ---
@@ -37,6 +37,10 @@
 29. [Shipment Workflow](#29-shipment-workflow)
 30. [Employee Management and Attendance](#30-employee-management-and-attendance)
 31. [Firing Temperature Logging](#31-firing-temperature-logging)
+32. [Smart Force Unblock](#32-smart-force-unblock)
+33. [Points System and Recipe Verification](#33-points-system-and-recipe-verification)
+34. [Telegram Bot Commands](#34-telegram-bot-commands)
+35. [Morning Briefing](#35-morning-briefing)
 
 ---
 
@@ -1613,6 +1617,125 @@ To add a reading:
 - Helps diagnose defects caused by temperature deviations.
 - Builds a historical record for recipe optimization.
 - Peak temperature is compared against the recipe's target firing temperature.
+
+---
+
+---
+
+## 32. Smart Force Unblock
+
+When a position is blocked, you can force-unblock it to keep production moving. The system now offers **3 context-aware options** instead of a generic "Force Unblock" button.
+
+### 32.1. How to Use
+
+1. Go to the **Blocking** tab on your Dashboard.
+2. Find the blocked position.
+3. Click **"Force Unblock"**.
+4. A dialog appears with 3 options specific to the blocking reason.
+
+### 32.2. Options by Blocking Type
+
+| Blocking Reason | Option 1 | Option 2 | Option 3 |
+|----------------|----------|----------|----------|
+| Material Shortage | Proceed with available stock | Wait for next delivery | Substitute material |
+| Missing Recipe | Use closest matching recipe | Create temporary recipe | Skip glazing |
+| Missing Stencil | Proceed without stencil | Use alternative stencil | Delay until ready |
+| Color Mismatch | Accept current color | Request re-matching | Use standard color |
+| Missing Consumption Data | Use default rates | Measure now | Copy from similar recipe |
+
+### 32.3. CEO Notification
+
+Every force unblock automatically sends a Telegram notification to the CEO with the position details, blocking reason, chosen option, and your name.
+
+> **Important**: Force unblock is a last resort. Always try to resolve the underlying issue first.
+
+---
+
+## 33. Points System and Recipe Verification
+
+### 33.1. Points System
+
+You earn points for accurate recipe preparation. Points accumulate throughout the year and appear on leaderboards.
+
+**Scoring:**
+
+| Accuracy (deviation from spec) | Points |
+|-------------------------------|--------|
+| Within +/-1% | 10 |
+| Within +/-3% | 7 |
+| Within +/-5% | 5 |
+| Within +/-10% | 3 |
+| Beyond +/-10% | 1 |
+| Photo verification bonus | +2 |
+
+Points reset on January 1 each year. Check your points anytime with `/mystats` or `/points` in Telegram.
+
+### 33.2. Recipe Verification
+
+To verify a recipe preparation:
+
+1. Prepare the recipe according to specifications.
+2. Take a photo of the measured quantities (scale reading, graduated cylinder, etc.).
+3. Send the photo to the Telegram bot or upload via the app.
+4. The system uses OCR to extract measured values and compares them to the recipe spec.
+5. Points are awarded based on accuracy.
+
+To cancel an in-progress verification, use `/cancel_verify` in Telegram.
+
+### 33.3. Daily Challenges
+
+Each morning briefing includes a daily challenge (e.g., "Zero defects today = +20 pts"). Complete the challenge for bonus points.
+
+---
+
+## 34. Telegram Bot Commands
+
+The Telegram bot supports these commands for production managers:
+
+| Command | What It Does |
+|---------|-------------|
+| `/mystats` | Your personal points breakdown and statistics |
+| `/leaderboard` | Top performers ranking |
+| `/stock` | Low stock materials summary |
+| `/challenge` | Current daily challenge details |
+| `/achievements` | Your earned badges and milestones |
+| `/points` | Current points balance |
+| `/cancel_verify` | Cancel an in-progress recipe verification |
+
+You can also send natural language messages to the bot for AI-powered assistance with production questions.
+
+---
+
+## 35. Morning Briefing
+
+Every morning at the configured time (default 7:00 AM), the bot sends a briefing to the production group chat.
+
+### 35.1. Briefing Structure
+
+The briefing contains 7 blocks:
+
+1. **Greeting** -- personalized with mood based on yesterday's results
+2. **Yesterday Summary** -- pieces produced, defect rate, kiln utilization
+3. **Today's Plan** -- scheduled batches, expected output, key deadlines
+4. **Blocking Issues** -- active blocks requiring immediate attention
+5. **Achievements** -- points earned yesterday, top performers, streaks
+6. **Challenge** -- daily challenge with bonus points
+7. **Action Buttons** -- 6 inline buttons for quick actions
+
+### 35.2. Inline Buttons
+
+Below the briefing message, you will see 6 buttons:
+
+- **Start Day** -- tap to confirm attendance and start your shift
+- **Details** -- see the full expanded schedule for today
+- **Problem** -- quickly report a problem
+- **Stats** -- view your personal statistics
+- **Leaders** -- see the current leaderboard
+- **Stock** -- check low stock materials
+
+### 35.3. Evening Summary
+
+At 6 PM, the bot sends an evening summary with today's results: pieces completed vs plan, defect rate, points earned, and a preview of tomorrow's first batch.
 
 ---
 

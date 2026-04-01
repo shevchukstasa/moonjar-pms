@@ -187,3 +187,166 @@ if firing_round > 1:
 else:
     profile = get_firing_profile(recipe)
 ```
+
+---
+
+## Points System — Accuracy Scoring (NEW — April 1-2, 2026)
+
+### Overview
+Production managers and masters earn points for recipe verification accuracy. Points accumulate yearly and feed into leaderboards and gamification.
+
+### Scoring Rules
+- Accuracy within +/-1% of expected values: **10 points**
+- Accuracy within +/-3%: **7 points**
+- Accuracy within +/-5%: **5 points**
+- Accuracy within +/-10%: **3 points**
+- Beyond +/-10%: **1 point** (participation)
+- Photo verification bonus: **+2 points** per verified photo
+
+### Yearly Accumulation
+Points reset on January 1. Yearly totals are archived for historical comparison. Monthly leaderboards are generated from accumulated points.
+
+### Bot Commands
+- `/mystats` — personal points breakdown
+- `/leaderboard` — top performers
+- `/points` — current points balance
+- `/achievements` — earned badges and milestones
+
+---
+
+## Recipe Verification Flow (NEW — April 1-2, 2026)
+
+### Photo-Based Verification
+```
+PM takes photo of recipe preparation
+  │
+  ├─ POST photo to bot / upload via app
+  │
+  ├─ OCR extracts measured values (weight, volume, ratios)
+  │
+  ├─ System compares extracted values vs recipe specification
+  │    ├─ deviation_pct = abs(measured - expected) / expected * 100
+  │    └─ score = lookup_score(deviation_pct)
+  │
+  ├─ Points awarded to user
+  │
+  └─ Result stored in verification_log
+       ├─ photo_url, ocr_data, recipe_id
+       ├─ deviation_pct, points_awarded
+       └─ verified_by, verified_at
+```
+
+### Cancel Verification
+`/cancel_verify` — cancels an in-progress verification if photo was wrong or conditions changed.
+
+---
+
+## Smart Force Unblock (NEW — April 1-2, 2026)
+
+### Overview
+When a position is blocked (material shortage, missing recipe, missing stencil, etc.), PM can force-unblock it. The system now presents **3 context-aware options** per blocking type instead of a generic unblock.
+
+### Options by Blocking Type
+
+| Blocking Status | Option 1 | Option 2 | Option 3 |
+|----------------|----------|----------|----------|
+| `INSUFFICIENT_MATERIALS` | Proceed with available stock | Wait for next delivery (ETA shown) | Substitute material |
+| `AWAITING_RECIPE` | Use closest matching recipe | Create temporary recipe | Skip glazing stage |
+| `AWAITING_STENCIL_SILKSCREEN` | Proceed without stencil | Use alternative stencil | Delay until stencil ready |
+| `AWAITING_COLOR_MATCHING` | Accept current color | Request re-matching | Use standard color |
+| `AWAITING_CONSUMPTION_DATA` | Use default rates | Measure now | Copy from similar recipe |
+
+### CEO Notification
+Every force unblock triggers a Telegram notification to the CEO with:
+- Position ID, order number, blocking reason
+- Which option was selected
+- PM who performed the unblock
+- Timestamp
+
+---
+
+## Bug Report Monitor (NEW — April 1-2, 2026)
+
+### AI Triage of Group Messages
+The Telegram bot monitors ALL messages in the production group chat (not just commands). When a message describes a problem, bug, or issue:
+
+1. AI classifies the message: `bug_report`, `feature_request`, `question`, `general`
+2. For `bug_report`: auto-creates a problem card with severity estimate
+3. Notifies the relevant role (PM for production issues, Admin for system issues)
+4. Tracks resolution status
+
+---
+
+## Morning Briefing v2 (NEW — April 1-2, 2026)
+
+### 7-Block Structure
+Daily briefing sent at configured time (default 7:00 AM) to production group:
+
+| Block | Content |
+|-------|---------|
+| 1. Greeting | Personalized greeting with emotion/mood based on yesterday's results |
+| 2. Yesterday Summary | Key metrics: pieces produced, defect rate, kiln utilization |
+| 3. Today's Plan | Scheduled batches, expected output, key deadlines |
+| 4. Blocking Issues | Active blocks requiring immediate attention |
+| 5. Achievements | Points earned yesterday, top performers, streaks |
+| 6. Challenge | Daily challenge with bonus points (e.g., "Zero defects today = +20 pts") |
+| 7. Action Buttons | 6 inline buttons (see below) |
+
+### 6 Inline Buttons
+| Button | Action |
+|--------|--------|
+| Start Day | Confirms attendance, starts shift |
+| Details | Expands full schedule for today |
+| Problem | Report a problem immediately |
+| Stats | Personal statistics summary |
+| Leaders | Current leaderboard |
+| Stock | Low stock materials alert |
+
+---
+
+## Evening Summary (NEW — April 1-2, 2026)
+
+### Daily Results (6 PM)
+Automated summary sent to production group at 6 PM:
+- Pieces completed today vs plan
+- Defect rate today vs target
+- Points earned by team
+- Outstanding blocking issues
+- Tomorrow preview (first batch, key deadlines)
+
+---
+
+## Attendance Monitor (NEW — April 1-2, 2026)
+
+### Daily Check
+System checks attendance records daily at configured time:
+- Compares expected workers vs actual check-ins
+- If **3 or more gaps** detected: sends CEO alert via Telegram
+- Alert includes: names of absent workers, their roles, impact on today's schedule
+
+---
+
+## Material Balance Fix (UPDATED — April 1-2, 2026)
+
+### g to kg Conversion
+Fixed material balance calculation where recipe quantities in grams were compared directly to stock in kilograms without conversion. Now properly converts:
+
+```
+stock_needed_kg = recipe_qty_g / 1000
+```
+
+### Legacy Trigger Removal
+Removed legacy database triggers that were auto-updating material balances on transaction insert. These caused double-counting when the application layer also updated balances. Now only the application layer manages balance updates.
+
+---
+
+## Reprocess Enhancement (UPDATED — April 1-2, 2026)
+
+### All Blocking Statuses Handled
+`POST /orders/{order_id}/reprocess` now handles ALL blocking statuses, not just `INSUFFICIENT_MATERIALS`. When reprocessing:
+- Re-checks material availability for `INSUFFICIENT_MATERIALS`
+- Re-matches recipes for `AWAITING_RECIPE`
+- Re-checks stencil availability for `AWAITING_STENCIL_SILKSCREEN`
+- Re-validates consumption data for `AWAITING_CONSUMPTION_DATA`
+- Re-runs color matching for `AWAITING_COLOR_MATCHING`
+- Positions that can be unblocked are moved back to `PLANNED`

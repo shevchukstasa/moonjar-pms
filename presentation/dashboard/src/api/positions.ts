@@ -115,6 +115,6 @@ export const positionsApi = {
     }).then((r) => r.data),
   materialReservations: (id: string) =>
     apiClient.get<MaterialReservationResponse>(`/positions/${id}/material-reservations`).then((r) => r.data),
-  forceUnblock: (id: string, notes: string) =>
-    apiClient.post<ForceUnblockResponse>(`/positions/${id}/force-unblock`, { notes }).then((r) => r.data),
+  forceUnblock: (id: string, notes: string, notify_override = false) =>
+    apiClient.post<ForceUnblockResponse>(`/positions/${id}/force-unblock`, { notes, notify_override }).then((r) => r.data),
 };

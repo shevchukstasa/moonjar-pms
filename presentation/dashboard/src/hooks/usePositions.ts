@@ -155,8 +155,8 @@ export function useUpdatePosition() {
 export function useForceUnblock() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, notes }: { id: string; notes: string }) =>
-      positionsApi.forceUnblock(id, notes),
+    mutationFn: ({ id, notes, notify_override }: { id: string; notes: string; notify_override?: boolean }) =>
+      positionsApi.forceUnblock(id, notes, notify_override),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['positions'] });
       qc.invalidateQueries({ queryKey: ['blocking-summary'] });

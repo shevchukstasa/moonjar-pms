@@ -1165,6 +1165,42 @@ async def daily_streak_update():
         db.close()
 
 
+async def daily_attendance_check():
+    """Check attendance gaps at 7:30 AM Bali time (23:30 UTC).
+
+    For each active factory:
+    - Finds working days this month without any attendance records
+    - Creates in-app notification for Production Managers
+    - Sends Telegram alert to CEO/Owner if 3+ days unfilled
+    """
+    logger.info("Running daily attendance gap check")
+    db = _get_db_session()
+    try:
+        from business.services.attendance_monitor import process_attendance_gaps
+
+        factory_ids = _get_all_factory_ids(db)
+        total_gaps = 0
+
+        for fid in factory_ids:
+            try:
+                result = process_attendance_gaps(db, fid)
+                if result:
+                    total_gaps += result["total_unfilled"]
+            except Exception as e:
+                logger.error("Attendance check failed for factory %s: %s", fid, e)
+
+        logger.info(
+            "Attendance check completed: %d total unfilled days across %d factories",
+            total_gaps,
+            len(factory_ids),
+        )
+    except Exception as e:
+        logger.error("Daily attendance check failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 # --- Scheduler setup ---
 
 def setup_scheduler():
@@ -1227,6 +1263,9 @@ def setup_scheduler():
 
     # Weekly Sunday 20:00 UTC (Monday 04:00 Bali) — weekly summary to PM + CEO
     scheduler.add_job(weekly_summary_dispatcher, CronTrigger(day_of_week="sun", hour=20, minute=0), id="weekly_summary")
+
+    # Daily 23:30 UTC (07:30 Bali) — attendance gap check
+    scheduler.add_job(daily_attendance_check, CronTrigger(hour=23, minute=30), id="attendance_check")
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

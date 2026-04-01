@@ -236,6 +236,8 @@ export function BlockingTasksTab({ factoryId }: BlockingTasksTabProps) {
           positionId={unblockTarget.id}
           positionLabel={`${unblockTarget.order_number} ${unblockTarget.position_label}`}
           currentStatus={unblockTarget.status}
+          color={unblockTarget.color}
+          collection={unblockTarget.collection}
           onClose={() => setUnblockTarget(null)}
         />
       )}

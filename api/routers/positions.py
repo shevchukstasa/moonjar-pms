@@ -1304,6 +1304,7 @@ async def get_stock_availability(
 
 class ForceUnblockInput(BaseModel):
     notes: str  # PM must provide a reason
+    notify_override: bool = False  # If True, send Telegram to CEO/Owner
 
 
 @router.post("/{position_id}/force-unblock")
@@ -1415,6 +1416,34 @@ async def force_unblock_position(
         current_user.id, p.id, old_status_str,
         len(blocking_tasks), len(negative_balances), data.notes[:80],
     )
+
+    # --- Send Telegram to CEO/Owner if force override ---
+    if data.notify_override:
+        try:
+            from api.models import User
+            from business.services.notifications import send_telegram_message
+            ceo_users = db.query(User).filter(
+                User.role.in_(['ceo', 'owner']),
+                User.is_active.is_(True),
+                User.telegram_user_id.isnot(None),
+            ).all()
+            pos_label = f"#{p.position_number}" if hasattr(p, 'position_number') else str(p.id)[:8]
+            if hasattr(p, 'split_index') and p.split_index:
+                pos_label += f".{p.split_index}"
+            order = db.query(ProductionOrder).filter(ProductionOrder.id == p.order_id).first()
+            order_num = order.order_number if order else "?"
+            user_name = getattr(current_user, 'full_name', None) or getattr(current_user, 'name', str(current_user.id))
+            for u in ceo_users:
+                send_telegram_message(
+                    str(u.telegram_user_id),
+                    f"\u26a0\ufe0f *Force Override*\n"
+                    f"PM {user_name} force-unblocked position {order_num} {pos_label}\n"
+                    f"Color: {p.color}\n"
+                    f"Previous: {old_status_str}\n"
+                    f"Reason: {data.notes.strip()}",
+                )
+        except Exception as e:
+            logger.warning("Failed to send force-override Telegram: %s", e)
 
     return {
         "position_id": str(p.id),

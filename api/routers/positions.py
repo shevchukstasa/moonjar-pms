@@ -1901,9 +1901,22 @@ async def get_position_materials(
                     required_calc, calc_unit, stock_unit,
                     specific_gravity=sg, material_name=material.name,
                 ))
-            except Exception:
-                # Fallback: simple per-piece calculation
-                required = float(rm.quantity_per_unit) * position.quantity
+            except Exception as _calc_err:
+                import logging as _log
+                _log.getLogger("moonjar.positions").warning(
+                    "Material calc failed for %s: %s — using fallback", material.name, _calc_err
+                )
+                # Fallback: simple per-piece calculation WITH unit conversion
+                raw = float(rm.quantity_per_unit) * position.quantity
+                # If recipe unit is g_per_100g and stock is kg, convert
+                rm_unit = (rm.unit or "per_piece").lower().strip()
+                stock_u = (material.unit or "pcs").lower().strip()
+                if rm_unit == "g_per_100g" and stock_u == "kg":
+                    required = raw / 1000.0  # grams to kg
+                elif rm_unit == "per_sqm" and stock_u == "kg":
+                    required = raw / 1000.0  # ml assumed ≈ g at SG=1
+                else:
+                    required = raw
 
             # Check if this material has been reserved for this position
             # by looking for RESERVE transactions

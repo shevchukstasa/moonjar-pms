@@ -1807,6 +1807,7 @@ async def lifespan(app: FastAPI):
         ("numeric_precision", "api.schema_patches.numeric_precision_patch", "apply_patch"),
         ("streaks", "api.schema_patches.streaks_patch", "apply_patch"),
         ("achievements", "api.schema_patches.achievements_patch", "apply_patch"),
+        ("points_system", "api.schema_patches.points_system_patch", "apply_patch"),
     ]
 
     # Inline patches (too small for separate files)

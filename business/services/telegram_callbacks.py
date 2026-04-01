@@ -716,14 +716,24 @@ def _handle_position_detail(db: Session, cq: dict, parts: list[str]) -> str:
                     continue
                 try:
                     from business.services.material_reservation import _calculate_required
-                    from api.unit_conversion import get_calculation_unit, convert_to_stock_unit
                     from decimal import Decimal
-                    req_calc = _calculate_required(rm, pos, recipe=recipe, db=db)
-                    calc_unit = get_calculation_unit(rm.unit)
-                    stock_unit = (material.unit or "pcs").lower().strip()
-                    sg = recipe.specific_gravity if recipe else None
-                    req = float(convert_to_stock_unit(Decimal(str(req_calc)), calc_unit, stock_unit, specific_gravity=sg))
-                    msg += f"  • {material.name}: {req:.3f} {material.unit}\n"
+                    req_calc = float(_calculate_required(rm, pos, recipe=recipe, db=db))
+                    # Show in recipe units (grams) — masters work with grams, not kg
+                    calc_unit = (rm.unit or "per_piece").lower().strip()
+                    if calc_unit == "g_per_100g":
+                        # req_calc is already in grams
+                        if req_calc >= 1000:
+                            msg += f"  • {material.name}: {req_calc/1000:.2f} kg ({req_calc:.0f} g)\n"
+                        else:
+                            msg += f"  • {material.name}: {req_calc:.1f} g\n"
+                    elif calc_unit == "per_sqm":
+                        # req_calc is in ml
+                        if req_calc >= 1000:
+                            msg += f"  • {material.name}: {req_calc/1000:.2f} L ({req_calc:.0f} ml)\n"
+                        else:
+                            msg += f"  • {material.name}: {req_calc:.1f} ml\n"
+                    else:
+                        msg += f"  • {material.name}: {req_calc:.1f} {material.unit}\n"
                 except Exception:
                     msg += f"  • {material.name}: {rm.quantity_per_unit} ({rm.unit})\n"
             if recipe.specific_gravity:

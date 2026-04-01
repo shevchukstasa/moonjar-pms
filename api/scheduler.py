@@ -1279,6 +1279,40 @@ async def daily_attendance_check():
         db.close()
 
 
+# --- Points system resets ---
+
+async def weekly_points_reset():
+    """Reset weekly points counter every Monday."""
+    logger.info("Running weekly points reset")
+    db = _get_db_session()
+    try:
+        from business.services.points_system import reset_weekly_points
+        count = reset_weekly_points(db)
+        db.commit()
+        logger.info("Weekly points reset done: %d records", count)
+    except Exception as e:
+        logger.error("Weekly points reset failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def monthly_points_reset():
+    """Reset monthly points counter on the 1st of each month."""
+    logger.info("Running monthly points reset")
+    db = _get_db_session()
+    try:
+        from business.services.points_system import reset_monthly_points
+        count = reset_monthly_points(db)
+        db.commit()
+        logger.info("Monthly points reset done: %d records", count)
+    except Exception as e:
+        logger.error("Monthly points reset failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 # --- Scheduler setup ---
 
 def setup_scheduler():
@@ -1344,6 +1378,12 @@ def setup_scheduler():
 
     # Daily 23:30 UTC (07:30 Bali) — attendance gap check
     scheduler.add_job(daily_attendance_check, CronTrigger(hour=23, minute=30), id="attendance_check")
+
+    # Weekly Monday 00:00 UTC — reset weekly points counter
+    scheduler.add_job(weekly_points_reset, CronTrigger(day_of_week="mon", hour=0, minute=0), id="weekly_points_reset")
+
+    # Monthly 1st at 00:05 UTC — reset monthly points counter
+    scheduler.add_job(monthly_points_reset, CronTrigger(day=1, hour=0, minute=5), id="monthly_points_reset")
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

@@ -2647,3 +2647,66 @@ class MasterAchievement(Base):
     )
 
     user = relationship('User', foreign_keys=[user_id])
+
+
+class UserPoints(Base):
+    """Yearly points accumulation per user + factory."""
+    __tablename__ = 'user_points'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    points_total = Column(sa.Integer, nullable=False, default=0)
+    points_this_month = Column(sa.Integer, nullable=False, default=0)
+    points_this_week = Column(sa.Integer, nullable=False, default=0)
+    year = Column(sa.Integer, nullable=False, default=2026)
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'factory_id', 'year'),
+    )
+
+    user = relationship('User', foreign_keys=[user_id])
+    factory = relationship('Factory', foreign_keys=[factory_id])
+
+
+class PointTransaction(Base):
+    """Individual point award record (audit trail)."""
+    __tablename__ = 'point_transactions'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    points = Column(sa.Integer, nullable=False)
+    reason = Column(sa.String(50), nullable=False)
+    details = Column(JSONB)
+    position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id', ondelete='SET NULL'))
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    user = relationship('User', foreign_keys=[user_id])
+    factory = relationship('Factory', foreign_keys=[factory_id])
+
+
+class RecipeVerification(Base):
+    """Per-ingredient photo verification during recipe preparation."""
+    __tablename__ = 'recipe_verifications'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    position_id = Column(UUID(as_uuid=True), ForeignKey('order_positions.id'))
+    recipe_id = Column(UUID(as_uuid=True), ForeignKey('recipes.id'))
+    material_id = Column(UUID(as_uuid=True), ForeignKey('materials.id'), nullable=False)
+    target_grams = Column(sa.Numeric(10, 2), nullable=False)
+    actual_grams = Column(sa.Numeric(10, 2))
+    accuracy_pct = Column(sa.Numeric(5, 2))
+    points_awarded = Column(sa.Integer, default=0)
+    photo_url = Column(sa.Text)
+    ai_reading = Column(sa.Text)
+    verified_at = Column(sa.DateTime(timezone=True))
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    user = relationship('User', foreign_keys=[user_id])
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    material = relationship('Material', foreign_keys=[material_id])
+    recipe = relationship('Recipe', foreign_keys=[recipe_id])

@@ -27,6 +27,7 @@ from api.models import (
     Batch, Resource, DailyTaskDistribution,
     MaterialTransaction, MaterialStock, MaterialPurchaseRequest,
     UserStreak, MasterAchievement, DailyChallenge,
+    UserPoints, PointTransaction, RecipeVerification,
 )
 from api.enums import (
     TaskStatus, PositionStatus, ResourceType, BatchStatus,
@@ -714,6 +715,58 @@ MESSAGES: dict[str, dict[str, str]] = {
         "id": "Terjadi kesalahan",
         "ru": "Произошла ошибка",
     },
+    # ── Recipe verification ──────────────────────────────────────
+    "rv_no_recipe": {
+        "en": "No recipe found for this position.",
+        "id": "Resep tidak ditemukan untuk posisi ini.",
+        "ru": "Рецепт не найден для этой позиции.",
+    },
+    "rv_no_materials": {
+        "en": "Recipe has no materials to verify.",
+        "id": "Resep tidak memiliki bahan untuk diverifikasi.",
+        "ru": "В рецепте нет ингредиентов для проверки.",
+    },
+    "rv_send_photo": {
+        "en": "Send photo of ingredient #{num} on scale",
+        "id": "Kirim foto bahan #{num} di timbangan",
+        "ru": "Отправьте фото ингредиента #{num} на весах",
+    },
+    "rv_result_line": {
+        "en": "{emoji} #{num} {name}: {actual}g (target {target}g) — {accuracy}% accuracy — {points} pts!",
+        "id": "{emoji} #{num} {name}: {actual}g (target {target}g) — {accuracy}% akurasi — {points} poin!",
+        "ru": "{emoji} #{num} {name}: {actual}g (цель {target}g) — {accuracy}% точность — {points} очков!",
+    },
+    "rv_complete": {
+        "en": "Recipe verified! Total: {earned}/{max_pts} points ({pct}%)",
+        "id": "Resep terverifikasi! Total: {earned}/{max_pts} poin ({pct}%)",
+        "ru": "Рецепт проверен! Итого: {earned}/{max_pts} очков ({pct}%)",
+    },
+    "rv_ai_failed": {
+        "en": "Could not read weight from photo. Please type the weight in grams (e.g. 318.5):",
+        "id": "Tidak bisa membaca berat dari foto. Ketik berat dalam gram (misal 318.5):",
+        "ru": "Не удалось прочитать вес с фото. Введите вес в граммах (напр. 318.5):",
+    },
+    "rv_cancelled": {
+        "en": "Recipe verification cancelled.",
+        "id": "Verifikasi resep dibatalkan.",
+        "ru": "Проверка рецепта отменена.",
+    },
+    "rv_already_active": {
+        "en": "You already have an active recipe verification. Send a photo or /cancel_verify to stop.",
+        "id": "Anda sudah memiliki verifikasi resep aktif. Kirim foto atau /cancel_verify untuk berhenti.",
+        "ru": "У вас уже есть активная проверка. Отправьте фото или /cancel_verify для отмены.",
+    },
+    # ── Points ───────────────────────────────────────────────────
+    "points_header": {
+        "en": "Your Points — {year}",
+        "id": "Poin Anda — {year}",
+        "ru": "Ваши очки — {year}",
+    },
+    "points_no_data": {
+        "en": "No points yet. Verify a recipe to earn your first points!",
+        "id": "Belum ada poin. Verifikasi resep untuk mendapatkan poin pertama!",
+        "ru": "Пока нет очков. Проверьте рецепт, чтобы получить первые очки!",
+    },
 }
 
 # Default language for group chats or unlinked users
@@ -827,6 +880,42 @@ def _cleanup_expired_deliveries() -> None:
 # }
 _pending_edits: dict[int, dict] = {}
 
+# ────────────────────────────────────────────────────────────────
+# Pending recipe verification sessions (in-memory)
+# ────────────────────────────────────────────────────────────────
+# key = chat_id (int)
+# value = {
+#     "created_at": float (time.time()),
+#     "user_id": UUID,
+#     "factory_id": UUID,
+#     "position_id": UUID | None,
+#     "recipe_id": UUID,
+#     "recipe_name": str,
+#     "ingredients": [
+#         {"index": int, "material_id": UUID, "material_name": str, "target_g": float, "unit": str},
+#     ],
+#     "current_index": int,          # which ingredient to verify next (0-based)
+#     "results": [                   # filled as photos come in
+#         {"material_name": str, "target_g": float, "actual_g": float, "accuracy_pct": float, "points": int},
+#     ],
+#     "awaiting_manual": bool,       # True if AI failed and we're waiting for typed weight
+# }
+_RECIPE_VERIFY_TTL = 60 * 60  # 1 hour
+_pending_recipe_verifications: dict[int, dict] = {}
+
+
+def _cleanup_expired_recipe_verifications() -> None:
+    """Remove recipe verification sessions older than TTL."""
+    now = time.time()
+    expired = [
+        cid for cid, rv in _pending_recipe_verifications.items()
+        if now - rv["created_at"] > _RECIPE_VERIFY_TTL
+    ]
+    for cid in expired:
+        del _pending_recipe_verifications[cid]
+    if expired:
+        logger.info("Cleaned up %d expired recipe verification sessions", len(expired))
+
 
 # ────────────────────────────────────────────────────────────────
 # Public API
@@ -869,6 +958,13 @@ async def handle_update(db: Session, update_data: dict) -> None:
             edit_session = _pending_edits[msg_chat_id]
             if edit_session.get("awaiting"):
                 await _handle_edit_text_input(db, msg_chat_id, text)
+                return
+
+        # Check if this chat has an active recipe verification awaiting manual weight
+        if msg_chat_id and msg_chat_id in _pending_recipe_verifications and text:
+            rv_session = _pending_recipe_verifications[msg_chat_id]
+            if rv_session.get("awaiting_manual"):
+                await _handle_recipe_verification_manual(db, msg_chat_id, text, rv_session)
                 return
 
         # Plain text in private chat — could be email for linking flow
@@ -1020,6 +1116,10 @@ async def handle_command(db: Session, message: dict) -> None:
         await _cmd_challenge(db, message)
     elif command == "/achievements":
         await _cmd_achievements(db, message)
+    elif command == "/points":
+        await _cmd_points(db, message)
+    elif command == "/cancel_verify":
+        await _cmd_cancel_verify(db, message)
     else:
         _from = message.get("from", {})
         lang = get_user_language(db, _from.get("id"), chat_id, message_text=text)
@@ -1077,6 +1177,22 @@ async def handle_photo(db: Session, message: dict) -> None:
 
     # Look up the PMS user
     user = _find_user_by_telegram(db, telegram_user_id)
+
+    # ── Recipe Verification intercept ────────────────────────────
+    # If user has an active recipe verification session, treat this photo as scale reading
+    if chat_id in _pending_recipe_verifications and user:
+        rv_session = _pending_recipe_verifications[chat_id]
+        if str(rv_session["user_id"]) == str(user.id):
+            try:
+                image_bytes = await download_telegram_photo(file_id)
+                if image_bytes:
+                    await _handle_recipe_verification_photo(db, chat_id, user, factory, image_bytes, rv_session)
+                    return
+            except Exception as e:
+                logger.error("Recipe verification photo handler failed: %s", e, exc_info=True)
+                lang = get_user_language(db, telegram_user_id, chat_id)
+                await _send_message(chat_id, msg("error_occurred", lang))
+            return
 
     # Determine photo_type from caption keywords
     photo_type = _detect_photo_type(caption)
@@ -1262,6 +1378,18 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
             )
         except Exception as e:
             logger.error(f"Delivery callback error for data={data}: {e}", exc_info=True)
+            await answer_callback_query(callback_id, msg("error_occurred", _cb_lang))
+        return
+
+    # Recipe verification callback: "rv:start:<position_id>"
+    if action == "rv":
+        try:
+            cb_message = callback_query.get("message", {})
+            cb_chat_id = cb_message.get("chat", {}).get("id")
+            if cb_chat_id:
+                await _handle_recipe_verify_callback(db, data, callback_id, cb_chat_id, telegram_user_id)
+        except Exception as e:
+            logger.error("Recipe verify callback error for data=%s: %s", data, e, exc_info=True)
             await answer_callback_query(callback_id, msg("error_occurred", _cb_lang))
         return
 
@@ -2148,6 +2276,7 @@ async def _cmd_glaze(db: Session, message: dict, args: str) -> None:
     lines = [msg("glaze_info_header", lang, pos=pos_label)]
 
     # Recipe info
+    recipe_materials = []
     if position.recipe_id:
         recipe = db.query(Recipe).filter(Recipe.id == position.recipe_id).first()
         if recipe:
@@ -2200,7 +2329,15 @@ async def _cmd_glaze(db: Session, message: dict, args: str) -> None:
     status_val = position.status.value if hasattr(position.status, 'value') else str(position.status)
     lines.append(f"Status: {status_val}")
 
-    await _send_message(chat_id, "\n".join(lines))
+    # Add "Verify Recipe" button if position has a recipe with materials
+    if position.recipe_id and recipe_materials:
+        keyboard = [[{
+            "text": "\U0001F4F8 Verify Recipe",
+            "callback_data": f"rv:start:{position.id}",
+        }]]
+        await send_message_with_buttons(chat_id, "\n".join(lines), keyboard)
+    else:
+        await _send_message(chat_id, "\n".join(lines))
 
 
 async def _cmd_recipe(db: Session, message: dict, args: str) -> None:
@@ -4020,6 +4157,430 @@ async def _create_new_material_from_edit(
     edit_session.pop("new_material_subtype", None)
     edit_session["current_index"] = current_idx + 1
     await _send_edit_item_prompt(chat_id, delivery_id, edit_session)
+
+
+# ────────────────────────────────────────────────────────────────
+# Recipe Verification Flow
+# ────────────────────────────────────────────────────────────────
+
+_SCALE_WEIGHT_PROMPT = (
+    "You are reading a digital or mechanical scale display in a photo from a ceramic factory. "
+    "The scale shows the weight of a raw material ingredient. "
+    "Read the weight value shown on the scale display as precisely as possible. "
+    "Return ONLY valid JSON (no markdown, no code fences):\n"
+    '{"weight_grams": <number>, "confidence": "high"|"medium"|"low", "notes": "<any observations>"}\n\n'
+    "If you cannot read the weight, return: {\"weight_grams\": null, \"confidence\": \"low\", \"notes\": \"reason\"}"
+)
+
+
+async def _handle_recipe_verify_callback(
+    db: Session, data: str, callback_id: str, chat_id: int, telegram_user_id: int
+) -> None:
+    """Handle rv:start:<position_id> or rv:cancel:<idx> callback."""
+    _cleanup_expired_recipe_verifications()
+
+    lang = get_user_language(db, telegram_user_id, chat_id)
+    user = _find_user_by_telegram(db, telegram_user_id)
+    if not user:
+        await answer_callback_query(callback_id, msg("account_not_linked", lang))
+        return
+
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else lang
+
+    parts = data.split(":")
+    sub_action = parts[1] if len(parts) > 1 else ""
+
+    # Handle cancel
+    if sub_action == "cancel":
+        if chat_id in _pending_recipe_verifications:
+            del _pending_recipe_verifications[chat_id]
+        await answer_callback_query(callback_id, msg("rv_cancelled", lang))
+        await _send_message(chat_id, msg("rv_cancelled", lang))
+        return
+
+    # Check if already has active session
+    if chat_id in _pending_recipe_verifications:
+        await answer_callback_query(callback_id, msg("rv_already_active", lang))
+        return
+
+    if len(parts) < 3 or sub_action != "start":
+        await answer_callback_query(callback_id, "Invalid action")
+        return
+
+    position_id_str = parts[2]
+    try:
+        from uuid import UUID as _UUID
+        position_id = _UUID(position_id_str)
+    except ValueError:
+        await answer_callback_query(callback_id, "Invalid position ID")
+        return
+
+    # Load position and recipe
+    position = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not position:
+        await answer_callback_query(callback_id, "Position not found")
+        return
+
+    # Determine factory
+    uf = db.query(UserFactory).filter(UserFactory.user_id == user.id).first()
+    factory_id = uf.factory_id if uf else position.factory_id
+
+    # Find recipe for this position
+    recipe = None
+    if position.recipe_id:
+        recipe = db.query(Recipe).filter(Recipe.id == position.recipe_id).first()
+
+    if not recipe:
+        # Try to find recipe by color/collection
+        recipe = (
+            db.query(Recipe)
+            .filter(Recipe.is_active.is_(True))
+            .filter(Recipe.name.ilike(f"%{position.color or ''}%"))
+            .first()
+        )
+
+    if not recipe:
+        await answer_callback_query(callback_id, msg("rv_no_recipe", lang))
+        return
+
+    # Load recipe materials
+    recipe_materials = (
+        db.query(RecipeMaterial)
+        .filter(RecipeMaterial.recipe_id == recipe.id)
+        .all()
+    )
+
+    if not recipe_materials:
+        await answer_callback_query(callback_id, msg("rv_no_materials", lang))
+        return
+
+    # Build ingredient list
+    ingredients = []
+    for i, rm in enumerate(recipe_materials):
+        mat = db.query(Material).filter(Material.id == rm.material_id).first()
+        mat_name = mat.name if mat else f"Material #{i+1}"
+        # Convert to grams for consistent comparison
+        target_g = float(rm.quantity_per_unit or 0)
+        unit = rm.unit or "g"
+        # If unit is kg, convert to grams
+        if unit.lower() == "kg":
+            target_g *= 1000
+            unit = "g"
+        ingredients.append({
+            "index": i,
+            "material_id": str(rm.material_id),
+            "material_name": mat_name,
+            "target_g": target_g,
+            "unit": unit,
+        })
+
+    # Create verification session
+    _pending_recipe_verifications[chat_id] = {
+        "created_at": time.time(),
+        "user_id": user.id,
+        "factory_id": factory_id,
+        "position_id": position_id,
+        "recipe_id": recipe.id,
+        "recipe_name": recipe.name,
+        "ingredients": ingredients,
+        "current_index": 0,
+        "results": [],
+        "awaiting_manual": False,
+    }
+
+    await answer_callback_query(callback_id, "Starting recipe verification...")
+
+    # Send ingredient list
+    lines = [f"\U0001F4F8 *Recipe Verification* — {recipe.name}\n"]
+    lines.append("Weigh each ingredient and send a photo:\n")
+    for ing in ingredients:
+        num = ing["index"] + 1
+        emoji_num = _num_emoji(num)
+        lines.append(f"{emoji_num} {ing['material_name']}: {ing['target_g']:.1f} {ing['unit']}")
+
+    lines.append(f"\n{msg('rv_send_photo', lang, num=1)} \U0001F4F7")
+
+    # Add cancel button
+    keyboard = [[{"text": "\u274C Cancel", "callback_data": "rv:cancel:0"}]]
+    await send_message_with_buttons(chat_id, "\n".join(lines), keyboard)
+
+
+async def _handle_recipe_verification_photo(
+    db: Session, chat_id: int, user: User, factory: Factory,
+    image_bytes: bytes, rv_session: dict,
+) -> None:
+    """Process a scale photo during recipe verification — read weight via AI."""
+    import base64
+
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else "id"
+
+    idx = rv_session["current_index"]
+    if idx >= len(rv_session["ingredients"]):
+        # All done
+        del _pending_recipe_verifications[chat_id]
+        return
+
+    ingredient = rv_session["ingredients"][idx]
+
+    # OCR the scale photo
+    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+    actual_g = None
+    ai_raw = None
+
+    try:
+        from business.services.photo_analysis import (
+            _call_openai_vision, _parse_llm_json,
+            OPENAI_VISION_MODEL_OCR,
+        )
+        import os
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key:
+            context_prompt = (
+                f"{_SCALE_WEIGHT_PROMPT}\n\n"
+                f"Context: Expected weight is approximately {ingredient['target_g']:.1f}g "
+                f"of {ingredient['material_name']}."
+            )
+            ai_raw = await _call_openai_vision(
+                context_prompt, b64_image, "image/jpeg", api_key,
+                model=OPENAI_VISION_MODEL_OCR,
+            )
+            if ai_raw:
+                parsed = _parse_llm_json(ai_raw)
+                weight_val = parsed.get("weight_grams")
+                if weight_val is not None:
+                    actual_g = float(weight_val)
+    except Exception as e:
+        logger.warning("Recipe verification AI failed: %s", e)
+
+    if actual_g is None:
+        # AI failed — ask for manual input
+        rv_session["awaiting_manual"] = True
+        await _send_message(chat_id, msg("rv_ai_failed", lang))
+        return
+
+    # Process the result
+    await _process_recipe_ingredient_result(db, chat_id, user, factory, rv_session, actual_g, ai_raw)
+
+
+async def _handle_recipe_verification_manual(
+    db: Session, chat_id: int, text: str, rv_session: dict,
+) -> None:
+    """Handle manually typed weight for recipe verification."""
+    user_id = rv_session["user_id"]
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        del _pending_recipe_verifications[chat_id]
+        return
+
+    factory = db.query(Factory).filter(Factory.id == rv_session["factory_id"]).first()
+    if not factory:
+        del _pending_recipe_verifications[chat_id]
+        return
+
+    # Parse weight from text
+    text = text.strip().replace(",", ".")
+    try:
+        actual_g = float(text)
+    except ValueError:
+        lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else "id"
+        await _send_message(chat_id, msg("rv_ai_failed", lang))
+        return
+
+    rv_session["awaiting_manual"] = False
+    await _process_recipe_ingredient_result(db, chat_id, user, factory, rv_session, actual_g, f"manual: {text}")
+
+
+async def _process_recipe_ingredient_result(
+    db: Session, chat_id: int, user: User, factory: Factory,
+    rv_session: dict, actual_g: float, ai_raw: str | None,
+) -> None:
+    """Score one ingredient verification and advance to next or finish."""
+    from business.services.points_system import (
+        calculate_accuracy_points, accuracy_emoji, award_points,
+    )
+    from datetime import datetime, timezone
+
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else "id"
+
+    idx = rv_session["current_index"]
+    ingredient = rv_session["ingredients"][idx]
+
+    target_g = ingredient["target_g"]
+    points, deviation_pct = calculate_accuracy_points(target_g, actual_g)
+    accuracy_pct = round(100 - deviation_pct, 1)
+    emoji = accuracy_emoji(points)
+
+    # Save RecipeVerification record
+    try:
+        from uuid import UUID as _UUID
+        verification = RecipeVerification(
+            user_id=user.id,
+            factory_id=factory.id,
+            position_id=rv_session.get("position_id"),
+            recipe_id=rv_session.get("recipe_id"),
+            material_id=_UUID(ingredient["material_id"]),
+            target_grams=target_g,
+            actual_grams=actual_g,
+            accuracy_pct=deviation_pct,
+            points_awarded=points,
+            ai_reading=ai_raw,
+            verified_at=datetime.now(timezone.utc),
+        )
+        db.add(verification)
+    except Exception as e:
+        logger.warning("Failed to save RecipeVerification: %s", e)
+
+    # Award points
+    try:
+        award_points(
+            db, user.id, factory.id, points,
+            reason="recipe_accuracy",
+            details={
+                "recipe_id": str(rv_session.get("recipe_id", "")),
+                "material_name": ingredient["material_name"],
+                "target_g": target_g,
+                "actual_g": actual_g,
+                "accuracy_pct": accuracy_pct,
+            },
+            position_id=rv_session.get("position_id"),
+        )
+    except Exception as e:
+        logger.warning("Failed to award points: %s", e)
+
+    db.commit()
+
+    # Store result
+    rv_session["results"].append({
+        "material_name": ingredient["material_name"],
+        "target_g": target_g,
+        "actual_g": actual_g,
+        "accuracy_pct": accuracy_pct,
+        "points": points,
+    })
+
+    # Send result message
+    num = idx + 1
+    result_msg = msg(
+        "rv_result_line", lang,
+        emoji=emoji, num=num, name=ingredient["material_name"],
+        actual=f"{actual_g:.1f}", target=f"{target_g:.1f}",
+        accuracy=f"{accuracy_pct:.1f}", points=points,
+    )
+    await _send_message(chat_id, result_msg, parse_mode="")
+
+    # Advance to next ingredient
+    rv_session["current_index"] = idx + 1
+    rv_session["awaiting_manual"] = False
+
+    if rv_session["current_index"] >= len(rv_session["ingredients"]):
+        # All ingredients verified — send summary
+        results = rv_session["results"]
+        total_earned = sum(r["points"] for r in results)
+        max_possible = len(results) * 10
+        pct = round(total_earned / max_possible * 100, 1) if max_possible > 0 else 0
+
+        summary = f"\U0001F389 {msg('rv_complete', lang, earned=total_earned, max_pts=max_possible, pct=f'{pct:.1f}')}"
+        await _send_message(chat_id, summary, parse_mode="")
+
+        # Clean up session
+        del _pending_recipe_verifications[chat_id]
+    else:
+        # Prompt for next ingredient
+        next_num = rv_session["current_index"] + 1
+        next_ing = rv_session["ingredients"][rv_session["current_index"]]
+        prompt_msg = f"\n{msg('rv_send_photo', lang, num=next_num)} \U0001F4F7\n{next_ing['material_name']}: {next_ing['target_g']:.1f} {next_ing['unit']}"
+        keyboard = [[{"text": "\u274C Cancel", "callback_data": f"rv:cancel:{rv_session['current_index']}"}]]
+        await send_message_with_buttons(chat_id, prompt_msg, keyboard, parse_mode="")
+
+
+def _num_emoji(n: int) -> str:
+    """Return a number-keycap emoji for 1-9."""
+    keycaps = {1: "1\ufe0f\u20e3", 2: "2\ufe0f\u20e3", 3: "3\ufe0f\u20e3", 4: "4\ufe0f\u20e3",
+               5: "5\ufe0f\u20e3", 6: "6\ufe0f\u20e3", 7: "7\ufe0f\u20e3", 8: "8\ufe0f\u20e3",
+               9: "9\ufe0f\u20e3"}
+    return keycaps.get(n, f"#{n}")
+
+
+# ── /points command ──────────────────────────────────────────────
+
+
+async def _cmd_points(db: Session, message: dict) -> None:
+    """/points — Show user's accumulated points and rank."""
+    chat_id = message["chat"]["id"]
+    from_user = message.get("from", {})
+    telegram_user_id = from_user.get("id")
+
+    lang = get_user_language(db, telegram_user_id, chat_id)
+    user = _find_user_by_telegram(db, telegram_user_id)
+    if not user:
+        await _send_message(chat_id, msg("account_not_linked", lang))
+        return
+
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else lang
+
+    uf = db.query(UserFactory).filter(UserFactory.user_id == user.id).first()
+    if not uf:
+        await _send_message(chat_id, msg("not_assigned_factory", lang))
+        return
+
+    from business.services.points_system import (
+        get_user_points, get_user_rank, get_recent_transactions,
+    )
+    from datetime import datetime, timezone
+
+    pts = get_user_points(db, user.id, uf.factory_id)
+    rank, total = get_user_rank(db, user.id, uf.factory_id)
+    recent = get_recent_transactions(db, user.id, uf.factory_id, limit=5)
+    year = datetime.now(timezone.utc).year
+
+    if pts["points_total"] == 0 and not recent:
+        await _send_message(chat_id, msg("points_no_data", lang))
+        return
+
+    lines = [f"\U0001F3C6 *{msg('points_header', lang, year=year)}*\n"]
+    lines.append(f"\U0001F4CA Total: {pts['points_total']:,} points")
+    lines.append(f"\U0001F4C5 This month: {pts['points_this_month']:,} points")
+    lines.append(f"\U0001F4C8 This week: {pts['points_this_week']:,} points")
+
+    if rank > 0:
+        lines.append(f"\U0001F3C5 Rank: #{rank} of {total} masters")
+
+    if recent:
+        lines.append("\nRecent:")
+        for txn in recent:
+            reason = txn["reason"].replace("_", " ").title()
+            details = txn.get("details") or {}
+            mat_name = details.get("material_name", "")
+            accuracy = details.get("accuracy_pct", "")
+            detail_str = f" ({mat_name}" if mat_name else ""
+            if accuracy:
+                detail_str += f", {accuracy}%"
+            if detail_str:
+                detail_str += ")"
+            lines.append(f"  +{txn['points']} pts — {reason}{detail_str}")
+
+    await _send_message(chat_id, "\n".join(lines))
+
+
+# ── /cancel_verify command ───────────────────────────────────────
+
+
+async def _cmd_cancel_verify(db: Session, message: dict) -> None:
+    """/cancel_verify — Cancel active recipe verification."""
+    chat_id = message["chat"]["id"]
+    from_user = message.get("from", {})
+    telegram_user_id = from_user.get("id")
+
+    lang = get_user_language(db, telegram_user_id, chat_id)
+
+    if chat_id in _pending_recipe_verifications:
+        del _pending_recipe_verifications[chat_id]
+        await _send_message(chat_id, msg("rv_cancelled", lang))
+    else:
+        await _send_message(chat_id, "No active verification session.", parse_mode="")
+
+
+# ────────────────────────────────────────────────────────────────
 
 
 def _safe_summary(update_data: dict) -> str:

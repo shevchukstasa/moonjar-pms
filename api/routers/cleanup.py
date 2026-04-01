@@ -437,8 +437,11 @@ async def delete_order(
             _sql_safe(db, f"UPDATE order_positions SET batch_id = NULL, resource_id = NULL, estimated_kiln_id = NULL, recipe_id = NULL WHERE id IN ({pids_str})")
 
             # 2. Delete from ALL FK tables
+            # Delete ONLY consume/reserve/unreserve transactions (NOT audit/receive/inventory!)
+            _sql_safe(db, f"DELETE FROM material_transactions WHERE related_position_id IN ({pids_str}) AND type IN ('consume', 'reserve', 'unreserve')")
+
             fk_tables = [
-                ("material_transactions", "related_position_id"),
+                # material_transactions handled above with type filter
                 ("quality_checks", "position_id"),
                 ("defect_records", "position_id"),
                 ("grinding_stock", "source_position_id"),
@@ -460,8 +463,8 @@ async def delete_order(
             for table, col in fk_tables:
                 _sql_safe(db, f"DELETE FROM {table} WHERE {col} IN ({pids_str})")
 
-        # Order-level FK refs
-        _sql_safe(db, f"DELETE FROM material_transactions WHERE related_order_id = '{order_id}'")
+        # Order-level FK refs (ONLY consume/reserve/unreserve — preserve audit/receive/inventory!)
+        _sql_safe(db, f"DELETE FROM material_transactions WHERE related_order_id = '{order_id}' AND type IN ('consume', 'reserve', 'unreserve')")
         _sql_safe(db, f"DELETE FROM grinding_stock WHERE source_order_id = '{order_id}'")
         _sql_safe(db, f"DELETE FROM repair_queue WHERE source_order_id = '{order_id}'")
         _sql_safe(db, f"DELETE FROM surplus_dispositions WHERE order_id = '{order_id}'")

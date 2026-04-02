@@ -522,3 +522,95 @@ async def get_position_schedule_endpoint(
         "status": _ev(position.status),
         **sched,
     }
+
+
+# ────────────────────────────────────────────────────────────────
+# Planning engine endpoints
+# ────────────────────────────────────────────────────────────────
+
+@router.post("/optimize-batch/{batch_id}")
+async def optimize_batch_endpoint(
+    batch_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """
+    Find candidate positions to fill remaining capacity in a batch.
+    Returns ranked suggestions without modifying any records.
+    """
+    from business.planning_engine.optimizer import optimize_batch_fill
+
+    result = optimize_batch_fill(db, batch_id)
+    if "error" in result:
+        error = result["error"]
+        if error == "batch_not_found":
+            raise HTTPException(404, detail="Batch not found")
+        if error == "kiln_not_found":
+            raise HTTPException(404, detail="Kiln not found for this batch")
+        if error == "invalid_status":
+            raise HTTPException(
+                400,
+                detail=result.get("message", "Batch cannot be optimized in current status"),
+            )
+    return result
+
+
+@router.get("/kiln-utilization")
+async def kiln_utilization_endpoint(
+    factory_id: UUID,
+    days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Kiln utilization metrics for a factory over the past N days.
+    Per-kiln stats: firings, avg fill %, idle days, total area.
+    """
+    from api.models import Factory
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory:
+        raise HTTPException(404, detail="Factory not found")
+
+    from business.planning_engine.optimizer import calculate_kiln_utilization
+    return calculate_kiln_utilization(db, factory_id, period_days=days)
+
+
+@router.get("/production-schedule")
+async def production_schedule_endpoint(
+    factory_id: UUID,
+    days: int = Query(14, ge=1, le=90),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Forward-looking daily production schedule view for N days.
+    Read-only aggregation: glazing, kiln loading, firing, cooling,
+    sorting, QC sections per day.
+    """
+    from api.models import Factory
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory:
+        raise HTTPException(404, detail="Factory not found")
+
+    from business.planning_engine.scheduler import generate_production_schedule
+    return generate_production_schedule(db, factory_id, horizon_days=days)
+
+
+@router.post("/recalculate")
+async def recalculate_schedule_endpoint(
+    factory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """
+    Full factory schedule recalculation orchestrator.
+    Runs: estimate recalc → backward scheduling → batch suggestion → utilization.
+    PM/Admin only.
+    """
+    from api.models import Factory
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory:
+        raise HTTPException(404, detail="Factory not found")
+
+    from business.planning_engine.scheduler import recalculate_schedule
+    return recalculate_schedule(db, factory_id)

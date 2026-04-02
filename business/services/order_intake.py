@@ -229,11 +229,24 @@ def process_incoming_order(
                     _sw = _sh = None
             # Support both "quantity_pcs" (PMS native) and "quantity" (Sales)
             _qty_pcs = item_data.get("quantity_pcs") or item_data.get("quantity", 0)
-            if _sw and _sh and _qty_pcs:
+            # Only calculate sqm from pcs×size if Sales didn't provide quantity_sqm
+            if not _qty_sqm_raw and _sw and _sh and _qty_pcs:
                 _qty_sqm_raw = round((float(_sw) * float(_sh) / 10000) * _qty_pcs, 3)
+            # If Sales sent quantity_sqm but quantity_pcs looks like it's actually sqm
+            # (quantity_pcs == quantity_sqm and piece_area << 1), recalculate pcs from sqm
+            elif _qty_sqm_raw and _sw and _sh and _qty_pcs:
+                piece_area = float(_sw) * float(_sh) / 10000
+                if piece_area > 0:
+                    expected_pcs = round(_qty_sqm_raw / piece_area)
+                    if expected_pcs > _qty_pcs * 5:  # Sales sent sqm as pcs
+                        logger.warning(
+                            "QTY_MISMATCH | color=%s | pcs=%s sqm=%s piece_area=%s → corrected pcs=%s",
+                            item_data.get("color"), _qty_pcs, _qty_sqm_raw, piece_area, expected_pcs,
+                        )
+                        _qty_pcs = expected_pcs
 
-        # Support both "quantity_pcs" (PMS native) and "quantity" (Sales)
-        _final_qty_pcs = item_data.get("quantity_pcs") or item_data.get("quantity", 0)
+        # Use corrected _qty_pcs (may have been recalculated from sqm above)
+        _final_qty_pcs = _qty_pcs
 
         item = ProductionOrderItem(
             order_id=order.id,

@@ -1433,16 +1433,21 @@ async def match_typology(
     current_user=Depends(require_management),
 ):
     """Find matching typology for given product parameters."""
+    from types import SimpleNamespace
     from business.services.typology_matcher import find_matching_typology
-    result = find_matching_typology(
-        db,
+
+    # Build a mock position object from query params
+    mock_position = SimpleNamespace(
         factory_id=factory_id,
         product_type=product_type,
-        place=place,
-        size=size,
+        place_of_application=place,
         collection=collection,
-        method=method,
+        application_method_code=method,
+        width_cm=size,
+        length_cm=size,
+        size=f"{size}x{size}" if size else None,
     )
+    result = find_matching_typology(db, mock_position)
     if not result:
         return {"match": None}
     return {"match": _serialize_typology(result)}

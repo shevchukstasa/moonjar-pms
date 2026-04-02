@@ -1011,10 +1011,27 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
     if not payload.get("order_number"):
         payload["order_number"] = f"SALES-{uuid_mod.uuid4().hex[:8].upper()}"
 
-    # Normalize product_type in items: table_top → countertop
+    # Normalize product_type in items
     for item in payload.get("items", []):
-        if item.get("product_type") == "table_top":
+        pt = (item.get("product_type") or "").lower().strip()
+        # table_top → countertop
+        if pt == "table_top":
             item["product_type"] = "countertop"
+        # wash_basin / washbasin → sink
+        elif pt in ("wash_basin", "washbasin", "basin"):
+            item["product_type"] = "sink"
+        # Auto-detect from product name/description if type says "tile" but name says otherwise
+        name_fields = " ".join([
+            item.get("product_name", ""), item.get("description", ""),
+            item.get("color", ""), item.get("finishing", ""),
+        ]).lower()
+        if pt == "tile":
+            if any(kw in name_fields for kw in ("wash basin", "washbasin", "sink", "basin")):
+                item["product_type"] = "sink"
+                logger.info("AUTO_DETECT_PRODUCT_TYPE | %s → sink (was tile)", item.get("color"))
+            elif any(kw in name_fields for kw in ("countertop", "table top", "tabletop", "vanity top")):
+                item["product_type"] = "countertop"
+                logger.info("AUTO_DETECT_PRODUCT_TYPE | %s → countertop (was tile)", item.get("color"))
 
     # Store raw Sales payload for audit
     payload["sales_payload_json"] = raw_payload

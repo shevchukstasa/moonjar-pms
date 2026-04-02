@@ -58,6 +58,7 @@ class UserUpdateInput(BaseModel):
     name: Optional[str] = None
     role: Optional[str] = None
     language: Optional[str] = None
+    telegram_user_id: Optional[int] = None
     factory_ids: Optional[list[str]] = None
 
 
@@ -201,6 +202,8 @@ async def update_user(
         valid_langs = [l.value for l in LanguagePreference]
         if data.language in valid_langs:
             user.language = data.language
+    if data.telegram_user_id is not None:
+        user.telegram_user_id = data.telegram_user_id
 
     # Sync factory assignments
     if data.factory_ids is not None:

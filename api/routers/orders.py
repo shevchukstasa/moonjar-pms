@@ -707,7 +707,37 @@ async def reprocess_order(
 
                 recipe_obj = db.query(Recipe).filter(Recipe.id == p.recipe_id).first()
                 res = reserve_materials_for_position(db, p, recipe_obj, order.factory_id)
-                pos_result["actions"].append(f"materials={'reserved' if res else 'insufficient'}")
+                if res.all_sufficient:
+                    pos_result["actions"].append("materials=reserved")
+                else:
+                    pos_result["actions"].append(f"materials=insufficient({len(res.shortages)} shortages)")
+                    # Smart check + auto purchase + blocking — same as intake
+                    from business.services.material_reservation import (
+                        check_material_availability_smart, create_auto_purchase_request,
+                    )
+                    truly_missing = []
+                    _glazing_date = None
+                    if order.desired_delivery_date:
+                        _glazing_date = order.desired_delivery_date - timedelta(days=7)
+                    elif order.final_deadline:
+                        _glazing_date = order.final_deadline - timedelta(days=7)
+
+                    for shortage in res.shortages:
+                        smart = check_material_availability_smart(
+                            db=db, material_id=shortage.material_id,
+                            factory_id=order.factory_id, required_qty=shortage.required,
+                            effective_available=shortage.available,
+                            planned_glazing_date=_glazing_date, buffer_days=3,
+                        )
+                        if not smart.available:
+                            truly_missing.append(shortage)
+
+                    if truly_missing:
+                        if _ev(p.status) == "planned":
+                            p.status = PositionStatus.INSUFFICIENT_MATERIALS
+                            pos_result["actions"].append("blocked_insufficient_materials")
+                        create_auto_purchase_request(db, order.factory_id, truly_missing, order)
+                        pos_result["actions"].append(f"purchase_request_created({len(truly_missing)})")
             except Exception as e:
                 pos_result["actions"].append(f"materials_error={str(e)[:50]}")
 

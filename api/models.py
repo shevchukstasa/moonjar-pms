@@ -1238,6 +1238,71 @@ class CalibrationLog(Base):
     approver = relationship('User', foreign_keys=[approved_by])
 
 
+class KilnLoadingTypology(Base):
+    """Named kiln loading configuration that defines capacity by product characteristics."""
+    __tablename__ = 'kiln_loading_typologies'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    name = Column(sa.String(200), nullable=False)
+    # Matching criteria (JSONB arrays, empty = all)
+    product_types = Column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb"))
+    place_of_application = Column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb"))
+    collections = Column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb"))
+    methods = Column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb"))
+    # Size range
+    min_size_cm = Column(sa.Numeric(8, 2), nullable=True)
+    max_size_cm = Column(sa.Numeric(8, 2), nullable=True)
+    # Loading preference
+    preferred_loading = Column(sa.String(20), nullable=False, server_default=sa.text("'auto'"))
+    # Temperature range
+    min_firing_temp = Column(sa.Integer, nullable=True)
+    max_firing_temp = Column(sa.Integer, nullable=True)
+    # Shifts
+    shift_count = Column(sa.Integer, nullable=False, server_default=sa.text('2'))
+    # AI
+    auto_calibrate = Column(sa.Boolean, nullable=False, server_default=sa.text('false'))
+    is_active = Column(sa.Boolean, nullable=False, server_default=sa.text('true'))
+    priority = Column(sa.Integer, nullable=False, server_default=sa.text('0'))
+    notes = Column(sa.Text, nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    capacities = relationship('KilnTypologyCapacity', back_populates='typology', cascade='all, delete-orphan')
+
+
+class KilnTypologyCapacity(Base):
+    """Pre-computed capacity per kiln per typology."""
+    __tablename__ = 'kiln_typology_capacities'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    typology_id = Column(UUID(as_uuid=True), ForeignKey('kiln_loading_typologies.id', ondelete='CASCADE'), nullable=False)
+    resource_id = Column(UUID(as_uuid=True), ForeignKey('resources.id', ondelete='CASCADE'), nullable=False)
+    capacity_sqm = Column(sa.Numeric(10, 3), nullable=True)
+    capacity_pcs = Column(sa.Integer, nullable=True)
+    loading_method = Column(sa.String(20), nullable=True)
+    num_levels = Column(sa.Integer, server_default=sa.text('1'))
+    ref_size = Column(sa.String(20), nullable=True)
+    ref_thickness_mm = Column(sa.Numeric(6, 2), server_default=sa.text('11'))
+    ref_shape = Column(sa.String(20), server_default=sa.text("'rectangle'"))
+    # AI correction
+    ai_adjusted_sqm = Column(sa.Numeric(10, 3), nullable=True)
+    calibration_ema = Column(sa.Numeric(10, 3), nullable=True)
+    last_calibrated_at = Column(sa.DateTime(timezone=True), nullable=True)
+    # Metadata
+    calculated_at = Column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    calculation_input = Column(JSONB, nullable=True)
+    calculation_output = Column(JSONB, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('typology_id', 'resource_id'),
+    )
+
+    typology = relationship('KilnLoadingTypology', back_populates='capacities', foreign_keys=[typology_id])
+    resource = relationship('Resource', foreign_keys=[resource_id])
+
+
 class BottleneckConfig(Base):
     __tablename__ = 'bottleneck_config'
 

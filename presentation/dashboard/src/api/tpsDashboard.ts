@@ -84,6 +84,58 @@ export interface ProcessStepCreate {
   notes?: string;
 }
 
+// ── Typology Types ───────────────────────────────────────────
+
+export interface KilnCapacityItem {
+  kiln_id: string;
+  kiln_name: string | null;
+  capacity_sqm: number | null;
+  capacity_pcs: number | null;
+  loading_method: string | null;
+  num_levels: number | null;
+  ai_adjusted_sqm: number | null;
+  ref_size: string | null;
+}
+
+export interface TypologyItem {
+  id: string;
+  factory_id: string;
+  name: string;
+  product_types: string[];
+  place_of_application: string[];
+  collections: string[];
+  methods: string[];
+  min_size_cm: number | null;
+  max_size_cm: number | null;
+  preferred_loading: string;
+  min_firing_temp: number | null;
+  max_firing_temp: number | null;
+  shift_count: number;
+  auto_calibrate: boolean;
+  is_active: boolean;
+  priority: number;
+  notes: string | null;
+  capacities?: KilnCapacityItem[];
+}
+
+export interface TypologyCreate {
+  name: string;
+  factory_id: string;
+  product_types?: string[];
+  place_of_application?: string[];
+  collections?: string[];
+  methods?: string[];
+  min_size_cm?: number;
+  max_size_cm?: number;
+  preferred_loading?: string;
+  min_firing_temp?: number;
+  max_firing_temp?: number;
+  shift_count?: number;
+  auto_calibrate?: boolean;
+  priority?: number;
+  notes?: string;
+}
+
 // ── API functions ────────────────────────────────────────────
 
 export const tpsDashboardApi = {
@@ -155,6 +207,36 @@ export const tpsDashboardApi = {
     const { data } = await apiClient.get(`/tps/calibration/log?${params}`);
     return data;
   },
+
+  // Typologies
+  listTypologies: async (factoryId: string): Promise<{ items: TypologyItem[] }> => {
+    const { data } = await apiClient.get(`/tps/typologies?factory_id=${factoryId}`);
+    return data;
+  },
+
+  createTypology: async (payload: TypologyCreate): Promise<TypologyItem> => {
+    const { data } = await apiClient.post('/tps/typologies', payload);
+    return data;
+  },
+
+  updateTypology: async (id: string, payload: Partial<TypologyCreate>): Promise<TypologyItem> => {
+    const { data } = await apiClient.patch(`/tps/typologies/${id}`, payload);
+    return data;
+  },
+
+  deleteTypology: async (id: string): Promise<void> => {
+    await apiClient.delete(`/tps/typologies/${id}`);
+  },
+
+  calculateTypology: async (id: string): Promise<{ results: unknown[] }> => {
+    const { data } = await apiClient.post(`/tps/typologies/${id}/calculate`);
+    return data;
+  },
+
+  calculateAllTypologies: async (factoryId: string): Promise<{ results: unknown[] }> => {
+    const { data } = await apiClient.post('/tps/typologies/calculate-all', { factory_id: factoryId });
+    return data;
+  },
 };
 
 // ── Constants ────────────────────────────────────────────────
@@ -202,4 +284,25 @@ export const APPLICATION_METHODS = [
   { value: 'silk_screen', label: 'Silk Screen' },
   { value: 'gold', label: 'Gold' },
   { value: 'raku', label: 'Raku' },
+];
+
+export const PLACE_OF_APPLICATION = [
+  { value: 'face_only', label: 'Face Only' },
+  { value: 'edges_1', label: 'Face + 1 Edge' },
+  { value: 'edges_2', label: 'Face + 2 Edges' },
+  { value: 'all_edges', label: 'All Edges' },
+  { value: 'with_back', label: 'All Surfaces' },
+];
+
+export const PRODUCT_TYPES = [
+  { value: 'tile', label: 'Tile' },
+  { value: 'countertop', label: 'Countertop' },
+  { value: 'sink', label: 'Sink' },
+  { value: '_3d', label: '3D Product' },
+];
+
+export const LOADING_METHODS = [
+  { value: 'auto', label: 'Auto (optimal)' },
+  { value: 'flat', label: 'Flat (face up)' },
+  { value: 'edge', label: 'Edge (standing)' },
 ];

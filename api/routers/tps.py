@@ -6,7 +6,7 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func as sa_func, or_
 
 from api.database import get_db
@@ -16,6 +16,7 @@ from api.models import (
     TpsParameter, TpsShiftMetric, TpsDeviation, Factory,
     OperationLog, Operation, OrderPosition, MasterPermission, User,
     ProcessStep, CalibrationLog,
+    KilnLoadingTypology, KilnTypologyCapacity,
 )
 from api.enums import TpsDeviationType
 from business.services.tps_metrics import (
@@ -1277,3 +1278,273 @@ async def apply_calibration_endpoint(
     )
     db.commit()
     return {"status": "applied", "step_id": data.step_id, "new_rate": data.new_rate}
+
+
+# ── Kiln Loading Typologies ───────────────────────────────────────────────
+
+class TypologyCreate(BaseModel):
+    name: str
+    factory_id: UUID
+    product_types: list[str] = []
+    place_of_application: list[str] = []
+    collections: list[str] = []
+    methods: list[str] = []
+    min_size_cm: Optional[float] = None
+    max_size_cm: Optional[float] = None
+    preferred_loading: str = "auto"
+    min_firing_temp: Optional[int] = None
+    max_firing_temp: Optional[int] = None
+    shift_count: int = 2
+    auto_calibrate: bool = False
+    priority: int = 0
+    notes: Optional[str] = None
+
+
+class TypologyUpdate(BaseModel):
+    name: Optional[str] = None
+    product_types: Optional[list[str]] = None
+    place_of_application: Optional[list[str]] = None
+    collections: Optional[list[str]] = None
+    methods: Optional[list[str]] = None
+    min_size_cm: Optional[float] = None
+    max_size_cm: Optional[float] = None
+    preferred_loading: Optional[str] = None
+    min_firing_temp: Optional[int] = None
+    max_firing_temp: Optional[int] = None
+    shift_count: Optional[int] = None
+    auto_calibrate: Optional[bool] = None
+    priority: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class TypologyCalculateAllInput(BaseModel):
+    factory_id: UUID
+
+
+def _serialize_typology(t: KilnLoadingTypology, db: Session = None) -> dict:
+    result = {
+        "id": str(t.id),
+        "factory_id": str(t.factory_id),
+        "name": t.name,
+        "product_types": t.product_types or [],
+        "place_of_application": t.place_of_application or [],
+        "collections": t.collections or [],
+        "methods": t.methods or [],
+        "min_size_cm": float(t.min_size_cm) if t.min_size_cm else None,
+        "max_size_cm": float(t.max_size_cm) if t.max_size_cm else None,
+        "preferred_loading": t.preferred_loading,
+        "min_firing_temp": t.min_firing_temp,
+        "max_firing_temp": t.max_firing_temp,
+        "shift_count": t.shift_count or 2,
+        "auto_calibrate": t.auto_calibrate or False,
+        "is_active": t.is_active,
+        "priority": t.priority or 0,
+        "notes": t.notes,
+    }
+    if t.capacities:
+        result["capacities"] = [{
+            "kiln_id": str(c.resource_id),
+            "kiln_name": c.resource.name if c.resource else None,
+            "capacity_sqm": float(c.capacity_sqm) if c.capacity_sqm else None,
+            "capacity_pcs": c.capacity_pcs,
+            "loading_method": c.loading_method,
+            "num_levels": c.num_levels,
+            "ai_adjusted_sqm": float(c.ai_adjusted_sqm) if c.ai_adjusted_sqm else None,
+            "ref_size": c.ref_size,
+        } for c in t.capacities]
+    return result
+
+
+@router.get("/typologies")
+async def list_typologies(
+    factory_id: UUID = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """List all active typologies for a factory."""
+    rows = (
+        db.query(KilnLoadingTypology)
+        .options(
+            joinedload(KilnLoadingTypology.capacities)
+            .joinedload(KilnTypologyCapacity.resource)
+        )
+        .filter(
+            KilnLoadingTypology.factory_id == factory_id,
+            KilnLoadingTypology.is_active.is_(True),
+        )
+        .order_by(KilnLoadingTypology.priority.desc(), KilnLoadingTypology.name)
+        .all()
+    )
+    return {"items": [_serialize_typology(t) for t in rows]}
+
+
+@router.post("/typologies/calculate-all")
+async def calculate_all_typologies(
+    data: TypologyCalculateAllInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Recalculate capacities for ALL typologies in a factory."""
+    from business.services.typology_matcher import calculate_all_typology_capacities
+    results = calculate_all_typology_capacities(db, data.factory_id)
+    db.commit()
+    return {"status": "ok", "recalculated": len(results), "results": results}
+
+
+@router.post("/typologies")
+async def create_typology(
+    data: TypologyCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Create a new kiln loading typology."""
+    typology = KilnLoadingTypology(
+        factory_id=data.factory_id,
+        name=data.name,
+        product_types=data.product_types,
+        place_of_application=data.place_of_application,
+        collections=data.collections,
+        methods=data.methods,
+        min_size_cm=data.min_size_cm,
+        max_size_cm=data.max_size_cm,
+        preferred_loading=data.preferred_loading,
+        min_firing_temp=data.min_firing_temp,
+        max_firing_temp=data.max_firing_temp,
+        shift_count=data.shift_count,
+        auto_calibrate=data.auto_calibrate,
+        priority=data.priority,
+        notes=data.notes,
+    )
+    db.add(typology)
+    db.commit()
+    db.refresh(typology)
+    return _serialize_typology(typology)
+
+
+@router.get("/typologies/match")
+async def match_typology(
+    factory_id: UUID = Query(...),
+    product_type: Optional[str] = Query(None),
+    place: Optional[str] = Query(None),
+    size: Optional[float] = Query(None),
+    collection: Optional[str] = Query(None),
+    method: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Find matching typology for given product parameters."""
+    from business.services.typology_matcher import find_matching_typology
+    result = find_matching_typology(
+        db,
+        factory_id=factory_id,
+        product_type=product_type,
+        place=place,
+        size=size,
+        collection=collection,
+        method=method,
+    )
+    if not result:
+        return {"match": None}
+    return {"match": _serialize_typology(result)}
+
+
+@router.get("/typologies/{typology_id}")
+async def get_typology(
+    typology_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Get a single typology with capacities."""
+    t = (
+        db.query(KilnLoadingTypology)
+        .options(
+            joinedload(KilnLoadingTypology.capacities)
+            .joinedload(KilnTypologyCapacity.resource)
+        )
+        .filter(KilnLoadingTypology.id == typology_id)
+        .first()
+    )
+    if not t:
+        raise HTTPException(404, "Typology not found")
+    return _serialize_typology(t)
+
+
+@router.patch("/typologies/{typology_id}")
+async def update_typology(
+    typology_id: UUID,
+    data: TypologyUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Partially update a typology."""
+    t = db.query(KilnLoadingTypology).filter(KilnLoadingTypology.id == typology_id).first()
+    if not t:
+        raise HTTPException(404, "Typology not found")
+    updates = data.model_dump(exclude_unset=True)
+    for key, val in updates.items():
+        setattr(t, key, val)
+    db.commit()
+    db.refresh(t)
+    return _serialize_typology(t)
+
+
+@router.delete("/typologies/{typology_id}")
+async def delete_typology(
+    typology_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Soft-delete a typology (set is_active=False)."""
+    t = db.query(KilnLoadingTypology).filter(KilnLoadingTypology.id == typology_id).first()
+    if not t:
+        raise HTTPException(404, "Typology not found")
+    t.is_active = False
+    db.commit()
+    return {"status": "deleted", "id": str(typology_id)}
+
+
+@router.post("/typologies/{typology_id}/calculate")
+async def calculate_typology(
+    typology_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Recalculate capacities for a single typology across all kilns."""
+    from business.services.typology_matcher import calculate_typology_for_kiln
+    t = db.query(KilnLoadingTypology).filter(KilnLoadingTypology.id == typology_id).first()
+    if not t:
+        raise HTTPException(404, "Typology not found")
+    results = calculate_typology_for_kiln(db, typology_id)
+    db.commit()
+    return {"status": "ok", "typology_id": str(typology_id), "results": results}
+
+
+@router.get("/typologies/{typology_id}/capacities")
+async def get_typology_capacities(
+    typology_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Get per-kiln capacities for a typology."""
+    t = db.query(KilnLoadingTypology).filter(KilnLoadingTypology.id == typology_id).first()
+    if not t:
+        raise HTTPException(404, "Typology not found")
+    caps = (
+        db.query(KilnTypologyCapacity)
+        .options(joinedload(KilnTypologyCapacity.resource))
+        .filter(KilnTypologyCapacity.typology_id == typology_id)
+        .all()
+    )
+    return {
+        "typology_id": str(typology_id),
+        "capacities": [{
+            "kiln_id": str(c.resource_id),
+            "kiln_name": c.resource.name if c.resource else None,
+            "capacity_sqm": float(c.capacity_sqm) if c.capacity_sqm else None,
+            "capacity_pcs": c.capacity_pcs,
+            "loading_method": c.loading_method,
+            "num_levels": c.num_levels,
+            "ai_adjusted_sqm": float(c.ai_adjusted_sqm) if c.ai_adjusted_sqm else None,
+            "ref_size": c.ref_size,
+        } for c in caps],
+    }

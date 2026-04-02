@@ -283,7 +283,12 @@ def find_best_kiln_and_date(
                 continue
 
             # Capacity check: does this kiln have room on candidate_date?
-            cap = _get_kiln_capacity_sqm(kiln)
+            # Use typology-aware capacity if available, else fallback to simple sqm
+            try:
+                from business.services.typology_matcher import get_effective_capacity
+                cap = get_effective_capacity(db, position, kiln)
+            except Exception:
+                cap = _get_kiln_capacity_sqm(kiln)
             already_used = _get_scheduled_area_sqm(db, kiln.id, candidate_date)
             if pos_area > 0 and already_used + pos_area > cap * 1.1:
                 # Over capacity (10% tolerance) — skip this kiln on this day

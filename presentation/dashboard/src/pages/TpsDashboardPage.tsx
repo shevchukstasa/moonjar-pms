@@ -32,11 +32,17 @@ import {
   PRODUCTIVITY_UNITS,
   COLLECTIONS,
   APPLICATION_METHODS,
+  PLACE_OF_APPLICATION,
+  PRODUCT_TYPES,
+  LOADING_METHODS,
   type ProcessStepItem,
   type ProcessStepCreate,
   type CalibrationStatus,
   type CalibrationSuggestion,
   type CalibrationLogEntry,
+  type TypologyItem,
+  type TypologyCreate,
+  type KilnCapacityItem,
 } from '@/api/tpsDashboard';
 import { cn } from '@/lib/cn';
 import { useNavigate } from 'react-router-dom';
@@ -98,6 +104,7 @@ const PAGE_TABS = [
   { id: 'pipeline', label: 'Pipeline View' },
   { id: 'rates', label: 'Rates Table' },
   { id: 'calibration', label: 'AI Calibration' },
+  { id: 'typologies', label: 'Typologies' },
 ];
 
 // ── Main page ───────────────────────────────────────────────
@@ -136,6 +143,7 @@ export default function TpsDashboardPage() {
           {activeTab === 'pipeline' && <PipelineTab factoryId={activeFactoryId} />}
           {activeTab === 'rates' && <RatesTableTab factoryId={activeFactoryId} />}
           {activeTab === 'calibration' && <CalibrationTab factoryId={activeFactoryId} />}
+          {activeTab === 'typologies' && <TypologiesTab factoryId={activeFactoryId} />}
         </>
       )}
     </div>

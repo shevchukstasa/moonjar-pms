@@ -2221,70 +2221,81 @@ async def get_position_materials(
         recipe = db.query(Recipe).filter(Recipe.id == position.recipe_id).first()
 
     if recipe:
-        recipe_materials = (
-            db.query(RecipeMaterial)
-            .filter(RecipeMaterial.recipe_id == recipe.id)
-            .all()
-        )
+        try:
+            recipe_materials = (
+                db.query(RecipeMaterial)
+                .filter(RecipeMaterial.recipe_id == recipe.id)
+                .all()
+            )
+        except Exception:
+            recipe_materials = []
 
         for rm in recipe_materials:
-            material = db.query(Material).filter(Material.id == rm.material_id).first()
-            if not material:
-                continue
-
-            mat_type = (material.material_type or "").lower()
-            mat_name = material.name
-
-            # Calculate required quantity (converted to stock unit)
+            material = None
             try:
-                from business.services.material_reservation import _calculate_required
-                from api.unit_conversion import get_calculation_unit, convert_to_stock_unit
-                required_calc = _calculate_required(rm, position, recipe=recipe, db=db)
-                calc_unit = get_calculation_unit(rm.unit)
-                stock_unit = (material.unit or "pcs").lower().strip()
-                sg = recipe.specific_gravity if recipe else None
-                required = float(convert_to_stock_unit(
-                    required_calc, calc_unit, stock_unit,
-                    specific_gravity=sg, material_name=material.name,
-                ))
-            except Exception as _calc_err:
+                material = db.query(Material).filter(Material.id == rm.material_id).first()
+                if not material:
+                    continue
+
+                mat_type = (material.material_type or "").lower()
+                mat_name = material.name
+                required = 0.0
+
+                # Calculate required quantity
+                try:
+                    from business.services.material_reservation import _calculate_required
+                    from api.unit_conversion import get_calculation_unit, convert_to_stock_unit
+                    required_calc = _calculate_required(rm, position, recipe=recipe, db=db)
+                    calc_unit = get_calculation_unit(rm.unit)
+                    stock_unit = (material.unit or "pcs").lower().strip()
+                    sg = recipe.specific_gravity if recipe else None
+                    required = float(convert_to_stock_unit(
+                        required_calc, calc_unit, stock_unit,
+                        specific_gravity=sg, material_name=material.name,
+                    ))
+                except Exception:
+                    # Fallback: simple calculation
+                    raw = float(rm.quantity_per_unit or 0) * (position.quantity or 1)
+                    rm_unit = (rm.unit or "per_piece").lower().strip()
+                    stock_u = (material.unit or "pcs").lower().strip()
+                    if rm_unit == "g_per_100g" and stock_u == "kg":
+                        required = raw / 1000.0
+                    elif rm_unit == "per_sqm" and stock_u == "kg":
+                        required = raw / 1000.0
+                    else:
+                        required = raw
+
+                # Check reservation status
+                reserved_qty = float(
+                    db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+                    .filter(
+                        MaterialTransaction.position_id == position.id,
+                        MaterialTransaction.material_id == rm.material_id,
+                        MaterialTransaction.type == TransactionType.RESERVE,
+                    )
+                    .scalar() or 0
+                )
+                is_reserved = reserved_qty >= required * 0.99 if required > 0 else False
+
+                requirements.append({
+                    "material_name": mat_name,
+                    "type": mat_type,
+                    "quantity_needed": round(required, 2),
+                    "unit": material.unit or "pcs",
+                    "reserved": is_reserved,
+                })
+            except Exception as _rm_err:
                 import logging as _log
-                _log.getLogger("moonjar.positions").warning(
-                    "Material calc failed for %s: %s — using fallback", material.name, _calc_err
+                _log.getLogger("moonjar.positions").error(
+                    "Material requirement error for rm=%s: %s", rm.id, _rm_err
                 )
-                # Fallback: simple per-piece calculation WITH unit conversion
-                raw = float(rm.quantity_per_unit) * position.quantity
-                # If recipe unit is g_per_100g and stock is kg, convert
-                rm_unit = (rm.unit or "per_piece").lower().strip()
-                stock_u = (material.unit or "pcs").lower().strip()
-                if rm_unit == "g_per_100g" and stock_u == "kg":
-                    required = raw / 1000.0  # grams to kg
-                elif rm_unit == "per_sqm" and stock_u == "kg":
-                    required = raw / 1000.0  # ml assumed ≈ g at SG=1
-                else:
-                    required = raw
-
-            # Check if this material has been reserved for this position
-            # by looking for RESERVE transactions
-            reserved_qty = (
-                db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
-                .filter(
-                    MaterialTransaction.position_id == position.id,
-                    MaterialTransaction.material_id == rm.material_id,
-                    MaterialTransaction.type == TransactionType.RESERVE,
-                )
-                .scalar()
-            ) or 0
-
-            is_reserved = float(reserved_qty) >= required * 0.99 if required > 0 else False
-
-            requirements.append({
-                "material_name": mat_name,
-                "type": mat_type,
-                "quantity_needed": round(required, 2),
-                "unit": material.unit or "pcs",
-                "reserved": is_reserved,
-            })
+                requirements.append({
+                    "material_name": material.name if material else f"Material {rm.material_id}",
+                    "type": material.material_type if material else "?",
+                    "quantity_needed": 0,
+                    "unit": "?",
+                    "reserved": False,
+                })
 
     return {
         "position_id": str(position.id),

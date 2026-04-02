@@ -282,17 +282,37 @@ def find_best_kiln_and_date(
             if _kiln_blocked_on_date(maintenance_windows, candidate_date):
                 continue
 
-            # Capacity check: does this kiln have room on candidate_date?
-            # Use typology-aware capacity if available, else fallback to simple sqm
+            # Zone-aware capacity check for mixed loading
             try:
-                from business.services.typology_matcher import get_effective_capacity
-                cap = get_effective_capacity(db, position, kiln)
+                from business.services.typology_matcher import (
+                    classify_loading_zone, get_zone_capacity,
+                )
+                zone = classify_loading_zone(position)
+                zone_cap = get_zone_capacity(db, position, kiln, zone)
+
+                # Sum area of same-zone positions already scheduled on this day
+                zone_used = 0.0
+                scheduled = (
+                    db.query(OrderPosition)
+                    .filter(
+                        OrderPosition.estimated_kiln_id == kiln.id,
+                        OrderPosition.planned_kiln_date == candidate_date,
+                        OrderPosition.status != PositionStatus.CANCELLED.value,
+                    )
+                    .all()
+                )
+                for sp in scheduled:
+                    if classify_loading_zone(sp) == zone:
+                        zone_used += float(sp.glazeable_sqm or 0) * float(sp.quantity or 1)
+
+                if pos_area > 0 and zone_used + pos_area > zone_cap * 1.1:
+                    continue
             except Exception:
+                # Fallback to simple capacity check
                 cap = _get_kiln_capacity_sqm(kiln)
-            already_used = _get_scheduled_area_sqm(db, kiln.id, candidate_date)
-            if pos_area > 0 and already_used + pos_area > cap * 1.1:
-                # Over capacity (10% tolerance) — skip this kiln on this day
-                continue
+                already_used = _get_scheduled_area_sqm(db, kiln.id, candidate_date)
+                if pos_area > 0 and already_used + pos_area > cap * 1.1:
+                    continue
 
             batch_count = db.query(sa_func.count(Batch.id)).filter(
                 Batch.resource_id == kiln.id,

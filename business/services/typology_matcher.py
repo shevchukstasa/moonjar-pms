@@ -136,6 +136,33 @@ def get_typology_capacity(
     ).first()
 
 
+def classify_loading_zone(position) -> str:
+    """Classify position into loading zone: 'edge' or 'flat'.
+
+    Edge loading: face only, face+1 edge, face+2 edges — IF size ≤ 15cm max side.
+    Flat loading: all edges, with back, OR any tile bigger than 15cm.
+    """
+    place = getattr(position, 'place_of_application', 'face_only') or 'face_only'
+    place = place.value if hasattr(place, 'value') else str(place)
+
+    if place in ('face_only', 'edges_1', 'edges_2'):
+        # Check size — tiles > 15cm on any side can't be edge-loaded
+        w = float(position.width_cm or 0) if getattr(position, 'width_cm', None) else 0
+        l = float(position.length_cm or 0) if getattr(position, 'length_cm', None) else 0
+        if not w and not l and getattr(position, 'size', None):
+            try:
+                parts = str(position.size).lower().replace('х', 'x').split('x')
+                w = float(parts[0])
+                l = float(parts[1]) if len(parts) > 1 else w
+            except (ValueError, IndexError):
+                pass
+        max_dim = max(w, l) if w or l else 10  # default 10cm if unknown
+        if max_dim > 15:
+            return 'flat'
+        return 'edge'
+    return 'flat'
+
+
 def get_effective_capacity(
     db: Session,
     position: OrderPosition,
@@ -161,6 +188,29 @@ def get_effective_capacity(
     if kiln.capacity_sqm:
         return float(kiln.capacity_sqm)
     return 1.0
+
+
+def get_zone_capacity(
+    db: Session,
+    position: OrderPosition,
+    kiln: Resource,
+    zone: str,
+) -> float:
+    """Get capacity for a specific loading zone, considering typology.
+
+    Falls back to proportional split of total capacity if no typology data.
+    """
+    typology = find_matching_typology(db, position)
+    if typology:
+        cap = get_typology_capacity(db, typology.id, kiln.id)
+        if cap:
+            return float(cap.ai_adjusted_sqm or cap.capacity_sqm or 0)
+
+    # Fallback proportional split
+    total = float(kiln.capacity_sqm or 1.0)
+    if zone == 'edge':
+        return total * 0.85
+    return total * 0.15
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +334,16 @@ def calculate_typology_for_kiln(
         "glaze_placement": ref_pos.glaze_placement,
     }
     cap_record.calculation_output = result
+
+    # Auto-determine zone from place_of_application
+    places = typology.place_of_application or []
+    if not places or any(p in ('face_only', 'edges_1', 'edges_2') for p in places):
+        if method == 'edge':
+            cap_record.zone = 'edge'
+        else:
+            cap_record.zone = 'flat'
+    else:
+        cap_record.zone = 'flat'
 
     db.flush()
     return cap_record

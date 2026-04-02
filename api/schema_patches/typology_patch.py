@@ -58,6 +58,9 @@ STATEMENTS = [
 
     "CREATE INDEX IF NOT EXISTS idx_typology_factory ON kiln_loading_typologies (factory_id, is_active)",
     "CREATE INDEX IF NOT EXISTS idx_typology_cap_lookup ON kiln_typology_capacities (typology_id, resource_id)",
+
+    # Zone column for mixed loading support
+    "ALTER TABLE kiln_typology_capacities ADD COLUMN IF NOT EXISTS zone VARCHAR(20) NOT NULL DEFAULT 'primary'",
 ]
 
 

@@ -1290,6 +1290,8 @@ class KilnTypologyCapacity(Base):
     ai_adjusted_sqm = Column(sa.Numeric(10, 3), nullable=True)
     calibration_ema = Column(sa.Numeric(10, 3), nullable=True)
     last_calibrated_at = Column(sa.DateTime(timezone=True), nullable=True)
+    # Loading zone for mixed loading (edge/flat/filler/primary)
+    zone = Column(sa.String(20), nullable=False, server_default=sa.text("'primary'"))
     # Metadata
     calculated_at = Column(sa.DateTime(timezone=True), server_default=sa.func.now())
     calculation_input = Column(JSONB, nullable=True)

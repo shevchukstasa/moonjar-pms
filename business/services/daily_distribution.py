@@ -910,22 +910,17 @@ def _collect_streak_data(db: Session, factory_id: UUID) -> dict:
 # ────────────────────────────────────────────────────────────────
 
 def _collect_daily_challenge(db: Session, factory_id: UUID, target_date: date) -> Optional[dict]:
-    """Get today's daily challenge for the factory."""
+    """Get today's daily challenge for the factory (auto-creates if missing)."""
     try:
-        challenge = (
-            db.query(DailyChallenge)
-            .filter(
-                DailyChallenge.factory_id == factory_id,
-                DailyChallenge.challenge_date == target_date,
-            )
-            .first()
-        )
-        if challenge:
+        from business.services.streaks import get_daily_challenge
+        challenge_data = get_daily_challenge(db, factory_id, target_date)
+        if challenge_data:
             return {
-                "title": challenge.title,
-                "description": challenge.description,
-                "target_value": challenge.target_value,
-                "completed": challenge.completed,
+                "title": challenge_data["title"],
+                "description": challenge_data["description"],
+                "target_value": challenge_data["target_value"],
+                "completed": challenge_data.get("completed", False),
+                "bonus_points": 5,  # Standard daily challenge bonus
             }
     except Exception as e:
         logger.warning("Daily challenge collection failed: %s", e)
@@ -1119,6 +1114,24 @@ def _quality_emoji_id(defect_rate: float, defect_count: int) -> str:
     return "\u26a0\ufe0f Kualitas perlu perhatian"
 
 
+def _mood_emoji(kpi: dict) -> str:
+    """Return mood emoji based on yesterday's results.
+
+    Good day (>10 pieces, <3% defects) = fire
+    Average day (some work, <5% defects) = muscle
+    Bad day (high defects or no work) = angry face
+    """
+    pieces = kpi.get("pieces_processed", 0)
+    defect_rate = kpi.get("defect_rate", 0)
+    if pieces > 0 and defect_rate < 3.0:
+        return "\U0001f525"  # fire
+    if pieces > 0 and defect_rate < 5.0:
+        return "\U0001f4aa"  # muscle
+    if pieces == 0:
+        return "\U0001f4aa"  # no data — neutral
+    return "\U0001f624"  # angry/determined
+
+
 def _format_message_en(distribution: dict) -> str:
     """Format daily message in English — 7-block motivational format."""
     factory_name = distribution.get("factory_name", "")
@@ -1129,9 +1142,10 @@ def _format_message_en(distribution: dict) -> str:
     lines = []
 
     # ═══════════════════════════════════════════════════════════
-    # BLOCK 1: Greeting + Yesterday's Win + Streak
+    # BLOCK 1: Greeting + Mood + Yesterday's Win + Streak
     # ═══════════════════════════════════════════════════════════
-    lines.append(f"\U0001f305 *Good morning, {factory_name} team!*")
+    mood = _mood_emoji(kpi)
+    lines.append(f"{mood} *Good morning, {factory_name} team!*")
 
     pieces = kpi.get("pieces_processed", 0)
     defects = kpi.get("defect_count", 0)
@@ -1148,10 +1162,14 @@ def _format_message_en(distribution: dict) -> str:
     lines.append(SEPARATOR)
 
     # ═══════════════════════════════════════════════════════════
-    # BLOCK 2: Daily Challenge
+    # BLOCK 2: Daily Challenge + Bonus Points
     # ═══════════════════════════════════════════════════════════
     if challenge:
+        bonus = challenge.get("bonus_points", 5)
         lines.append(f"\U0001f3af *Today's Challenge:* {challenge['title']}")
+        if challenge.get("description"):
+            lines.append(f"   {challenge['description']}")
+        lines.append(f"   \U0001f4b0 Bonus: +{bonus} pts for completion!")
     else:
         if total_positions > 0:
             lines.append(f"\U0001f3af *Today's Challenge:* Complete all {total_positions} positions!")
@@ -1299,9 +1317,10 @@ def _format_message_id(distribution: dict) -> str:
     lines = []
 
     # ═══════════════════════════════════════════════════════════
-    # BLOCK 1: Greeting + Yesterday's Win + Streak
+    # BLOCK 1: Greeting + Mood + Yesterday's Win + Streak
     # ═══════════════════════════════════════════════════════════
-    lines.append(f"\U0001f305 *Selamat pagi, tim {factory_name}!*")
+    mood = _mood_emoji(kpi)
+    lines.append(f"{mood} *Selamat pagi, tim {factory_name}!*")
 
     pieces = kpi.get("pieces_processed", 0)
     defects = kpi.get("defect_count", 0)
@@ -1318,10 +1337,14 @@ def _format_message_id(distribution: dict) -> str:
     lines.append(SEPARATOR)
 
     # ═══════════════════════════════════════════════════════════
-    # BLOCK 2: Daily Challenge
+    # BLOCK 2: Daily Challenge + Bonus Points
     # ═══════════════════════════════════════════════════════════
     if challenge:
+        bonus = challenge.get("bonus_points", 5)
         lines.append(f"\U0001f3af *Tantangan Hari Ini:* {challenge['title']}")
+        if challenge.get("description"):
+            lines.append(f"   {challenge['description']}")
+        lines.append(f"   \U0001f4b0 Bonus: +{bonus} poin jika selesai!")
     else:
         if total_positions > 0:
             lines.append(f"\U0001f3af *Tantangan Hari Ini:* Selesaikan semua {total_positions} posisi!")
@@ -1467,8 +1490,9 @@ def _format_message_ru(distribution: dict) -> str:
     challenge = distribution.get("daily_challenge")
     lines = []
 
-    # BLOCK 1: Greeting
-    lines.append(f"\U0001f305 *\u0414\u043e\u0431\u0440\u043e\u0435 \u0443\u0442\u0440\u043e, \u043a\u043e\u043c\u0430\u043d\u0434\u0430 {factory_name}!*")
+    # BLOCK 1: Greeting + Mood
+    mood = _mood_emoji(kpi)
+    lines.append(f"{mood} *\u0414\u043e\u0431\u0440\u043e\u0435 \u0443\u0442\u0440\u043e, \u043a\u043e\u043c\u0430\u043d\u0434\u0430 {factory_name}!*")
 
     pieces = kpi.get("pieces_processed", 0)
     defects = kpi.get("defect_count", 0)
@@ -1491,9 +1515,13 @@ def _format_message_ru(distribution: dict) -> str:
         lines.append(f"\u0421\u0435\u0440\u0438\u044f: {zero_streak} \u0434\u043d\u0435\u0439 \u0431\u0435\u0437 \u0431\u0440\u0430\u043a\u0430! \U0001f4aa")
     lines.append(SEPARATOR)
 
-    # BLOCK 2: Challenge
+    # BLOCK 2: Challenge + Bonus Points
     if challenge:
+        bonus = challenge.get("bonus_points", 5)
         lines.append(f"\U0001f3af *\u0412\u044b\u0437\u043e\u0432 \u0434\u043d\u044f:* {challenge['title']}")
+        if challenge.get("description"):
+            lines.append(f"   {challenge['description']}")
+        lines.append(f"   \U0001f4b0 \u0411\u043e\u043d\u0443\u0441: +{bonus} \u043e\u0447\u043a\u043e\u0432 \u0437\u0430 \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435!")
     elif total_positions > 0:
         lines.append(f"\U0001f3af *\u0412\u044b\u0437\u043e\u0432 \u0434\u043d\u044f:* \u0417\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u044c \u0432\u0441\u0435 {total_positions} \u043f\u043e\u0437\u0438\u0446\u0438\u0439!")
     lines.append(SEPARATOR)

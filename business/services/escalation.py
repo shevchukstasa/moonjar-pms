@@ -2,9 +2,20 @@
 Escalation Engine.
 Business Logic: §36 (Notifications & Escalation)
 
-Handles task escalation chains: PM → CEO → Owner.
+Handles task escalation chains: PM -> CEO -> Owner.
 Night alerts only for kiln events (temperature deviation, kiln shutdown).
-Escalation levels: 1=morning message, 2=repeat every 30min, 3=voice call.
+
+Escalation modes (configurable per factory in Factory.settings):
+  MORNING  — (default) collect all unresolved overnight, send one morning summary
+  REPEAT   — re-send alert every N hours until resolved
+  CALL     — after N hours unresolved, escalate to CEO/Owner with urgent flag
+
+Factory.settings JSONB structure:
+  {
+    "escalation_mode": "morning",          # morning | repeat | call
+    "escalation_interval_hours": 2,        # for repeat mode
+    "escalation_threshold_hours": 4,       # for call mode
+  }
 """
 import logging
 from datetime import datetime, timezone, timedelta
@@ -14,7 +25,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from api.models import (
-    Task, EscalationRule, User, UserFactory, Notification,
+    Task, EscalationRule, User, UserFactory, Notification, Factory,
 )
 from api.enums import TaskStatus, UserRole, NotificationType, NightAlertLevel
 
@@ -33,6 +44,13 @@ NIGHT_ALERT_TASK_TYPES = frozenset({
     "kiln_emergency",
 })
 
+# Default escalation config
+DEFAULT_ESCALATION_CONFIG = {
+    "escalation_mode": "morning",
+    "escalation_interval_hours": 2,
+    "escalation_threshold_hours": 4,
+}
+
 
 def is_night_time(utc_now: Optional[datetime] = None) -> bool:
     """Check if current time is night in Bali (WITA, UTC+8)."""
@@ -42,25 +60,53 @@ def is_night_time(utc_now: Optional[datetime] = None) -> bool:
     return local_hour >= NIGHT_START_HOUR or local_hour < NIGHT_END_HOUR
 
 
+def _get_escalation_config(db: Session, factory_id: UUID) -> dict:
+    """Read escalation config from Factory.settings JSONB, with defaults."""
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory or not factory.settings or not isinstance(factory.settings, dict):
+        return dict(DEFAULT_ESCALATION_CONFIG)
+    config = dict(DEFAULT_ESCALATION_CONFIG)
+    config["escalation_mode"] = factory.settings.get(
+        "escalation_mode", config["escalation_mode"]
+    )
+    config["escalation_interval_hours"] = factory.settings.get(
+        "escalation_interval_hours", config["escalation_interval_hours"]
+    )
+    config["escalation_threshold_hours"] = factory.settings.get(
+        "escalation_threshold_hours", config["escalation_threshold_hours"]
+    )
+    return config
+
+
 def check_and_escalate(db: Session, factory_id: UUID) -> list[dict]:
     """
     Check all active tasks for escalation needs.
 
-    Escalation chain:
-    1. Task assigned to PM → if not resolved in pm_timeout_hours → escalate to CEO
-    2. CEO notified → if not resolved in ceo_timeout_hours → escalate to Owner
-    3. Owner notified → if not resolved in owner_timeout_hours → voice call
+    Escalation chain (standard):
+    1. Task assigned to PM -> if not resolved in pm_timeout_hours -> escalate to CEO
+    2. CEO notified -> if not resolved in ceo_timeout_hours -> escalate to Owner
+    3. Owner notified -> if not resolved in owner_timeout_hours -> voice call
+
+    Escalation modes (from Factory.settings):
+    - MORNING: collect all unresolved overnight, send one morning summary (default)
+    - REPEAT: re-send alert every escalation_interval_hours until resolved
+    - CALL: after escalation_threshold_hours unresolved, escalate to CEO/Owner with urgent flag
 
     Night mode (21:00-06:00 Bali time):
     - Only kiln-related alerts are sent at night
     - All other escalations are deferred to morning (06:00)
-    - Kiln alerts: level 1=telegram, level 2=repeat every 30min, level 3=voice call
 
     Returns list of escalation actions taken.
     """
     now = datetime.now(timezone.utc)
     night = is_night_time(now)
     actions = []
+
+    # Read factory escalation config
+    esc_config = _get_escalation_config(db, factory_id)
+    esc_mode = esc_config["escalation_mode"]       # morning | repeat | call
+    esc_interval = esc_config["escalation_interval_hours"]   # for repeat
+    esc_threshold = esc_config["escalation_threshold_hours"]  # for call
 
     # Get all pending/in-progress tasks for this factory
     active_tasks = db.query(Task).filter(
@@ -79,7 +125,7 @@ def check_and_escalate(db: Session, factory_id: UUID) -> list[dict]:
     ).all():
         rules[rule.task_type] = rule
 
-    # Get role → user mapping for this factory
+    # Get role -> user mapping for this factory
     pm_users = _get_users_by_role(db, factory_id, UserRole.PRODUCTION_MANAGER)
     ceo_users = _get_users_by_role(db, factory_id, UserRole.CEO)
     owner_users = _get_users_by_role(db, factory_id, UserRole.OWNER)
@@ -88,22 +134,24 @@ def check_and_escalate(db: Session, factory_id: UUID) -> list[dict]:
         task_type = task.type.value if hasattr(task.type, "value") else str(task.type)
         rule = rules.get(task_type)
         if not rule:
-            # Use defaults
             rule = _default_rule()
 
         age_hours = (now - task.created_at).total_seconds() / 3600
+        is_kiln = task_type in NIGHT_ALERT_TASK_TYPES
 
-        # Night check: only kiln alerts proceed at night
-        if night and task_type not in NIGHT_ALERT_TASK_TYPES:
-            # Defer non-kiln escalation to morning
+        # Night check: only kiln alerts proceed at night (for all modes)
+        if night and not is_kiln:
+            # MORNING mode: deferred to morning (default behavior)
+            # REPEAT/CALL modes also defer non-kiln to morning at night
+            _mark_deferred(task)
             continue
 
         # Determine current escalation level
         current_level = _get_escalation_level(task)
 
-        # Level 0 → PM (already assigned, check if timeout exceeded)
+        # ── Standard escalation chain (all modes) ──────────────
+        # Level 0 -> PM timeout -> escalate to CEO
         if current_level == 0 and age_hours >= float(rule.pm_timeout_hours):
-            # Escalate to CEO
             for user in ceo_users:
                 _send_escalation(
                     db, task, user, "ceo",
@@ -111,14 +159,16 @@ def check_and_escalate(db: Session, factory_id: UUID) -> list[dict]:
                     night=night,
                 )
             _set_escalation_level(task, 1, night=night)
+            _set_first_escalation_at(task, now)
             actions.append({
                 "task_id": str(task.id),
                 "task_type": task_type,
                 "escalated_to": "ceo",
+                "mode": esc_mode,
                 "age_hours": round(age_hours, 1),
             })
 
-        # Level 1 → CEO timeout → escalate to Owner
+        # Level 1 -> CEO timeout -> escalate to Owner
         elif current_level == 1 and age_hours >= float(rule.ceo_timeout_hours):
             for user in owner_users:
                 _send_escalation(
@@ -131,10 +181,11 @@ def check_and_escalate(db: Session, factory_id: UUID) -> list[dict]:
                 "task_id": str(task.id),
                 "task_type": task_type,
                 "escalated_to": "owner",
+                "mode": esc_mode,
                 "age_hours": round(age_hours, 1),
             })
 
-        # Level 2 → Owner timeout → voice call attempt
+        # Level 2 -> Owner timeout -> voice call attempt
         elif current_level == 2 and age_hours >= float(rule.owner_timeout_hours):
             for user in owner_users:
                 _request_voice_call(db, task, user)
@@ -143,11 +194,76 @@ def check_and_escalate(db: Session, factory_id: UUID) -> list[dict]:
                 "task_id": str(task.id),
                 "task_type": task_type,
                 "escalated_to": "voice_call",
+                "mode": esc_mode,
                 "age_hours": round(age_hours, 1),
             })
 
-        # Night kiln alerts: repeat every 30 min at level 2+
-        if night and task_type in NIGHT_ALERT_TASK_TYPES and current_level >= 1:
+        # ── Mode-specific behavior (after standard chain) ──────
+
+        # REPEAT mode: re-send alert every esc_interval hours
+        if esc_mode == "repeat" and current_level >= 1:
+            last_notif_at = _get_last_notification_time(task)
+            interval_seconds = esc_interval * 3600
+            should_repeat = (
+                last_notif_at is not None
+                and (now - last_notif_at).total_seconds() >= interval_seconds
+            )
+            if should_repeat:
+                target_users = ceo_users + owner_users
+                for user in target_users:
+                    _send_escalation(
+                        db, task, user, "repeat",
+                        f"REPEAT ALERT ({esc_interval}h): {task_type} still unresolved "
+                        f"({round(age_hours, 1)}h old)",
+                        night=night,
+                    )
+                _ensure_metadata(task)
+                task.metadata_json["night_alert_mode"] = NightAlertLevel.REPEAT.value
+                actions.append({
+                    "task_id": str(task.id),
+                    "task_type": task_type,
+                    "escalated_to": "repeat",
+                    "mode": "repeat",
+                    "age_hours": round(age_hours, 1),
+                })
+
+        # CALL mode: after threshold hours, send urgent CEO/Owner notification
+        if esc_mode == "call" and current_level >= 1:
+            first_esc_at = _get_first_escalation_at(task)
+            if first_esc_at:
+                hours_since_first = (now - first_esc_at).total_seconds() / 3600
+                already_called = (
+                    task.metadata_json
+                    and isinstance(task.metadata_json, dict)
+                    and task.metadata_json.get("call_mode_escalated")
+                )
+                if hours_since_first >= esc_threshold and not already_called:
+                    # Urgent escalation to CEO + Owner
+                    target_users = ceo_users + owner_users
+                    for user in target_users:
+                        _send_escalation(
+                            db, task, user, "urgent_call",
+                            f"URGENT CALL ESCALATION: {task_type} unresolved for "
+                            f"{round(hours_since_first, 1)}h (threshold: {esc_threshold}h). "
+                            f"Immediate attention required!",
+                            night=night,
+                            urgent=True,
+                        )
+                    _ensure_metadata(task)
+                    task.metadata_json["call_mode_escalated"] = True
+                    task.metadata_json["call_escalated_at"] = now.isoformat()
+                    task.metadata_json["night_alert_mode"] = NightAlertLevel.CALL.value
+                    actions.append({
+                        "task_id": str(task.id),
+                        "task_type": task_type,
+                        "escalated_to": "urgent_call",
+                        "mode": "call",
+                        "age_hours": round(age_hours, 1),
+                        "hours_since_first_escalation": round(hours_since_first, 1),
+                    })
+
+        # Night kiln alerts: repeat every 30 min at level 2+ (always, regardless of mode)
+        if night and is_kiln and current_level >= 1:
             last_notif_at = _get_last_notification_time(task)
             if last_notif_at and (now - last_notif_at).total_seconds() >= 1800:
                 target_users = ceo_users + owner_users
@@ -157,14 +273,13 @@ def check_and_escalate(db: Session, factory_id: UUID) -> list[dict]:
                         f"NIGHT ALERT (repeat): {task_type} still unresolved",
                         night=True,
                     )
-                # Mark night alert mode as REPEAT for kiln night repeats
-                if not task.metadata_json or not isinstance(task.metadata_json, dict):
-                    task.metadata_json = {}
+                _ensure_metadata(task)
                 task.metadata_json["night_alert_mode"] = NightAlertLevel.REPEAT.value
                 actions.append({
                     "task_id": str(task.id),
                     "task_type": task_type,
                     "escalated_to": "night_repeat",
+                    "mode": esc_mode,
                     "age_hours": round(age_hours, 1),
                 })
 
@@ -223,6 +338,38 @@ def _default_rule():
     return _Default()
 
 
+def _ensure_metadata(task: Task):
+    """Ensure task.metadata_json is a dict."""
+    if not task.metadata_json or not isinstance(task.metadata_json, dict):
+        task.metadata_json = {}
+
+
+def _mark_deferred(task: Task):
+    """Mark a task as deferred to morning (for non-kiln tasks at night)."""
+    _ensure_metadata(task)
+    task.metadata_json["deferred_to_morning"] = True
+    task.metadata_json["deferred_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def _set_first_escalation_at(task: Task, now: datetime):
+    """Set the first escalation timestamp (only if not already set)."""
+    _ensure_metadata(task)
+    if "first_escalation_at" not in task.metadata_json:
+        task.metadata_json["first_escalation_at"] = now.isoformat()
+
+
+def _get_first_escalation_at(task: Task) -> Optional[datetime]:
+    """Get the time of the first escalation from metadata."""
+    if task.metadata_json and isinstance(task.metadata_json, dict):
+        ts = task.metadata_json.get("first_escalation_at")
+        if ts:
+            try:
+                return datetime.fromisoformat(ts)
+            except (ValueError, TypeError):
+                pass
+    return None
+
+
 def _get_escalation_level(task: Task) -> int:
     """Get current escalation level from task metadata."""
     if task.metadata_json and isinstance(task.metadata_json, dict):
@@ -276,16 +423,22 @@ def _send_escalation(
     level: str,
     message: str,
     night: bool = False,
+    urgent: bool = False,
 ):
-    """Send escalation notification (in-app + telegram)."""
+    """Send escalation notification (in-app + telegram).
+
+    Args:
+        urgent: If True, marks notification as high-priority with urgent emoji.
+    """
     import uuid as uuid_mod
 
+    title_prefix = "URGENT Escalation" if urgent else "Escalation"
     notif = Notification(
         id=uuid_mod.uuid4(),
         user_id=user.id,
         factory_id=task.factory_id,
         type=NotificationType.ALERT.value,
-        title=f"Escalation ({level}): {task.type if isinstance(task.type, str) else task.type.value}",
+        title=f"{title_prefix} ({level}): {task.type if isinstance(task.type, str) else task.type.value}",
         message=message,
         related_entity_type="task",
         related_entity_id=task.id,
@@ -293,8 +446,7 @@ def _send_escalation(
     db.add(notif)
 
     # Update task metadata
-    if not task.metadata_json or not isinstance(task.metadata_json, dict):
-        task.metadata_json = {}
+    _ensure_metadata(task)
     task.metadata_json["last_notification_at"] = datetime.now(timezone.utc).isoformat()
     task.metadata_json[f"escalated_to_{level}"] = user.id.hex if hasattr(user.id, "hex") else str(user.id)
 
@@ -302,7 +454,12 @@ def _send_escalation(
     try:
         if hasattr(user, "telegram_chat_id") and user.telegram_chat_id:
             from business.services.telegram_bot import send_message
-            emoji = "🔴" if night else "⚠️"
+            if urgent:
+                emoji = "\U0001f6a8\U0001f6a8"  # double siren
+            elif night:
+                emoji = "\U0001f534"  # red circle
+            else:
+                emoji = "\u26a0\ufe0f"  # warning
             send_message(
                 user.telegram_chat_id,
                 f"{emoji} {message}\n\nTask: {task.description or task.type}",
@@ -310,7 +467,7 @@ def _send_escalation(
     except Exception as e:
         logger.warning(f"Telegram escalation failed for user {user.id}: {e}")
 
-    logger.info(f"Escalation sent: task={task.id} level={level} user={user.id} night={night}")
+    logger.info(f"Escalation sent: task={task.id} level={level} user={user.id} night={night} urgent={urgent}")
 
 
 def _request_voice_call(db: Session, task: Task, user: User):

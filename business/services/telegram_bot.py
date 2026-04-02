@@ -1395,6 +1395,33 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
     parts = data.split(":", maxsplit=2)
     action = parts[0] if parts else ""
 
+    # Account linking callback from /start
+    if action == "link_user" and len(parts) > 1:
+        user_id_str = parts[1]
+        try:
+            from uuid import UUID as _UUID
+            user = db.query(User).filter(User.id == _UUID(user_id_str), User.is_active.is_(True)).first()
+            if user:
+                user.telegram_user_id = telegram_user_id
+                db.commit()
+                lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else 'en'
+                logger.info(f"Linked Telegram {telegram_user_id} to user {user.name} via button")
+                await answer_callback_query(callback_id, "✅")
+                success_msg = {
+                    "en": f"✅ Account linked! Welcome, {user.name}. Type /help to see commands.",
+                    "id": f"✅ Akun terhubung! Selamat datang, {user.name}. Ketik /help untuk melihat perintah.",
+                    "ru": f"✅ Аккаунт привязан! Добро пожаловать, {user.name}. Введите /help для списка команд.",
+                }
+                chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
+                if chat_id:
+                    await _send_message(chat_id, success_msg.get(lang, success_msg["en"]))
+            else:
+                await answer_callback_query(callback_id, "User not found")
+        except Exception as e:
+            logger.error(f"Link user callback error: {e}")
+            await answer_callback_query(callback_id, "Error linking account")
+        return
+
     # Route daily/alert/task callbacks to the dedicated handler service
     if action in ("d", "a", "t"):
         try:
@@ -1632,8 +1659,34 @@ async def _cmd_start(db: Session, message: dict, args: str) -> None:
         await _send_message(chat_id, msg("account_already_linked", lang, name=existing.name, email=existing.email))
         return
 
-    # Ask for email to link
-    await _send_message(chat_id, msg("welcome_start", lang, first_name=first_name))
+    # Show list of unlinked users as inline buttons for easy linking
+    unlinked = (
+        db.query(User)
+        .filter(
+            User.is_active.is_(True),
+            User.telegram_user_id.is_(None),
+        )
+        .order_by(User.name)
+        .all()
+    )
+    if unlinked:
+        keyboard = []
+        for u in unlinked:
+            role_label = u.role.value if hasattr(u.role, 'value') else str(u.role) if u.role else ''
+            keyboard.append([{
+                "text": f"{u.name} ({role_label})",
+                "callback_data": f"link_user:{u.id}",
+            }])
+        greetings = {
+            "en": f"Welcome, {first_name}! Select your name to link your account:",
+            "id": f"Selamat datang, {first_name}! Pilih nama Anda untuk menghubungkan akun:",
+            "ru": f"Добро пожаловать, {first_name}! Выберите своё имя для привязки аккаунта:",
+        }
+        await _send_message(chat_id, greetings.get(lang, greetings["en"]),
+                           reply_markup={"inline_keyboard": keyboard})
+    else:
+        # All users already linked — fall back to email
+        await _send_message(chat_id, msg("welcome_start", lang, first_name=first_name))
 
 
 async def _cmd_status(db: Session, message: dict) -> None:

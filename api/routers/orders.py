@@ -606,7 +606,6 @@ async def reprocess_order(
     existing_item_ids = {p.order_item_id for p in positions if p.order_item_id}
     all_items = db.query(ProductionOrderItem).filter(
         ProductionOrderItem.order_id == order_id,
-        ProductionOrderItem.item_type == 'product',
     ).all()
     new_positions_created = 0
     for item in all_items:

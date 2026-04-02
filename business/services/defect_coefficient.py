@@ -132,7 +132,7 @@ def get_stone_defect_coefficient(db: Session, factory_id: UUID, stone_type: str)
     if sdc_any:
         return float(sdc_any.coefficient)
 
-    return 0.0  # No data — assume no defects
+    return 0.01  # Default 1% stone rejection rate, adjusted by AI from actual data
 
 
 # ============================================================

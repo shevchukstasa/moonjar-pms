@@ -413,13 +413,12 @@ def schedule_position(
         )
     )
 
-    # Guard: planned_glazing must be >= today. If the deadline is too tight,
-    # the dates will be in the past — we clamp to today and let the PM see
-    # the warning (position starts late → schedule_version tracks this).
+    # Guard: planned_glazing must be >= today.
+    # For overdue deadlines, don't clamp all to today — find the first
+    # available day with glazing capacity (TOC: don't flood the pipeline).
     today = date.today()
     if planned_glazing < today:
-        # Tight deadline — shift everything forward from today
-        planned_glazing = today
+        planned_glazing = today  # start from today, will be adjusted below
         planned_kiln = _skip_weekends(
             today + timedelta(
                 days=glazing_days + pre_kiln_days + BUFFER_DAYS
@@ -461,6 +460,7 @@ def schedule_position(
     # ── TOC Glazing Rate Limit ────────────────────────────────
     # Don't glaze more per day than kilns can fire.
     # Kiln = drum (constraint), glazing must match its rhythm.
+    # Shift FORWARD from planned_glazing until a day with capacity is found.
     if position.estimated_kiln_id and _pos_sqm > 0:
         try:
             from business.services.typology_matcher import get_zone_capacity, classify_loading_zone
@@ -468,29 +468,45 @@ def schedule_position(
             if kiln_obj:
                 zone = classify_loading_zone(position)
                 daily_kiln_cap = get_zone_capacity(db, position, kiln_obj, zone)
-                # Check glazing day load
-                for shift_back in range(8):  # try up to 8 days earlier
-                    candidate_glaze = _skip_weekends(planned_glazing - timedelta(days=shift_back))
-                    if candidate_glaze < today:
-                        break
-                    glaze_day_load = (
-                        db.query(sa_func.coalesce(
-                            sa_func.sum(OrderPosition.glazeable_sqm * OrderPosition.quantity), 0
-                        ))
-                        .filter(
-                            OrderPosition.factory_id == position.factory_id,
-                            OrderPosition.planned_glazing_date == candidate_glaze,
-                            OrderPosition.status != PositionStatus.CANCELLED.value,
-                            OrderPosition.id != position.id,
+                if daily_kiln_cap > 0:
+                    for shift_fwd in range(21):  # try up to 21 days forward
+                        candidate_glaze = _skip_weekends(planned_glazing + timedelta(days=shift_fwd))
+                        glaze_day_load = float(
+                            db.query(sa_func.coalesce(
+                                sa_func.sum(OrderPosition.glazeable_sqm * OrderPosition.quantity), 0
+                            ))
+                            .filter(
+                                OrderPosition.factory_id == position.factory_id,
+                                OrderPosition.planned_glazing_date == candidate_glaze,
+                                OrderPosition.status != PositionStatus.CANCELLED.value,
+                                OrderPosition.id != position.id,
+                            )
+                            .scalar() or 0
                         )
-                        .scalar()
-                    )
-                    if float(glaze_day_load or 0) + _pos_sqm <= daily_kiln_cap * 1.1:
-                        planned_glazing = candidate_glaze
-                        break
-                else:
-                    # All days full — keep original date
-                    pass
+                        if glaze_day_load + _pos_sqm <= daily_kiln_cap * 1.1:
+                            if shift_fwd > 0:
+                                logger.info(
+                                    "GLAZING_RATE_SHIFT | position=%s | %s → %s (+%dd) | "
+                                    "day_load=%.2f + pos=%.2f vs cap=%.2f",
+                                    position.id, planned_glazing, candidate_glaze,
+                                    shift_fwd, glaze_day_load, _pos_sqm, daily_kiln_cap,
+                                )
+                            planned_glazing = candidate_glaze
+                            # Recalculate downstream dates from new glazing date
+                            planned_kiln = _skip_weekends(
+                                planned_glazing + timedelta(
+                                    days=glazing_days + pre_kiln_days + BUFFER_DAYS
+                                )
+                            )
+                            planned_sorting = _skip_weekends(
+                                planned_kiln + timedelta(
+                                    days=firing_days + cooling_days + BUFFER_DAYS
+                                )
+                            )
+                            planned_completion = _skip_weekends(
+                                planned_sorting + timedelta(days=sorting_days + qc_days)
+                            )
+                            break
         except Exception as e:
             logger.debug("Glazing rate limit check skipped: %s", e)
 

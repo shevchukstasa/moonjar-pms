@@ -314,6 +314,46 @@ async def test_chat(
 
 
 # ────────────────────────────────────────────────────────────────
+# Send custom message (admin-only)
+# ────────────────────────────────────────────────────────────────
+
+class SendMessageRequest(BaseModel):
+    chat_id: str
+    text: str
+    parse_mode: str | None = None
+
+
+@router.post("/send-message")
+async def send_message(
+    data: SendMessageRequest,
+    current_user=Depends(require_admin),
+):
+    """Send a custom message via the Telegram bot. Admin only."""
+    settings = get_settings()
+    token = settings.TELEGRAM_BOT_TOKEN
+    if not token:
+        raise HTTPException(400, "Bot token not configured")
+
+    import httpx
+    payload = {"chat_id": data.chat_id, "text": data.text}
+    if data.parse_mode:
+        payload["parse_mode"] = data.parse_mode
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json=payload,
+            )
+            result = resp.json()
+        if result.get("ok"):
+            return {"success": True, "message_id": result["result"]["message_id"]}
+        return {"success": False, "error": result.get("description", "Unknown error")}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ────────────────────────────────────────────────────────────────
 # Discover chat IDs from webhook history (admin-only)
 # ────────────────────────────────────────────────────────────────
 

@@ -458,6 +458,42 @@ def schedule_position(
     else:
         position.estimated_kiln_id = None
 
+    # ── TOC Glazing Rate Limit ────────────────────────────────
+    # Don't glaze more per day than kilns can fire.
+    # Kiln = drum (constraint), glazing must match its rhythm.
+    if position.estimated_kiln_id and _pos_sqm > 0:
+        try:
+            from business.services.typology_matcher import get_zone_capacity, classify_loading_zone
+            kiln_obj = db.query(Resource).filter(Resource.id == position.estimated_kiln_id).first()
+            if kiln_obj:
+                zone = classify_loading_zone(position)
+                daily_kiln_cap = get_zone_capacity(db, position, kiln_obj, zone)
+                # Check glazing day load
+                for shift_back in range(8):  # try up to 8 days earlier
+                    candidate_glaze = _skip_weekends(planned_glazing - timedelta(days=shift_back))
+                    if candidate_glaze < today:
+                        break
+                    glaze_day_load = (
+                        db.query(sa_func.coalesce(
+                            sa_func.sum(OrderPosition.glazeable_sqm * OrderPosition.quantity), 0
+                        ))
+                        .filter(
+                            OrderPosition.factory_id == position.factory_id,
+                            OrderPosition.planned_glazing_date == candidate_glaze,
+                            OrderPosition.status != PositionStatus.CANCELLED.value,
+                            OrderPosition.id != position.id,
+                        )
+                        .scalar()
+                    )
+                    if float(glaze_day_load or 0) + _pos_sqm <= daily_kiln_cap * 1.1:
+                        planned_glazing = candidate_glaze
+                        break
+                else:
+                    # All days full — keep original date
+                    pass
+        except Exception as e:
+            logger.debug("Glazing rate limit check skipped: %s", e)
+
     # Assign dates
     position.planned_glazing_date = planned_glazing
     position.planned_kiln_date = planned_kiln

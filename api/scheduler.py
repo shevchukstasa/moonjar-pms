@@ -859,6 +859,7 @@ async def daily_task_distribution_dispatcher():
 
 def _send_evening_summary(db, factory):
     """Send end-of-day summary to factory team."""
+    from sqlalchemy import func
     from api.models import OrderPosition, ProductionOrder, UserStreak, DailyChallenge
     from api.enums import PositionStatus, OrderStatus
     from business.services.notifications import send_telegram_message, get_forum_topic

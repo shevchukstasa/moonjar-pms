@@ -1017,8 +1017,8 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
         # table_top → countertop
         if pt == "table_top":
             item["product_type"] = "countertop"
-        # wash_basin / washbasin → sink
-        elif pt in ("wash_basin", "washbasin", "basin"):
+        # wash_basin / washbasin / wastafel → sink
+        elif pt in ("wash_basin", "washbasin", "basin", "wastafel", "sink"):
             item["product_type"] = "sink"
         # Auto-detect from product name/description if type says "tile" but name says otherwise
         name_fields = " ".join([
@@ -1026,7 +1026,7 @@ def _create_order_from_webhook(db: Session, order_data: dict, raw_payload: dict)
             item.get("color", ""), item.get("finishing", ""),
         ]).lower()
         if pt == "tile":
-            if any(kw in name_fields for kw in ("wash basin", "washbasin", "sink", "basin")):
+            if any(kw in name_fields for kw in ("wash basin", "washbasin", "sink", "basin", "wastafel")):
                 item["product_type"] = "sink"
                 logger.info("AUTO_DETECT_PRODUCT_TYPE | %s → sink (was tile)", item.get("color"))
             elif any(kw in name_fields for kw in ("countertop", "table top", "tabletop", "vanity top")):

@@ -938,12 +938,12 @@ def _send_evening_summary(db, factory):
 
     # Send to masters group
     if factory.masters_group_chat_id:
-        send_telegram_message(int(factory.masters_group_chat_id), msg, parse_mode="Markdown")
+        send_telegram_message(int(factory.masters_group_chat_id), msg)
 
     # Send to forum #daily-briefing
     forum_group, daily_topic = get_forum_topic("daily")
     if forum_group:
-        send_telegram_message(forum_group, msg, parse_mode="Markdown", message_thread_id=daily_topic)
+        send_telegram_message(forum_group, msg, message_thread_id=daily_topic)
 
     logger.info("Evening summary sent for %s: %d done, %d shipped", factory.name, done_today, shipped)
 

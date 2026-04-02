@@ -446,16 +446,22 @@ def _get_available_kilns(
 
 
 def _get_kiln_capacity_sqm(kiln: Resource) -> Decimal:
-    """Get the kiln capacity in sqm, with sensible fallback."""
+    """Get the kiln capacity in sqm, with sensible fallback.
+
+    Priority: capacity_sqm → derive from working_area × coefficient → 1.0 m².
+    Seed data uses keys ``width_cm`` / ``depth_cm`` in kiln_working_area_cm.
+    """
     if kiln.capacity_sqm:
         return Decimal(str(kiln.capacity_sqm))
-    # Fallback: derive from dimensions if available
+    # Fallback: derive from working-area dimensions
     if kiln.kiln_working_area_cm:
         dims = kiln.kiln_working_area_cm
-        w = dims.get("width", 0)
-        h = dims.get("height", 0)
-        if w and h:
-            return Decimal(str(w * h)) / Decimal("10000")  # cm2 -> m2
+        w = dims.get("width_cm") or dims.get("width") or 0
+        d = dims.get("depth_cm") or dims.get("depth") or 0
+        if w and d:
+            area = Decimal(str(w * d)) / Decimal("10000")  # cm² → m²
+            coeff = Decimal(str(kiln.kiln_coefficient)) if kiln.kiln_coefficient else Decimal("1")
+            return area * coeff
     # Last resort
     return Decimal("1.0")
 

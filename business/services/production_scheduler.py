@@ -140,6 +140,37 @@ def _kiln_blocked_on_date(maintenance_windows: list, target_date: date) -> bool:
 # Find best kiln for a position
 # ────────────────────────────────────────────────────────────────
 
+def _get_kiln_capacity_sqm(kiln: Resource) -> float:
+    """Get usable kiln area in m². Same logic as batch_formation helper."""
+    if kiln.capacity_sqm:
+        return float(kiln.capacity_sqm)
+    if kiln.kiln_working_area_cm:
+        dims = kiln.kiln_working_area_cm
+        w = dims.get("width_cm") or dims.get("width") or 0
+        d = dims.get("depth_cm") or dims.get("depth") or 0
+        if w and d:
+            coeff = float(kiln.kiln_coefficient) if kiln.kiln_coefficient else 1.0
+            return w * d / 10000.0 * coeff
+    return 1.0
+
+
+def _get_scheduled_area_sqm(db: Session, kiln_id: UUID, on_date: date) -> float:
+    """Sum glazeable area of all positions already scheduled for this kiln on a date."""
+    from sqlalchemy import cast, Date
+    total = (
+        db.query(sa_func.coalesce(
+            sa_func.sum(OrderPosition.glazeable_sqm * OrderPosition.quantity), 0
+        ))
+        .filter(
+            OrderPosition.estimated_kiln_id == kiln_id,
+            OrderPosition.planned_kiln_date == on_date,
+            OrderPosition.status != PositionStatus.CANCELLED.value,
+        )
+        .scalar()
+    )
+    return float(total or 0)
+
+
 def find_best_kiln(
     db: Session,
     position: OrderPosition,
@@ -157,6 +188,22 @@ def find_best_kiln(
        7-day window around the target date (least congested)
     5. If no batches exist for any kiln, pick the first available
     """
+    result = find_best_kiln_and_date(db, position, target_date)
+    return result[0] if result else None
+
+
+def find_best_kiln_and_date(
+    db: Session,
+    position: OrderPosition,
+    target_date: date,
+    max_shift_days: int = 14,
+) -> Optional[tuple[UUID, date]]:
+    """
+    Find the best kiln AND date, respecting capacity constraints.
+
+    Returns (kiln_id, adjusted_date) or None.
+    Tries target_date first, then shifts forward day-by-day up to max_shift_days.
+    """
     kilns = db.query(Resource).filter(
         Resource.factory_id == position.factory_id,
         Resource.resource_type == ResourceType.KILN.value,
@@ -167,51 +214,72 @@ def find_best_kiln(
     if not kilns:
         return None
 
-    window_start = target_date - timedelta(days=3)
-    window_end = target_date + timedelta(days=3)
+    # Area this position needs
+    pos_area = 0.0
+    if position.glazeable_sqm and position.quantity:
+        pos_area = float(position.glazeable_sqm) * float(position.quantity)
+    elif position.quantity_sqm:
+        pos_area = float(position.quantity_sqm)
 
-    best_kiln_id = None
-    min_load = float("inf")
+    for day_offset in range(max_shift_days + 1):
+        candidate_date = _skip_weekends(target_date + timedelta(days=day_offset))
 
-    for kiln in kilns:
-        # Check maintenance windows — skip kiln if it requires being empty
-        # on the target date
-        maintenance_windows = get_kiln_maintenance_windows(
-            db, kiln.id, window_start, window_end,
-        )
-        if _kiln_blocked_on_date(maintenance_windows, target_date):
-            logger.debug(
-                "KILN_BLOCKED_BY_MAINTENANCE | kiln=%s date=%s",
-                kiln.id, target_date,
+        window_start = candidate_date - timedelta(days=3)
+        window_end = candidate_date + timedelta(days=3)
+
+        best_kiln_id = None
+        min_load = float("inf")
+
+        for kiln in kilns:
+            maintenance_windows = get_kiln_maintenance_windows(
+                db, kiln.id, window_start, window_end,
             )
-            continue
+            if _kiln_blocked_on_date(maintenance_windows, candidate_date):
+                continue
 
-        # Count batches in the window for this kiln
-        batch_count = db.query(sa_func.count(Batch.id)).filter(
-            Batch.resource_id == kiln.id,
-            Batch.batch_date >= window_start,
-            Batch.batch_date <= window_end,
-            Batch.status.in_([BatchStatus.PLANNED.value, BatchStatus.IN_PROGRESS.value]),
-        ).scalar() or 0
+            # Capacity check: does this kiln have room on candidate_date?
+            cap = _get_kiln_capacity_sqm(kiln)
+            already_used = _get_scheduled_area_sqm(db, kiln.id, candidate_date)
+            if pos_area > 0 and already_used + pos_area > cap * 1.1:
+                # Over capacity (10% tolerance) — skip this kiln on this day
+                continue
 
-        # Also count schedule slots
-        slot_count = db.query(sa_func.count(ScheduleSlot.id)).filter(
-            ScheduleSlot.resource_id == kiln.id,
-            sa_func.date(ScheduleSlot.start_at) >= window_start,
-            sa_func.date(ScheduleSlot.start_at) <= window_end,
-            ScheduleSlot.status == ScheduleSlotStatus.PLANNED.value,
-        ).scalar() or 0
+            batch_count = db.query(sa_func.count(Batch.id)).filter(
+                Batch.resource_id == kiln.id,
+                Batch.batch_date >= window_start,
+                Batch.batch_date <= window_end,
+                Batch.status.in_([BatchStatus.PLANNED.value, BatchStatus.IN_PROGRESS.value]),
+            ).scalar() or 0
 
-        # Add penalty for maintenance windows in the broader window
-        # (even if not blocking, it indicates reduced availability)
-        maintenance_penalty = len(maintenance_windows)
+            slot_count = db.query(sa_func.count(ScheduleSlot.id)).filter(
+                ScheduleSlot.resource_id == kiln.id,
+                sa_func.date(ScheduleSlot.start_at) >= window_start,
+                sa_func.date(ScheduleSlot.start_at) <= window_end,
+                ScheduleSlot.status == ScheduleSlotStatus.PLANNED.value,
+            ).scalar() or 0
 
-        total_load = batch_count + slot_count + maintenance_penalty
-        if total_load < min_load:
-            min_load = total_load
-            best_kiln_id = kiln.id
+            maintenance_penalty = len(maintenance_windows)
+            total_load = batch_count + slot_count + maintenance_penalty
 
-    return best_kiln_id
+            if total_load < min_load:
+                min_load = total_load
+                best_kiln_id = kiln.id
+
+        if best_kiln_id is not None:
+            if day_offset > 0:
+                logger.info(
+                    "KILN_DATE_SHIFTED | position=%s | target=%s → actual=%s (+%d days) | kiln=%s",
+                    position.id, target_date, candidate_date, day_offset, best_kiln_id,
+                )
+            return (best_kiln_id, candidate_date)
+
+    # Fallback: no kiln found with capacity in the window — return first available on target_date
+    logger.warning(
+        "NO_KILN_CAPACITY | position=%s | tried %d days from %s, falling back to first kiln",
+        position.id, max_shift_days, target_date,
+    )
+    first_kiln = kilns[0] if kilns else None
+    return (first_kiln.id, target_date) if first_kiln else None
 
 
 # ────────────────────────────────────────────────────────────────
@@ -288,14 +356,30 @@ def schedule_position(
             position.id, deadline, planned_completion,
         )
 
+    # Find best kiln with capacity-aware date adjustment
+    kiln_result = find_best_kiln_and_date(db, position, planned_kiln)
+    if kiln_result:
+        kiln_id, actual_kiln_date = kiln_result
+        position.estimated_kiln_id = kiln_id
+        # If kiln date was shifted forward due to capacity, recalculate downstream dates
+        if actual_kiln_date != planned_kiln:
+            planned_kiln = actual_kiln_date
+            planned_sorting = _skip_weekends(
+                planned_kiln + timedelta(
+                    days=FIRING_DURATION_DAYS + COOLING_DAYS + BUFFER_DAYS
+                )
+            )
+            planned_completion = _skip_weekends(
+                planned_sorting + timedelta(days=SORTING_DAYS + QC_DAYS)
+            )
+    else:
+        position.estimated_kiln_id = None
+
     # Assign dates
     position.planned_glazing_date = planned_glazing
     position.planned_kiln_date = planned_kiln
     position.planned_sorting_date = planned_sorting
     position.planned_completion_date = planned_completion
-
-    # Find best kiln
-    position.estimated_kiln_id = find_best_kiln(db, position, planned_kiln)
 
     # Increment schedule version
     position.schedule_version = (position.schedule_version or 0) + 1

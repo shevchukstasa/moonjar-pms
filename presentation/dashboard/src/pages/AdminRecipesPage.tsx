@@ -202,10 +202,13 @@ export default function AdminRecipesPage() {
             notes: `New recipe created & assigned: ${newRecipe.name}`,
           });
           setReturnPositionId(null);
-          // Navigate back to dashboard blocking tab
           navigate('/?tab=blocking');
         } catch (e) {
           console.error('Auto-assign recipe to position failed:', e);
+          setMutationError(
+            `Recipe created, but failed to assign to position: ${extractError(e)}. ` +
+            `You can manually assign it from the position details.`
+          );
         }
       }
 

@@ -586,7 +586,7 @@ async def reprocess_order(
     7. Schedule production dates
     """
     from business.services.order_intake import (
-        _find_recipe, _auto_detect_exclusive,
+        _find_recipe, _auto_detect_exclusive, _check_consumption_rates,
     )
     from business.services.surface_area import calculate_glazeable_sqm_for_position
     from business.services.size_resolution import resolve_size_for_position, create_size_resolution_task
@@ -640,6 +640,17 @@ async def reprocess_order(
             elif not sr.resolved and sr.reason != "missing_dimensions":
                 create_size_resolution_task(db, p, order.id, order.factory_id, sr.reason, sr.candidates)
                 pos_result["actions"].append(f"size_task_created={sr.reason}")
+
+        # 4.5. Check consumption rates (if recipe bound)
+        #   Blocks position with AWAITING_CONSUMPTION_DATA if spray/brush rates missing
+        if p.recipe_id and _ev(p.status) == "planned":
+            from api.models import Recipe as RecipeModel
+            recipe_obj_for_check = db.query(RecipeModel).filter(RecipeModel.id == p.recipe_id).first()
+            if recipe_obj_for_check:
+                was_blocked = _check_consumption_rates(db, order, p, recipe_obj_for_check)
+                if was_blocked:
+                    db.flush()
+                    pos_result["actions"].append("blocked_awaiting_consumption_data")
 
         # 5. Reserve materials (if recipe exists and status allows re-reservation)
         #    awaiting_recipe positions with newly-bound recipe should also be re-reserved

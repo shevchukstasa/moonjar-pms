@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Trash2, Thermometer, ClipboardCheck } from 'lucide-react';
+import { Trash2, Thermometer, ClipboardCheck, Calendar } from 'lucide-react';
 import { useUiStore } from '@/stores/uiStore';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGlazingSchedule, useFiringSchedule, useSortingSchedule, useQcSchedule, useKilnSchedule, useAutoFormBatches } from '@/hooks/useSchedule';
@@ -237,6 +237,34 @@ export default function ManagerSchedulePage() {
   };
 
   const kilns = kilnData?.items || [];
+
+  // Date field mapping per section tab
+  const DATE_FIELD_MAP: Record<string, string> = {
+    glazing: 'planned_glazing_date',
+    firing: 'planned_kiln_date',
+    sorting: 'planned_sorting_date',
+    qc: 'planned_completion_date',
+  };
+
+  // Group positions by their planned date for the active section
+  const groupedByDate = useMemo(() => {
+    const items = (sectionItems[tab] || []) as Record<string, unknown>[];
+    const dateField = DATE_FIELD_MAP[tab];
+    if (!dateField || items.length === 0) return [];
+
+    const groups = new Map<string, Record<string, unknown>[]>();
+    for (const item of items) {
+      const dateVal = (item[dateField] as string) || 'Unscheduled';
+      if (!groups.has(dateVal)) groups.set(dateVal, []);
+      groups.get(dateVal)!.push(item);
+    }
+    // Sort groups: real dates first (ascending), "Unscheduled" last
+    return Array.from(groups.entries()).sort(([a], [b]) => {
+      if (a === 'Unscheduled') return 1;
+      if (b === 'Unscheduled') return -1;
+      return a.localeCompare(b);
+    });
+  }, [tab, sectionItems]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const positionColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
@@ -514,11 +542,47 @@ export default function ManagerSchedulePage() {
           </div>
         )
       ) : (
-        /* Section tabs (glazing/firing/sorting/qc) */
+        /* Section tabs (glazing/firing/sorting/qc) — grouped by date */
         sectionItems[tab]?.length === 0 ? (
           <div className="py-8 text-center text-gray-400">No positions in this section</div>
         ) : (
-          <DataTable columns={positionColumns} data={(sectionItems[tab] || []) as Record<string, unknown>[]} />
+          <div className="space-y-4">
+            {groupedByDate.map(([dateKey, positions]) => {
+              const isUnscheduled = dateKey === 'Unscheduled';
+              const dateLabel = isUnscheduled
+                ? 'Unscheduled'
+                : new Date(dateKey + 'T00:00:00').toLocaleDateString('en-GB', {
+                    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+                  });
+              const isToday = !isUnscheduled && dateKey === new Date().toISOString().slice(0, 10);
+              const isPast = !isUnscheduled && dateKey < new Date().toISOString().slice(0, 10);
+
+              return (
+                <div key={dateKey}>
+                  <div className={`flex items-center gap-2 rounded-t-lg border-b px-4 py-2 ${
+                    isToday ? 'bg-orange-50 border-orange-200' :
+                    isPast ? 'bg-red-50 border-red-200' :
+                    isUnscheduled ? 'bg-gray-50 border-gray-200' :
+                    'bg-blue-50 border-blue-200'
+                  }`}>
+                    <Calendar className={`h-4 w-4 ${
+                      isToday ? 'text-orange-500' : isPast ? 'text-red-400' : isUnscheduled ? 'text-gray-400' : 'text-blue-500'
+                    }`} />
+                    <span className={`text-sm font-semibold ${
+                      isToday ? 'text-orange-700' : isPast ? 'text-red-600' : isUnscheduled ? 'text-gray-500' : 'text-blue-700'
+                    }`}>
+                      {dateLabel}
+                      {isToday && ' (Today)'}
+                    </span>
+                    <span className="ml-auto text-xs text-gray-500">
+                      {positions.length} position{positions.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <DataTable columns={positionColumns} data={positions} />
+                </div>
+              );
+            })}
+          </div>
         )
       )}
 

@@ -904,14 +904,36 @@ def _send_evening_summary(db, factory):
         status = "✅ Completed!" if challenge.completed else f"❌ {challenge.actual_value or 0}/{challenge.target_value}"
         challenge_text = f"\n🎯 Challenge: {status}"
 
-    msg = (
-        f"🌙 *Day Complete!* — {factory.name}\n\n"
-        f"✅ Positions processed: {done_today}\n"
-        f"📦 Orders shipped: {shipped}\n"
-        f"🔥 Zero defect streak: {streak_days} days\n"
-        f"{challenge_text}\n\n"
-        f"Great work today! See you tomorrow 💪"
-    )
+    # Build multi-language message based on factory timezone (Bali = id)
+    msgs = {
+        "en": (
+            f"🌙 *Day Complete!* — {factory.name}\n\n"
+            f"✅ Positions processed: {done_today}\n"
+            f"📦 Orders shipped: {shipped}\n"
+            f"🔥 Zero defect streak: {streak_days} days\n"
+            f"{challenge_text}\n\n"
+            f"Great work today! See you tomorrow 💪"
+        ),
+        "id": (
+            f"🌙 *Hari Selesai!* — {factory.name}\n\n"
+            f"✅ Posisi diproses: {done_today}\n"
+            f"📦 Pesanan dikirim: {shipped}\n"
+            f"🔥 Streak tanpa cacat: {streak_days} hari\n"
+            f"{challenge_text}\n\n"
+            f"Kerja bagus hari ini! Sampai jumpa besok 💪"
+        ),
+        "ru": (
+            f"🌙 *День завершён!* — {factory.name}\n\n"
+            f"✅ Обработано позиций: {done_today}\n"
+            f"📦 Отгружено заказов: {shipped}\n"
+            f"🔥 Серия без дефектов: {streak_days} дн.\n"
+            f"{challenge_text}\n\n"
+            f"Отличная работа! До завтра 💪"
+        ),
+    }
+    # Use factory default language, or Indonesian for Bali
+    factory_lang = "id" if "bali" in (factory.name or "").lower() else "en"
+    msg = msgs.get(factory_lang, msgs["en"])
 
     # Send to masters group
     if factory.masters_group_chat_id:

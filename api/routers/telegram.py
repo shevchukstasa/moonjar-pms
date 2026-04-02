@@ -354,6 +354,41 @@ async def send_message(
 
 
 # ────────────────────────────────────────────────────────────────
+# Manual trigger for evening summary / morning briefing (admin-only)
+# ────────────────────────────────────────────────────────────────
+
+class TriggerSummaryRequest(BaseModel):
+    factory_id: str
+    type: str = "evening"  # "evening" or "morning"
+
+
+@router.post("/trigger-summary")
+async def trigger_summary(
+    data: TriggerSummaryRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Manually trigger evening summary or morning briefing for a factory."""
+    from uuid import UUID
+    from api.models import Factory
+
+    factory = db.query(Factory).filter(Factory.id == UUID(data.factory_id)).first()
+    if not factory:
+        raise HTTPException(404, "Factory not found")
+
+    if data.type == "evening":
+        from api.scheduler import _send_evening_summary
+        _send_evening_summary(db, factory)
+        return {"success": True, "type": "evening", "factory": factory.name}
+    elif data.type == "morning":
+        from business.services.daily_distribution import daily_task_distribution
+        daily_task_distribution(db, UUID(data.factory_id))
+        return {"success": True, "type": "morning", "factory": factory.name}
+    else:
+        raise HTTPException(400, f"Unknown type: {data.type}. Use 'evening' or 'morning'.")
+
+
+# ────────────────────────────────────────────────────────────────
 # Discover chat IDs from webhook history (admin-only)
 # ────────────────────────────────────────────────────────────────
 

@@ -104,6 +104,8 @@ def calculate_position_availability(db: Session, position: OrderPosition) -> dat
             factors.append(today + timedelta(days=7))
         elif task_type == TaskType.RECIPE_CONFIGURATION.value:
             factors.append(today + timedelta(days=3))
+        elif task_type == TaskType.STONE_PROCUREMENT.value:
+            factors.append(today + timedelta(days=DEFAULT_LEAD_TIME_STONE))
         else:
             # Generic blocking task — 3 days default
             factors.append(today + timedelta(days=3))

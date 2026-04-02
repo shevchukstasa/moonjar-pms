@@ -209,7 +209,11 @@ def _calculate_reserved_sqm(position, defect_pct: float) -> float:
 # §3  Reserve stone for a position
 # ──────────────────────────────────────────────────────────────────
 
-def reserve_stone_for_position(db: Session, position) -> Optional[dict]:
+def reserve_stone_for_position(
+    db: Session,
+    position,
+    auto_commit: bool = True,
+) -> Optional[dict]:
     """Create (or replace) stone reservation for a position.
 
     - Cancels any existing 'active' reservation for this position first.
@@ -217,8 +221,11 @@ def reserve_stone_for_position(db: Session, position) -> Optional[dict]:
     - Returns dict with reservation details, or None if net area is 0.
 
     Args:
-        db:       SQLAlchemy session
-        position: OrderPosition ORM object (must have id, factory_id, quantity, etc.)
+        db:          SQLAlchemy session
+        position:    OrderPosition ORM object (must have id, factory_id, quantity, etc.)
+        auto_commit: If True (default), commit within this function.
+                     Set to False when called from a pipeline that manages
+                     its own transaction (e.g. order_intake).
 
     Returns:
         {
@@ -281,11 +288,14 @@ def reserve_stone_for_position(db: Session, position) -> Optional[dict]:
         "pct": defect_pct,
     }).fetchone()
 
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
+    if auto_commit:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+    else:
+        db.flush()
 
     reservation_id = str(row[0])
 

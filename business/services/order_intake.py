@@ -41,6 +41,10 @@ from api.enums import (
 
 logger = logging.getLogger("moonjar.order_intake")
 
+# Stone procurement default lead time (days).
+# Matches DEFAULT_LEAD_TIME_STONE in schedule_estimation.
+DEFAULT_STONE_LEAD_TIME_DAYS = 35
+
 
 # ────────────────────────────────────────────────────────────────
 # Service item detection helpers
@@ -797,6 +801,62 @@ def process_order_item(
         # Don't proceed to material reservation if size is unresolved
         return position
 
+    # ── Stone reservation ──────────────────────────────────────────
+    # Stone (raw slabs/blocks) is tracked separately from BOM materials.
+    # Create a sqm reservation record; if net area is 0 we skip silently.
+    try:
+        from business.services.stone_reservation import reserve_stone_for_position
+        stone_result = reserve_stone_for_position(
+            db, position, auto_commit=False,
+        )
+        if stone_result:
+            logger.info(
+                "STONE_RESERVED_INTAKE | order=%s position=%s | "
+                "sqm=%.3f defect=%.1f%% size_cat=%s product=%s",
+                order.order_number, position.id,
+                stone_result["reserved_sqm"],
+                stone_result["stone_defect_pct"] * 100,
+                stone_result["size_category"],
+                stone_result["product_type"],
+            )
+            # Check if factory has enough stone stock for this reservation.
+            # Stone materials have material_type='stone'.
+            _stone_available = _check_stone_stock(
+                db, position, order.factory_id, stone_result,
+            )
+            if not _stone_available:
+                # Create procurement task for purchaser
+                _stone_task = Task(
+                    factory_id=order.factory_id,
+                    type=TaskType.STONE_PROCUREMENT,
+                    status=TaskStatus.PENDING,
+                    assigned_role=UserRole.PURCHASER,
+                    related_order_id=order.id,
+                    related_position_id=position.id,
+                    blocking=True,
+                    description=(
+                        f"Procure stone for {position.color or ''} "
+                        f"{position.size or ''}: "
+                        f"need {stone_result['reserved_sqm']:.2f} m\u00b2 "
+                        f"(incl. {stone_result['stone_defect_pct']*100:.0f}% "
+                        f"defect margin, {stone_result['reserved_qty']} pcs). "
+                        f"Lead time: ~{DEFAULT_STONE_LEAD_TIME_DAYS} days."
+                    ),
+                )
+                db.add(_stone_task)
+                db.flush()
+                logger.info(
+                    "STONE_PROCUREMENT_TASK | order=%s position=%s | "
+                    "sqm=%.3f task=%s",
+                    order.order_number, position.id,
+                    stone_result["reserved_sqm"], _stone_task.id,
+                )
+    except Exception as e:
+        logger.warning(
+            "STONE_RESERVATION_FAILED | order=%s position=%s | %s",
+            order.order_number, position.id, e,
+        )
+
     # Material reservation check
     # Recipe is guaranteed to exist here (no-recipe returns above).
     # Stock collections already returned above.
@@ -889,6 +949,69 @@ _METHOD_REQUIRED_RATES: dict[str, list[str]] = {
     'gold': ['spray', 'brush'],     # 1st firing SS, 2nd brush gold
     'raku': ['spray'],              # spray, raku kiln
 }
+
+
+def _check_stone_stock(
+    db: Session,
+    position,
+    factory_id: UUID,
+    stone_result: dict,
+) -> bool:
+    """Check if factory has enough stone in stock for the reservation.
+
+    Looks at MaterialStock rows where material.material_type = 'stone'
+    and compares total available balance against reserved_sqm.
+    Uses a simple heuristic: sum all stone balances at the factory.
+
+    Returns True if enough stone is available, False if procurement needed.
+    """
+    from api.models import MaterialStock, Material as Mat
+    from sqlalchemy import func as sa_func
+
+    try:
+        # Sum all stone stock balances at this factory (in kg or m2 depending
+        # on how stone is tracked). The reservation is in sqm.
+        total_stone_balance = (
+            db.query(sa_func.coalesce(sa_func.sum(MaterialStock.balance), 0))
+            .join(Mat, Mat.id == MaterialStock.material_id)
+            .filter(
+                MaterialStock.factory_id == factory_id,
+                Mat.material_type == "stone",
+            )
+            .scalar()
+        )
+        total_stone_balance = float(total_stone_balance)
+
+        # Also check already-reserved stone (active reservations at this factory)
+        from sqlalchemy import text
+        already_reserved = db.execute(text("""
+            SELECT COALESCE(SUM(reserved_sqm), 0)
+            FROM stone_reservations
+            WHERE factory_id = :fid AND status = 'active'
+              AND position_id != :pid
+        """), {"fid": str(factory_id), "pid": str(position.id)}).scalar()
+        already_reserved = float(already_reserved or 0)
+
+        effective_available = total_stone_balance - already_reserved
+        needed = stone_result["reserved_sqm"]
+
+        if effective_available >= needed:
+            logger.debug(
+                "STONE_STOCK_OK | position=%s | available=%.3f needed=%.3f",
+                position.id, effective_available, needed,
+            )
+            return True
+        else:
+            logger.info(
+                "STONE_STOCK_INSUFFICIENT | position=%s | "
+                "available=%.3f needed=%.3f deficit=%.3f",
+                position.id, effective_available, needed,
+                needed - effective_available,
+            )
+            return False
+    except Exception as e:
+        logger.warning("STONE_STOCK_CHECK_FAILED | %s — assuming insufficient", e)
+        return False
 
 
 def _check_consumption_rates(

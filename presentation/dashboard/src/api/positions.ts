@@ -69,6 +69,21 @@ export interface MaterialReservationItem {
   status: 'reserved' | 'force_reserved' | 'partially_reserved' | 'available' | 'insufficient';
 }
 
+export interface ForceUnblockOption {
+  key: string;
+  title: string;
+  description: string;
+  variant: 'primary' | 'secondary' | 'danger';
+  icon: string;
+}
+
+export interface ForceUnblockOptionsResponse {
+  position_id: string;
+  current_status: string;
+  status_label: string;
+  options: ForceUnblockOption[];
+}
+
 export interface ForceUnblockResponse {
   position_id: string;
   previous_status: string;
@@ -76,6 +91,8 @@ export interface ForceUnblockResponse {
   blocking_tasks_closed: number;
   negative_balances: { material_id: string; material_name: string; balance: number; reserved: number; resulting_effective: number }[];
   audit_note: string;
+  option: string;
+  option_label: string;
 }
 
 export const positionsApi = {
@@ -115,6 +132,8 @@ export const positionsApi = {
     }).then((r) => r.data),
   materialReservations: (id: string) =>
     apiClient.get<MaterialReservationResponse>(`/positions/${id}/material-reservations`).then((r) => r.data),
-  forceUnblock: (id: string, notes: string, notify_override = false) =>
-    apiClient.post<ForceUnblockResponse>(`/positions/${id}/force-unblock`, { notes, notify_override }).then((r) => r.data),
+  forceUnblockOptions: (id: string) =>
+    apiClient.get<ForceUnblockOptionsResponse>(`/positions/${id}/force-unblock-options`).then((r) => r.data),
+  forceUnblock: (id: string, notes: string, option = 'force_override', notify_override = true) =>
+    apiClient.post<ForceUnblockResponse>(`/positions/${id}/force-unblock`, { notes, option, notify_override }).then((r) => r.data),
 };

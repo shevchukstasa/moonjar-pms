@@ -1243,7 +1243,230 @@ async def get_stock_availability(
 
 class ForceUnblockInput(BaseModel):
     notes: str  # PM must provide a reason
-    notify_override: bool = False  # If True, send Telegram to CEO/Owner
+    option: str = "force_override"  # Selected option key from force-unblock-options
+    notify_override: bool = True  # Always notify CEO on force-unblock
+
+
+# ── Smart Force Unblock: context-aware options per blocking type ──
+
+FORCE_UNBLOCK_OPTIONS: dict[str, list[dict]] = {
+    "insufficient_materials": [
+        {
+            "key": "proceed_with_available",
+            "title": "Proceed with available stock",
+            "description": "Force-reserve what's available, mark shortages. Balance may go negative.",
+            "variant": "primary",
+            "icon": "package",
+        },
+        {
+            "key": "wait_for_delivery",
+            "title": "Wait for delivery",
+            "description": "Create purchase request, set estimated delivery date.",
+            "variant": "secondary",
+            "icon": "truck",
+        },
+        {
+            "key": "substitute_material",
+            "title": "Substitute material",
+            "description": "Specify alternative material and re-reserve.",
+            "variant": "secondary",
+            "icon": "replace",
+        },
+    ],
+    "awaiting_recipe": [
+        {
+            "key": "create_new_recipe",
+            "title": "Create new recipe",
+            "description": "Open recipe creation with pre-filled data for this position.",
+            "variant": "primary",
+            "icon": "plus",
+        },
+        {
+            "key": "use_existing_recipe",
+            "title": "Use existing recipe",
+            "description": "Select and assign a recipe from the existing list.",
+            "variant": "secondary",
+            "icon": "clipboard",
+        },
+        {
+            "key": "proceed_without_recipe",
+            "title": "Proceed without recipe",
+            "description": "Force to PLANNED. PM takes full responsibility.",
+            "variant": "danger",
+            "icon": "zap",
+        },
+    ],
+    "awaiting_stencil_silkscreen": [
+        {
+            "key": "stencil_ready",
+            "title": "Stencil ready",
+            "description": "Mark stencil/silkscreen as available and close blocking task.",
+            "variant": "primary",
+            "icon": "check",
+        },
+        {
+            "key": "use_alternative_stencil",
+            "title": "Use alternative stencil",
+            "description": "Select a substitute stencil for this position.",
+            "variant": "secondary",
+            "icon": "replace",
+        },
+        {
+            "key": "skip_stencil_step",
+            "title": "Skip stencil step",
+            "description": "Proceed without stencil. PM takes responsibility.",
+            "variant": "danger",
+            "icon": "zap",
+        },
+    ],
+    "awaiting_color_matching": [
+        {
+            "key": "color_approved",
+            "title": "Color approved",
+            "description": "PM confirms color match is acceptable.",
+            "variant": "primary",
+            "icon": "check",
+        },
+        {
+            "key": "adjust_color",
+            "title": "Adjust color",
+            "description": "Create recipe adjustment task for color correction.",
+            "variant": "secondary",
+            "icon": "palette",
+        },
+        {
+            "key": "proceed_as_is",
+            "title": "Proceed as-is",
+            "description": "Force to PLANNED with current color.",
+            "variant": "danger",
+            "icon": "zap",
+        },
+    ],
+    "awaiting_consumption_data": [
+        {
+            "key": "enter_rates_now",
+            "title": "Enter rates now",
+            "description": "PM provides spray/brush consumption rates inline.",
+            "variant": "primary",
+            "icon": "edit",
+        },
+        {
+            "key": "use_default_rates",
+            "title": "Use default rates",
+            "description": "Apply factory default consumption rates.",
+            "variant": "secondary",
+            "icon": "settings",
+        },
+        {
+            "key": "skip_consumption_check",
+            "title": "Skip consumption check",
+            "description": "Proceed without consumption rates.",
+            "variant": "danger",
+            "icon": "zap",
+        },
+    ],
+    "awaiting_size_confirmation": [
+        {
+            "key": "size_confirmed",
+            "title": "Size confirmed",
+            "description": "PM confirms dimensions are correct.",
+            "variant": "primary",
+            "icon": "check",
+        },
+        {
+            "key": "adjust_dimensions",
+            "title": "Adjust dimensions",
+            "description": "PM provides correct dimensions.",
+            "variant": "secondary",
+            "icon": "ruler",
+        },
+        {
+            "key": "custom_size",
+            "title": "Custom size",
+            "description": "Create custom size entry for this position.",
+            "variant": "secondary",
+            "icon": "edit",
+        },
+    ],
+    "blocked_by_qm": [
+        {
+            "key": "qm_approved",
+            "title": "QM approved",
+            "description": "Override QM block — quality manager approved.",
+            "variant": "primary",
+            "icon": "check",
+        },
+        {
+            "key": "rework",
+            "title": "Rework",
+            "description": "Send back to previous stage for rework.",
+            "variant": "secondary",
+            "icon": "undo",
+        },
+        {
+            "key": "scrap",
+            "title": "Scrap",
+            "description": "Mark as defective and write off.",
+            "variant": "danger",
+            "icon": "trash",
+        },
+    ],
+}
+
+# Human-readable labels for option keys (used in Telegram notifications)
+OPTION_LABELS: dict[str, str] = {
+    "proceed_with_available": "Proceed with available stock",
+    "wait_for_delivery": "Wait for delivery",
+    "substitute_material": "Substitute material",
+    "create_new_recipe": "Create new recipe",
+    "use_existing_recipe": "Use existing recipe",
+    "proceed_without_recipe": "Proceed without recipe",
+    "stencil_ready": "Stencil marked ready",
+    "use_alternative_stencil": "Use alternative stencil",
+    "skip_stencil_step": "Skip stencil step",
+    "color_approved": "Color approved",
+    "adjust_color": "Adjust color",
+    "proceed_as_is": "Proceed as-is",
+    "enter_rates_now": "Enter rates manually",
+    "use_default_rates": "Use default rates",
+    "skip_consumption_check": "Skip consumption check",
+    "size_confirmed": "Size confirmed",
+    "adjust_dimensions": "Adjust dimensions",
+    "custom_size": "Custom size",
+    "qm_approved": "QM approved (override)",
+    "rework": "Rework",
+    "scrap": "Scrap",
+    "force_override": "Force override (legacy)",
+}
+
+
+@router.get("/{position_id}/force-unblock-options")
+async def get_force_unblock_options(
+    position_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Return context-aware unblock options based on position's current blocking status."""
+    p = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not p:
+        raise HTTPException(404, "Position not found")
+
+    current_status = p.status
+    if current_status not in BLOCKING_STATUSES:
+        raise HTTPException(
+            400,
+            f"Position status '{_ev(current_status)}' is not a blocking status.",
+        )
+
+    status_key = _ev(current_status)
+    options = FORCE_UNBLOCK_OPTIONS.get(status_key, [])
+
+    return {
+        "position_id": str(p.id),
+        "current_status": status_key,
+        "status_label": status_key.replace("_", " ").title(),
+        "options": options,
+    }
 
 
 @router.post("/{position_id}/force-unblock")
@@ -1253,13 +1476,10 @@ async def force_unblock_position(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
-    """PM force-unblock: override any blocking status, force-reserve if needed.
+    """PM force-unblock: override any blocking status with context-aware action.
 
-    - insufficient_materials → force-reserve (may go negative), set PLANNED
-    - awaiting_recipe → set PLANNED (PM takes responsibility)
-    - awaiting_stencil_silkscreen / awaiting_color_matching → close blocking tasks, set PLANNED
-    - blocked_by_qm → close QM block tasks, set PLANNED
-    All actions are logged for audit.
+    Accepts an `option` key that determines the specific unblock behavior.
+    All actions are logged for audit. CEO/Owner always notified via Telegram.
     """
     import logging
     logger = logging.getLogger("moonjar.force_unblock")
@@ -1281,14 +1501,158 @@ async def force_unblock_position(
 
     now = datetime.now(timezone.utc)
     negative_balances = []
+    option_key = data.option
+    action_label = OPTION_LABELS.get(option_key, option_key)
 
-    # --- Handle INSUFFICIENT_MATERIALS: force-reserve ---
+    # ── Option-specific handling ──
+
+    # INSUFFICIENT_MATERIALS
     if current_status == PositionStatus.INSUFFICIENT_MATERIALS:
-        recipe = db.query(Recipe).filter(Recipe.id == p.recipe_id).first() if p.recipe_id else None
-        if recipe:
-            from business.services.material_reservation import force_reserve_materials
-            negative_balances = force_reserve_materials(db, p, recipe, p.factory_id)
-        # Even without recipe (edge case), transition to planned
+        if option_key == "proceed_with_available":
+            recipe = db.query(Recipe).filter(Recipe.id == p.recipe_id).first() if p.recipe_id else None
+            if recipe:
+                from business.services.material_reservation import force_reserve_materials
+                negative_balances = force_reserve_materials(db, p, recipe, p.factory_id)
+        elif option_key == "wait_for_delivery":
+            # Create a blocking task for purchase/delivery tracking
+            task = Task(
+                id=uuid_mod.uuid4(),
+                factory_id=p.factory_id,
+                type=TaskType.MANA_CONFIRMATION,
+                status=TaskStatus.PENDING,
+                assigned_role=UserRole.PURCHASER,
+                related_order_id=p.order_id,
+                related_position_id=p.id,
+                blocking=False,
+                description=f"Purchase request: materials for position #{getattr(p, 'position_number', '?')} ({p.color})",
+                priority=1,
+                created_at=now,
+                updated_at=now,
+                metadata_json={"action": "wait_for_delivery", "notes": data.notes.strip()},
+            )
+            db.add(task)
+        elif option_key == "substitute_material":
+            pass  # PM provides substitute info in notes; force-reserve with available
+            recipe = db.query(Recipe).filter(Recipe.id == p.recipe_id).first() if p.recipe_id else None
+            if recipe:
+                from business.services.material_reservation import force_reserve_materials
+                negative_balances = force_reserve_materials(db, p, recipe, p.factory_id)
+        else:
+            # Legacy / force_override fallback
+            recipe = db.query(Recipe).filter(Recipe.id == p.recipe_id).first() if p.recipe_id else None
+            if recipe:
+                from business.services.material_reservation import force_reserve_materials
+                negative_balances = force_reserve_materials(db, p, recipe, p.factory_id)
+
+    # BLOCKED_BY_QM — special handling for scrap/rework
+    if current_status == PositionStatus.BLOCKED_BY_QM:
+        if option_key == "scrap":
+            # Mark position as write-off instead of PLANNED
+            transition_position_status(
+                db, p.id, PositionStatus.CANCELLED.value,
+                changed_by=current_user.id, is_override=True,
+                notes=f"Scrapped via force-unblock: {data.notes.strip()}",
+            )
+            p.updated_at = now
+            # Close blocking tasks
+            blocking_tasks = (
+                db.query(Task)
+                .filter(
+                    Task.related_position_id == position_id,
+                    Task.blocking.is_(True),
+                    Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+                )
+                .all()
+            )
+            for task in blocking_tasks:
+                task.status = TaskStatus.DONE
+                task.completed_at = now
+                task.updated_at = now
+
+            old_status_str = _ev(current_status)
+            # Audit
+            audit_task = Task(
+                id=uuid_mod.uuid4(),
+                factory_id=p.factory_id,
+                type=TaskType.MANA_CONFIRMATION,
+                status=TaskStatus.DONE,
+                assigned_role=UserRole.PRODUCTION_MANAGER,
+                related_order_id=p.order_id,
+                related_position_id=p.id,
+                blocking=False,
+                description=f"PM Force-Unblock (Scrap): {old_status_str} -> cancelled",
+                priority=0,
+                completed_at=now,
+                created_at=now,
+                updated_at=now,
+                metadata_json={
+                    "action": "force_unblock",
+                    "option": option_key,
+                    "option_label": action_label,
+                    "previous_status": old_status_str,
+                    "notes": data.notes.strip(),
+                    "user_id": str(current_user.id),
+                    "user_name": getattr(current_user, 'full_name', None) or str(current_user.id),
+                },
+            )
+            db.add(audit_task)
+            _recalculate_order_status(db, p.order_id)
+            db.commit()
+            db.refresh(p)
+
+            # CEO notification
+            _send_force_unblock_telegram(db, p, current_user, old_status_str, action_label, data.notes.strip(), logger)
+
+            return {
+                "position_id": str(p.id),
+                "previous_status": old_status_str,
+                "new_status": "cancelled",
+                "blocking_tasks_closed": len(blocking_tasks),
+                "negative_balances": [],
+                "audit_note": data.notes.strip(),
+                "option": option_key,
+                "option_label": action_label,
+            }
+
+        elif option_key == "rework":
+            # Create rework task, transition to previous stage
+            rework_task = Task(
+                id=uuid_mod.uuid4(),
+                factory_id=p.factory_id,
+                type=TaskType.MANA_CONFIRMATION,
+                status=TaskStatus.PENDING,
+                assigned_role=UserRole.PRODUCTION_MANAGER,
+                related_order_id=p.order_id,
+                related_position_id=p.id,
+                blocking=False,
+                description=f"Rework required for position #{getattr(p, 'position_number', '?')} ({p.color}): {data.notes.strip()}",
+                priority=1,
+                created_at=now,
+                updated_at=now,
+                metadata_json={"action": "rework", "notes": data.notes.strip()},
+            )
+            db.add(rework_task)
+            # Rework goes back to PLANNED for re-processing
+            pass  # Fall through to normal PLANNED transition below
+
+    # AWAITING_COLOR_MATCHING — adjust_color creates a task
+    if current_status == PositionStatus.AWAITING_COLOR_MATCHING and option_key == "adjust_color":
+        adjust_task = Task(
+            id=uuid_mod.uuid4(),
+            factory_id=p.factory_id,
+            type=TaskType.MANA_CONFIRMATION,
+            status=TaskStatus.PENDING,
+            assigned_role=UserRole.PRODUCTION_MANAGER,
+            related_order_id=p.order_id,
+            related_position_id=p.id,
+            blocking=False,
+            description=f"Color adjustment for position #{getattr(p, 'position_number', '?')} ({p.color}): {data.notes.strip()}",
+            priority=1,
+            created_at=now,
+            updated_at=now,
+            metadata_json={"action": "adjust_color", "notes": data.notes.strip()},
+        )
+        db.add(adjust_task)
 
     # --- Close related blocking tasks ---
     blocking_tasks = (
@@ -1307,26 +1671,28 @@ async def force_unblock_position(
 
     # --- Transition to PLANNED ---
     old_status_str = _ev(p.status)
-    transition_position_status(db, p.id, PositionStatus.PLANNED.value, changed_by=current_user.id, is_override=True, notes=data.notes.strip())
+    transition_position_status(db, p.id, PositionStatus.PLANNED.value, changed_by=current_user.id, is_override=True, notes=f"[{action_label}] {data.notes.strip()}")
     p.updated_at = now
 
     # --- Audit metadata ---
     audit_task = Task(
         id=uuid_mod.uuid4(),
         factory_id=p.factory_id,
-        type=TaskType.MANA_CONFIRMATION,  # Reuse for audit log of PM overrides
+        type=TaskType.MANA_CONFIRMATION,
         status=TaskStatus.DONE,
         assigned_role=UserRole.PRODUCTION_MANAGER,
         related_order_id=p.order_id,
         related_position_id=p.id,
         blocking=False,
-        description=f"PM Force-Unblock: {old_status_str} → planned",
+        description=f"PM Force-Unblock ({action_label}): {old_status_str} -> planned",
         priority=0,
         completed_at=now,
         created_at=now,
         updated_at=now,
         metadata_json={
             "action": "force_unblock",
+            "option": option_key,
+            "option_label": action_label,
             "previous_status": old_status_str,
             "notes": data.notes.strip(),
             "user_id": str(current_user.id),
@@ -1351,38 +1717,13 @@ async def force_unblock_position(
     db.refresh(p)
 
     logger.warning(
-        "FORCE_UNBLOCK | user=%s | position=%s | %s → planned | tasks_closed=%d | negatives=%d | notes=%s",
-        current_user.id, p.id, old_status_str,
+        "FORCE_UNBLOCK | user=%s | position=%s | option=%s | %s -> planned | tasks_closed=%d | negatives=%d | notes=%s",
+        current_user.id, p.id, option_key, old_status_str,
         len(blocking_tasks), len(negative_balances), data.notes[:80],
     )
 
-    # --- Send Telegram to CEO/Owner if force override ---
-    if data.notify_override:
-        try:
-            from api.models import User
-            from business.services.notifications import send_telegram_message
-            ceo_users = db.query(User).filter(
-                User.role.in_(['ceo', 'owner']),
-                User.is_active.is_(True),
-                User.telegram_user_id.isnot(None),
-            ).all()
-            pos_label = f"#{p.position_number}" if hasattr(p, 'position_number') else str(p.id)[:8]
-            if hasattr(p, 'split_index') and p.split_index:
-                pos_label += f".{p.split_index}"
-            order = db.query(ProductionOrder).filter(ProductionOrder.id == p.order_id).first()
-            order_num = order.order_number if order else "?"
-            user_name = getattr(current_user, 'full_name', None) or getattr(current_user, 'name', str(current_user.id))
-            for u in ceo_users:
-                send_telegram_message(
-                    str(u.telegram_user_id),
-                    f"\u26a0\ufe0f *Force Override*\n"
-                    f"PM {user_name} force-unblocked position {order_num} {pos_label}\n"
-                    f"Color: {p.color}\n"
-                    f"Previous: {old_status_str}\n"
-                    f"Reason: {data.notes.strip()}",
-                )
-        except Exception as e:
-            logger.warning("Failed to send force-override Telegram: %s", e)
+    # --- Always send Telegram to CEO/Owner ---
+    _send_force_unblock_telegram(db, p, current_user, old_status_str, action_label, data.notes.strip(), logger)
 
     return {
         "position_id": str(p.id),
@@ -1391,7 +1732,44 @@ async def force_unblock_position(
         "blocking_tasks_closed": len(blocking_tasks),
         "negative_balances": negative_balances,
         "audit_note": data.notes.strip(),
+        "option": option_key,
+        "option_label": action_label,
     }
+
+
+def _send_force_unblock_telegram(db, position, current_user, old_status_str, action_label, notes, logger):
+    """Send CEO/Owner Telegram notification on every force-unblock."""
+    try:
+        from api.models import User
+        from business.services.notifications import send_telegram_message
+
+        ceo_users = db.query(User).filter(
+            User.role.in_(['ceo', 'owner']),
+            User.is_active.is_(True),
+            User.telegram_user_id.isnot(None),
+        ).all()
+
+        pos_label = f"#{position.position_number}" if hasattr(position, 'position_number') else str(position.id)[:8]
+        if hasattr(position, 'split_index') and position.split_index:
+            pos_label += f".{position.split_index}"
+        order = db.query(ProductionOrder).filter(ProductionOrder.id == position.order_id).first()
+        order_num = order.order_number if order else "?"
+        user_name = getattr(current_user, 'full_name', None) or getattr(current_user, 'name', str(current_user.id))
+
+        size_str = getattr(position, 'size', '') or ''
+        msg = (
+            f"\u26a0\ufe0f *Force Unblock*\n\n"
+            f"*Order:* {order_num}\n"
+            f"*Position:* {pos_label} {position.color or ''} {size_str}\n"
+            f"*Previous:* {old_status_str}\n"
+            f"*Action:* {action_label}\n"
+            f"*PM:* {user_name}\n"
+            f"*Notes:* {notes}"
+        )
+        for u in ceo_users:
+            send_telegram_message(str(u.telegram_user_id), msg)
+    except Exception as e:
+        logger.warning("Failed to send force-unblock Telegram: %s", e)
 
 
 # ================================================================

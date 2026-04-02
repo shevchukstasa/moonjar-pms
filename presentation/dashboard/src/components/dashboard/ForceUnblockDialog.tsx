@@ -3,12 +3,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Spinner } from '@/components/ui/Spinner';
-import { useForceUnblock, useUpdatePosition } from '@/hooks/usePositions';
+import { useForceUnblock, useForceUnblockOptions, useUpdatePosition } from '@/hooks/usePositions';
 import { recipesApi, type RecipeItem } from '@/api/recipes';
-import { positionsApi } from '@/api/positions';
-import { ClipboardList, Plus, Zap, ArrowLeft, AlertTriangle, Package, CheckCircle } from 'lucide-react';
+import { positionsApi, type ForceUnblockOption } from '@/api/positions';
+import {
+  ClipboardList, Plus, Zap, ArrowLeft, AlertTriangle, Package, CheckCircle,
+  Truck, Replace, Palette, Settings, Edit3, Ruler, Undo2, Trash2,
+} from 'lucide-react';
 
-// ─── Types ──────────────────────────────────────────────────────
+// ---- Types ----
 interface ForceUnblockDialogProps {
   positionId: string;
   positionLabel: string;
@@ -18,17 +21,36 @@ interface ForceUnblockDialogProps {
   onClose: () => void;
 }
 
-type DialogMode = 'choose' | 'select_recipe' | 'create_recipe' | 'force_override';
+type DialogMode = 'choose' | 'select_recipe' | 'confirm_action';
 
 const STATUS_LABELS: Record<string, string> = {
   insufficient_materials: 'Insufficient Materials',
   awaiting_recipe: 'Awaiting Recipe',
   awaiting_stencil_silkscreen: 'Awaiting Stencil/Silkscreen',
   awaiting_color_matching: 'Awaiting Color Matching',
+  awaiting_consumption_data: 'Awaiting Consumption Data',
+  awaiting_size_confirmation: 'Awaiting Size Confirmation',
   blocked_by_qm: 'Blocked by QM',
 };
 
-// ─── Option Card ────────────────────────────────────────────────
+// Icon mapping from backend icon keys
+const ICON_MAP: Record<string, React.ReactNode> = {
+  package: <Package className="h-6 w-6" />,
+  truck: <Truck className="h-6 w-6" />,
+  replace: <Replace className="h-6 w-6" />,
+  plus: <Plus className="h-6 w-6" />,
+  clipboard: <ClipboardList className="h-6 w-6" />,
+  zap: <Zap className="h-6 w-6" />,
+  check: <CheckCircle className="h-6 w-6" />,
+  palette: <Palette className="h-6 w-6" />,
+  settings: <Settings className="h-6 w-6" />,
+  edit: <Edit3 className="h-6 w-6" />,
+  ruler: <Ruler className="h-6 w-6" />,
+  undo: <Undo2 className="h-6 w-6" />,
+  trash: <Trash2 className="h-6 w-6" />,
+};
+
+// ---- Option Card ----
 function OptionCard({
   icon,
   title,
@@ -69,7 +91,7 @@ function OptionCard({
   );
 }
 
-// ─── Main Dialog ────────────────────────────────────────────────
+// ---- Main Dialog ----
 export function ForceUnblockDialog({
   positionId,
   positionLabel,
@@ -82,20 +104,21 @@ export function ForceUnblockDialog({
   const forceUnblock = useForceUnblock();
   const updatePosition = useUpdatePosition();
 
+  // Fetch context-aware options from backend
+  const { data: optionsData, isLoading: optionsLoading } = useForceUnblockOptions(positionId);
+
   // Dialog mode
   const [mode, setMode] = useState<DialogMode>('choose');
 
-  // Force override state
-  const [overrideNotes, setOverrideNotes] = useState('');
+  // Selected option for confirmation step
+  const [selectedOption, setSelectedOption] = useState<ForceUnblockOption | null>(null);
+
+  // Notes for confirmation
+  const [notes, setNotes] = useState('');
 
   // Select recipe state
   const [search, setSearch] = useState('');
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
-
-  // Create recipe state
-  const [newRecipeName, setNewRecipeName] = useState(color || '');
-  const [newRecipeType, setNewRecipeType] = useState<'glaze' | 'engobe'>('glaze');
-  const [newRecipeCollection, setNewRecipeCollection] = useState(collection || '');
 
   const [error, setError] = useState('');
 
@@ -119,40 +142,17 @@ export function ForceUnblockDialog({
   }, [recipes, search]);
   const selectedRecipe = recipes.find((r) => r.id === selectedRecipeId);
 
-  // Assign recipe mutation (select existing)
+  // Assign recipe mutation (for use_existing_recipe option)
   const assignMutation = useMutation({
     mutationFn: async () => {
       if (!selectedRecipeId) throw new Error('No recipe selected');
       await positionsApi.update(positionId, { recipe_id: selectedRecipeId });
       const recipeName = recipes.find((r) => r.id === selectedRecipeId)?.name ?? selectedRecipeId;
-      await positionsApi.forceUnblock(positionId, `Recipe assigned: ${recipeName}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['positions'] });
-      queryClient.invalidateQueries({ queryKey: ['blocking-summary'] });
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      onClose();
-    },
-    onError: (err: unknown) => {
-      const resp = (err as { response?: { data?: { detail?: string } } })?.response?.data;
-      setError(resp?.detail || (err instanceof Error ? err.message : String(err)));
-    },
-  });
-
-  // Create recipe + assign mutation
-  const createAssignMutation = useMutation({
-    mutationFn: async () => {
-      if (!newRecipeName.trim()) throw new Error('Recipe name is required');
-      const created = await recipesApi.create({
-        name: newRecipeName.trim(),
-        recipe_type: newRecipeType,
-        color_collection: newRecipeCollection.trim() || null,
-        is_active: true,
-      });
-      const recipeId = created.id;
-      await positionsApi.update(positionId, { recipe_id: recipeId });
-      await positionsApi.forceUnblock(positionId, `New recipe created & assigned: ${newRecipeName.trim()}`);
+      await positionsApi.forceUnblock(
+        positionId,
+        `Recipe assigned: ${recipeName}. ${notes}`.trim(),
+        'use_existing_recipe',
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['positions'] });
@@ -168,12 +168,40 @@ export function ForceUnblockDialog({
     },
   });
 
-  // Force override submit
-  const handleForceOverride = () => {
-    if (!overrideNotes.trim()) return;
+  // Handle option click
+  const handleOptionClick = (option: ForceUnblockOption) => {
     setError('');
+
+    // Special routing for recipe-related options
+    if (option.key === 'use_existing_recipe') {
+      setSelectedOption(option);
+      setMode('select_recipe');
+      return;
+    }
+    if (option.key === 'create_new_recipe') {
+      // Redirect to recipe creation page with pre-filled data
+      const params = new URLSearchParams({
+        create: 'true',
+        name: color || '',
+        collection: collection || '',
+        position_id: positionId,
+      });
+      window.location.href = `/admin/recipes?${params.toString()}`;
+      return;
+    }
+
+    // All other options go to confirmation step
+    setSelectedOption(option);
+    setMode('confirm_action');
+  };
+
+  // Execute the selected option
+  const handleConfirm = () => {
+    if (!selectedOption || !notes.trim()) return;
+    setError('');
+
     forceUnblock.mutate(
-      { id: positionId, notes: overrideNotes.trim(), notify_override: true },
+      { id: positionId, notes: notes.trim(), option: selectedOption.key, notify_override: true },
       {
         onSuccess: (data) => {
           if (data.negative_balances && data.negative_balances.length > 0) {
@@ -198,143 +226,18 @@ export function ForceUnblockDialog({
     );
   };
 
-  // Mark ready (for stencil/silkscreen)
-  const handleMarkReady = () => {
-    setError('');
-    forceUnblock.mutate(
-      { id: positionId, notes: 'Stencil/silkscreen marked as ready by PM' },
-      {
-        onSuccess: () => onClose(),
-        onError: (err: unknown) => {
-          const resp = (err as { response?: { data?: { detail?: string } } })?.response?.data;
-          setError(resp?.detail || (err instanceof Error ? err.message : String(err)));
-        },
-      },
-    );
-  };
+  const isPending = forceUnblock.isPending || assignMutation.isPending;
 
-  const isPending =
-    forceUnblock.isPending || assignMutation.isPending || createAssignMutation.isPending;
-
-  // Determine which options to show based on status
-  const getChooseOptions = () => {
-    if (currentStatus === 'awaiting_recipe') {
-      return (
-        <div className="grid grid-cols-3 gap-3">
-          <OptionCard
-            icon={<ClipboardList className="h-6 w-6" />}
-            title="Select Recipe"
-            description="Choose from existing recipes"
-            onClick={() => { setMode('select_recipe'); setError(''); }}
-            variant="primary"
-          />
-          <OptionCard
-            icon={<Plus className="h-6 w-6" />}
-            title="Create Recipe"
-            description="Create a new recipe for this color"
-            onClick={() => {
-              // Redirect to full recipe creation page with pre-filled color name
-              const params = new URLSearchParams({
-                create: 'true',
-                name: color || '',
-                collection: collection || '',
-                position_id: positionId,
-              });
-              window.location.href = `/admin/recipes?${params.toString()}`;
-            }}
-            variant="secondary"
-          />
-          <OptionCard
-            icon={<Zap className="h-6 w-6" />}
-            title="Force Override"
-            description="Proceed without recipe. CEO will be notified via Telegram."
-            onClick={() => { setMode('force_override'); setError(''); }}
-            variant="danger"
-          />
-        </div>
-      );
-    }
-
-    if (currentStatus === 'insufficient_materials') {
-      return (
-        <div className="grid grid-cols-3 gap-3">
-          <OptionCard
-            icon={<Package className="h-6 w-6" />}
-            title="Order Materials"
-            description="Create purchase request for missing materials"
-            onClick={() => {
-              // For now, go to force override with pre-filled note
-              setOverrideNotes('Materials ordered, production can proceed');
-              setMode('force_override');
-              setError('');
-            }}
-            variant="primary"
-          />
-          <OptionCard
-            icon={<CheckCircle className="h-6 w-6" />}
-            title="Receive Stock"
-            description="Stock has arrived, re-check reservations"
-            onClick={() => {
-              setOverrideNotes('Stock received, materials now available');
-              setMode('force_override');
-              setError('');
-            }}
-            variant="secondary"
-          />
-          <OptionCard
-            icon={<Zap className="h-6 w-6" />}
-            title="Force Override"
-            description="Force-reserve even if stock is insufficient. CEO notified."
-            onClick={() => { setMode('force_override'); setError(''); }}
-            variant="danger"
-          />
-        </div>
-      );
-    }
-
-    if (currentStatus === 'awaiting_stencil_silkscreen') {
-      return (
-        <div className="grid grid-cols-2 gap-3 max-w-sm mx-auto">
-          <OptionCard
-            icon={<CheckCircle className="h-6 w-6" />}
-            title="Mark Ready"
-            description="Stencil/silkscreen is ready, proceed"
-            onClick={handleMarkReady}
-            variant="primary"
-          />
-          <OptionCard
-            icon={<Zap className="h-6 w-6" />}
-            title="Force Override"
-            description="Proceed without confirmation. CEO notified."
-            onClick={() => { setMode('force_override'); setError(''); }}
-            variant="danger"
-          />
-        </div>
-      );
-    }
-
-    // Default: only force override
-    return (
-      <div className="max-w-xs mx-auto">
-        <OptionCard
-          icon={<Zap className="h-6 w-6" />}
-          title="Force Override"
-          description="Override this blocking status. CEO will be notified."
-          onClick={() => { setMode('force_override'); setError(''); }}
-          variant="danger"
-        />
-      </div>
-    );
-  };
+  const options = optionsData?.options ?? [];
 
   const dialogTitle =
     mode === 'choose'
       ? 'Resolve Blocking'
       : mode === 'select_recipe'
         ? 'Select Recipe'
-        : mode === 'create_recipe'
-          ? 'Create Recipe'
-          : 'Force Override';
+        : selectedOption
+          ? selectedOption.title
+          : 'Confirm Action';
 
   return (
     <Dialog open onClose={onClose} title={dialogTitle} className="w-full max-w-lg">
@@ -355,15 +258,40 @@ export function ForceUnblockDialog({
           </div>
         </div>
 
-        {/* Step 1: Choose mode */}
-        {mode === 'choose' && getChooseOptions()}
+        {/* Step 1: Choose from context-aware options */}
+        {mode === 'choose' && (
+          <>
+            {optionsLoading ? (
+              <div className="flex justify-center py-8">
+                <Spinner />
+              </div>
+            ) : options.length === 0 ? (
+              <div className="py-6 text-center text-sm text-gray-400 dark:text-stone-500">
+                No unblock options available for this status.
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-3">
+                {options.map((opt) => (
+                  <OptionCard
+                    key={opt.key}
+                    icon={ICON_MAP[opt.icon] || <Zap className="h-6 w-6" />}
+                    title={opt.title}
+                    description={opt.description}
+                    onClick={() => handleOptionClick(opt)}
+                    variant={opt.variant}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
 
         {/* Step 2a: Select Recipe */}
         {mode === 'select_recipe' && (
           <div className="space-y-3">
             <button
               type="button"
-              onClick={() => { setMode('choose'); setError(''); }}
+              onClick={() => { setMode('choose'); setError(''); setSelectedOption(null); }}
               className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:text-stone-400 dark:hover:text-stone-200"
             >
               <ArrowLeft className="h-4 w-4" /> Back
@@ -428,6 +356,19 @@ export function ForceUnblockDialog({
               </div>
             )}
 
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-stone-300">
+                Notes (optional)
+              </label>
+              <input
+                type="text"
+                placeholder="Additional notes..."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100"
+              />
+            </div>
+
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="secondary" onClick={onClose} disabled={isPending}>
                 Cancel
@@ -442,96 +383,45 @@ export function ForceUnblockDialog({
           </div>
         )}
 
-        {/* Step 2b: Create Recipe */}
-        {mode === 'create_recipe' && (
+        {/* Step 2b: Confirm action with notes */}
+        {mode === 'confirm_action' && selectedOption && (
           <div className="space-y-3">
             <button
               type="button"
-              onClick={() => { setMode('choose'); setError(''); }}
+              onClick={() => { setMode('choose'); setError(''); setSelectedOption(null); setNotes(''); }}
               className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:text-stone-400 dark:hover:text-stone-200"
             >
               <ArrowLeft className="h-4 w-4" /> Back
             </button>
 
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-stone-300">
-                Recipe name <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={newRecipeName}
-                onChange={(e) => setNewRecipeName(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100"
-                autoFocus
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-stone-300">
-                Recipe type
-              </label>
-              <select
-                value={newRecipeType}
-                onChange={(e) => setNewRecipeType(e.target.value as 'glaze' | 'engobe')}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100"
-              >
-                <option value="glaze">Glaze</option>
-                <option value="engobe">Engobe</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-stone-300">
-                Collection (optional)
-              </label>
-              <input
-                type="text"
-                value={newRecipeCollection}
-                onChange={(e) => setNewRecipeCollection(e.target.value)}
-                placeholder="e.g. Authentic, Creative, Stencil..."
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-1">
-              <Button variant="secondary" onClick={onClose} disabled={isPending}>
-                Cancel
-              </Button>
-              <Button
-                onClick={() => { setError(''); createAssignMutation.mutate(); }}
-                disabled={!newRecipeName.trim() || isPending}
-              >
-                {createAssignMutation.isPending ? 'Creating...' : 'Create & Assign'}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 2c: Force Override */}
-        {mode === 'force_override' && (
-          <div className="space-y-3">
-            {/* Back button only if there were multiple options */}
-            {(currentStatus === 'awaiting_recipe' ||
-              currentStatus === 'insufficient_materials' ||
-              currentStatus === 'awaiting_stencil_silkscreen') && (
-              <button
-                type="button"
-                onClick={() => { setMode('choose'); setError(''); }}
-                className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:text-stone-400 dark:hover:text-stone-200"
-              >
-                <ArrowLeft className="h-4 w-4" /> Back
-              </button>
+            {/* Warning for danger options */}
+            {selectedOption.variant === 'danger' && (
+              <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 dark:border-red-700/50 dark:bg-red-900/20">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-500 dark:text-red-400" />
+                <div className="text-sm text-red-700 dark:text-red-300">
+                  {selectedOption.key === 'scrap'
+                    ? 'This position will be marked as defective and written off. This action cannot be easily reversed.'
+                    : 'This position will proceed to production bypassing the current block. CEO/Owner will be notified via Telegram.'}
+                </div>
+              </div>
             )}
 
-            <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 dark:border-red-700/50 dark:bg-red-900/20">
-              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-500 dark:text-red-400" />
-              <div className="text-sm text-red-700 dark:text-red-300">
-                This position will proceed to production bypassing the current block.
-                CEO/Owner will be notified via Telegram.
+            {/* Info for non-danger options */}
+            {selectedOption.variant !== 'danger' && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-700/50 dark:bg-amber-900/20">
+                <div className="mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400">
+                  {ICON_MAP[selectedOption.icon] || <CheckCircle className="h-4 w-4" />}
+                </div>
+                <div className="text-sm text-amber-800 dark:text-amber-300">
+                  <span className="font-medium">{selectedOption.title}:</span> {selectedOption.description}
+                  <br />
+                  <span className="text-xs opacity-75">CEO/Owner will be notified via Telegram.</span>
+                </div>
               </div>
-            </div>
+            )}
 
-            {currentStatus === 'insufficient_materials' && (
+            {/* Material warning for insufficient_materials */}
+            {currentStatus === 'insufficient_materials' && selectedOption.key === 'proceed_with_available' && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/50 dark:bg-amber-900/20 dark:text-amber-300">
                 Materials will be force-reserved even if stock is insufficient. Balance may go
                 negative -- correct during inventory.
@@ -545,9 +435,9 @@ export function ForceUnblockDialog({
               <textarea
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100"
                 rows={3}
-                placeholder="Why are you force-overriding this position?..."
-                value={overrideNotes}
-                onChange={(e) => setOverrideNotes(e.target.value)}
+                placeholder={`Why are you choosing "${selectedOption.title}"?...`}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
                 autoFocus
               />
             </div>
@@ -556,15 +446,24 @@ export function ForceUnblockDialog({
               <Button variant="secondary" onClick={onClose} disabled={isPending}>
                 Cancel
               </Button>
-              <button
-                type="button"
-                onClick={handleForceOverride}
-                disabled={!overrideNotes.trim() || isPending}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-red-700 dark:hover:bg-red-600"
-              >
-                {forceUnblock.isPending ? 'Overriding...' : 'Force Override'}
-                {!forceUnblock.isPending && <Zap className="h-3.5 w-3.5" />}
-              </button>
+              {selectedOption.variant === 'danger' ? (
+                <button
+                  type="button"
+                  onClick={handleConfirm}
+                  disabled={!notes.trim() || isPending}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-red-700 dark:hover:bg-red-600"
+                >
+                  {forceUnblock.isPending ? 'Processing...' : selectedOption.title}
+                  {!forceUnblock.isPending && <Zap className="h-3.5 w-3.5" />}
+                </button>
+              ) : (
+                <Button
+                  onClick={handleConfirm}
+                  disabled={!notes.trim() || isPending}
+                >
+                  {forceUnblock.isPending ? 'Processing...' : `Confirm: ${selectedOption.title}`}
+                </Button>
+              )}
             </div>
           </div>
         )}

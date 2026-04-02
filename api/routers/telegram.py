@@ -376,16 +376,22 @@ async def trigger_summary(
     if not factory:
         raise HTTPException(404, "Factory not found")
 
-    if data.type == "evening":
-        from api.scheduler import _send_evening_summary
-        _send_evening_summary(db, factory)
-        return {"success": True, "type": "evening", "factory": factory.name}
-    elif data.type == "morning":
-        from business.services.daily_distribution import daily_task_distribution
-        daily_task_distribution(db, UUID(data.factory_id))
-        return {"success": True, "type": "morning", "factory": factory.name}
-    else:
-        raise HTTPException(400, f"Unknown type: {data.type}. Use 'evening' or 'morning'.")
+    try:
+        if data.type == "evening":
+            from api.scheduler import _send_evening_summary
+            _send_evening_summary(db, factory)
+            return {"success": True, "type": "evening", "factory": factory.name}
+        elif data.type == "morning":
+            from business.services.daily_distribution import daily_task_distribution
+            daily_task_distribution(db, UUID(data.factory_id))
+            return {"success": True, "type": "morning", "factory": factory.name}
+        else:
+            raise HTTPException(400, f"Unknown type: {data.type}. Use 'evening' or 'morning'.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("trigger-summary failed: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)}
 
 
 # ────────────────────────────────────────────────────────────────

@@ -673,11 +673,16 @@ async def receive_sales_order(
                         existing_order.order_number, ext_id,
                     )
                     factory = db.query(Factory).filter(Factory.id == existing_order.factory_id).first()
+                    factory_label = factory.name if factory else "production"
                     return {
                         "status": "change_request_created",
                         "order_id": str(existing_order.id),
                         "factory_name": factory.name if factory else None,
                         "factory_location": factory.location if factory else None,
+                        "message": (
+                            f"Change request created for order {existing_order.order_number} "
+                            f"at {factory_label} factory. PM will review the changes."
+                        ),
                     }
                 except Exception as e:
                     db.rollback()
@@ -744,12 +749,19 @@ async def receive_sales_order(
 
             # Return factory info + estimated completion so Sales can show delivery date
             factory = db.query(Factory).filter(Factory.id == order.factory_id).first()
+            factory_label = factory.name if factory else "production"
+            completion_text = f" Estimated completion: {estimated_completion}." if estimated_completion else ""
+            msg = f"Order {order.order_number} accepted by {factory_label} factory.{completion_text}"
+            if deadline_warning:
+                msg += f" Warning: {deadline_warning}"
+
             response = {
                 "status": "processed",
                 "order_id": str(order.id),
                 "factory_name": factory.name if factory else None,
                 "factory_location": factory.location if factory else None,
                 "estimated_completion_date": estimated_completion,
+                "message": msg,
             }
             if deadline_warning:
                 response["warning"] = deadline_warning

@@ -307,8 +307,9 @@ def find_best_kiln_and_date(
 
                 if pos_area > 0 and zone_used + pos_area > zone_cap * 1.1:
                     continue
-            except Exception:
+            except Exception as exc:
                 # Fallback to simple capacity check
+                logger.debug("Zone-aware capacity check failed for kiln %s: %s", kiln.id, exc)
                 cap = _get_kiln_capacity_sqm(kiln)
                 already_used = _get_scheduled_area_sqm(db, kiln.id, candidate_date)
                 if pos_area > 0 and already_used + pos_area > cap * 1.1:

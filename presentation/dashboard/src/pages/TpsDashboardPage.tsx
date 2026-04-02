@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DndContext,
@@ -390,8 +390,8 @@ function StepEditForm({ stepId, factoryId, onClose }: { stepId: string; factoryI
   const [form, setForm] = useState<Partial<ProcessStepCreate>>({});
   const [dirty, setDirty] = useState(false);
 
-  // Sync form when step data loads
-  useState(() => {
+  // Sync form when step data loads or stepId changes
+  useEffect(() => {
     if (step) {
       setForm({
         name: step.name,
@@ -404,8 +404,9 @@ function StepEditForm({ stepId, factoryId, onClose }: { stepId: string; factoryI
         applicable_collections: step.applicable_collections,
         applicable_methods: step.applicable_methods,
       });
+      setDirty(false);
     }
-  });
+  }, [step?.id]);
 
   const updateMut = useMutation({
     mutationFn: (data: Partial<ProcessStepCreate>) => tpsDashboardApi.updateStep(stepId, data),
@@ -998,5 +999,439 @@ function CalibrationTab({ factoryId }: { factoryId: string }) {
         )}
       </Card>
     </div>
+  );
+}
+
+
+// ════════════════════════════════════════════════════════════
+// TAB 4: Typologies
+// ════════════════════════════════════════════════════════════
+
+function MultiChips({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { value: string; label: string }[];
+  value: string[];
+  onChange: (v: string[]) => void;
+}) {
+  return (
+    <div>
+      <span className="mb-1 block text-xs font-medium text-gray-700 dark:text-stone-300">{label}</span>
+      <div className="flex flex-wrap gap-1">
+        {options.map((opt) => {
+          const selected = value.includes(opt.value);
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() =>
+                onChange(selected ? value.filter((v) => v !== opt.value) : [...value, opt.value])
+              }
+              className={cn(
+                'rounded-full border px-2.5 py-0.5 text-xs font-medium transition',
+                selected
+                  ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-gold-500 dark:bg-gold-900/30 dark:text-gold-300'
+                  : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-400',
+              )}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TypologiesTab({ factoryId }: { factoryId: string }) {
+  const qc = useQueryClient();
+  const [showCreate, setShowCreate] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['tps-typologies', factoryId],
+    queryFn: () => tpsDashboardApi.listTypologies(factoryId),
+    enabled: !!factoryId,
+  });
+
+  const typologies: TypologyItem[] = useMemo(() => {
+    const raw = data?.items ?? [];
+    return [...raw].sort((a, b) => a.priority - b.priority);
+  }, [data]);
+
+  const createMut = useMutation({
+    mutationFn: (payload: TypologyCreate) => tpsDashboardApi.createTypology(payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tps-typologies'] });
+      setShowCreate(false);
+    },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => tpsDashboardApi.deleteTypology(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tps-typologies'] }),
+  });
+
+  const calcAllMut = useMutation({
+    mutationFn: () => tpsDashboardApi.calculateAllTypologies(factoryId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tps-typologies'] }),
+  });
+
+  if (isLoading) {
+    return <Card><div className="flex justify-center py-8"><Spinner className="h-8 w-8" /></div></Card>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          Typologies ({typologies.length})
+        </h3>
+        <div className="flex gap-2">
+          <Button size="sm" variant="secondary" onClick={() => calcAllMut.mutate()} disabled={calcAllMut.isPending}>
+            {calcAllMut.isPending ? 'Calculating...' : 'Calculate All'}
+          </Button>
+          <Button size="sm" onClick={() => setShowCreate(true)}>
+            Add Typology
+          </Button>
+        </div>
+      </div>
+
+      {calcAllMut.isError && (
+        <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/20">
+          <p className="text-sm text-red-600">Calculate failed: {(calcAllMut.error as Error).message}</p>
+        </Card>
+      )}
+
+      {showCreate && (
+        <TypologyCreateForm
+          factoryId={factoryId}
+          nextPriority={typologies.length + 1}
+          onSubmit={(payload) => createMut.mutate(payload)}
+          onCancel={() => setShowCreate(false)}
+          isPending={createMut.isPending}
+          error={createMut.isError ? (createMut.error as Error).message : null}
+        />
+      )}
+
+      {typologies.length === 0 && !showCreate && (
+        <Card>
+          <p className="py-4 text-center text-sm text-gray-400">No typologies configured. Click "Add Typology" to create one.</p>
+        </Card>
+      )}
+
+      {typologies.map((t) => (
+        <TypologyCard key={t.id} typology={t} onDelete={() => setDeleteTarget(t.id)} />
+      ))}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => { if (deleteTarget) deleteMut.mutate(deleteTarget); setDeleteTarget(null); }}
+        title="Delete Typology"
+        message="Are you sure you want to delete this typology? This action cannot be undone."
+      />
+    </div>
+  );
+}
+
+
+// ── Typology create form ──────────────────────────────────
+
+function TypologyCreateForm({
+  factoryId,
+  nextPriority,
+  onSubmit,
+  onCancel,
+  isPending,
+  error,
+}: {
+  factoryId: string;
+  nextPriority: number;
+  onSubmit: (payload: TypologyCreate) => void;
+  onCancel: () => void;
+  isPending: boolean;
+  error: string | null;
+}) {
+  const [form, setForm] = useState<TypologyCreate>({
+    name: '',
+    factory_id: factoryId,
+    product_types: [],
+    place_of_application: [],
+    collections: [],
+    methods: [],
+    preferred_loading: 'auto',
+    shift_count: 1,
+    auto_calibrate: false,
+    priority: nextPriority,
+  });
+
+  function set(field: string, value: unknown) {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  return (
+    <Card className="border-blue-200 bg-blue-50/50 dark:border-blue-800 dark:bg-blue-950/20">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">New Typology</h3>
+        <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 dark:hover:text-stone-300">
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Input label="Name" value={form.name} onChange={(e) => set('name', e.target.value)} />
+        <Input label="Priority" type="number" min={1} value={form.priority ?? 1} onChange={(e) => set('priority', Number(e.target.value))} />
+        <Select
+          label="Preferred Loading"
+          options={LOADING_METHODS}
+          value={form.preferred_loading ?? 'auto'}
+          onChange={(e) => set('preferred_loading', e.target.value)}
+        />
+        <Input label="Shifts" type="number" min={1} max={3} value={form.shift_count ?? 1} onChange={(e) => set('shift_count', Number(e.target.value))} />
+        <Input label="Min Size (cm)" type="number" step="any" value={form.min_size_cm ?? ''} onChange={(e) => set('min_size_cm', e.target.value ? Number(e.target.value) : undefined)} />
+        <Input label="Max Size (cm)" type="number" step="any" value={form.max_size_cm ?? ''} onChange={(e) => set('max_size_cm', e.target.value ? Number(e.target.value) : undefined)} />
+        <Input label="Min Firing Temp" type="number" value={form.min_firing_temp ?? ''} onChange={(e) => set('min_firing_temp', e.target.value ? Number(e.target.value) : undefined)} />
+        <Input label="Max Firing Temp" type="number" value={form.max_firing_temp ?? ''} onChange={(e) => set('max_firing_temp', e.target.value ? Number(e.target.value) : undefined)} />
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <MultiChips label="Product Types" options={PRODUCT_TYPES} value={form.product_types ?? []} onChange={(v) => set('product_types', v)} />
+        <MultiChips label="Place of Application" options={PLACE_OF_APPLICATION} value={form.place_of_application ?? []} onChange={(v) => set('place_of_application', v)} />
+        <MultiChips label="Collections" options={COLLECTIONS} value={form.collections ?? []} onChange={(v) => set('collections', v)} />
+        <MultiChips label="Methods" options={APPLICATION_METHODS} value={form.methods ?? []} onChange={(v) => set('methods', v)} />
+      </div>
+
+      <div className="mt-3 flex items-center gap-3">
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.auto_calibrate ?? false} onChange={(e) => set('auto_calibrate', e.target.checked)} className="h-4 w-4 rounded border-gray-300" />
+          Auto-Calibrate
+        </label>
+      </div>
+
+      <div className="mt-3 flex gap-2">
+        <Button size="sm" onClick={() => onSubmit(form)} disabled={!form.name || isPending}>
+          {isPending ? 'Creating...' : 'Create Typology'}
+        </Button>
+        <Button size="sm" variant="secondary" onClick={onCancel}>Cancel</Button>
+      </div>
+      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
+    </Card>
+  );
+}
+
+
+// ── Typology card ─────────────────────────────────────────
+
+function TypologyCard({ typology, onDelete }: { typology: TypologyItem; onDelete: () => void }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState<Partial<TypologyCreate>>({});
+  const [dirty, setDirty] = useState(false);
+
+  function startEdit() {
+    setEditing(true);
+    setForm({
+      name: typology.name,
+      product_types: typology.product_types,
+      place_of_application: typology.place_of_application,
+      collections: typology.collections,
+      methods: typology.methods,
+      min_size_cm: typology.min_size_cm ?? undefined,
+      max_size_cm: typology.max_size_cm ?? undefined,
+      preferred_loading: typology.preferred_loading,
+      min_firing_temp: typology.min_firing_temp ?? undefined,
+      max_firing_temp: typology.max_firing_temp ?? undefined,
+      shift_count: typology.shift_count,
+      auto_calibrate: typology.auto_calibrate,
+      priority: typology.priority,
+      notes: typology.notes ?? undefined,
+    });
+    setDirty(false);
+  }
+
+  function set(field: string, value: unknown) {
+    setForm((prev) => ({ ...prev, [field]: value }));
+    setDirty(true);
+  }
+
+  const updateMut = useMutation({
+    mutationFn: (payload: Partial<TypologyCreate>) => tpsDashboardApi.updateTypology(typology.id, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tps-typologies'] });
+      setEditing(false);
+      setDirty(false);
+    },
+  });
+
+  const calcMut = useMutation({
+    mutationFn: () => tpsDashboardApi.calculateTypology(typology.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tps-typologies'] }),
+  });
+
+  const capacities: KilnCapacityItem[] = typology.capacities ?? [];
+
+  return (
+    <Card>
+      {/* Header */}
+      <div className="mb-3 flex items-start justify-between">
+        <div className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-xs font-bold text-gray-600 dark:bg-stone-700 dark:text-stone-300">
+            {typology.priority}
+          </span>
+          {editing ? (
+            <input
+              type="text"
+              className="rounded border px-2 py-1 text-sm font-semibold dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+              value={form.name ?? ''}
+              onChange={(e) => set('name', e.target.value)}
+            />
+          ) : (
+            <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{typology.name}</h4>
+          )}
+          {!typology.is_active && (
+            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Inactive</span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {!editing && (
+            <Button size="sm" variant="ghost" onClick={startEdit}>Edit</Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => calcMut.mutate()} disabled={calcMut.isPending}>
+            {calcMut.isPending ? 'Calc...' : 'Calculate'}
+          </Button>
+          <button
+            onClick={onDelete}
+            className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+            title="Delete"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {calcMut.isError && <p className="mb-2 text-xs text-red-500">Calculate failed: {(calcMut.error as Error).message}</p>}
+
+      {editing ? (
+        /* ── Edit mode ── */
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Input label="Priority" type="number" min={1} value={form.priority ?? 1} onChange={(e) => set('priority', Number(e.target.value))} />
+            <Select
+              label="Preferred Loading"
+              options={LOADING_METHODS}
+              value={form.preferred_loading ?? 'auto'}
+              onChange={(e) => set('preferred_loading', e.target.value)}
+            />
+            <Input label="Shifts" type="number" min={1} max={3} value={form.shift_count ?? 1} onChange={(e) => set('shift_count', Number(e.target.value))} />
+            <div className="flex items-end pb-1">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={form.auto_calibrate ?? false} onChange={(e) => set('auto_calibrate', e.target.checked)} className="h-4 w-4 rounded border-gray-300" />
+                Auto-Calibrate
+              </label>
+            </div>
+            <Input label="Min Size (cm)" type="number" step="any" value={form.min_size_cm ?? ''} onChange={(e) => set('min_size_cm', e.target.value ? Number(e.target.value) : undefined)} />
+            <Input label="Max Size (cm)" type="number" step="any" value={form.max_size_cm ?? ''} onChange={(e) => set('max_size_cm', e.target.value ? Number(e.target.value) : undefined)} />
+            <Input label="Min Firing Temp" type="number" value={form.min_firing_temp ?? ''} onChange={(e) => set('min_firing_temp', e.target.value ? Number(e.target.value) : undefined)} />
+            <Input label="Max Firing Temp" type="number" value={form.max_firing_temp ?? ''} onChange={(e) => set('max_firing_temp', e.target.value ? Number(e.target.value) : undefined)} />
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <MultiChips label="Product Types" options={PRODUCT_TYPES} value={form.product_types ?? []} onChange={(v) => set('product_types', v)} />
+            <MultiChips label="Place of Application" options={PLACE_OF_APPLICATION} value={form.place_of_application ?? []} onChange={(v) => set('place_of_application', v)} />
+            <MultiChips label="Collections" options={COLLECTIONS} value={form.collections ?? []} onChange={(v) => set('collections', v)} />
+            <MultiChips label="Methods" options={APPLICATION_METHODS} value={form.methods ?? []} onChange={(v) => set('methods', v)} />
+          </div>
+
+          <Input label="Notes" value={form.notes ?? ''} onChange={(e) => set('notes', e.target.value)} />
+
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => updateMut.mutate(form)} disabled={!dirty || updateMut.isPending}>
+              {updateMut.isPending ? 'Saving...' : 'Save Changes'}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>Cancel</Button>
+          </div>
+          {updateMut.isError && <p className="text-xs text-red-500">{(updateMut.error as Error).message}</p>}
+        </div>
+      ) : (
+        /* ── View mode ── */
+        <div className="space-y-2">
+          {/* Summary chips */}
+          <div className="flex flex-wrap gap-3 text-xs text-gray-600 dark:text-stone-400">
+            <span>Loading: <strong>{LOADING_METHODS.find((m) => m.value === typology.preferred_loading)?.label ?? typology.preferred_loading}</strong></span>
+            <span>Shifts: <strong>{typology.shift_count}</strong></span>
+            {typology.min_size_cm != null && <span>Size: <strong>{typology.min_size_cm}--{typology.max_size_cm ?? '?'} cm</strong></span>}
+            {typology.min_firing_temp != null && <span>Temp: <strong>{typology.min_firing_temp}--{typology.max_firing_temp ?? '?'} C</strong></span>}
+            {typology.auto_calibrate && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">Auto-Cal</span>}
+          </div>
+
+          {/* Tags */}
+          <div className="flex flex-wrap gap-1">
+            {typology.product_types.map((v) => (
+              <span key={v} className="rounded-full bg-purple-50 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                {PRODUCT_TYPES.find((p) => p.value === v)?.label ?? v}
+              </span>
+            ))}
+            {typology.place_of_application.map((v) => (
+              <span key={v} className="rounded-full bg-teal-50 px-2 py-0.5 text-xs text-teal-700 dark:bg-teal-900/30 dark:text-teal-300">
+                {PLACE_OF_APPLICATION.find((p) => p.value === v)?.label ?? v}
+              </span>
+            ))}
+            {typology.collections.map((v) => (
+              <span key={v} className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                {COLLECTIONS.find((c) => c.value === v)?.label ?? v}
+              </span>
+            ))}
+            {typology.methods.map((v) => (
+              <span key={v} className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                {APPLICATION_METHODS.find((m) => m.value === v)?.label ?? v}
+              </span>
+            ))}
+          </div>
+
+          {typology.notes && <p className="text-xs text-gray-500 dark:text-stone-400 italic">{typology.notes}</p>}
+
+          {/* Capacities table */}
+          {capacities.length > 0 && (
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b text-left font-medium uppercase text-gray-500 dark:text-stone-400">
+                    <th className="px-2 py-1">Kiln</th>
+                    <th className="px-2 py-1">Capacity m2</th>
+                    <th className="px-2 py-1">Capacity pcs</th>
+                    <th className="px-2 py-1">Method</th>
+                    <th className="px-2 py-1">Levels</th>
+                    <th className="px-2 py-1">AI Adjusted m2</th>
+                    <th className="px-2 py-1">Ref Size</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {capacities.map((cap) => (
+                    <tr key={cap.kiln_id} className="border-b hover:bg-gray-50 dark:hover:bg-stone-800/50">
+                      <td className="px-2 py-1 font-medium text-gray-900 dark:text-gray-100">{cap.kiln_name ?? cap.kiln_id.slice(0, 8)}</td>
+                      <td className="px-2 py-1">{cap.capacity_sqm ?? '--'}</td>
+                      <td className="px-2 py-1">{cap.capacity_pcs ?? '--'}</td>
+                      <td className="px-2 py-1">{cap.loading_method ?? '--'}</td>
+                      <td className="px-2 py-1">{cap.num_levels ?? '--'}</td>
+                      <td className="px-2 py-1 font-medium text-primary-600 dark:text-gold-400">{cap.ai_adjusted_sqm ?? '--'}</td>
+                      <td className="px-2 py-1 text-gray-500">{cap.ref_size ?? '--'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }

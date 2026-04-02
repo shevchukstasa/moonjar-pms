@@ -232,7 +232,16 @@ export function ForceUnblockDialog({
             icon={<Plus className="h-6 w-6" />}
             title="Create Recipe"
             description="Create a new recipe for this color"
-            onClick={() => { setMode('create_recipe'); setError(''); }}
+            onClick={() => {
+              // Redirect to full recipe creation page with pre-filled color name
+              const params = new URLSearchParams({
+                create: 'true',
+                name: color || '',
+                collection: collection || '',
+                position_id: positionId,
+              });
+              window.location.href = `/admin/recipes?${params.toString()}`;
+            }}
             variant="secondary"
           />
           <OptionCard

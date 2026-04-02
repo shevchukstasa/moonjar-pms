@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, FlaskConical, Copy } from 'lucide-react';
@@ -88,6 +88,24 @@ export default function AdminRecipesPage() {
   const [cloneFromId, setCloneFromId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [returnPositionId, setReturnPositionId] = useState<string | null>(null);
+
+  // Auto-open create dialog from URL params (e.g. from Force Unblock)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('create') === 'true') {
+      setForm({
+        ...emptyForm,
+        name: params.get('name') || '',
+        color_collection: params.get('collection') || '',
+        recipe_type: 'glaze',
+      });
+      setReturnPositionId(params.get('position_id') || null);
+      setDialogOpen(true);
+      // Clean URL without reload
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   /* ── queries ───────────────────────────────────────────────────────── */
   const { data, isLoading } = useQuery<{ items: RecipeItem[]; total: number }>({
@@ -174,6 +192,23 @@ export default function AdminRecipesPage() {
       // Save ingredients + temp group — errors should NOT block dialog close
       try { await saveIngredients(newRecipe.id); } catch (e) { console.error('saveIngredients failed:', e); }
       try { await saveTempGroupAssignment(newRecipe.id, []); } catch (e) { console.error('saveTempGroup failed:', e); }
+
+      // If came from Force Unblock — bind recipe to position + unblock
+      if (returnPositionId) {
+        try {
+          const { default: apiClient } = await import('../api/client');
+          await apiClient.patch(`/positions/${returnPositionId}`, { recipe_id: newRecipe.id });
+          await apiClient.post(`/positions/${returnPositionId}/force-unblock`, {
+            notes: `New recipe created & assigned: ${newRecipe.name}`,
+          });
+          setReturnPositionId(null);
+          // Navigate back to dashboard blocking tab
+          navigate('/?tab=blocking');
+        } catch (e) {
+          console.error('Auto-assign recipe to position failed:', e);
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ['admin-recipes'] });
       closeDialog();
     },

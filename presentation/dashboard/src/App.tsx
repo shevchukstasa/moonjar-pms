@@ -36,6 +36,7 @@ import AdminPackagingPage from '@/pages/AdminPackagingPage';
 import AdminSizesPage from '@/pages/AdminSizesPage';
 import AdminFiringProfilesPage from '@/pages/AdminFiringProfilesPage';
 import AdminStagesPage from '@/pages/AdminStagesPage';
+import TpsDashboardPage from '@/pages/TpsDashboardPage';
 import KilnFiringSchedulesPage from '@/pages/KilnFiringSchedulesPage';
 import FactoryCalendarPage from '@/pages/FactoryCalendarPage';
 import ConsumptionRulesPage from '@/pages/ConsumptionRulesPage';
@@ -146,6 +147,7 @@ export default function App() {
             <Route path="/admin/consumption-rules" element={<ConsumptionRulesPage />} />
             <Route path="/admin/firing-profiles" element={<AdminFiringProfilesPage />} />
             <Route path="/admin/stages" element={<AdminStagesPage />} />
+            <Route path="/admin/tps-dashboard" element={<TpsDashboardPage />} />
             <Route path="/admin/firing-schedules" element={<KilnFiringSchedulesPage />} />
             <Route path="/admin/factory-calendar" element={<FactoryCalendarPage />} />
           </Route>

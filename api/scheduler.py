@@ -1190,6 +1190,59 @@ async def weekly_summary_dispatcher():
         db.close()
 
 
+async def daily_tps_calibration():
+    """Run TPS auto-calibration for all factories. Adjusts production speeds based on EMA of actual data."""
+    logger.info("Running daily TPS calibration")
+    db = _get_db_session()
+    try:
+        from business.services.tps_calibration import run_calibration
+        from business.services.notifications import send_telegram_to_role
+
+        factory_ids = _get_all_factory_ids(db)
+        for fid in factory_ids:
+            try:
+                suggestions = run_calibration(db, fid, auto_apply=True)
+                db.commit()
+
+                if suggestions:
+                    applied = [s for s in suggestions if s.get("applied")]
+                    pending = [s for s in suggestions if not s.get("applied")]
+
+                    lines = []
+                    for s in applied:
+                        lines.append(
+                            f"  {s['step_name']}: {s['current_rate']} -> {s['suggested_rate']} "
+                            f"{s.get('productivity_unit', '')}\n"
+                            f"    (fact {s['data_points']}d: {s['ema_value']}, drift: {s['drift_percent']:+.1f}%)"
+                        )
+                    for s in pending:
+                        lines.append(
+                            f"  {s['step_name']}: drift {s['drift_percent']:+.1f}% (needs approval)"
+                        )
+
+                    from api.models import Factory
+                    factory = db.query(Factory).filter(Factory.id == fid).first()
+                    msg = (
+                        f"TPS Auto-Calibration — {factory.name if factory else fid}\n\n"
+                        + "\n".join(lines)
+                    )
+                    try:
+                        send_telegram_to_role(
+                            db, fid,
+                            roles=["production_manager", "owner"],
+                            message=msg,
+                        )
+                    except Exception as tg_err:
+                        logger.warning("TPS calibration Telegram failed: %s", tg_err)
+
+            except Exception as e:
+                logger.error("TPS calibration failed for factory %s: %s", fid, e)
+                db.rollback()
+    finally:
+        db.close()
+    logger.info("Daily TPS calibration complete")
+
+
 async def daily_streak_update():
     """Update streaks, evaluate daily challenges, and update achievements for all factories."""
     logger.info("Running daily streak update")
@@ -1384,6 +1437,9 @@ def setup_scheduler():
 
     # Monthly 1st at 00:05 UTC — reset monthly points counter
     scheduler.add_job(monthly_points_reset, CronTrigger(day=1, hour=0, minute=5), id="monthly_points_reset")
+
+    # Daily 14:00 UTC (22:00 Bali) — TPS auto-calibration
+    scheduler.add_job(daily_tps_calibration, CronTrigger(hour=14, minute=0), id="tps_calibration")
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

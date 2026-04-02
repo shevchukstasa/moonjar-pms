@@ -7,7 +7,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sa_func
+from sqlalchemy import func as sa_func, or_
 
 from api.database import get_db
 from api.auth import get_current_user, apply_factory_filter
@@ -15,6 +15,7 @@ from api.roles import require_management
 from api.models import (
     TpsParameter, TpsShiftMetric, TpsDeviation, Factory,
     OperationLog, Operation, OrderPosition, MasterPermission, User,
+    ProcessStep, CalibrationLog,
 )
 from api.enums import TpsDeviationType
 from business.services.tps_metrics import (
@@ -950,3 +951,329 @@ async def get_achievements(
         "items": achievements,
         "user_name": user.name,
     }
+
+
+# ── Process Steps ──────────────────────────────────────────────────────
+
+
+class ProcessStepCreate(BaseModel):
+    name: str
+    factory_id: UUID
+    stage: str
+    sequence: int = 0
+    norm_time_minutes: Optional[float] = None
+    productivity_rate: Optional[float] = None
+    productivity_unit: Optional[str] = None
+    measurement_basis: Optional[str] = None
+    shift_count: int = 2
+    applicable_collections: List[str] = []
+    applicable_methods: List[str] = []
+    applicable_product_types: List[str] = []
+    auto_calibrate: bool = False
+    notes: Optional[str] = None
+
+
+class ProcessStepUpdate(BaseModel):
+    name: Optional[str] = None
+    stage: Optional[str] = None
+    sequence: Optional[int] = None
+    norm_time_minutes: Optional[float] = None
+    productivity_rate: Optional[float] = None
+    productivity_unit: Optional[str] = None
+    measurement_basis: Optional[str] = None
+    shift_count: Optional[int] = None
+    applicable_collections: Optional[List[str]] = None
+    applicable_methods: Optional[List[str]] = None
+    applicable_product_types: Optional[List[str]] = None
+    auto_calibrate: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class ReorderPayload(BaseModel):
+    step_ids: List[UUID]
+
+
+def _serialize_process_step(step) -> dict:
+    return {
+        "id": str(step.id),
+        "name": step.name,
+        "factory_id": str(step.factory_id),
+        "stage": step.stage,
+        "sequence": step.sequence,
+        "norm_time_minutes": float(step.norm_time_minutes) if step.norm_time_minutes else None,
+        "productivity_rate": float(step.productivity_rate) if step.productivity_rate else None,
+        "productivity_unit": step.productivity_unit,
+        "measurement_basis": step.measurement_basis,
+        "shift_count": step.shift_count or 2,
+        "applicable_collections": step.applicable_collections or [],
+        "applicable_methods": step.applicable_methods or [],
+        "applicable_product_types": step.applicable_product_types or [],
+        "auto_calibrate": step.auto_calibrate or False,
+        "calibration_ema": float(step.calibration_ema) if step.calibration_ema else None,
+        "last_calibrated_at": step.last_calibrated_at.isoformat() if step.last_calibrated_at else None,
+        "is_active": step.is_active,
+        "notes": step.notes,
+    }
+
+
+@router.get("/process-steps")
+async def list_process_steps(
+    factory_id: UUID = Query(...),
+    collection: Optional[str] = None,
+    method: Optional[str] = None,
+    product_type: Optional[str] = None,
+    stage: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List process steps with filtering."""
+    query = db.query(ProcessStep).filter(ProcessStep.factory_id == factory_id)
+
+    if stage:
+        query = query.filter(ProcessStep.stage == stage)
+    if is_active is not None:
+        query = query.filter(ProcessStep.is_active == is_active)
+
+    # JSONB array filtering: empty array means "all" (include step)
+    if collection:
+        query = query.filter(
+            or_(
+                sa_func.jsonb_array_length(ProcessStep.applicable_collections) == 0,
+                ProcessStep.applicable_collections.contains([collection]),
+            )
+        )
+    if method:
+        query = query.filter(
+            or_(
+                sa_func.jsonb_array_length(ProcessStep.applicable_methods) == 0,
+                ProcessStep.applicable_methods.contains([method]),
+            )
+        )
+    if product_type:
+        query = query.filter(
+            or_(
+                sa_func.jsonb_array_length(ProcessStep.applicable_product_types) == 0,
+                ProcessStep.applicable_product_types.contains([product_type]),
+            )
+        )
+
+    items = query.order_by(ProcessStep.sequence).all()
+    return {"items": [_serialize_process_step(s) for s in items], "total": len(items)}
+
+
+@router.post("/process-steps", status_code=201)
+async def create_process_step(
+    data: ProcessStepCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Create a new process step."""
+    step = ProcessStep(
+        name=data.name,
+        factory_id=data.factory_id,
+        stage=data.stage,
+        sequence=data.sequence,
+        norm_time_minutes=data.norm_time_minutes,
+        productivity_rate=data.productivity_rate,
+        productivity_unit=data.productivity_unit,
+        measurement_basis=data.measurement_basis,
+        shift_count=data.shift_count,
+        applicable_collections=data.applicable_collections,
+        applicable_methods=data.applicable_methods,
+        applicable_product_types=data.applicable_product_types,
+        auto_calibrate=data.auto_calibrate,
+        notes=data.notes,
+    )
+    db.add(step)
+    db.commit()
+    db.refresh(step)
+    return _serialize_process_step(step)
+
+
+# NOTE: reorder MUST be before {step_id} to avoid FastAPI path conflict
+@router.patch("/process-steps/reorder")
+async def reorder_process_steps(
+    data: ReorderPayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Reorder process steps. Sets sequence = index for each step."""
+    for idx, step_id in enumerate(data.step_ids):
+        step = db.query(ProcessStep).filter(ProcessStep.id == step_id).first()
+        if step:
+            step.sequence = idx
+    db.commit()
+    return {"ok": True, "message": f"Reordered {len(data.step_ids)} steps"}
+
+
+@router.get("/process-steps/pipeline")
+async def get_process_pipeline(
+    factory_id: UUID = Query(...),
+    collection: Optional[str] = None,
+    method: Optional[str] = None,
+    product_type: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return filtered pipeline for a specific collection+method combo."""
+    query = db.query(ProcessStep).filter(
+        ProcessStep.factory_id == factory_id,
+        ProcessStep.is_active == True,
+    )
+
+    if collection:
+        query = query.filter(
+            or_(
+                sa_func.jsonb_array_length(ProcessStep.applicable_collections) == 0,
+                ProcessStep.applicable_collections.contains([collection]),
+            )
+        )
+    if method:
+        query = query.filter(
+            or_(
+                sa_func.jsonb_array_length(ProcessStep.applicable_methods) == 0,
+                ProcessStep.applicable_methods.contains([method]),
+            )
+        )
+    if product_type:
+        query = query.filter(
+            or_(
+                sa_func.jsonb_array_length(ProcessStep.applicable_product_types) == 0,
+                ProcessStep.applicable_product_types.contains([product_type]),
+            )
+        )
+
+    items = query.order_by(ProcessStep.sequence).all()
+    return {"items": [_serialize_process_step(s) for s in items], "total": len(items)}
+
+
+@router.patch("/process-steps/{step_id}")
+async def update_process_step(
+    step_id: UUID,
+    data: ProcessStepUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Partial update of a process step."""
+    step = db.query(ProcessStep).filter(ProcessStep.id == step_id).first()
+    if not step:
+        raise HTTPException(404, "Process step not found")
+
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(step, field, value)
+
+    db.commit()
+    db.refresh(step)
+    return _serialize_process_step(step)
+
+
+@router.delete("/process-steps/{step_id}")
+async def deactivate_process_step(
+    step_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Soft-delete: set is_active=false."""
+    step = db.query(ProcessStep).filter(ProcessStep.id == step_id).first()
+    if not step:
+        raise HTTPException(404, "Process step not found")
+
+    step.is_active = False
+    db.commit()
+    return {"ok": True, "message": "Process step deactivated"}
+
+
+# ── Calibration Log ──────────────────────────────────────────────────
+
+
+@router.get("/calibration/log")
+async def list_calibration_log(
+    factory_id: Optional[UUID] = None,
+    process_step_id: Optional[UUID] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List calibration log entries with step and factory names."""
+    query = db.query(CalibrationLog)
+
+    if factory_id:
+        query = query.filter(CalibrationLog.factory_id == factory_id)
+    if process_step_id:
+        query = query.filter(CalibrationLog.process_step_id == process_step_id)
+
+    items = query.order_by(CalibrationLog.created_at.desc()).all()
+
+    result = []
+    for log in items:
+        step = db.query(ProcessStep).filter(ProcessStep.id == log.process_step_id).first()
+        factory = db.query(Factory).filter(Factory.id == log.factory_id).first()
+        result.append({
+            "id": str(log.id),
+            "factory_id": str(log.factory_id),
+            "factory_name": factory.name if factory else None,
+            "process_step_id": str(log.process_step_id),
+            "step_name": step.name if step else None,
+            "previous_rate": float(log.previous_rate),
+            "new_rate": float(log.new_rate),
+            "ema_value": float(log.ema_value) if log.ema_value else None,
+            "data_points": log.data_points,
+            "trigger": log.trigger,
+            "approved_by": str(log.approved_by) if log.approved_by else None,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+        })
+
+    return {"items": result, "total": len(result)}
+
+
+# ── Calibration Action Endpoints ─────────────────────────────
+
+class CalibrationRunInput(BaseModel):
+    factory_id: str
+
+
+class CalibrationApplyInput(BaseModel):
+    step_id: str
+    new_rate: float
+
+
+@router.get("/calibration/status")
+async def get_calibration_status(
+    factory_id: UUID = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Current calibration status for all steps in a factory."""
+    from business.services.tps_calibration import get_calibration_status
+    return get_calibration_status(db, factory_id)
+
+
+@router.post("/calibration/run")
+async def run_calibration(
+    data: CalibrationRunInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Manually trigger calibration analysis for a factory."""
+    from business.services.tps_calibration import run_calibration
+    suggestions = run_calibration(db, UUID(data.factory_id), auto_apply=False)
+    db.commit()
+    return {"suggestions": suggestions, "total": len(suggestions)}
+
+
+@router.post("/calibration/apply")
+async def apply_calibration_endpoint(
+    data: CalibrationApplyInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Apply a calibration suggestion."""
+    from business.services.tps_calibration import apply_calibration
+    apply_calibration(
+        db, UUID(data.step_id), data.new_rate,
+        approved_by=current_user.id,
+        trigger="manual",
+    )
+    db.commit()
+    return {"status": "applied", "step_id": data.step_id, "new_rate": data.new_rate}

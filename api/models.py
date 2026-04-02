@@ -1178,6 +1178,16 @@ class ProcessStep(Base):
     measurement_basis = Column(sa.String(50), nullable=True)       # "per_person", "per_machine", "per_shift"
     is_active = Column(sa.Boolean, nullable=False, server_default=sa.text('true'))
     notes = Column(sa.Text, nullable=True)
+    # TPS Dashboard fields
+    stage = Column(sa.String(100), nullable=True)                  # links to production_stage (glazing, sorting, etc.)
+    shift_count = Column(sa.Integer, nullable=False, server_default=sa.text('2'))  # 1 or 2 shifts/day
+    applicable_collections = Column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb"))  # e.g. ["raku","gold"]
+    applicable_methods = Column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb"))      # e.g. ["ss","bs"]
+    applicable_product_types = Column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb"))  # e.g. ["tile"]
+    # AI auto-calibration
+    auto_calibrate = Column(sa.Boolean, nullable=False, server_default=sa.text('false'))
+    calibration_ema = Column(sa.Numeric(10, 2), nullable=True)
+    last_calibrated_at = Column(sa.DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint('factory_id', 'sequence'),
@@ -1206,6 +1216,26 @@ class StandardWork(Base):
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     process_step = relationship('ProcessStep', back_populates='standard_works', foreign_keys=[process_step_id])
+
+
+class CalibrationLog(Base):
+    """Log of AI auto-calibration events for ProcessStep productivity rates."""
+    __tablename__ = 'calibration_log'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    process_step_id = Column(UUID(as_uuid=True), ForeignKey('process_steps.id', ondelete='CASCADE'), nullable=False)
+    previous_rate = Column(sa.Numeric(10, 2), nullable=False)
+    new_rate = Column(sa.Numeric(10, 2), nullable=False)
+    ema_value = Column(sa.Numeric(10, 2), nullable=True)
+    data_points = Column(sa.Integer, nullable=False, default=0)
+    trigger = Column(sa.String(50), nullable=False, default='manual')  # auto / manual / suggestion
+    approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    process_step = relationship('ProcessStep', foreign_keys=[process_step_id])
+    approver = relationship('User', foreign_keys=[approved_by])
 
 
 class BottleneckConfig(Base):

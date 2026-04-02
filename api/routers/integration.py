@@ -695,19 +695,66 @@ async def receive_sales_order(
             # but still attached to session — _estimate_completion updates schedule_deadline)
             estimated_completion = _estimate_completion(db, order)
 
+            # ── Past deadline detection & alert ──────────────────────────
+            deadline_warning = None
+            incoming_deadline = order.final_deadline or order.desired_delivery_date
+            if incoming_deadline and incoming_deadline < date.today():
+                days_overdue = (date.today() - incoming_deadline).days
+                deadline_warning = (
+                    f"Order received with expired deadline "
+                    f"({incoming_deadline.isoformat()}, {days_overdue}d ago). "
+                    f"Estimated completion: {estimated_completion or 'TBD'}."
+                )
+                logger.warning(
+                    "PAST_DEADLINE_ORDER | order=%s ext=%s | deadline=%s (%dd ago) | "
+                    "estimated_completion=%s",
+                    order.order_number, order.external_id,
+                    incoming_deadline, days_overdue, estimated_completion,
+                )
+                # Notify PM + CEO via Telegram
+                try:
+                    from business.services.notifications import send_telegram_to_role
+                    alert_msg = (
+                        f"⚠️ Заказ с истёкшим дедлайном!\n\n"
+                        f"Заказ: {order.order_number}\n"
+                        f"Клиент: {order.client or '—'}\n"
+                        f"Дедлайн из Sales: {incoming_deadline.strftime('%d.%m.%Y')} "
+                        f"({days_overdue} дн. назад)\n"
+                        f"Расчётный срок: {estimated_completion or 'не определён'}\n\n"
+                        f"Дедлайн автоматически сдвинут на расчётную дату."
+                    )
+                    send_telegram_to_role(
+                        db, order.factory_id,
+                        roles=["production_manager", "ceo", "owner"],
+                        message=alert_msg,
+                    )
+                except Exception as tg_err:
+                    logger.warning("Failed to send past-deadline Telegram alert: %s", tg_err)
+
+                # Override final_deadline to realistic date so schedule is correct
+                if estimated_completion:
+                    try:
+                        order.final_deadline = date.fromisoformat(estimated_completion)
+                    except (ValueError, TypeError):
+                        pass
+
             db.commit()  # Commits event.processed=True + schedule_deadline update
 
             # PM notification is handled inside process_incoming_order — no duplicate here.
 
             # Return factory info + estimated completion so Sales can show delivery date
             factory = db.query(Factory).filter(Factory.id == order.factory_id).first()
-            return {
+            response = {
                 "status": "processed",
                 "order_id": str(order.id),
                 "factory_name": factory.name if factory else None,
                 "factory_location": factory.location if factory else None,
                 "estimated_completion_date": estimated_completion,
             }
+            if deadline_warning:
+                response["warning"] = deadline_warning
+                response["original_deadline"] = str(incoming_deadline)
+            return response
         except Exception as e:
             db.rollback()
             event.error_message = str(e)

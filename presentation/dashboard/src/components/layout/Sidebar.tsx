@@ -78,6 +78,7 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/admin/suppliers', label: 'Suppliers', icon: '🤝' },
         { to: '/admin/sizes', label: 'Sizes', icon: '📐' },
         { to: '/admin/stages', label: 'Stages', icon: '🔄' },
+        { to: '/admin/tps-dashboard', label: 'TPS Dashboard', icon: '⚡' },
       ],
     },
     {
@@ -133,6 +134,7 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/admin/packaging', label: 'Packaging', icon: '📦' },
         { to: '/admin/sizes', label: 'Sizes', icon: '📐' },
         { to: '/admin/stages', label: 'Stages', icon: '🔄' },
+        { to: '/admin/tps-dashboard', label: 'TPS Dashboard', icon: '⚡' },
         { to: '/admin/firing-schedules', label: 'Firing Schedules', icon: '🗓' },
       ],
     },

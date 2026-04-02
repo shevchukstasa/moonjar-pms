@@ -60,6 +60,51 @@ QC_DAYS = 1                     # quality check (rounded up from 0.5)
 BUFFER_DAYS = 1                 # TOC buffer — safety margin around the constraint
 
 
+def _get_stage_duration_days(
+    db: Session,
+    factory_id: UUID,
+    stage: str,
+    total_sqm: float = 0,
+    total_pcs: int = 0,
+) -> int:
+    """Calculate duration in working days for a stage using ProcessStep data.
+
+    Falls back to hardcoded 1 day if no ProcessStep is configured.
+    """
+    try:
+        from api.models import ProcessStep
+        step = db.query(ProcessStep).filter(
+            ProcessStep.factory_id == factory_id,
+            ProcessStep.stage == stage,
+            ProcessStep.is_active == True,
+            ProcessStep.productivity_rate.isnot(None),
+        ).first()
+
+        if not step or not step.productivity_rate:
+            return 1  # fallback
+
+        rate = float(step.productivity_rate)
+        if rate <= 0:
+            return 1
+
+        shift_count = step.shift_count or 2
+        hours_per_day = 8.0 * shift_count
+        unit = (step.productivity_unit or '').lower()
+
+        if 'sqm' in unit and total_sqm > 0:
+            hours_needed = total_sqm / rate
+        elif 'pcs' in unit and total_pcs > 0:
+            hours_needed = total_pcs / rate
+        else:
+            hours_needed = 8.0  # fallback: 1 shift
+
+        import math
+        return max(1, math.ceil(hours_needed / hours_per_day))
+    except Exception as e:
+        logger.debug("_get_stage_duration_days fallback for %s: %s", stage, e)
+        return 1
+
+
 def _skip_weekends(target: date) -> date:
     """If target falls on Sunday, move to Monday."""
     # In Bali/Java production, Saturday is a workday; Sunday is off.
@@ -311,22 +356,34 @@ def schedule_position(
         - PRE_KILN_CHECK_DAYS             → pre-kiln QC
         - GLAZING_DURATION_DAYS           → planned_glazing_date (rope start)
     """
+    # Calculate position area and quantity for duration estimation
+    _pos_sqm = float(position.glazeable_sqm or 0) * float(position.quantity or 1)
+    _pos_pcs = int(position.quantity or 0)
+
+    # Dynamic stage durations (fall back to hardcoded 1 if not configured)
+    glazing_days = _get_stage_duration_days(db, position.factory_id, 'glazing', _pos_sqm, _pos_pcs)
+    pre_kiln_days = _get_stage_duration_days(db, position.factory_id, 'pre_kiln_check', _pos_sqm, _pos_pcs)
+    firing_days = _get_stage_duration_days(db, position.factory_id, 'firing', _pos_sqm, _pos_pcs)
+    cooling_days = COOLING_DAYS  # physical process, not worker-dependent
+    sorting_days = _get_stage_duration_days(db, position.factory_id, 'sorting', _pos_sqm, _pos_pcs)
+    qc_days = _get_stage_duration_days(db, position.factory_id, 'quality_check', _pos_sqm, _pos_pcs)
+
     # Backward schedule calculation
     planned_completion = _skip_weekends(deadline)
 
     planned_sorting = _skip_weekends(
-        planned_completion - timedelta(days=SORTING_DAYS + QC_DAYS)
+        planned_completion - timedelta(days=sorting_days + qc_days)
     )
 
     planned_kiln = _skip_weekends(
         planned_sorting - timedelta(
-            days=FIRING_DURATION_DAYS + COOLING_DAYS + BUFFER_DAYS
+            days=firing_days + cooling_days + BUFFER_DAYS
         )
     )
 
     planned_glazing = _skip_weekends(
         planned_kiln - timedelta(
-            days=GLAZING_DURATION_DAYS + PRE_KILN_CHECK_DAYS + BUFFER_DAYS
+            days=glazing_days + pre_kiln_days + BUFFER_DAYS
         )
     )
 
@@ -339,16 +396,16 @@ def schedule_position(
         planned_glazing = today
         planned_kiln = _skip_weekends(
             today + timedelta(
-                days=GLAZING_DURATION_DAYS + PRE_KILN_CHECK_DAYS + BUFFER_DAYS
+                days=glazing_days + pre_kiln_days + BUFFER_DAYS
             )
         )
         planned_sorting = _skip_weekends(
             planned_kiln + timedelta(
-                days=FIRING_DURATION_DAYS + COOLING_DAYS + BUFFER_DAYS
+                days=firing_days + cooling_days + BUFFER_DAYS
             )
         )
         planned_completion = _skip_weekends(
-            planned_sorting + timedelta(days=SORTING_DAYS + QC_DAYS)
+            planned_sorting + timedelta(days=sorting_days + qc_days)
         )
         logger.warning(
             "TIGHT_DEADLINE | position=%s deadline=%s | "
@@ -366,11 +423,11 @@ def schedule_position(
             planned_kiln = actual_kiln_date
             planned_sorting = _skip_weekends(
                 planned_kiln + timedelta(
-                    days=FIRING_DURATION_DAYS + COOLING_DAYS + BUFFER_DAYS
+                    days=firing_days + cooling_days + BUFFER_DAYS
                 )
             )
             planned_completion = _skip_weekends(
-                planned_sorting + timedelta(days=SORTING_DAYS + QC_DAYS)
+                planned_sorting + timedelta(days=sorting_days + qc_days)
             )
     else:
         position.estimated_kiln_id = None

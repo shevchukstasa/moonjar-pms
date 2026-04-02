@@ -862,10 +862,10 @@ def _send_evening_summary(db, factory):
     from api.models import OrderPosition, ProductionOrder, UserStreak, DailyChallenge
     from api.enums import PositionStatus, OrderStatus
     from business.services.notifications import send_telegram_message, get_forum_topic
-    from datetime import date as date_cls, time as time_cls
+    from datetime import datetime as dt_cls, date as date_cls, time as time_cls, timezone as tz_cls
 
     today = date_cls.today()
-    today_start = datetime.combine(today, time_cls.min).replace(tzinfo=timezone.utc)
+    today_start = dt_cls.combine(today, time_cls.min).replace(tzinfo=tz_cls.utc)
 
     # Count positions processed today
     done_statuses = [

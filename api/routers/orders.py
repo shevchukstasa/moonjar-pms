@@ -602,6 +602,30 @@ async def reprocess_order(
         .all()
     )
 
+    # Create positions for items that don't have one yet
+    existing_item_ids = {p.order_item_id for p in positions if p.order_item_id}
+    all_items = db.query(ProductionOrderItem).filter(
+        ProductionOrderItem.order_id == order_id,
+        ProductionOrderItem.item_type == 'product',
+    ).all()
+    new_positions_created = 0
+    for item in all_items:
+        if item.id not in existing_item_ids:
+            try:
+                from business.services.order_intake import process_order_item
+                new_pos = process_order_item(db, order, item)
+                if new_pos:
+                    positions.append(new_pos)
+                    new_positions_created += 1
+                    logger.info(
+                        "REPROCESS_NEW_POSITION | order=%s item=%s color=%s",
+                        order.order_number, item.id, item.color,
+                    )
+            except Exception as e:
+                logger.error("Failed to create position for item %s: %s", item.id, e)
+    if new_positions_created:
+        db.flush()
+
     results = []
     for p in positions:
         pos_result = {"position_number": p.position_number, "actions": []}

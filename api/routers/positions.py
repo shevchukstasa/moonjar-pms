@@ -2253,17 +2253,33 @@ async def get_position_materials(
                         required_calc, calc_unit, stock_unit,
                         specific_gravity=sg, material_name=material.name,
                     ))
-                except Exception:
-                    # Fallback: simple calculation
-                    raw = float(rm.quantity_per_unit or 0) * (position.quantity or 1)
+                except Exception as _calc_err:
+                    import logging as _clog
+                    _clog.getLogger("moonjar.positions").warning(
+                        "Material calc error for %s (rm.unit=%s): %s",
+                        material.name, rm.unit, _calc_err,
+                    )
+                    # Fallback: g_per_100g needs area × spray_rate × SG formula
                     rm_unit = (rm.unit or "per_piece").lower().strip()
                     stock_u = (material.unit or "pcs").lower().strip()
-                    if rm_unit == "g_per_100g" and stock_u == "kg":
-                        required = raw / 1000.0
-                    elif rm_unit == "per_sqm" and stock_u == "kg":
-                        required = raw / 1000.0
+                    qty_per = float(rm.quantity_per_unit or 0)
+                    pos_qty = float(position.quantity or 1)
+                    area_sqm = float(position.glazeable_sqm or 0) * pos_qty
+
+                    if rm_unit == "g_per_100g" and area_sqm > 0:
+                        # area × spray_rate_ml → total_ml × SG → grams
+                        spray_rate = float(recipe.consumption_spray_ml_per_sqm or 500) if recipe else 500
+                        sg_val = float(recipe.specific_gravity or 1.0) if recipe else 1.0
+                        total_grams = area_sqm * spray_rate * sg_val
+                        required = (qty_per / 100.0) * total_grams
+                        if stock_u == "kg":
+                            required = required / 1000.0
+                    elif rm_unit == "per_sqm":
+                        required = qty_per * area_sqm
+                        if stock_u == "kg":
+                            required = required / 1000.0
                     else:
-                        required = raw
+                        required = qty_per * pos_qty
 
                 # Check reservation status
                 reserved_qty = float(

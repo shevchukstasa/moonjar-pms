@@ -22,62 +22,72 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Step 1: Calculate balance corrections needed
-    # For each test transaction:
-    #   receive/inventory: balance was INCREASED, removing = DECREASE
-    #   consume/manual_write_off: balance was DECREASED, removing = INCREASE
-    # correction = SUM of reverse effects
-    op.execute(text("""
-        -- Temporary table with corrections
-        CREATE TEMP TABLE _balance_corrections AS
+    conn = op.get_bind()
+
+    # Check if both tables exist — skip if either is missing
+    result = conn.execute(text("""
         SELECT
-            ms.id AS stock_id,
-            SUM(
+            EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'material_transactions') AS has_mt,
+            EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'material_stocks') AS has_ms
+    """))
+    row = result.fetchone()
+    has_mt = row[0] if row else False
+    has_ms = row[1] if row else False
+
+    if not has_mt:
+        # No transactions table — nothing to clean
+        return
+
+    if has_mt and has_ms:
+        # Both exist — do the full cleanup with balance corrections
+        conn.execute(text("""
+            CREATE TEMP TABLE _balance_corrections AS
+            SELECT
+                ms.id AS stock_id,
+                SUM(
+                    CASE
+                        WHEN mt.type IN ('receive', 'inventory') THEN -mt.quantity
+                        WHEN mt.type IN ('consume', 'manual_write_off') THEN mt.quantity
+                        ELSE 0
+                    END
+                ) AS correction
+            FROM material_transactions mt
+            JOIN material_stocks ms
+                ON ms.material_id = mt.material_id
+                AND ms.factory_id = mt.factory_id
+            WHERE mt.created_by IS NULL
+              AND mt.type IN ('receive', 'consume', 'manual_write_off', 'inventory')
+            GROUP BY ms.id
+            HAVING SUM(
                 CASE
                     WHEN mt.type IN ('receive', 'inventory') THEN -mt.quantity
                     WHEN mt.type IN ('consume', 'manual_write_off') THEN mt.quantity
                     ELSE 0
                 END
-            ) AS correction
-        FROM material_transactions mt
-        JOIN material_stocks ms
-            ON ms.material_id = mt.material_id
-            AND ms.factory_id = mt.factory_id
-        WHERE mt.created_by IS NULL
-          AND mt.type IN ('receive', 'consume', 'manual_write_off', 'inventory')
-        GROUP BY ms.id
-        HAVING SUM(
-            CASE
-                WHEN mt.type IN ('receive', 'inventory') THEN -mt.quantity
-                WHEN mt.type IN ('consume', 'manual_write_off') THEN mt.quantity
-                ELSE 0
-            END
-        ) != 0;
-    """))
+            ) != 0;
+        """))
 
-    # Step 2: Apply balance corrections
-    op.execute(text("""
-        UPDATE material_stocks ms
-        SET balance = GREATEST(0, ms.balance + bc.correction)
-        FROM _balance_corrections bc
-        WHERE ms.id = bc.stock_id;
-    """))
+        conn.execute(text("""
+            UPDATE material_stocks ms
+            SET balance = GREATEST(0, ms.balance + bc.correction)
+            FROM _balance_corrections bc
+            WHERE ms.id = bc.stock_id;
+        """))
 
-    # Step 3: Delete all test transactions (NULL created_by)
-    op.execute(text("""
+        conn.execute(text("DROP TABLE IF EXISTS _balance_corrections;"))
+
+        # Fix negative balances
+        conn.execute(text("""
+            UPDATE material_stocks
+            SET balance = 0
+            WHERE balance < 0;
+        """))
+
+    # Delete test transactions regardless
+    conn.execute(text("""
         DELETE FROM material_transactions
         WHERE created_by IS NULL;
     """))
-
-    # Step 4: Also fix any stocks that have negative balance (safety net)
-    op.execute(text("""
-        UPDATE material_stocks
-        SET balance = 0
-        WHERE balance < 0;
-    """))
-
-    # Cleanup
-    op.execute(text("DROP TABLE IF EXISTS _balance_corrections;"))
 
 
 def downgrade() -> None:

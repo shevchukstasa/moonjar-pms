@@ -196,6 +196,8 @@ def _order_detail(order, db: Session) -> dict:
                 "batch_id": str(p.batch_id) if p.batch_id else None,
                 "resource_id": str(p.resource_id) if p.resource_id else None,
                 "quantity": p.quantity,
+                "glazeable_sqm": float(p.glazeable_sqm) if p.glazeable_sqm else None,
+                "quantity_sqm": float(p.quantity_sqm) if p.quantity_sqm else None,
                 "color": p.color, "size": p.size,
                 "application": p.application, "finishing": p.finishing,
                 "collection": p.collection,
@@ -821,6 +823,33 @@ async def reprocess_order(
         "positions_reprocessed": len(results),
         "results": results,
     }
+
+
+@router.get("/{order_id}/debug-sqm")
+async def debug_sqm(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Debug endpoint: read glazeable_sqm directly via raw SQL."""
+    from api.database import engine
+    with engine.connect() as raw_conn:
+        rows = raw_conn.execute(
+            text(
+                "SELECT id, position_number, glazeable_sqm, quantity_sqm, size "
+                "FROM order_positions WHERE order_id = :oid"
+            ),
+            {"oid": str(order_id)},
+        ).fetchall()
+    return [
+        {
+            "id": str(r[0]), "position_number": r[1],
+            "glazeable_sqm": float(r[2]) if r[2] is not None else None,
+            "quantity_sqm": float(r[3]) if r[3] is not None else None,
+            "size": r[4],
+        }
+        for r in rows
+    ]
 
 
 @router.post("/{order_id}/reschedule")

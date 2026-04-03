@@ -525,7 +525,9 @@ async def get_allowed_transitions(
         raise HTTPException(404, "Position not found")
 
     current = _ev(p.status)
-    return {"current_status": current, "allowed": _get_allowed(current)}
+    role = getattr(current_user, "role", "")
+    role_str = role.value if hasattr(role, "value") else str(role or "")
+    return {"current_status": current, "allowed": _get_allowed(current, role=role_str)}
 
 
 @router.post("/{position_id}/status")

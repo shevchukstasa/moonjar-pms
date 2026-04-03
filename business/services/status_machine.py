@@ -163,8 +163,12 @@ def validate_status_transition(current: str, new: str) -> bool:
     return new_ps in allowed
 
 
-def get_allowed_transitions(current: str) -> list[str]:
-    """Return list of allowed next statuses for a given current status."""
+def get_allowed_transitions(current: str, role: str = "") -> list[str]:
+    """Return list of allowed next statuses for a given current status.
+
+    Management roles (owner, administrator, ceo, production_manager)
+    get extra transitions — e.g. un-cancel back to PLANNED.
+    """
     try:
         current_ps = PositionStatus(current)
     except ValueError:
@@ -173,6 +177,15 @@ def get_allowed_transitions(current: str) -> list[str]:
     allowed = set(_TRANSITIONS.get(current_ps, set()))
     # Always add universal targets
     allowed |= _UNIVERSAL_TARGETS
+
+    # Management override: allow recovery from terminal states
+    _MGMT_ROLES = {"owner", "administrator", "ceo", "production_manager"}
+    if role in _MGMT_ROLES:
+        if current_ps == PositionStatus.CANCELLED:
+            allowed.add(PositionStatus.PLANNED)
+        if current_ps == PositionStatus.SHIPPED:
+            allowed.add(PositionStatus.READY_FOR_SHIPMENT)
+
     return sorted([s.value for s in allowed])
 
 

@@ -23,6 +23,15 @@ depends_on = None
 def upgrade() -> None:
     conn = op.get_bind()
 
+    # ── Check tables exist (they are created by schema patches, which run AFTER migrations) ──
+    for tbl in ('kiln_loading_typologies', 'stage_typology_speeds', 'factories'):
+        exists = conn.execute(text(
+            f"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = '{tbl}')"
+        )).scalar()
+        if not exists:
+            print(f"WARNING: Table {tbl} not found — skipping typology seed (will run as patch).")
+            return
+
     # ── Get Bali factory ID ──────────────────────────────────────
     row = conn.execute(text(
         "SELECT id FROM factories WHERE name ILIKE '%bali%' LIMIT 1"

@@ -626,6 +626,10 @@ async def reprocess_order(
         db.flush()
 
     results = []
+    # Pre-calculated glazeable_sqm values — stored here during main loop
+    # so post-commit SQL can use them even after ORM session expires attributes.
+    _precalc_sqm: dict[str, tuple[float, float]] = {}  # position_id → (per_piece, total)
+
     for p in positions:
         pos_result = {"position_number": p.position_number, "actions": []}
 
@@ -642,20 +646,15 @@ async def reprocess_order(
                 else:
                     pos_result["actions"].append("recipe_not_found")
 
-        # 2. Recalculate glazeable_sqm
+        # 2. Recalculate glazeable_sqm — store in _precalc_sqm for post-commit fix
         new_area = calculate_glazeable_sqm_for_position(db, p)
         if new_area is not None:
             _area_f = float(new_area)
             _qsqm = round(_area_f * (p.quantity or 1), 4)
             p.glazeable_sqm = new_area
             p.quantity_sqm = _qsqm
-            db.add(p)  # mark dirty explicitly
-            db.flush()
-            # Verify persistence by re-reading
-            db.refresh(p)
-            pos_result["actions"].append(
-                f"area={_area_f:.4f},total_sqm={_qsqm},persisted={p.glazeable_sqm}"
-            )
+            _precalc_sqm[str(p.id)] = (_area_f, _qsqm)
+            pos_result["actions"].append(f"area={_area_f:.4f},total_sqm={_qsqm}")
 
         # 3. Recalculate defect margin (2D: glaze + product type coefficients)
         if p.quantity and not p.quantity_with_defect_margin:
@@ -772,32 +771,27 @@ async def reprocess_order(
     db.commit()
 
     # Post-commit: fix glazeable_sqm using engine.connect() — completely
-    # separate from ORM session to avoid any identity map interference.
-    try:
-        from api.database import engine
-        with engine.connect() as raw_conn:
-            _fix_count = 0
-            for p in positions:
-                if p.size:
-                    try:
-                        new_area = calculate_glazeable_sqm_for_position(None, p)
-                        if new_area is not None:
-                            _qsqm = round(float(new_area) * (p.quantity or 1), 4)
-                            raw_conn.execute(
-                                text(
-                                    "UPDATE order_positions SET glazeable_sqm = :sqm, "
-                                    "quantity_sqm = :qsqm WHERE id = :pid"
-                                ),
-                                {"sqm": float(new_area), "qsqm": _qsqm, "pid": str(p.id)},
-                            )
-                            _fix_count += 1
-                    except Exception:
-                        pass
-            if _fix_count:
+    # separate from ORM to avoid identity map interference.
+    # Uses pre-calculated values from _precalc_sqm dict (computed when db was available).
+    if _precalc_sqm:
+        try:
+            from api.database import engine
+            with engine.connect() as raw_conn:
+                _fix_count = 0
+                for pid, (sqm_val, qsqm_val) in _precalc_sqm.items():
+                    raw_conn.execute(
+                        text(
+                            "UPDATE order_positions "
+                            "SET glazeable_sqm = :sqm, quantity_sqm = :qsqm "
+                            "WHERE id = :pid"
+                        ),
+                        {"sqm": sqm_val, "qsqm": qsqm_val, "pid": pid},
+                    )
+                    _fix_count += 1
                 raw_conn.commit()
                 logger.info("Post-commit glazeable_sqm fix: %d positions updated", _fix_count)
-    except Exception as _e:
-        logger.warning("Post-commit glazeable_sqm fix failed: %s", _e)
+        except Exception as _e:
+            logger.warning("Post-commit glazeable_sqm fix failed: %s", _e)
 
     return {
         "ok": True,

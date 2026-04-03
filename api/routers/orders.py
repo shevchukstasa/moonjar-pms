@@ -9,7 +9,7 @@ from typing import Optional, Union, List
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, text
 
 from api.database import get_db
 from api.auth import apply_factory_filter
@@ -642,15 +642,19 @@ async def reprocess_order(
                 else:
                     pos_result["actions"].append("recipe_not_found")
 
-        # 2. Recalculate glazeable_sqm
+        # 2. Recalculate glazeable_sqm — use raw SQL to guarantee persistence
         new_area = calculate_glazeable_sqm_for_position(db, p)
         if new_area is not None:
+            _area_f = float(new_area)
+            _qsqm = round(_area_f * (p.quantity or 1), 4)
+            db.execute(
+                text("UPDATE order_positions SET glazeable_sqm = :sqm, quantity_sqm = :qsqm WHERE id = :pid"),
+                {"sqm": _area_f, "qsqm": _qsqm, "pid": str(p.id)},
+            )
+            # Refresh ORM object so subsequent steps see the new values
             p.glazeable_sqm = new_area
-            # Also set quantity_sqm if missing (total area = per_piece × qty)
-            if not p.quantity_sqm and p.quantity:
-                p.quantity_sqm = float(new_area) * p.quantity
-            db.flush()
-            pos_result["actions"].append(f"area={float(new_area):.4f}")
+            p.quantity_sqm = _qsqm
+            pos_result["actions"].append(f"area={_area_f:.4f},total_sqm={_qsqm}")
 
         # 3. Recalculate defect margin (2D: glaze + product type coefficients)
         if p.quantity and not p.quantity_with_defect_margin:
@@ -679,35 +683,32 @@ async def reprocess_order(
                     db.flush()
                     pos_result["actions"].append("blocked_awaiting_consumption_data")
 
-        # 5. Reserve materials (if recipe exists and status allows re-reservation)
-        #    awaiting_recipe positions with newly-bound recipe should also be re-reserved
-        _reservable = ("planned", "insufficient_materials", "awaiting_recipe",
-                        "awaiting_consumption_data", "awaiting_size_confirmation")
-        if p.recipe_id and _ev(p.status) in _reservable:
+        # 5. Reserve materials (if recipe exists)
+        #    ALWAYS clear old reserves and re-create from scratch during reprocess.
+        #    This handles: quantity changes, recipe changes, rate changes.
+        if p.recipe_id:
             try:
                 from api.models import Recipe, MaterialTransaction
                 from api.enums import TransactionType
 
-                # If re-reserving from blocking status, clear old reserves + reset to planned
-                if _ev(p.status) in ("insufficient_materials", "awaiting_recipe",
-                                      "awaiting_consumption_data", "awaiting_size_confirmation"):
-                    old_reserves = (
-                        db.query(MaterialTransaction)
-                        .filter(
-                            MaterialTransaction.related_position_id == p.id,
-                            MaterialTransaction.type == TransactionType.RESERVE,
-                        )
-                        .all()
+                # Always clear old reserves — reprocess means "recalculate everything"
+                old_reserves = (
+                    db.query(MaterialTransaction)
+                    .filter(
+                        MaterialTransaction.related_position_id == p.id,
+                        MaterialTransaction.type == TransactionType.RESERVE,
                     )
+                    .all()
+                )
+                if old_reserves:
                     for txn in old_reserves:
                         db.delete(txn)
-                    if old_reserves:
-                        db.flush()
-                        pos_result["actions"].append(f"old_reserves_cleared={len(old_reserves)}")
-                    # Reset status to planned for re-reservation
-                    p.status = PositionStatus.PLANNED
-                    p.reservation_at = None
                     db.flush()
+                    pos_result["actions"].append(f"old_reserves_cleared={len(old_reserves)}")
+                # Reset reservation status
+                p.status = PositionStatus.PLANNED
+                p.reservation_at = None
+                db.flush()
 
                 recipe_obj = db.query(Recipe).filter(Recipe.id == p.recipe_id).first()
                 res = reserve_materials_for_position(db, p, recipe_obj, order.factory_id)

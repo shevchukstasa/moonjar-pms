@@ -111,6 +111,21 @@ async def create_grinding_stock_item(
     return item
 
 
+@router.delete("/{item_id}", status_code=204)
+async def delete_grinding_stock_item(
+    item_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Delete a grinding stock item (management only)."""
+    item = db.query(GrindingStock).filter(GrindingStock.id == item_id).first()
+    if not item:
+        raise HTTPException(404, "GrindingStock item not found")
+    db.delete(item)
+    db.commit()
+    return None
+
+
 @router.post("/{item_id}/decide", response_model=GrindingStockResponse)
 async def decide_grinding_stock(
     item_id: UUID,

@@ -201,7 +201,26 @@ def _get_area_for_position(position, db=None) -> Decimal:
         defect_ratio = Decimal(str(effective_quantity)) / Decimal(str(base_qty))
         face_total = Decimal(str(position.quantity_sqm)) * defect_ratio
     else:
-        face_total = Decimal(str(effective_quantity))
+        # No area data — calculate glazeable_sqm dynamically instead of
+        # using raw quantity (which would be interpreted as m² and give
+        # absurdly large material requirements for g_per_100g recipes).
+        try:
+            from business.services.surface_area import calculate_glazeable_sqm_for_position
+            computed_sqm = calculate_glazeable_sqm_for_position(db, position)
+            if computed_sqm and float(computed_sqm) > 0:
+                # computed_sqm is per-piece; multiply by effective_quantity
+                face_total = Decimal(str(computed_sqm)) * Decimal(str(effective_quantity))
+                # Cache on position to avoid repeated calculation
+                position.glazeable_sqm = computed_sqm
+                logger.info(
+                    "AREA_COMPUTED | position=%s | glazeable_sqm=%s | total_area=%s",
+                    getattr(position, 'id', '?'), computed_sqm, face_total,
+                )
+            else:
+                face_total = Decimal(str(effective_quantity))
+        except Exception as exc:
+            logger.warning("Failed to compute glazeable_sqm in _get_area_for_position: %s", exc)
+            face_total = Decimal(str(effective_quantity))
 
     # Edge area — only when edge profile requires glazing
     edge_profile = getattr(position, 'edge_profile', None) or 'straight'

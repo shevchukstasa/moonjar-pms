@@ -2230,6 +2230,16 @@ async def get_position_materials(
         except Exception:
             recipe_materials = []
 
+        # Look up ConsumptionRule overrides (same logic as reserve_materials_for_position)
+        _glaze_rule = None
+        _engobe_rule = None
+        try:
+            from business.services.material_reservation import find_best_consumption_rule
+            _glaze_rule = find_best_consumption_rule(db, position, recipe_type="glaze")
+            _engobe_rule = find_best_consumption_rule(db, position, recipe_type="engobe")
+        except Exception:
+            pass
+
         for rm in recipe_materials:
             material = None
             try:
@@ -2240,6 +2250,14 @@ async def get_position_materials(
                 mat_type = (material.material_type or "").lower()
                 mat_name = material.name
                 required = 0.0
+
+                # Set _consumption_rule on position for _calculate_required
+                if mat_type == 'engobe' and _engobe_rule:
+                    position._consumption_rule = _engobe_rule
+                elif _glaze_rule:
+                    position._consumption_rule = _glaze_rule
+                else:
+                    position._consumption_rule = None
 
                 # Calculate required quantity
                 try:
@@ -2285,7 +2303,7 @@ async def get_position_materials(
                 reserved_qty = float(
                     db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
                     .filter(
-                        MaterialTransaction.position_id == position.id,
+                        MaterialTransaction.related_position_id == position.id,
                         MaterialTransaction.material_id == rm.material_id,
                         MaterialTransaction.type == TransactionType.RESERVE,
                     )

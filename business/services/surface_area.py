@@ -444,13 +444,12 @@ def _calculate_glazeable_sqm_for_position_inner(db, position) -> Optional[Decima
             face_area = Decimal(str(round(area_per_piece * coeff, 4)))
 
     if face_area is None:
-        # 4. Last-resort fallback: assume 20x20 tile (0.04 sqm per piece)
-        qty = getattr(position, "quantity", None) or getattr(position, "quantity_pcs", None)
-        qty_val = max(int(qty), 1) if qty else 1
-        face_area = Decimal(str(round(0.04 * qty_val, 4)))
+        # 4. Last-resort fallback: assume 20x20 tile (0.04 sqm PER PIECE)
+        #    This function returns PER-PIECE area, NOT total.
+        face_area = Decimal("0.04")
         logger.warning(
-            "Surface area fallback: position %s — using 0.04*%d = %s sqm",
-            getattr(position, "id", "?"), qty_val, face_area,
+            "Surface area fallback: position %s — using 0.04 sqm/piece (default 20x20)",
+            getattr(position, "id", "?"),
         )
 
     # --- Adjust for place_of_application (edges/back add surface) ---
@@ -540,16 +539,18 @@ def calculate_glazeable_sqm_for_position(db, position) -> Decimal:
             getattr(position, "id", "?"), exc,
         )
 
-    # Fallback: use quantity_sqm if available, else 0.04 * quantity (20x20 default)
+    # Fallback: use quantity_sqm / quantity if available, else 0.04 per piece (20x20 default)
+    # This function returns PER-PIECE area, NOT total.
     qty_sqm = getattr(position, "quantity_sqm", None)
-    if qty_sqm and float(qty_sqm) > 0:
-        return Decimal(str(round(float(qty_sqm), 4)))
-
     qty = getattr(position, "quantity", None) or getattr(position, "quantity_pcs", None)
     qty_val = max(int(qty), 1) if qty else 1
-    fallback = Decimal(str(round(0.04 * qty_val, 4)))
+    if qty_sqm and float(qty_sqm) > 0:
+        per_piece = float(qty_sqm) / qty_val
+        return Decimal(str(round(per_piece, 6)))
+
+    fallback = Decimal("0.04")
     logger.warning(
-        "Surface area fallback for position %s: 0.04 * %d = %s sqm",
-        getattr(position, "id", "?"), qty_val, fallback,
+        "Surface area fallback for position %s: 0.04 sqm/piece (default 20x20)",
+        getattr(position, "id", "?"),
     )
     return fallback

@@ -771,27 +771,33 @@ async def reprocess_order(
 
     db.commit()
 
-    # Post-commit: fix glazeable_sqm that ORM overwrites during schedule_order.
-    # Use a SEPARATE connection to bypass ORM identity map entirely.
-    _fix_count = 0
-    for p in positions:
-        if p.size:
-            try:
-                new_area = calculate_glazeable_sqm_for_position(db, p)
-                if new_area is not None:
-                    _qsqm = round(float(new_area) * (p.quantity or 1), 4)
-                    db.execute(
-                        text(
-                            "UPDATE order_positions SET glazeable_sqm = :sqm, "
-                            "quantity_sqm = :qsqm WHERE id = :pid"
-                        ),
-                        {"sqm": float(new_area), "qsqm": _qsqm, "pid": str(p.id)},
-                    )
-                    _fix_count += 1
-            except Exception:
-                pass
-    if _fix_count:
-        db.commit()  # Second commit — only glazeable_sqm updates
+    # Post-commit: fix glazeable_sqm using engine.connect() — completely
+    # separate from ORM session to avoid any identity map interference.
+    try:
+        from api.database import engine
+        with engine.connect() as raw_conn:
+            _fix_count = 0
+            for p in positions:
+                if p.size:
+                    try:
+                        new_area = calculate_glazeable_sqm_for_position(None, p)
+                        if new_area is not None:
+                            _qsqm = round(float(new_area) * (p.quantity or 1), 4)
+                            raw_conn.execute(
+                                text(
+                                    "UPDATE order_positions SET glazeable_sqm = :sqm, "
+                                    "quantity_sqm = :qsqm WHERE id = :pid"
+                                ),
+                                {"sqm": float(new_area), "qsqm": _qsqm, "pid": str(p.id)},
+                            )
+                            _fix_count += 1
+                    except Exception:
+                        pass
+            if _fix_count:
+                raw_conn.commit()
+                logger.info("Post-commit glazeable_sqm fix: %d positions updated", _fix_count)
+    except Exception as _e:
+        logger.warning("Post-commit glazeable_sqm fix failed: %s", _e)
 
     return {
         "ok": True,

@@ -18,6 +18,13 @@ depends_on = None
 
 def upgrade() -> None:
     conn = op.get_bind()
+    # Check if resources table exists
+    exists = conn.execute(text(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'resources')"
+    )).scalar()
+    if not exists:
+        return
+
     # Set capacity_sqm = working_area(width×depth) / 10000 × coefficient
     # for all kilns that have dimensions but no capacity_sqm yet.
     conn.execute(text("""

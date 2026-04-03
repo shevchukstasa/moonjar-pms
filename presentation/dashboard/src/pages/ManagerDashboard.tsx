@@ -31,6 +31,7 @@ import { FactorySelector } from '@/components/layout/FactorySelector';
 import { OrderCreateDialog } from '@/components/orders/OrderCreateDialog';
 import { PdfUploadDialog } from '@/components/orders/PdfUploadDialog';
 import { tpsApi, type TpsParameter } from '@/api/tps';
+import { tpsDashboardApi, stageSpeedsApi, RATE_UNITS, RATE_BASIS, TIME_UNITS, type StageSpeedItem } from '@/api/tpsDashboard';
 import { tocApi } from '@/api/toc';
 import { defectsApi } from '@/api/defects';
 import { aiChatApi } from '@/api/ai_chat';
@@ -1332,6 +1333,188 @@ function TpsTabContent({ factoryId }: { factoryId: string | null }) {
 
       {/* TPS Parameters */}
       <TpsParametersSection factoryId={factoryId} />
+
+      {/* Typology Speeds */}
+      <TypologySpeedsSection factoryId={factoryId} />
+    </div>
+  );
+}
+
+/* ── Typology Speeds Section ─────────────────────────────── */
+
+function TypologySpeedsSection({ factoryId }: { factoryId: string | null }) {
+  const queryClient = useQueryClient();
+  const [expandedTyp, setExpandedTyp] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<Partial<StageSpeedItem>>({});
+
+  const { data: typologies } = useQuery({
+    queryKey: ['tps-typologies', factoryId],
+    queryFn: () => tpsDashboardApi.listTypologies(factoryId!),
+    enabled: !!factoryId,
+  });
+
+  const { data: speedsData, isLoading } = useQuery({
+    queryKey: ['stage-speeds', factoryId],
+    queryFn: () => stageSpeedsApi.list({ factory_id: factoryId! }),
+    enabled: !!factoryId,
+  });
+
+  const speeds = speedsData?.items ?? [];
+  const typs = typologies?.items ?? [];
+
+  const STAGE_LABELS: Record<string, string> = {
+    engobe: 'Engobe', glazing: 'Glazing', firing: 'Firing',
+    sorting: 'Sorting', packing: 'Packing', pre_kiln_check: 'Pre-Kiln QC',
+  };
+
+  const formatSpeed = (s: StageSpeedItem) =>
+    `${s.productivity_rate} ${s.rate_unit ?? 'pcs'} / ${(s.rate_basis ?? 'per_person').replace('per_', '')} / ${s.time_unit ?? 'hour'}`;
+
+  const startEdit = (s: StageSpeedItem) => {
+    setEditingId(s.id);
+    setEditForm({ productivity_rate: s.productivity_rate, rate_unit: s.rate_unit, rate_basis: s.rate_basis, time_unit: s.time_unit, auto_calibrate: s.auto_calibrate });
+  };
+
+  const saveEdit = async (s: StageSpeedItem) => {
+    try {
+      await stageSpeedsApi.update(s.id, editForm);
+      queryClient.invalidateQueries({ queryKey: ['stage-speeds'] });
+      setEditingId(null);
+    } catch { /* ignore */ }
+  };
+
+  const toggleAuto = async (s: StageSpeedItem) => {
+    await stageSpeedsApi.update(s.id, { auto_calibrate: !s.auto_calibrate });
+    queryClient.invalidateQueries({ queryKey: ['stage-speeds'] });
+  };
+
+  if (!factoryId) return null;
+
+  return (
+    <div className="mt-6">
+      <h2 className="mb-3 text-lg font-semibold text-gray-900">Typology Speeds</h2>
+      <p className="mb-4 text-sm text-gray-500">Production speeds per typology. Toggle Auto to enable AI calibration from actual data.</p>
+
+      {isLoading ? (
+        <div className="flex justify-center py-6"><Spinner className="h-6 w-6" /></div>
+      ) : typs.length === 0 ? (
+        <Card><p className="py-4 text-center text-sm text-gray-400">No typologies found. They will be created automatically.</p></Card>
+      ) : (
+        <div className="space-y-3">
+          {typs.map((typ) => {
+            const typSpeeds = speeds.filter((s) => s.typology_id === typ.id);
+            const isExpanded = expandedTyp === typ.id;
+
+            return (
+              <div key={typ.id} className="rounded-lg border border-gray-200 bg-white">
+                {/* Header */}
+                <button
+                  onClick={() => setExpandedTyp(isExpanded ? null : typ.id)}
+                  className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-semibold text-gray-900">{typ.name}</span>
+                    <span className="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
+                      {typ.product_types?.join(', ') || 'All products'}
+                    </span>
+                    {typ.min_size_cm != null && (
+                      <span className="text-xs text-gray-400">{typ.min_size_cm}–{typ.max_size_cm} cm</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">{typSpeeds.length} speeds</span>
+                    <span className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`}>▾</span>
+                  </div>
+                </button>
+
+                {/* Expanded speeds table */}
+                {isExpanded && (
+                  <div className="border-t border-gray-100 px-4 pb-3">
+                    {typSpeeds.length === 0 ? (
+                      <p className="py-3 text-center text-xs text-gray-400">No speed data for this typology</p>
+                    ) : (
+                      <table className="mt-2 w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-xs uppercase text-gray-400">
+                            <th className="pb-2">Stage</th>
+                            <th className="pb-2">Speed</th>
+                            <th className="pb-2">Unit</th>
+                            <th className="pb-2">Basis</th>
+                            <th className="pb-2">Time</th>
+                            <th className="pb-2 text-center">Mode</th>
+                            <th className="pb-2 text-center">EMA</th>
+                            <th className="pb-2"></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {typSpeeds.map((s) => (
+                            <tr key={s.id} className="hover:bg-gray-50">
+                              <td className="py-2 font-medium text-gray-800">{STAGE_LABELS[s.stage] ?? s.stage}</td>
+
+                              {editingId === s.id ? (
+                                <>
+                                  <td className="py-2">
+                                    <input type="number" step="0.1" className="w-20 rounded border px-2 py-1 text-sm"
+                                      value={editForm.productivity_rate ?? ''} onChange={(e) => setEditForm({ ...editForm, productivity_rate: parseFloat(e.target.value) })} />
+                                  </td>
+                                  <td className="py-2">
+                                    <select className="rounded border px-1 py-1 text-xs" value={editForm.rate_unit ?? 'pcs'}
+                                      onChange={(e) => setEditForm({ ...editForm, rate_unit: e.target.value })}>
+                                      {RATE_UNITS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                                    </select>
+                                  </td>
+                                  <td className="py-2">
+                                    <select className="rounded border px-1 py-1 text-xs" value={editForm.rate_basis ?? 'per_person'}
+                                      onChange={(e) => setEditForm({ ...editForm, rate_basis: e.target.value })}>
+                                      {RATE_BASIS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                                    </select>
+                                  </td>
+                                  <td className="py-2">
+                                    <select className="rounded border px-1 py-1 text-xs" value={editForm.time_unit ?? 'hour'}
+                                      onChange={(e) => setEditForm({ ...editForm, time_unit: e.target.value })}>
+                                      {TIME_UNITS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                                    </select>
+                                  </td>
+                                  <td></td><td></td>
+                                  <td className="py-2 text-right">
+                                    <button onClick={() => saveEdit(s)} className="mr-1 text-xs font-medium text-green-600 hover:underline">Save</button>
+                                    <button onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:underline">Cancel</button>
+                                  </td>
+                                </>
+                              ) : (
+                                <>
+                                  <td className="py-2 font-mono text-gray-700">{s.productivity_rate}</td>
+                                  <td className="py-2 text-gray-500">{s.rate_unit ?? 'pcs'}</td>
+                                  <td className="py-2 text-gray-500">{(s.rate_basis ?? 'per_person').replace('per_', '')}</td>
+                                  <td className="py-2 text-gray-500">/{s.time_unit ?? 'hour'}</td>
+                                  <td className="py-2 text-center">
+                                    <button onClick={() => toggleAuto(s)} className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                                      s.auto_calibrate ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                                    }`}>
+                                      {s.auto_calibrate ? '🤖 Auto' : '✏️ Manual'}
+                                    </button>
+                                  </td>
+                                  <td className="py-2 text-center font-mono text-xs text-gray-400">
+                                    {s.calibration_ema ? Number(s.calibration_ema).toFixed(1) : '—'}
+                                  </td>
+                                  <td className="py-2 text-right">
+                                    <button onClick={() => startEdit(s)} className="text-xs font-medium text-blue-600 hover:underline">Edit</button>
+                                  </td>
+                                </>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -97,6 +97,9 @@ export interface StageSpeedItem {
   time_unit: string;       // 'min' | 'hour' | 'shift'
   shift_count: number;
   brigade_size: number;
+  auto_calibrate: boolean;
+  calibration_ema?: number | null;
+  last_calibrated_at?: string | null;
   created_at?: string;
   updated_at?: string;
 }

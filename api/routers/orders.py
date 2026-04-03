@@ -642,19 +642,20 @@ async def reprocess_order(
                 else:
                     pos_result["actions"].append("recipe_not_found")
 
-        # 2. Recalculate glazeable_sqm — use raw SQL to guarantee persistence
+        # 2. Recalculate glazeable_sqm
         new_area = calculate_glazeable_sqm_for_position(db, p)
         if new_area is not None:
             _area_f = float(new_area)
             _qsqm = round(_area_f * (p.quantity or 1), 4)
-            db.execute(
-                text("UPDATE order_positions SET glazeable_sqm = :sqm, quantity_sqm = :qsqm WHERE id = :pid"),
-                {"sqm": _area_f, "qsqm": _qsqm, "pid": str(p.id)},
-            )
-            # Refresh ORM object so subsequent steps see the new values
             p.glazeable_sqm = new_area
             p.quantity_sqm = _qsqm
-            pos_result["actions"].append(f"area={_area_f:.4f},total_sqm={_qsqm}")
+            db.add(p)  # mark dirty explicitly
+            db.flush()
+            # Verify persistence by re-reading
+            db.refresh(p)
+            pos_result["actions"].append(
+                f"area={_area_f:.4f},total_sqm={_qsqm},persisted={p.glazeable_sqm}"
+            )
 
         # 3. Recalculate defect margin (2D: glaze + product type coefficients)
         if p.quantity and not p.quantity_with_defect_margin:

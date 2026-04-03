@@ -646,11 +646,14 @@ async def reprocess_order(
                 else:
                     pos_result["actions"].append("recipe_not_found")
 
-        # 2. Recalculate glazeable_sqm — store in _precalc_sqm for post-commit fix
+        # 2. Recalculate glazeable_sqm — DON'T assign via ORM (gets overwritten).
+        #    Store in _precalc_sqm dict, apply via raw SQL post-commit.
         new_area = calculate_glazeable_sqm_for_position(db, p)
         if new_area is not None:
             _area_f = float(new_area)
             _qsqm = round(_area_f * (p.quantity or 1), 4)
+            # Set on ORM object for use by downstream code in THIS request
+            # (e.g. material reservation, scheduler capacity check)
             p.glazeable_sqm = new_area
             p.quantity_sqm = _qsqm
             _precalc_sqm[str(p.id)] = (_area_f, _qsqm)
@@ -770,8 +773,8 @@ async def reprocess_order(
 
     db.commit()
 
-    # Post-commit: fix glazeable_sqm using engine.connect() — completely
-    # separate from ORM to avoid identity map interference.
+    # Post-commit: fix glazeable_sqm using raw SQL via engine.connect().
+    # Completely separate from ORM to avoid identity map interference.
     # Uses pre-calculated values from _precalc_sqm dict (computed when db was available).
     if _precalc_sqm:
         try:
@@ -779,19 +782,38 @@ async def reprocess_order(
             with engine.connect() as raw_conn:
                 _fix_count = 0
                 for pid, (sqm_val, qsqm_val) in _precalc_sqm.items():
-                    raw_conn.execute(
+                    logger.info(
+                        "POST_COMMIT_FIX | pid=%s sqm=%s qsqm=%s",
+                        pid, sqm_val, qsqm_val,
+                    )
+                    result = raw_conn.execute(
                         text(
                             "UPDATE order_positions "
                             "SET glazeable_sqm = :sqm, quantity_sqm = :qsqm "
-                            "WHERE id = :pid"
+                            "WHERE id = :pid::uuid"
                         ),
                         {"sqm": sqm_val, "qsqm": qsqm_val, "pid": pid},
+                    )
+                    logger.info(
+                        "POST_COMMIT_FIX | pid=%s rowcount=%s",
+                        pid, result.rowcount,
                     )
                     _fix_count += 1
                 raw_conn.commit()
                 logger.info("Post-commit glazeable_sqm fix: %d positions updated", _fix_count)
+
+                # Verify by reading back
+                for pid in _precalc_sqm:
+                    row = raw_conn.execute(
+                        text("SELECT glazeable_sqm, quantity_sqm FROM order_positions WHERE id = :pid::uuid"),
+                        {"pid": pid},
+                    ).fetchone()
+                    logger.info(
+                        "POST_COMMIT_VERIFY | pid=%s glazeable_sqm=%s quantity_sqm=%s",
+                        pid, row[0] if row else "NOT_FOUND", row[1] if row else "NOT_FOUND",
+                    )
         except Exception as _e:
-            logger.warning("Post-commit glazeable_sqm fix failed: %s", _e)
+            logger.warning("Post-commit glazeable_sqm fix failed: %s", _e, exc_info=True)
 
     return {
         "ok": True,

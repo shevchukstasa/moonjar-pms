@@ -769,6 +769,24 @@ async def reprocess_order(
         for r in results:
             r["actions"].append(f"schedule_error={str(e)[:50]}")
 
+    # Re-apply glazeable_sqm — schedule_order may refresh ORM objects from DB
+    # which overwrites in-memory changes. Write via raw SQL to bypass ORM cache.
+    for p in positions:
+        if p.glazeable_sqm is None and p.size:
+            try:
+                new_area = calculate_glazeable_sqm_for_position(db, p)
+                if new_area is not None:
+                    _qsqm = round(float(new_area) * (p.quantity or 1), 4)
+                    db.execute(
+                        text(
+                            "UPDATE order_positions SET glazeable_sqm = :sqm, "
+                            "quantity_sqm = :qsqm WHERE id = :pid"
+                        ),
+                        {"sqm": float(new_area), "qsqm": _qsqm, "pid": str(p.id)},
+                    )
+            except Exception:
+                pass
+
     db.commit()
 
     return {

@@ -1129,6 +1129,7 @@ class TpsShiftMetric(Base):
     cycle_time_minutes = Column(sa.Numeric(8, 2), default=0)
     oee_percent = Column(sa.Numeric(5, 2), default=0)
     takt_time_minutes = Column(sa.Numeric(8, 2), default=0)
+    typology_id = Column(UUID(as_uuid=True), ForeignKey('kiln_loading_typologies.id', ondelete='SET NULL'), nullable=True)
     status = Column(PgEnum(TpsStatus), nullable=False, default=TpsStatus.NORMAL)
     notes = Column(sa.Text)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
@@ -1138,6 +1139,7 @@ class TpsShiftMetric(Base):
     )
 
     factory = relationship('Factory', foreign_keys=[factory_id])
+    typology = relationship('KilnLoadingTypology', foreign_keys=[typology_id])
 
 
 class TpsDeviation(Base):

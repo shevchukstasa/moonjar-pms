@@ -28,8 +28,12 @@ import { FactorySelector } from '@/components/layout/FactorySelector';
 import { useUiStore } from '@/stores/uiStore';
 import {
   tpsDashboardApi,
+  stageSpeedsApi,
   PRODUCTION_STAGES,
   PRODUCTIVITY_UNITS,
+  RATE_UNITS,
+  RATE_BASIS,
+  TIME_UNITS,
   COLLECTIONS,
   APPLICATION_METHODS,
   PLACE_OF_APPLICATION,
@@ -43,6 +47,9 @@ import {
   type TypologyItem,
   type TypologyCreate,
   type KilnCapacityItem,
+  type StageSpeedItem,
+  type StageSpeedCreate,
+  type StageSpeedMatrix,
 } from '@/api/tpsDashboard';
 import { cn } from '@/lib/cn';
 import { useNavigate } from 'react-router-dom';
@@ -105,6 +112,7 @@ const PAGE_TABS = [
   { id: 'rates', label: 'Rates Table' },
   { id: 'calibration', label: 'AI Calibration' },
   { id: 'typologies', label: 'Typologies' },
+  { id: 'typology-speeds', label: 'Typology Speeds' },
 ];
 
 // ── Main page ───────────────────────────────────────────────
@@ -144,6 +152,7 @@ export default function TpsDashboardPage() {
           {activeTab === 'rates' && <RatesTableTab factoryId={activeFactoryId} />}
           {activeTab === 'calibration' && <CalibrationTab factoryId={activeFactoryId} />}
           {activeTab === 'typologies' && <TypologiesTab factoryId={activeFactoryId} />}
+          {activeTab === 'typology-speeds' && <TypologySpeedsTab factoryId={activeFactoryId} />}
         </>
       )}
     </div>
@@ -630,6 +639,7 @@ function RatesTableTab({ factoryId }: { factoryId: string }) {
       stage: step.stage ?? '',
       productivity_rate: step.productivity_rate ?? undefined,
       productivity_unit: step.productivity_unit ?? 'sqm/hour',
+      measurement_basis: step.measurement_basis ?? 'per_person',
       shift_count: step.shift_count,
       auto_calibrate: step.auto_calibrate,
     });
@@ -650,6 +660,7 @@ function RatesTableTab({ factoryId }: { factoryId: string }) {
               <th className="px-3 py-2">Stage</th>
               <th className="px-3 py-2">Rate</th>
               <th className="px-3 py-2">Unit</th>
+              <th className="px-3 py-2">Basis</th>
               <th className="px-3 py-2">Shifts</th>
               <th className="px-3 py-2">Collections</th>
               <th className="px-3 py-2">Methods</th>
@@ -709,6 +720,15 @@ function RatesTableTab({ factoryId }: { factoryId: string }) {
                         </select>
                       </td>
                       <td className="px-3 py-2">
+                        <select
+                          className="w-24 rounded border px-1 py-1 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                          value={editData.measurement_basis ?? 'per_person'}
+                          onChange={(e) => setEditData({ ...editData, measurement_basis: e.target.value })}
+                        >
+                          {RATE_BASIS.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-3 py-2">
                         <input
                           type="number"
                           min={1}
@@ -747,6 +767,7 @@ function RatesTableTab({ factoryId }: { factoryId: string }) {
                       <td className="px-3 py-2 text-gray-600 dark:text-stone-400">{stageLabel(step.stage)}</td>
                       <td className="px-3 py-2 font-medium">{step.productivity_rate ?? '--'}</td>
                       <td className="px-3 py-2 text-gray-500">{unitLabel(step.productivity_unit)}</td>
+                      <td className="px-3 py-2 text-gray-500">{RATE_BASIS.find((b) => b.value === step.measurement_basis)?.label ?? '--'}</td>
                       <td className="px-3 py-2">{step.shift_count}</td>
                       <td className="px-3 py-2 text-xs text-gray-500">{step.applicable_collections.join(', ') || '--'}</td>
                       <td className="px-3 py-2 text-xs text-gray-500">{step.applicable_methods.join(', ') || '--'}</td>
@@ -767,7 +788,7 @@ function RatesTableTab({ factoryId }: { factoryId: string }) {
             })}
             {steps.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-3 py-8 text-center text-gray-400">
+                <td colSpan={13} className="px-3 py-8 text-center text-gray-400">
                   No process steps configured for this factory.
                 </td>
               </tr>
@@ -1433,5 +1454,454 @@ function TypologyCard({ typology, onDelete }: { typology: TypologyItem; onDelete
         </div>
       )}
     </Card>
+  );
+}
+
+
+// ════════════════════════════════════════════════════════════
+// TAB 5: Typology Speeds
+// ════════════════════════════════════════════════════════════
+
+function formatSpeedDisplay(speed: StageSpeedItem): string {
+  const rateUnit = RATE_UNITS.find((u) => u.value === speed.rate_unit)?.label ?? speed.rate_unit;
+  const basis = RATE_BASIS.find((b) => b.value === speed.rate_basis)?.label ?? speed.rate_basis;
+  const timeUnit = TIME_UNITS.find((t) => t.value === speed.time_unit)?.label ?? speed.time_unit;
+  return `${speed.productivity_rate} ${rateUnit} ${basis} ${timeUnit}`;
+}
+
+function TypologySpeedsTab({ factoryId }: { factoryId: string }) {
+  const qc = useQueryClient();
+  const [expandedTypology, setExpandedTypology] = useState<string | null>(null);
+  const [editingSpeedId, setEditingSpeedId] = useState<string | null>(null);
+  const [editData, setEditData] = useState<Partial<StageSpeedCreate>>({});
+  const [addingFor, setAddingFor] = useState<{ typology_id: string; stage: string } | null>(null);
+  const [newSpeed, setNewSpeed] = useState<Partial<StageSpeedCreate>>({});
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  const { data: typologiesData, isLoading: typLoading } = useQuery({
+    queryKey: ['tps-typologies', factoryId],
+    queryFn: () => tpsDashboardApi.listTypologies(factoryId),
+    enabled: !!factoryId,
+  });
+
+  const typologies: TypologyItem[] = useMemo(() => {
+    const raw = typologiesData?.items ?? [];
+    return [...raw].sort((a, b) => a.priority - b.priority);
+  }, [typologiesData]);
+
+  const { data: matrixData, isLoading: matrixLoading } = useQuery({
+    queryKey: ['tps-stage-speeds-matrix', factoryId],
+    queryFn: () => stageSpeedsApi.matrix(factoryId),
+    enabled: !!factoryId,
+  });
+
+  // Build a map: typology_id -> StageSpeedItem[]
+  const speedsByTypology = useMemo(() => {
+    const map: Record<string, StageSpeedItem[]> = {};
+    const items = matrixData?.items ?? [];
+    items.forEach((entry: StageSpeedMatrix) => {
+      map[entry.typology_id] = entry.speeds ?? [];
+    });
+    return map;
+  }, [matrixData]);
+
+  const createMut = useMutation({
+    mutationFn: (payload: StageSpeedCreate) => stageSpeedsApi.create(payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tps-stage-speeds-matrix'] });
+      setAddingFor(null);
+      setNewSpeed({});
+    },
+  });
+
+  const updateMut = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Partial<StageSpeedCreate> }) =>
+      stageSpeedsApi.update(id, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tps-stage-speeds-matrix'] });
+      setEditingSpeedId(null);
+    },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => stageSpeedsApi.remove(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tps-stage-speeds-matrix'] }),
+  });
+
+  function startEditSpeed(speed: StageSpeedItem) {
+    setEditingSpeedId(speed.id);
+    setEditData({
+      productivity_rate: speed.productivity_rate,
+      rate_unit: speed.rate_unit,
+      rate_basis: speed.rate_basis,
+      time_unit: speed.time_unit,
+      shift_count: speed.shift_count,
+      brigade_size: speed.brigade_size,
+    });
+  }
+
+  function startAdd(typologyId: string, stage: string) {
+    setAddingFor({ typology_id: typologyId, stage });
+    setNewSpeed({
+      typology_id: typologyId,
+      factory_id: factoryId,
+      stage,
+      productivity_rate: 0,
+      rate_unit: 'pcs',
+      rate_basis: 'per_person',
+      time_unit: 'hour',
+      shift_count: 1,
+      brigade_size: 1,
+    });
+  }
+
+  const isLoading = typLoading || matrixLoading;
+
+  if (isLoading) {
+    return <Card><div className="flex justify-center py-8"><Spinner className="h-8 w-8" /></div></Card>;
+  }
+
+  if (typologies.length === 0) {
+    return (
+      <Card>
+        <p className="py-4 text-center text-sm text-gray-400">
+          No typologies configured. Create typologies first in the Typologies tab.
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          Stage Speeds by Typology
+        </h3>
+      </div>
+
+      {createMut.isError && (
+        <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/20">
+          <p className="text-sm text-red-600">Create failed: {(createMut.error as Error).message}</p>
+        </Card>
+      )}
+
+      {typologies.map((typology) => {
+        const isExpanded = expandedTypology === typology.id;
+        const speeds = speedsByTypology[typology.id] ?? [];
+
+        // Group speeds by stage
+        const speedsByStage: Record<string, StageSpeedItem[]> = {};
+        speeds.forEach((s) => {
+          if (!speedsByStage[s.stage]) speedsByStage[s.stage] = [];
+          speedsByStage[s.stage].push(s);
+        });
+
+        // All stages for the "add" dropdown
+        const stagesWithSpeeds = new Set(Object.keys(speedsByStage));
+
+        return (
+          <Card key={typology.id}>
+            {/* Typology header - clickable to expand */}
+            <button
+              onClick={() => setExpandedTypology(isExpanded ? null : typology.id)}
+              className="flex w-full items-center justify-between text-left"
+            >
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-xs font-bold text-gray-600 dark:bg-stone-700 dark:text-stone-300">
+                  {typology.priority}
+                </span>
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{typology.name}</h4>
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500 dark:bg-stone-700 dark:text-stone-400">
+                  {speeds.length} speed{speeds.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <svg
+                className={cn('h-5 w-5 text-gray-400 transition-transform', isExpanded && 'rotate-180')}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {isExpanded && (
+              <div className="mt-3 space-y-2">
+                {/* Summary of typology tags */}
+                <div className="flex flex-wrap gap-1 text-xs">
+                  {typology.product_types.map((v) => (
+                    <span key={v} className="rounded-full bg-purple-50 px-2 py-0.5 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                      {PRODUCT_TYPES.find((p) => p.value === v)?.label ?? v}
+                    </span>
+                  ))}
+                  {typology.collections.map((v) => (
+                    <span key={v} className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                      {COLLECTIONS.find((c) => c.value === v)?.label ?? v}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Speeds table */}
+                {speeds.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b text-left text-xs font-medium uppercase text-gray-500 dark:text-stone-400">
+                          <th className="px-3 py-2">Stage</th>
+                          <th className="px-3 py-2">Rate</th>
+                          <th className="px-3 py-2">Unit</th>
+                          <th className="px-3 py-2">Basis</th>
+                          <th className="px-3 py-2">Time</th>
+                          <th className="px-3 py-2">Shifts</th>
+                          <th className="px-3 py-2">Brigade</th>
+                          <th className="px-3 py-2">Display</th>
+                          <th className="px-3 py-2">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {speeds.map((speed) => {
+                          const isEditing = editingSpeedId === speed.id;
+
+                          return (
+                            <tr key={speed.id} className="border-b transition hover:bg-gray-50 dark:hover:bg-stone-800/50">
+                              {isEditing ? (
+                                <>
+                                  <td className="px-3 py-2 text-gray-600 dark:text-stone-400">{stageLabel(speed.stage)}</td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      className="w-20 rounded border px-2 py-1 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                                      value={editData.productivity_rate ?? ''}
+                                      onChange={(e) => setEditData({ ...editData, productivity_rate: e.target.value ? Number(e.target.value) : undefined })}
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <select
+                                      className="w-16 rounded border px-1 py-1 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                                      value={editData.rate_unit ?? 'pcs'}
+                                      onChange={(e) => setEditData({ ...editData, rate_unit: e.target.value })}
+                                    >
+                                      {RATE_UNITS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                                    </select>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <select
+                                      className="w-24 rounded border px-1 py-1 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                                      value={editData.rate_basis ?? 'per_person'}
+                                      onChange={(e) => setEditData({ ...editData, rate_basis: e.target.value })}
+                                    >
+                                      {RATE_BASIS.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
+                                    </select>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <select
+                                      className="w-20 rounded border px-1 py-1 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                                      value={editData.time_unit ?? 'hour'}
+                                      onChange={(e) => setEditData({ ...editData, time_unit: e.target.value })}
+                                    >
+                                      {TIME_UNITS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                    </select>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={3}
+                                      className="w-14 rounded border px-2 py-1 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                                      value={editData.shift_count ?? 1}
+                                      onChange={(e) => setEditData({ ...editData, shift_count: Number(e.target.value) })}
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      className="w-14 rounded border px-2 py-1 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                                      value={editData.brigade_size ?? 1}
+                                      onChange={(e) => setEditData({ ...editData, brigade_size: Number(e.target.value) })}
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2 text-xs text-gray-500">--</td>
+                                  <td className="px-3 py-2 space-x-1">
+                                    <Button
+                                      size="sm"
+                                      onClick={() => updateMut.mutate({ id: speed.id, payload: editData })}
+                                      disabled={updateMut.isPending}
+                                    >
+                                      Save
+                                    </Button>
+                                    <Button size="sm" variant="secondary" onClick={() => setEditingSpeedId(null)}>
+                                      Cancel
+                                    </Button>
+                                  </td>
+                                </>
+                              ) : (
+                                <>
+                                  <td className="px-3 py-2 text-gray-600 dark:text-stone-400">{stageLabel(speed.stage)}</td>
+                                  <td className="px-3 py-2 font-medium font-mono">{speed.productivity_rate}</td>
+                                  <td className="px-3 py-2 text-gray-500">{RATE_UNITS.find((u) => u.value === speed.rate_unit)?.label ?? speed.rate_unit}</td>
+                                  <td className="px-3 py-2 text-gray-500">{RATE_BASIS.find((b) => b.value === speed.rate_basis)?.label ?? speed.rate_basis}</td>
+                                  <td className="px-3 py-2 text-gray-500">{TIME_UNITS.find((t) => t.value === speed.time_unit)?.label ?? speed.time_unit}</td>
+                                  <td className="px-3 py-2">{speed.shift_count}</td>
+                                  <td className="px-3 py-2">{speed.brigade_size}</td>
+                                  <td className="px-3 py-2">
+                                    <span className="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                                      {formatSpeedDisplay(speed)}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 space-x-1">
+                                    <Button size="sm" variant="ghost" onClick={() => startEditSpeed(speed)}>
+                                      Edit
+                                    </Button>
+                                    <button
+                                      onClick={() => setDeleteTarget(speed.id)}
+                                      className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                                      title="Remove speed override"
+                                    >
+                                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                      </svg>
+                                    </button>
+                                  </td>
+                                </>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="py-2 text-center text-xs text-gray-400">No speed overrides configured for this typology.</p>
+                )}
+
+                {/* Add speed inline form */}
+                {addingFor?.typology_id === typology.id ? (
+                  <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 dark:border-blue-800 dark:bg-blue-950/20">
+                    <h5 className="mb-2 text-xs font-semibold text-gray-700 dark:text-stone-300">Add Speed Override</h5>
+                    <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-7">
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-500">Stage</label>
+                        <select
+                          className="w-full rounded border px-2 py-1.5 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                          value={newSpeed.stage ?? ''}
+                          onChange={(e) => setNewSpeed({ ...newSpeed, stage: e.target.value })}
+                        >
+                          <option value="">-- Select --</option>
+                          {PRODUCTION_STAGES.map((s) => (
+                            <option key={s.value} value={s.value}>{s.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-500">Rate</label>
+                        <input
+                          type="number"
+                          step="any"
+                          className="w-full rounded border px-2 py-1.5 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                          value={newSpeed.productivity_rate ?? ''}
+                          onChange={(e) => setNewSpeed({ ...newSpeed, productivity_rate: e.target.value ? Number(e.target.value) : 0 })}
+                          placeholder="0"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-500">Unit</label>
+                        <select
+                          className="w-full rounded border px-2 py-1.5 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                          value={newSpeed.rate_unit ?? 'pcs'}
+                          onChange={(e) => setNewSpeed({ ...newSpeed, rate_unit: e.target.value })}
+                        >
+                          {RATE_UNITS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-500">Basis</label>
+                        <select
+                          className="w-full rounded border px-2 py-1.5 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                          value={newSpeed.rate_basis ?? 'per_person'}
+                          onChange={(e) => setNewSpeed({ ...newSpeed, rate_basis: e.target.value })}
+                        >
+                          {RATE_BASIS.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-500">Time</label>
+                        <select
+                          className="w-full rounded border px-2 py-1.5 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                          value={newSpeed.time_unit ?? 'hour'}
+                          onChange={(e) => setNewSpeed({ ...newSpeed, time_unit: e.target.value })}
+                        >
+                          {TIME_UNITS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-500">Shifts</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={3}
+                          className="w-full rounded border px-2 py-1.5 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                          value={newSpeed.shift_count ?? 1}
+                          onChange={(e) => setNewSpeed({ ...newSpeed, shift_count: Number(e.target.value) })}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-gray-500">Brigade</label>
+                        <input
+                          type="number"
+                          min={1}
+                          className="w-full rounded border px-2 py-1.5 text-sm dark:bg-stone-800 dark:border-stone-600 dark:text-stone-100"
+                          value={newSpeed.brigade_size ?? 1}
+                          onChange={(e) => setNewSpeed({ ...newSpeed, brigade_size: Number(e.target.value) })}
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          if (newSpeed.stage && newSpeed.productivity_rate) {
+                            createMut.mutate(newSpeed as StageSpeedCreate);
+                          }
+                        }}
+                        disabled={!newSpeed.stage || !newSpeed.productivity_rate || createMut.isPending}
+                      >
+                        {createMut.isPending ? 'Saving...' : 'Add Speed'}
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => { setAddingFor(null); setNewSpeed({}); }}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => startAdd(typology.id, '')}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-gray-200 py-2 text-xs text-gray-400 transition hover:border-primary-300 hover:text-primary-500 dark:border-stone-700 dark:hover:border-gold-600 dark:hover:text-gold-400"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add speed override
+                  </button>
+                )}
+              </div>
+            )}
+          </Card>
+        );
+      })}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) deleteMut.mutate(deleteTarget);
+          setDeleteTarget(null);
+        }}
+        title="Remove Speed Override"
+        message="Remove this speed override? The stage will fall back to the default rate."
+      />
+    </div>
   );
 }

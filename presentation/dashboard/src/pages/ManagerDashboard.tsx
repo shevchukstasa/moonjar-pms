@@ -1373,8 +1373,9 @@ function TpsParametersSection({ factoryId }: { factoryId: string | null }) {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Stage</th>
-                <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Target Cycle (min)</th>
-                <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Batch Size</th>
+                <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Metric</th>
+                <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Target Value</th>
+                <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Unit</th>
                 <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Tolerance %</th>
                 <th className="px-4 py-2 text-center text-xs font-medium uppercase tracking-wider text-gray-500">Status</th>
               </tr>
@@ -1385,14 +1386,17 @@ function TpsParametersSection({ factoryId }: { factoryId: string | null }) {
                   <td className="whitespace-nowrap px-4 py-2 text-sm font-medium text-gray-900">
                     {STAGE_LABELS[p.stage] ?? p.stage}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2 text-right font-mono text-sm text-gray-700">
-                    {p.target_cycle_time_min}
+                  <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-700">
+                    {p.metric_name ?? '--'}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2 text-right font-mono text-sm text-gray-700">
-                    {p.standard_batch_size}
+                    {p.target_value ?? p.target_cycle_time_min ?? '--'}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2 text-sm text-gray-500">
+                    {p.unit ?? '--'}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2 text-right font-mono text-sm text-gray-700">
-                    {p.tolerance_pct}%
+                    {(p.tolerance_percent ?? p.tolerance_pct) != null ? `${p.tolerance_percent ?? p.tolerance_pct}%` : '--'}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2 text-center">
                     <Badge status={p.is_active ? 'active' : 'inactive'} label={p.is_active ? 'Active' : 'Inactive'} />

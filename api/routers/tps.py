@@ -17,6 +17,7 @@ from api.models import (
     OperationLog, Operation, OrderPosition, MasterPermission, User,
     ProcessStep, CalibrationLog,
     KilnLoadingTypology, KilnTypologyCapacity,
+    StageTypologySpeed,
 )
 from api.enums import TpsDeviationType
 from business.services.tps_metrics import (
@@ -1552,4 +1553,212 @@ async def get_typology_capacities(
             "ai_adjusted_sqm": float(c.ai_adjusted_sqm) if c.ai_adjusted_sqm else None,
             "ref_size": c.ref_size,
         } for c in caps],
+    }
+
+
+# ── Stage Typology Speeds ────────────────────────────────────────────────
+
+
+class StageSpeedCreate(BaseModel):
+    factory_id: UUID
+    typology_id: UUID
+    stage: str
+    productivity_rate: float
+    rate_unit: str = "pcs"       # 'pcs' or 'sqm'
+    rate_basis: str = "per_person"  # 'per_person' or 'per_brigade'
+    time_unit: str = "hour"      # 'min', 'hour', 'shift'
+    shift_count: int = 2
+    shift_duration_hours: float = 8.0
+    brigade_size: int = 1
+    auto_calibrate: bool = False
+    notes: Optional[str] = None
+
+
+class StageSpeedUpdate(BaseModel):
+    productivity_rate: Optional[float] = None
+    rate_unit: Optional[str] = None
+    rate_basis: Optional[str] = None
+    time_unit: Optional[str] = None
+    shift_count: Optional[int] = None
+    shift_duration_hours: Optional[float] = None
+    brigade_size: Optional[int] = None
+    auto_calibrate: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+def _serialize_stage_speed(s: StageTypologySpeed) -> dict:
+    return {
+        "id": str(s.id),
+        "factory_id": str(s.factory_id),
+        "typology_id": str(s.typology_id),
+        "typology_name": s.typology.name if s.typology else None,
+        "stage": s.stage,
+        "productivity_rate": float(s.productivity_rate),
+        "rate_unit": s.rate_unit,
+        "rate_basis": s.rate_basis,
+        "time_unit": s.time_unit,
+        "shift_count": s.shift_count or 2,
+        "shift_duration_hours": float(s.shift_duration_hours) if s.shift_duration_hours else 8.0,
+        "brigade_size": s.brigade_size or 1,
+        "auto_calibrate": s.auto_calibrate or False,
+        "calibration_ema": float(s.calibration_ema) if s.calibration_ema else None,
+        "last_calibrated_at": s.last_calibrated_at.isoformat() if s.last_calibrated_at else None,
+        "notes": s.notes,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+        "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+    }
+
+
+@router.get("/stage-speeds")
+async def list_stage_speeds(
+    factory_id: Optional[UUID] = None,
+    typology_id: Optional[UUID] = None,
+    stage: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List stage typology speeds with optional filters."""
+    query = db.query(StageTypologySpeed).options(
+        joinedload(StageTypologySpeed.typology)
+    )
+    if factory_id:
+        query = query.filter(StageTypologySpeed.factory_id == factory_id)
+    if typology_id:
+        query = query.filter(StageTypologySpeed.typology_id == typology_id)
+    if stage:
+        query = query.filter(StageTypologySpeed.stage == stage)
+
+    items = query.order_by(StageTypologySpeed.stage).all()
+    return {"items": [_serialize_stage_speed(s) for s in items], "total": len(items)}
+
+
+@router.post("/stage-speeds", status_code=201)
+async def create_stage_speed(
+    data: StageSpeedCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Create a new stage typology speed entry."""
+    # Validate typology exists
+    typology = db.query(KilnLoadingTypology).filter(
+        KilnLoadingTypology.id == data.typology_id
+    ).first()
+    if not typology:
+        raise HTTPException(404, "Typology not found")
+
+    # Check for duplicate
+    existing = db.query(StageTypologySpeed).filter(
+        StageTypologySpeed.typology_id == data.typology_id,
+        StageTypologySpeed.stage == data.stage,
+    ).first()
+    if existing:
+        raise HTTPException(
+            409,
+            f"Speed already exists for typology + stage '{data.stage}'. Use PATCH to update.",
+        )
+
+    speed = StageTypologySpeed(
+        factory_id=data.factory_id,
+        typology_id=data.typology_id,
+        stage=data.stage,
+        productivity_rate=data.productivity_rate,
+        rate_unit=data.rate_unit,
+        rate_basis=data.rate_basis,
+        time_unit=data.time_unit,
+        shift_count=data.shift_count,
+        shift_duration_hours=data.shift_duration_hours,
+        brigade_size=data.brigade_size,
+        auto_calibrate=data.auto_calibrate,
+        notes=data.notes,
+    )
+    db.add(speed)
+    db.commit()
+    db.refresh(speed)
+    return _serialize_stage_speed(speed)
+
+
+@router.patch("/stage-speeds/{speed_id}")
+async def update_stage_speed(
+    speed_id: UUID,
+    data: StageSpeedUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Partially update a stage typology speed."""
+    speed = db.query(StageTypologySpeed).filter(StageTypologySpeed.id == speed_id).first()
+    if not speed:
+        raise HTTPException(404, "Stage speed not found")
+
+    for field, value in data.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(speed, field, value)
+
+    db.commit()
+    db.refresh(speed)
+    return _serialize_stage_speed(speed)
+
+
+@router.delete("/stage-speeds/{speed_id}")
+async def delete_stage_speed(
+    speed_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Delete a stage typology speed entry."""
+    speed = db.query(StageTypologySpeed).filter(StageTypologySpeed.id == speed_id).first()
+    if not speed:
+        raise HTTPException(404, "Stage speed not found")
+    db.delete(speed)
+    db.commit()
+    return {"status": "deleted", "id": str(speed_id)}
+
+
+@router.get("/stage-speeds/matrix")
+async def get_stage_speeds_matrix(
+    factory_id: UUID = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return all speeds grouped by typology then stage, for a frontend matrix view.
+
+    Response shape:
+    {
+      "typologies": [
+        {
+          "id": "...", "name": "Tile 10x10",
+          "stages": {
+            "glazing": { ...speed fields },
+            "sorting": { ...speed fields },
+          }
+        },
+        ...
+      ],
+      "all_stages": ["glazing", "firing", "sorting", ...]
+    }
+    """
+    speeds = (
+        db.query(StageTypologySpeed)
+        .options(joinedload(StageTypologySpeed.typology))
+        .filter(StageTypologySpeed.factory_id == factory_id)
+        .all()
+    )
+
+    # Collect all stages
+    all_stages = sorted({s.stage for s in speeds})
+
+    # Group by typology
+    by_typology: dict = {}
+    for s in speeds:
+        tid = str(s.typology_id)
+        if tid not in by_typology:
+            by_typology[tid] = {
+                "id": tid,
+                "name": s.typology.name if s.typology else "Unknown",
+                "stages": {},
+            }
+        by_typology[tid]["stages"][s.stage] = _serialize_stage_speed(s)
+
+    return {
+        "typologies": list(by_typology.values()),
+        "all_stages": all_stages,
     }

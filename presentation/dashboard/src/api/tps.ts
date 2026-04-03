@@ -3,13 +3,19 @@ import apiClient from './client';
 export interface TpsParameter {
   id: string;
   stage: string;
-  target_cycle_time_min: number;
-  standard_batch_size: number;
-  tolerance_pct: number;
+  // Backend actual field names
+  metric_name: string | null;
+  target_value: number | null;
+  tolerance_percent: number | null;
+  unit: string | null;
   factory_id: string | null;
   is_active: boolean;
   created_at: string | null;
   updated_at: string | null;
+  // Legacy aliases (may not be present)
+  target_cycle_time_min?: number;
+  standard_batch_size?: number;
+  tolerance_pct?: number;
 }
 
 export const tpsApi = {

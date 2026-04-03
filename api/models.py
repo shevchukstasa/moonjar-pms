@@ -1305,6 +1305,44 @@ class KilnTypologyCapacity(Base):
     resource = relationship('Resource', foreign_keys=[resource_id])
 
 
+class StageTypologySpeed(Base):
+    """Production speed per (stage x typology) combination.
+
+    Allows configuring different processing speeds depending on what product
+    typology is being processed at each production stage.
+    """
+    __tablename__ = 'stage_typology_speeds'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id', ondelete='CASCADE'), nullable=False)
+    typology_id = Column(UUID(as_uuid=True), ForeignKey('kiln_loading_typologies.id', ondelete='CASCADE'), nullable=False)
+    stage = Column(sa.String(100), nullable=False)  # glazing, sorting, firing, etc.
+
+    productivity_rate = Column(sa.Numeric(10, 2), nullable=False)  # e.g. 50.0
+    rate_unit = Column(sa.String(20), nullable=False, server_default=sa.text("'pcs'"))  # 'pcs' or 'sqm'
+    rate_basis = Column(sa.String(20), nullable=False, server_default=sa.text("'per_person'"))  # 'per_person' or 'per_brigade'
+    time_unit = Column(sa.String(20), nullable=False, server_default=sa.text("'hour'"))  # 'min', 'hour', 'shift'
+
+    shift_count = Column(sa.Integer, server_default=sa.text('2'))
+    shift_duration_hours = Column(sa.Numeric(4, 1), server_default=sa.text('8.0'))
+    brigade_size = Column(sa.Integer, server_default=sa.text('1'))  # people per brigade
+
+    auto_calibrate = Column(sa.Boolean, server_default=sa.text('false'))
+    calibration_ema = Column(sa.Numeric(10, 2), nullable=True)
+    last_calibrated_at = Column(sa.DateTime(timezone=True), nullable=True)
+    notes = Column(sa.Text, nullable=True)
+
+    created_at = Column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('typology_id', 'stage', name='uq_stage_typology_speed'),
+    )
+
+    typology = relationship('KilnLoadingTypology', backref='stage_speeds')
+    factory = relationship('Factory', foreign_keys=[factory_id])
+
+
 class BottleneckConfig(Base):
     __tablename__ = 'bottleneck_config'
 

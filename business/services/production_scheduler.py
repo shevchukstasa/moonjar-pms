@@ -66,11 +66,48 @@ def _get_stage_duration_days(
     stage: str,
     total_sqm: float = 0,
     total_pcs: int = 0,
+    position: "Optional[OrderPosition]" = None,
 ) -> int:
-    """Calculate duration in working days for a stage using ProcessStep data.
+    """Calculate duration in working days for a stage.
 
-    Falls back to hardcoded 1 day if no ProcessStep is configured.
+    Priority:
+      1. StageTypologySpeed — match position to typology, then look up speed
+      2. ProcessStep — generic factory-level speed for the stage
+      3. Fallback to 1 day
     """
+    import math
+
+    # ── Priority 1: StageTypologySpeed (typology-aware) ──
+    if position is not None:
+        try:
+            from api.models import StageTypologySpeed
+            from business.services.typology_matcher import find_matching_typology
+
+            typology = find_matching_typology(db, position)
+            if typology:
+                speed = db.query(StageTypologySpeed).filter(
+                    StageTypologySpeed.typology_id == typology.id,
+                    StageTypologySpeed.stage == stage,
+                ).first()
+
+                if speed and speed.productivity_rate:
+                    result = _calc_hours_from_speed(
+                        rate=float(speed.productivity_rate),
+                        rate_unit=speed.rate_unit or 'pcs',
+                        rate_basis=speed.rate_basis or 'per_person',
+                        time_unit=speed.time_unit or 'hour',
+                        shift_count=speed.shift_count or 2,
+                        shift_duration_hours=float(speed.shift_duration_hours or 8.0),
+                        brigade_size=speed.brigade_size or 1,
+                        total_sqm=total_sqm,
+                        total_pcs=total_pcs,
+                    )
+                    if result is not None:
+                        return result
+        except Exception as e:
+            logger.debug("StageTypologySpeed lookup failed for %s: %s", stage, e)
+
+    # ── Priority 2: ProcessStep (generic) ──
     try:
         from api.models import ProcessStep
         step = db.query(ProcessStep).filter(
@@ -98,11 +135,60 @@ def _get_stage_duration_days(
         else:
             hours_needed = 8.0  # fallback: 1 shift
 
-        import math
         return max(1, math.ceil(hours_needed / hours_per_day))
     except Exception as e:
         logger.debug("_get_stage_duration_days fallback for %s: %s", stage, e)
         return 1
+
+
+def _calc_hours_from_speed(
+    rate: float,
+    rate_unit: str,
+    rate_basis: str,
+    time_unit: str,
+    shift_count: int,
+    shift_duration_hours: float,
+    brigade_size: int,
+    total_sqm: float,
+    total_pcs: int,
+) -> "Optional[int]":
+    """Convert a StageTypologySpeed record into working days.
+
+    Returns None if the speed cannot be applied (e.g. rate_unit is sqm but
+    total_sqm is 0).
+    """
+    import math
+
+    if rate <= 0:
+        return None
+
+    # Convert rate to "units per hour"
+    if time_unit == 'min':
+        rate_per_hour = rate * 60.0
+    elif time_unit == 'shift':
+        rate_per_hour = rate / shift_duration_hours
+    else:  # 'hour' (default)
+        rate_per_hour = rate
+
+    # Effective hourly throughput: for per_person, multiply by brigade_size
+    if rate_basis == 'per_person':
+        effective_rate = rate_per_hour * brigade_size
+    else:  # 'per_brigade'
+        effective_rate = rate_per_hour
+
+    if effective_rate <= 0:
+        return None
+
+    # Calculate hours needed based on unit
+    if rate_unit == 'sqm' and total_sqm > 0:
+        hours_needed = total_sqm / effective_rate
+    elif rate_unit == 'pcs' and total_pcs > 0:
+        hours_needed = total_pcs / effective_rate
+    else:
+        return None  # cannot calculate — let caller fall through to next priority
+
+    hours_per_day = shift_duration_hours * shift_count
+    return max(1, math.ceil(hours_needed / hours_per_day))
 
 
 def _skip_weekends(target: date) -> date:
@@ -387,12 +473,12 @@ def schedule_position(
     _pos_pcs = int(position.quantity or 0)
 
     # Dynamic stage durations (fall back to hardcoded 1 if not configured)
-    glazing_days = _get_stage_duration_days(db, position.factory_id, 'glazing', _pos_sqm, _pos_pcs)
-    pre_kiln_days = _get_stage_duration_days(db, position.factory_id, 'pre_kiln_check', _pos_sqm, _pos_pcs)
-    firing_days = _get_stage_duration_days(db, position.factory_id, 'firing', _pos_sqm, _pos_pcs)
+    glazing_days = _get_stage_duration_days(db, position.factory_id, 'glazing', _pos_sqm, _pos_pcs, position=position)
+    pre_kiln_days = _get_stage_duration_days(db, position.factory_id, 'pre_kiln_check', _pos_sqm, _pos_pcs, position=position)
+    firing_days = _get_stage_duration_days(db, position.factory_id, 'firing', _pos_sqm, _pos_pcs, position=position)
     cooling_days = COOLING_DAYS  # physical process, not worker-dependent
-    sorting_days = _get_stage_duration_days(db, position.factory_id, 'sorting', _pos_sqm, _pos_pcs)
-    qc_days = _get_stage_duration_days(db, position.factory_id, 'quality_check', _pos_sqm, _pos_pcs)
+    sorting_days = _get_stage_duration_days(db, position.factory_id, 'sorting', _pos_sqm, _pos_pcs, position=position)
+    qc_days = _get_stage_duration_days(db, position.factory_id, 'quality_check', _pos_sqm, _pos_pcs, position=position)
 
     # Backward schedule calculation
     planned_completion = _skip_weekends(deadline)

@@ -1845,6 +1845,7 @@ async def lifespan(app: FastAPI):
         ("tps_dashboard", "api.schema_patches.tps_dashboard_patch", "apply"),
         ("typology", "api.schema_patches.typology_patch", "apply"),
         ("transcription_log", "api.schema_patches.transcription_log_patch", "apply"),
+        ("stage_typology_speeds", "api.schema_patches.stage_typology_speeds_patch", "apply"),
     ]
 
     # Inline patches (too small for separate files)

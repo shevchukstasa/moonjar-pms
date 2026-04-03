@@ -84,6 +84,41 @@ export interface ProcessStepCreate {
   notes?: string;
 }
 
+// ── Stage Speed Types ────────────────────────────────────────
+
+export interface StageSpeedItem {
+  id: string;
+  typology_id: string;
+  factory_id: string;
+  stage: string;
+  productivity_rate: number;
+  rate_unit: string;       // 'pcs' | 'sqm'
+  rate_basis: string;      // 'per_person' | 'per_brigade'
+  time_unit: string;       // 'min' | 'hour' | 'shift'
+  shift_count: number;
+  brigade_size: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface StageSpeedCreate {
+  typology_id: string;
+  factory_id: string;
+  stage: string;
+  productivity_rate: number;
+  rate_unit?: string;
+  rate_basis?: string;
+  time_unit?: string;
+  shift_count?: number;
+  brigade_size?: number;
+}
+
+export interface StageSpeedMatrix {
+  typology_id: string;
+  typology_name: string;
+  speeds: StageSpeedItem[];
+}
+
 // ── Typology Types ───────────────────────────────────────────
 
 export interface KilnCapacityItem {
@@ -239,6 +274,34 @@ export const tpsDashboardApi = {
   },
 };
 
+// ── Stage Typology Speeds API ─────────────────────────────────
+
+export const stageSpeedsApi = {
+  list: async (params?: { typology_id?: string; factory_id?: string; stage?: string }): Promise<{ items: StageSpeedItem[] }> => {
+    const { data } = await apiClient.get('/tps/stage-speeds', { params });
+    return data;
+  },
+
+  matrix: async (factoryId?: string): Promise<{ items: StageSpeedMatrix[] }> => {
+    const { data } = await apiClient.get('/tps/stage-speeds/matrix', { params: { factory_id: factoryId } });
+    return data;
+  },
+
+  create: async (payload: StageSpeedCreate): Promise<StageSpeedItem> => {
+    const { data } = await apiClient.post('/tps/stage-speeds', payload);
+    return data;
+  },
+
+  update: async (id: string, payload: Partial<StageSpeedCreate>): Promise<StageSpeedItem> => {
+    const { data } = await apiClient.patch(`/tps/stage-speeds/${id}`, payload);
+    return data;
+  },
+
+  remove: async (id: string): Promise<void> => {
+    await apiClient.delete(`/tps/stage-speeds/${id}`);
+  },
+};
+
 // ── Constants ────────────────────────────────────────────────
 
 export const PRODUCTION_STAGES = [
@@ -260,6 +323,24 @@ export const PRODUCTIVITY_UNITS = [
   { value: 'liters/hour', label: 'liters/hour' },
   { value: 'sqm/shift', label: 'm\u00b2/shift' },
   { value: 'pcs/shift', label: 'pcs/shift' },
+  { value: 'sqm/min', label: 'm\u00b2/min' },
+  { value: 'pcs/min', label: 'pcs/min' },
+];
+
+export const RATE_UNITS = [
+  { value: 'pcs', label: 'pcs' },
+  { value: 'sqm', label: 'm\u00b2' },
+];
+
+export const RATE_BASIS = [
+  { value: 'per_person', label: '/ person' },
+  { value: 'per_brigade', label: '/ brigade' },
+];
+
+export const TIME_UNITS = [
+  { value: 'min', label: '/ min' },
+  { value: 'hour', label: '/ hour' },
+  { value: 'shift', label: '/ shift' },
 ];
 
 export const COLLECTIONS = [

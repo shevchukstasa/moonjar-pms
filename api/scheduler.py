@@ -774,18 +774,62 @@ async def morning_deferred_alerts():
     logger.info("Running morning deferred alerts")
     db = _get_db_session()
     try:
+        from api.models import Factory
         from business.services.escalation import get_deferred_morning_alerts, is_night_time
+        from business.services.notifications import send_telegram_message, get_forum_topic
         if is_night_time():
             return  # Still night, skip
 
-        factory_ids = _get_all_factory_ids(db)
-        for fid in factory_ids:
+        factories = db.query(Factory).filter(Factory.is_active.is_(True)).all()
+        for factory in factories:
             try:
-                deferred = get_deferred_morning_alerts(db, fid)
-                if deferred:
-                    logger.info("Factory %s: %d deferred alerts", fid, len(deferred))
+                deferred = get_deferred_morning_alerts(db, factory.id)
+                if not deferred:
+                    continue
+
+                logger.info("Factory %s: %d deferred alerts", factory.id, len(deferred))
+
+                # Format deferred alerts into a message
+                lines = []
+                for i, alert in enumerate(deferred, 1):
+                    desc = alert.get("description") or alert.get("task_type", "—")
+                    lines.append(f"  {i}. [{alert['task_type']}] {desc}")
+
+                factory_lang = "id" if "bali" in (factory.name or "").lower() else "en"
+                msgs = {
+                    "en": (
+                        f"☀️ *Morning Deferred Alerts* — {factory.name}\n\n"
+                        f"📋 {len(deferred)} task(s) deferred overnight:\n"
+                        + "\n".join(lines)
+                        + "\n\nPlease review and take action."
+                    ),
+                    "id": (
+                        f"☀️ *Notifikasi Pagi* — {factory.name}\n\n"
+                        f"📋 {len(deferred)} tugas tertunda semalam:\n"
+                        + "\n".join(lines)
+                        + "\n\nSilakan periksa dan tindak lanjuti."
+                    ),
+                    "ru": (
+                        f"☀️ *Утренние отложенные алерты* — {factory.name}\n\n"
+                        f"📋 {len(deferred)} задач(и) отложено за ночь:\n"
+                        + "\n".join(lines)
+                        + "\n\nТребуется внимание."
+                    ),
+                }
+                msg = msgs.get(factory_lang, msgs["en"])
+
+                # Send to masters group
+                if factory.masters_group_chat_id:
+                    send_telegram_message(int(factory.masters_group_chat_id), msg)
+
+                # Send to forum #daily-briefing
+                forum_group, daily_topic = get_forum_topic("daily")
+                if forum_group:
+                    send_telegram_message(forum_group, msg, message_thread_id=daily_topic)
+
+                logger.info("Morning deferred alerts sent for %s: %d alerts", factory.name, len(deferred))
             except Exception as e:
-                logger.error("Morning alerts failed for factory %s: %s", fid, e)
+                logger.error("Morning alerts failed for factory %s: %s", factory.id, e)
     except Exception as e:
         logger.error("Morning alerts failed: %s", e)
     finally:

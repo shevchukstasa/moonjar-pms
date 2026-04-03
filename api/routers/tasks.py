@@ -15,6 +15,7 @@ from api.roles import require_management
 from api.models import Task, User, ProductionOrder, OrderPosition, Size, GlazingBoardSpec, Recipe
 from api.enums import TaskStatus, TaskType, PositionStatus, UserRole
 from business.services.status_machine import transition_position_status
+from business.services.notifications import create_notification, notify_pm
 
 router = APIRouter()
 
@@ -205,6 +206,37 @@ async def complete_task(
     task.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(task)
+
+    # Notify PM when a task linked to a sales order is completed
+    try:
+        if task.related_order_id and task.factory_id:
+            order = db.query(ProductionOrder).filter(
+                ProductionOrder.id == task.related_order_id
+            ).first()
+            if order and _ev(order.source) == "sales_app":
+                task_type = _ev(task.type) or "task"
+                title = f"Task completed: {task_type} for {order.order_number}"
+                message = f"Task '{task.description or task_type}' has been completed."
+                if order.sales_manager_name:
+                    message += f"\nSales manager: {order.sales_manager_name}"
+
+                notify_pm(
+                    db,
+                    factory_id=task.factory_id,
+                    type="task_completed",
+                    title=title,
+                    message=message,
+                    related_entity_type="production_order",
+                    related_entity_id=order.id,
+                )
+    except Exception:
+        import logging
+        logging.getLogger("moonjar.tasks").warning(
+            "Failed to send task completion notification for task %s",
+            task_id,
+            exc_info=True,
+        )
+
     return _serialize_task(task, db)
 
 
@@ -315,7 +347,47 @@ async def resolve_shortage(
 
         db.commit()
 
-        # TODO: Notify sales manager when notifications are implemented
+        # Notify PM and sales manager about shortage decline
+        try:
+            order = None
+            if task.related_order_id:
+                order = db.query(ProductionOrder).filter(
+                    ProductionOrder.id == task.related_order_id
+                ).first()
+
+            if order and task.factory_id:
+                order_num = order.order_number or "?"
+                color = meta.get("color", "?")
+                size = meta.get("size", "?")
+                shortage = meta.get("shortage", "?")
+                reason = data.notes or "No reason provided"
+
+                title = f"Shortage declined: {order_num}"
+                message = (
+                    f"Stock shortage for {color} {size} (qty {shortage}) "
+                    f"was declined.\nReason: {reason}"
+                )
+                if order.sales_manager_name:
+                    message += f"\nSales manager: {order.sales_manager_name}"
+
+                # Notify all PMs of the factory
+                notify_pm(
+                    db,
+                    factory_id=task.factory_id,
+                    type="shortage_declined",
+                    title=title,
+                    message=message,
+                    related_entity_type="production_order",
+                    related_entity_id=order.id,
+                )
+        except Exception:
+            import logging
+            logging.getLogger("moonjar.tasks").warning(
+                "Failed to send shortage decline notification for task %s",
+                task_id,
+                exc_info=True,
+            )
+
         return {
             "decision": "decline",
             "notes": data.notes,

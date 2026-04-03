@@ -2807,3 +2807,19 @@ class RecipeVerification(Base):
     factory = relationship('Factory', foreign_keys=[factory_id])
     material = relationship('Material', foreign_keys=[material_id])
     recipe = relationship('Recipe', foreign_keys=[recipe_id])
+
+
+class TranscriptionLog(Base):
+    __tablename__ = 'transcription_logs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    telegram_user_id = Column(sa.BigInteger, nullable=True)
+    telegram_chat_id = Column(sa.BigInteger, nullable=True)
+    audio_duration_sec = Column(sa.Integer, nullable=True)
+    transcribed_text = Column(sa.Text, nullable=True)
+    ai_response_summary = Column(sa.String(500), nullable=True)
+    language_detected = Column(sa.String(10), nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    user = relationship('User', foreign_keys=[user_id])

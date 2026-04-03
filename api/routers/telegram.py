@@ -552,3 +552,97 @@ async def telegram_unsubscribe(
         "success": True,
         "message": "Telegram account unlinked successfully.",
     }
+
+
+# ────────────────────────────────────────────────────────────────
+# Deep link invite URL generator (admin-only)
+# ────────────────────────────────────────────────────────────────
+
+# Cache bot username to avoid repeated getMe calls
+_bot_username_cache: str | None = None
+_bot_username_cached_at: float = 0
+_BOT_USERNAME_TTL = 3600  # 1 hour
+
+
+async def _get_bot_username() -> str | None:
+    """Fetch bot username from Telegram API (cached for 1 hour)."""
+    global _bot_username_cache, _bot_username_cached_at
+
+    if _bot_username_cache and (time.time() - _bot_username_cached_at < _BOT_USERNAME_TTL):
+        return _bot_username_cache
+
+    # Try to get from bot-status cache first
+    if _bot_status_cache and _bot_status_cache.get("bot_username"):
+        username = _bot_status_cache["bot_username"].lstrip("@")
+        _bot_username_cache = username
+        _bot_username_cached_at = time.time()
+        return username
+
+    settings = get_settings()
+    token = settings.TELEGRAM_BOT_TOKEN
+    if not token:
+        return None
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(f"https://api.telegram.org/bot{token}/getMe")
+            data = resp.json()
+        if data.get("ok"):
+            username = data["result"].get("username", "")
+            if username:
+                _bot_username_cache = username
+                _bot_username_cached_at = time.time()
+                return username
+    except Exception as e:
+        logger.warning(f"Failed to fetch bot username: {e}")
+
+    return None
+
+
+@router.get("/invite-link/{user_id}")
+async def get_invite_link(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """
+    Generate a Telegram deep link URL for a PMS user.
+    When the user opens the link, their Telegram account is auto-linked to this PMS user.
+    Admin-only endpoint.
+    """
+    from uuid import UUID
+    from api.models import User
+
+    # Validate UUID
+    try:
+        uid = UUID(user_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(400, "Invalid user_id format (must be UUID)")
+
+    # Verify user exists and is active
+    user = db.query(User).filter(User.id == uid, User.is_active.is_(True)).first()
+    if not user:
+        raise HTTPException(404, "User not found or inactive")
+
+    # Check if already linked
+    already_linked = user.telegram_user_id is not None
+
+    # Get bot username
+    bot_username = await _get_bot_username()
+    if not bot_username:
+        raise HTTPException(
+            503,
+            "Cannot generate invite link: bot token not configured or Telegram API unreachable.",
+        )
+
+    invite_url = f"https://t.me/{bot_username}?start={user_id}"
+
+    return {
+        "invite_url": invite_url,
+        "user_id": user_id,
+        "user_name": user.name,
+        "already_linked": already_linked,
+        "telegram_user_id": user.telegram_user_id,
+    }

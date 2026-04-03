@@ -33,6 +33,7 @@ from api.enums import (
     TaskStatus, PositionStatus, ResourceType, BatchStatus,
     TransactionType, PurchaseStatus,
 )
+from business.services.transcription_logger import transcribe_audio, save_transcription_log
 
 logger = logging.getLogger("moonjar.telegram_bot")
 
@@ -802,6 +803,22 @@ MESSAGES: dict[str, dict[str, str]] = {
         "id": "Belum ada poin. Verifikasi resep untuk mendapatkan poin pertama!",
         "ru": "Пока нет очков. Проверьте рецепт, чтобы получить первые очки!",
     },
+    # ── Voice transcription ──────────────────────────────────────
+    "voice_download_failed": {
+        "en": "Could not download the voice message. Please try again.",
+        "id": "Tidak dapat mengunduh pesan suara. Silakan coba lagi.",
+        "ru": "Не удалось скачать голосовое сообщение. Попробуйте ещё раз.",
+    },
+    "voice_empty_transcription": {
+        "en": "Could not recognize any speech. Please try again.",
+        "id": "Tidak dapat mengenali ucapan. Silakan coba lagi.",
+        "ru": "Не удалось распознать речь. Попробуйте ещё раз.",
+    },
+    "voice_transcription_error": {
+        "en": "Voice transcription failed. Please type your message instead.",
+        "id": "Transkripsi suara gagal. Silakan ketik pesan Anda.",
+        "ru": "Ошибка распознавания голоса. Напишите сообщение текстом.",
+    },
 }
 
 # Default language for group chats or unlinked users
@@ -986,6 +1003,11 @@ async def handle_update(db: Session, update_data: dict) -> None:
         # Photo message
         if message.get("photo"):
             await handle_photo(db, message)
+            return
+
+        # Voice / audio message
+        if message.get("voice") or message.get("audio"):
+            await _handle_voice_message(db, message)
             return
 
         # Text command
@@ -1627,7 +1649,7 @@ def set_webhook(webhook_url: str) -> bool:
 async def _cmd_start(db: Session, message: dict, args: str) -> None:
     """
     /start — Account linking flow (private) or welcome (group).
-    /start {deep_link_code} — Deep linking (logged for future use).
+    /start {user_uuid} — Deep link auto-linking: links Telegram to PMS user by UUID.
     """
     chat_id = message["chat"]["id"]
     chat_type = message["chat"].get("type", "private")
@@ -1636,13 +1658,62 @@ async def _cmd_start(db: Session, message: dict, args: str) -> None:
     first_name = from_user.get("first_name", "")
 
     if args:
-        # Deep link — log for future use
-        logger.info(f"Deep link start: user={telegram_user_id}, code={args}")
-        await _send_message(
-            chat_id,
-            f"Welcome, {first_name}! Deep link code received: `{args}`\n"
-            f"This feature is coming soon.",
-        )
+        # Deep link auto-linking: code is expected to be a PMS user UUID
+        logger.info(f"Deep link start: telegram_user={telegram_user_id}, code={args}")
+        lang = get_user_language(db, telegram_user_id, chat_id)
+
+        # Validate UUID format
+        try:
+            from uuid import UUID as _UUID
+            pms_user_id = _UUID(args)
+        except (ValueError, AttributeError):
+            err_msgs = {
+                "en": "Invalid link code. Please ask your admin for a new invite link.",
+                "id": "Kode tautan tidak valid. Minta admin Anda untuk tautan undangan baru.",
+                "ru": "Неверный код ссылки. Попросите администратора создать новую ссылку-приглашение.",
+            }
+            await _send_message(chat_id, err_msgs.get(lang, err_msgs["en"]))
+            return
+
+        # Check if this Telegram account is already linked to a PMS user
+        existing = _find_user_by_telegram(db, telegram_user_id)
+        if existing:
+            lang = existing.language.value if hasattr(existing.language, 'value') else str(existing.language) if existing.language else lang
+            await _send_message(chat_id, msg("account_already_linked", lang, name=existing.name, email=existing.email))
+            return
+
+        # Look up the target PMS user
+        pms_user = db.query(User).filter(User.id == pms_user_id, User.is_active.is_(True)).first()
+        if not pms_user:
+            err_msgs = {
+                "en": "User not found or inactive. Please contact your admin.",
+                "id": "Pengguna tidak ditemukan atau tidak aktif. Hubungi admin Anda.",
+                "ru": "Пользователь не найден или неактивен. Обратитесь к администратору.",
+            }
+            await _send_message(chat_id, err_msgs.get(lang, err_msgs["en"]))
+            return
+
+        # Check if PMS user is already linked to a different Telegram account
+        if pms_user.telegram_user_id and pms_user.telegram_user_id != telegram_user_id:
+            err_msgs = {
+                "en": f"Account *{pms_user.name}* is already linked to another Telegram user. Contact your admin to unlink first.",
+                "id": f"Akun *{pms_user.name}* sudah terhubung ke pengguna Telegram lain. Hubungi admin untuk memutuskan tautan terlebih dahulu.",
+                "ru": f"Аккаунт *{pms_user.name}* уже привязан к другому Telegram-пользователю. Обратитесь к администратору для отвязки.",
+            }
+            await _send_message(chat_id, err_msgs.get(lang, err_msgs["en"]))
+            return
+
+        # Auto-link the Telegram account to the PMS user
+        pms_user.telegram_user_id = telegram_user_id
+        db.commit()
+        lang = pms_user.language.value if hasattr(pms_user.language, 'value') else str(pms_user.language) if pms_user.language else lang
+        logger.info(f"Deep link: linked Telegram {telegram_user_id} to PMS user {pms_user.name} ({pms_user.id})")
+        success_msgs = {
+            "en": f"✅ Account linked! Welcome, {pms_user.name}.\nYour role: *{pms_user.role.value if hasattr(pms_user.role, 'value') else pms_user.role}*\nType /help to see available commands.",
+            "id": f"✅ Akun terhubung! Selamat datang, {pms_user.name}.\nPeran Anda: *{pms_user.role.value if hasattr(pms_user.role, 'value') else pms_user.role}*\nKetik /help untuk melihat perintah.",
+            "ru": f"✅ Аккаунт привязан! Добро пожаловать, {pms_user.name}.\nВаша роль: *{pms_user.role.value if hasattr(pms_user.role, 'value') else pms_user.role}*\nВведите /help для списка команд.",
+        }
+        await _send_message(chat_id, success_msgs.get(lang, success_msgs["en"]))
         return
 
     lang = get_user_language(db, telegram_user_id, chat_id)
@@ -2679,6 +2750,109 @@ async def _cmd_photo(db: Session, message: dict) -> None:
     from_user = message.get("from", {})
     lang = get_user_language(db, from_user.get("id"), chat_id)
     await _send_message(chat_id, msg("photo_instructions", lang))
+
+
+# ────────────────────────────────────────────────────────────────
+# Voice / audio message handler
+# ────────────────────────────────────────────────────────────────
+
+async def _handle_voice_message(db: Session, message: dict) -> None:
+    """
+    Handle incoming voice/audio message:
+    1. Download audio file from Telegram
+    2. Transcribe via OpenAI Whisper
+    3. Log transcription to DB
+    4. Forward transcribed text to the NLP/command handler
+    """
+    chat_id = message["chat"]["id"]
+    from_user = message.get("from", {})
+    telegram_user_id = from_user.get("id")
+
+    voice = message.get("voice") or message.get("audio") or {}
+    file_id = voice.get("file_id")
+    duration = voice.get("duration")  # seconds, provided by Telegram
+
+    if not file_id:
+        logger.warning("Voice message without file_id from tg_user=%s", telegram_user_id)
+        return
+
+    user = _find_user_by_telegram(db, telegram_user_id)
+    lang = get_user_language(db, telegram_user_id, chat_id)
+
+    try:
+        # Download audio bytes from Telegram
+        audio_bytes = await _download_telegram_file(file_id)
+        if not audio_bytes:
+            await _send_message(chat_id, msg("voice_download_failed", lang))
+            return
+
+        # Transcribe
+        result = await transcribe_audio(audio_bytes)
+        transcribed_text = result.get("text", "").strip()
+
+        if not transcribed_text:
+            await _send_message(chat_id, msg("voice_empty_transcription", lang))
+            return
+
+        # Save to DB
+        save_transcription_log(
+            db,
+            transcribed_text=transcribed_text,
+            user_id=user.id if user else None,
+            telegram_user_id=telegram_user_id,
+            telegram_chat_id=chat_id,
+            audio_duration_sec=duration or result.get("duration"),
+            language_detected=result.get("language"),
+        )
+        db.commit()
+
+        # Show the user what was heard, then process as text
+        await _send_message(
+            chat_id,
+            f"\U0001f399 *Transcription:*\n_{transcribed_text}_",
+            parse_mode="Markdown",
+        )
+
+        # Re-inject as text message for command/NLP processing
+        synthetic_message = {**message, "text": transcribed_text}
+        synthetic_message.pop("voice", None)
+        synthetic_message.pop("audio", None)
+
+        text = transcribed_text
+        if text.startswith("/"):
+            await handle_command(db, synthetic_message)
+        elif user:
+            await _handle_private_text(db, synthetic_message)
+        else:
+            logger.info("Voice transcription from unlinked user tg=%s: %s", telegram_user_id, transcribed_text[:100])
+
+    except Exception as e:
+        logger.error("Voice transcription failed for tg_user=%s: %s", telegram_user_id, e, exc_info=True)
+        await _send_message(chat_id, msg("voice_transcription_error", lang))
+
+
+async def _download_telegram_file(file_id: str) -> Optional[bytes]:
+    """Download a file from Telegram by file_id. Returns bytes or None."""
+    settings = get_settings()
+    token = settings.TELEGRAM_BOT_TOKEN
+    if not token:
+        return None
+    base = TELEGRAM_API.format(token=token)
+    async with httpx.AsyncClient(timeout=30) as client:
+        # Get file path
+        resp = await client.get(f"{base}/getFile", params={"file_id": file_id})
+        if resp.status_code != 200:
+            logger.error("getFile failed: %s", resp.text)
+            return None
+        file_path = resp.json().get("result", {}).get("file_path")
+        if not file_path:
+            return None
+        # Download
+        dl_resp = await client.get(f"https://api.telegram.org/file/bot{token}/{file_path}")
+        if dl_resp.status_code != 200:
+            logger.error("File download failed: %s", dl_resp.status_code)
+            return None
+        return dl_resp.content
 
 
 # ────────────────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ from math import ceil
 from typing import Optional
 import logging
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from api.models import DefectRecord, StoneDefectCoefficient, OrderPosition
@@ -168,14 +169,26 @@ def get_glaze_defect_coeff(db: Session, factory_id: UUID, glaze_type: str) -> fl
     """
     glaze_type_norm = (glaze_type or 'pigment').lower().strip()
 
-    # TODO: когда production_defects будет заполняться, добавить rolling average:
-    # cutoff = date.today() - timedelta(days=DEFECT_LOOKBACK_DAYS)
-    # rows = db.execute(text(
-    #     "SELECT SUM(defect_quantity), SUM(total_quantity) FROM production_defects "
-    #     "WHERE factory_id = :fid AND glaze_type = :gt AND fired_at >= :cutoff"
-    # ), {"fid": factory_id, "gt": glaze_type_norm, "cutoff": cutoff}).fetchone()
-    # if rows and rows[1] and rows[1] >= MIN_SAMPLE_SIZE:
-    #     return float(rows[0]) / float(rows[1])
+    # Rolling average from production_defects (90-day window)
+    try:
+        cutoff = date.today() - timedelta(days=DEFECT_LOOKBACK_DAYS)
+        row = db.execute(
+            text(
+                "SELECT SUM(defect_quantity), SUM(total_quantity) "
+                "FROM production_defects "
+                "WHERE factory_id = :fid AND glaze_type = :gt AND fired_at >= :cutoff"
+            ),
+            {"fid": str(factory_id), "gt": glaze_type_norm, "cutoff": cutoff},
+        ).fetchone()
+        if row and row[1] and row[1] >= MIN_SAMPLE_SIZE:
+            coeff = float(row[0]) / float(row[1])
+            logger.debug(
+                "Glaze defect coeff for %s (factory %s): %.4f from %d samples",
+                glaze_type_norm, factory_id, coeff, row[1],
+            )
+            return min(coeff, 1.0)
+    except Exception as exc:
+        logger.warning("Could not query production_defects for glaze coeff: %s", exc)
 
     return GLAZE_DEFECT_DEFAULTS.get(glaze_type_norm, 0.03)
 
@@ -188,7 +201,26 @@ def get_product_defect_coeff(db: Session, factory_id: UUID, product_type: str) -
     """
     product_type_norm = (product_type or 'tile').lower().strip()
 
-    # TODO: rolling average from production_defects when data is available (same pattern as glaze)
+    # Rolling average from production_defects (90-day window)
+    try:
+        cutoff = date.today() - timedelta(days=DEFECT_LOOKBACK_DAYS)
+        row = db.execute(
+            text(
+                "SELECT SUM(defect_quantity), SUM(total_quantity) "
+                "FROM production_defects "
+                "WHERE factory_id = :fid AND product_type = :pt AND fired_at >= :cutoff"
+            ),
+            {"fid": str(factory_id), "pt": product_type_norm, "cutoff": cutoff},
+        ).fetchone()
+        if row and row[1] and row[1] >= MIN_SAMPLE_SIZE:
+            coeff = float(row[0]) / float(row[1])
+            logger.debug(
+                "Product defect coeff for %s (factory %s): %.4f from %d samples",
+                product_type_norm, factory_id, coeff, row[1],
+            )
+            return min(coeff, 1.0)
+    except Exception as exc:
+        logger.warning("Could not query production_defects for product coeff: %s", exc)
 
     return PRODUCT_DEFECT_DEFAULTS.get(product_type_norm, 0.03)
 

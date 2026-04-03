@@ -646,6 +646,10 @@ async def reprocess_order(
         new_area = calculate_glazeable_sqm_for_position(db, p)
         if new_area is not None:
             p.glazeable_sqm = new_area
+            # Also set quantity_sqm if missing (total area = per_piece × qty)
+            if not p.quantity_sqm and p.quantity:
+                p.quantity_sqm = float(new_area) * p.quantity
+            db.flush()
             pos_result["actions"].append(f"area={float(new_area):.4f}")
 
         # 3. Recalculate defect margin (2D: glaze + product type coefficients)

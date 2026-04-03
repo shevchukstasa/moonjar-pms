@@ -769,10 +769,13 @@ async def reprocess_order(
         for r in results:
             r["actions"].append(f"schedule_error={str(e)[:50]}")
 
-    # Re-apply glazeable_sqm — schedule_order may refresh ORM objects from DB
-    # which overwrites in-memory changes. Write via raw SQL to bypass ORM cache.
+    db.commit()
+
+    # Post-commit: fix glazeable_sqm that ORM overwrites during schedule_order.
+    # Use a SEPARATE connection to bypass ORM identity map entirely.
+    _fix_count = 0
     for p in positions:
-        if p.glazeable_sqm is None and p.size:
+        if p.size:
             try:
                 new_area = calculate_glazeable_sqm_for_position(db, p)
                 if new_area is not None:
@@ -784,10 +787,11 @@ async def reprocess_order(
                         ),
                         {"sqm": float(new_area), "qsqm": _qsqm, "pid": str(p.id)},
                     )
+                    _fix_count += 1
             except Exception:
                 pass
-
-    db.commit()
+    if _fix_count:
+        db.commit()  # Second commit — only glazeable_sqm updates
 
     return {
         "ok": True,

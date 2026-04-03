@@ -198,13 +198,28 @@ def get_zone_capacity(
 ) -> float:
     """Get capacity for a specific loading zone, considering typology.
 
+    Looks up KilnTypologyCapacity filtered by zone column.
     Falls back to proportional split of total capacity if no typology data.
     """
     typology = find_matching_typology(db, position)
     if typology:
-        cap = get_typology_capacity(db, typology.id, kiln.id)
+        # First try zone-specific record
+        cap = (
+            db.query(KilnTypologyCapacity)
+            .filter(
+                KilnTypologyCapacity.typology_id == typology.id,
+                KilnTypologyCapacity.resource_id == kiln.id,
+                KilnTypologyCapacity.zone == zone,
+            )
+            .first()
+        )
         if cap:
             return float(cap.ai_adjusted_sqm or cap.capacity_sqm or 0)
+
+        # Fallback: try 'primary' zone record (legacy single-zone)
+        cap_primary = get_typology_capacity(db, typology.id, kiln.id)
+        if cap_primary and (cap_primary.zone or 'primary') == 'primary':
+            return float(cap_primary.ai_adjusted_sqm or cap_primary.capacity_sqm or 0)
 
     # Fallback proportional split
     total = float(kiln.capacity_sqm or 1.0)
@@ -303,15 +318,24 @@ def calculate_typology_for_kiln(
         levels = 1
         result = {"error": str(e)}
 
-    # Upsert KilnTypologyCapacity
+    # Auto-determine zone from place_of_application and loading method
+    places = typology.place_of_application or []
+    if not places or any(p in ('face_only', 'edges_1', 'edges_2') for p in places):
+        determined_zone = 'edge' if method == 'edge' else 'flat'
+    else:
+        determined_zone = 'flat'
+
+    # Upsert KilnTypologyCapacity (keyed by typology + kiln + zone)
     existing = db.query(KilnTypologyCapacity).filter(
         KilnTypologyCapacity.typology_id == typology.id,
         KilnTypologyCapacity.resource_id == kiln.id,
+        KilnTypologyCapacity.zone == determined_zone,
     ).first()
 
     cap_record = existing or KilnTypologyCapacity(
         typology_id=typology.id,
         resource_id=kiln.id,
+        zone=determined_zone,
     )
     if not existing:
         db.add(cap_record)
@@ -334,16 +358,7 @@ def calculate_typology_for_kiln(
         "glaze_placement": ref_pos.glaze_placement,
     }
     cap_record.calculation_output = result
-
-    # Auto-determine zone from place_of_application
-    places = typology.place_of_application or []
-    if not places or any(p in ('face_only', 'edges_1', 'edges_2') for p in places):
-        if method == 'edge':
-            cap_record.zone = 'edge'
-        else:
-            cap_record.zone = 'flat'
-    else:
-        cap_record.zone = 'flat'
+    cap_record.zone = determined_zone
 
     db.flush()
     return cap_record

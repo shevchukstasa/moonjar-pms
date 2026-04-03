@@ -1298,7 +1298,7 @@ class KilnTypologyCapacity(Base):
     calculation_output = Column(JSONB, nullable=True)
 
     __table_args__ = (
-        UniqueConstraint('typology_id', 'resource_id'),
+        UniqueConstraint('typology_id', 'resource_id', 'zone'),
     )
 
     typology = relationship('KilnLoadingTypology', back_populates='capacities', foreign_keys=[typology_id])

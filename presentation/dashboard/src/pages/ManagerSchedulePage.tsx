@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Trash2, Thermometer, ClipboardCheck, Calendar } from 'lucide-react';
+import { Trash2, Thermometer, ClipboardCheck, Calendar, AlertTriangle, RefreshCw } from 'lucide-react';
 import { useUiStore } from '@/stores/uiStore';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGlazingSchedule, useFiringSchedule, useSortingSchedule, useQcSchedule, useKilnSchedule, useAutoFormBatches } from '@/hooks/useSchedule';
@@ -52,6 +52,8 @@ export default function ManagerSchedulePage() {
 
   const autoFormMutation = useAutoFormBatches();
   const [autoFormResult, setAutoFormResult] = useState<string | null>(null);
+  const [rescheduling, setRescheduling] = useState(false);
+  const [rescheduleResult, setRescheduleResult] = useState<string | null>(null);
 
   // Firing log state
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -266,6 +268,39 @@ export default function ManagerSchedulePage() {
     });
   }, [tab, sectionItems]);
 
+  // Count overdue positions across all sections
+  const overdueCount = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    let count = 0;
+    for (const [dateKey, positions] of groupedByDate) {
+      if (dateKey !== 'Unscheduled' && dateKey < today) {
+        count += positions.length;
+      }
+    }
+    return count;
+  }, [groupedByDate]);
+
+  const handleRescheduleOverdue = useCallback(async () => {
+    if (!activeFactoryId) {
+      alert('Please select a specific factory first.');
+      return;
+    }
+    if (!window.confirm(`Reschedule ${overdueCount} overdue position(s) forward from today?`)) return;
+    setRescheduling(true);
+    setRescheduleResult(null);
+    try {
+      const res = await apiClient.post(`/schedule/factory/${activeFactoryId}/reschedule`);
+      const count = res.data?.positions_rescheduled ?? 0;
+      setRescheduleResult(`${count} position(s) rescheduled successfully.`);
+      queryClient.invalidateQueries({ queryKey: ['schedule'] });
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Reschedule failed';
+      setRescheduleResult(`Error: ${msg}`);
+    } finally {
+      setRescheduling(false);
+    }
+  }, [activeFactoryId, overdueCount, queryClient]);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const positionColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
     { key: 'order_number', header: 'Order' },
@@ -433,6 +468,37 @@ export default function ManagerSchedulePage() {
         </Card>
       </div>
 
+      {/* Overdue banner */}
+      {overdueCount > 0 && (
+        <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-red-500" />
+            <span className="text-sm font-medium text-red-800">
+              {overdueCount} position{overdueCount !== 1 ? 's' : ''} with past scheduled dates
+            </span>
+            <span className="text-xs text-red-600">
+              (auto-reschedule runs nightly at 08:05 Bali time)
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            {rescheduleResult && (
+              <span className={`text-xs ${rescheduleResult.startsWith('Error') ? 'text-red-700' : 'text-green-700'}`}>
+                {rescheduleResult}
+              </span>
+            )}
+            <Button
+              size="sm"
+              onClick={handleRescheduleOverdue}
+              disabled={rescheduling || !activeFactoryId}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${rescheduling ? 'animate-spin' : ''}`} />
+              {rescheduling ? 'Rescheduling...' : 'Reschedule Now'}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <Tabs tabs={SECTION_TABS} activeTab={tab} onChange={setTab} />
 
@@ -573,6 +639,10 @@ export default function ManagerSchedulePage() {
                     }`}>
                       {dateLabel}
                       {isToday && ' (Today)'}
+                      {isPast && (() => {
+                        const diff = Math.floor((Date.now() - new Date(dateKey + 'T00:00:00').getTime()) / 86400000);
+                        return ` — ${diff} day${diff !== 1 ? 's' : ''} overdue`;
+                      })()}
                     </span>
                     <span className="ml-auto text-xs text-gray-500">
                       {positions.length} position{positions.length !== 1 ? 's' : ''}

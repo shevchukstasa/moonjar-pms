@@ -368,17 +368,65 @@ def generate_payslip_pdf(item: dict, year: int, month: int, factory_name: str = 
         ]))
         elements.append(pph_t)
 
-    # Company contributions (BPJS — not deducted from employee)
+    # BPJS detailed breakdown
     if category == "formal":
-        company_rows = []
-        if item.get("bpjs_employer", 0) > 0:
-            company_rows.append(("BPJS Employer Contribution", item.get("bpjs_employer", 0)))
-        if item.get("company_bpjs_for_employee", 0) > 0:
-            company_rows.append(("BPJS Employee Share (paid by company)", item.get("company_bpjs_for_employee", 0)))
-        if is_probation:
-            company_rows.append(("⚠ Probation period — BPJS not registered", 0))
-        if company_rows:
-            _section("COMPANY CONTRIBUTIONS (not deducted from salary)", company_rows)
+        bd = item.get("bpjs_breakdown", {})
+        bpjs_note = ParagraphStyle("bpjs_note", parent=styles["Normal"], fontSize=7,
+                                    textColor=colors.HexColor("#6b7280"), italics=True)
+
+        if item.get("bpjs_employer", 0) > 0 or item.get("company_bpjs_for_employee", 0) > 0:
+            # ── BPJS Employer ──
+            elements.append(Paragraph("BPJS — EMPLOYER CONTRIBUTION", section_style))
+            employer_lines = [
+                [Paragraph("JKN / BPJS Kesehatan (4%)", label_style),
+                 Paragraph(_fmt_idr(bd.get("jkn_employer", 0)) + " IDR", value_style)],
+                [Paragraph("JKK / Kecelakaan Kerja (0.89%)", label_style),
+                 Paragraph(_fmt_idr(bd.get("jkk_employer", 0)) + " IDR", value_style)],
+                [Paragraph("JKM / Kematian (0.3%)", label_style),
+                 Paragraph(_fmt_idr(bd.get("jkm_employer", 0)) + " IDR", value_style)],
+                [Paragraph("JHT / Hari Tua (3.7%)", label_style),
+                 Paragraph(_fmt_idr(bd.get("jht_employer", 0)) + " IDR", value_style)],
+                [Paragraph("JP / Pensiun (2%)", label_style),
+                 Paragraph(_fmt_idr(bd.get("jp_employer", 0)) + " IDR", value_style)],
+                [Paragraph("Total Employer BPJS (10.89%)", ParagraphStyle("b", parent=value_style, fontSize=8)),
+                 Paragraph(_fmt_idr(item.get("bpjs_employer", 0)) + " IDR", value_style)],
+            ]
+            er_t = Table(employer_lines, colWidths=[100 * mm, 65 * mm])
+            er_t.setStyle(TableStyle([
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+                ("LINEABOVE", (0, -1), (-1, -1), 0.3, colors.HexColor("#d1d5db")),
+            ]))
+            elements.append(er_t)
+
+            # ── BPJS Employee (paid by company) ──
+            elements.append(Paragraph("BPJS — EMPLOYEE CONTRIBUTION (paid by company)", section_style))
+            employee_lines = [
+                [Paragraph("JKN / BPJS Kesehatan (1%)", label_style),
+                 Paragraph(_fmt_idr(bd.get("jkn_employee", 0)) + " IDR", value_style)],
+                [Paragraph("JHT / Hari Tua (2%)", label_style),
+                 Paragraph(_fmt_idr(bd.get("jht_employee", 0)) + " IDR", value_style)],
+                [Paragraph("JP / Pensiun (1%)", label_style),
+                 Paragraph(_fmt_idr(bd.get("jp_employee", 0)) + " IDR", value_style)],
+                [Paragraph("Total Employee BPJS (4%)", ParagraphStyle("b2", parent=value_style, fontSize=8)),
+                 Paragraph(_fmt_idr(item.get("company_bpjs_for_employee", bd.get("employee_total", 0))) + " IDR", value_style)],
+            ]
+            ee_t = Table(employee_lines, colWidths=[100 * mm, 65 * mm])
+            ee_t.setStyle(TableStyle([
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+                ("LINEABOVE", (0, -1), (-1, -1), 0.3, colors.HexColor("#d1d5db")),
+            ]))
+            elements.append(ee_t)
+            elements.append(Paragraph("Employee BPJS contribution is fully paid by the company — not deducted from salary", bpjs_note))
+
+        elif is_probation:
+            elements.append(Paragraph("BPJS", section_style))
+            elements.append(Paragraph("Probation period — BPJS not yet registered", bpjs_note))
 
     # Deductions from employee
     ded_rows = []

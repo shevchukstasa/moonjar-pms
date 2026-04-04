@@ -1254,7 +1254,8 @@ class KilnLoadingTypology(Base):
     methods = Column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb"))
     # Size range
     min_size_cm = Column(sa.Numeric(8, 2), nullable=True)
-    max_size_cm = Column(sa.Numeric(8, 2), nullable=True)
+    max_size_cm = Column(sa.Numeric(8, 2), nullable=True)       # max long side
+    max_short_side_cm = Column(sa.Numeric(8, 2), nullable=True)  # max short side
     # Loading preference
     preferred_loading = Column(sa.String(20), nullable=False, server_default=sa.text("'auto'"))
     # Temperature range

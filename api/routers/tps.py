@@ -1292,6 +1292,7 @@ class TypologyCreate(BaseModel):
     methods: list[str] = []
     min_size_cm: Optional[float] = None
     max_size_cm: Optional[float] = None
+    max_short_side_cm: Optional[float] = None
     preferred_loading: str = "auto"
     min_firing_temp: Optional[int] = None
     max_firing_temp: Optional[int] = None
@@ -1309,6 +1310,7 @@ class TypologyUpdate(BaseModel):
     methods: Optional[list[str]] = None
     min_size_cm: Optional[float] = None
     max_size_cm: Optional[float] = None
+    max_short_side_cm: Optional[float] = None
     preferred_loading: Optional[str] = None
     min_firing_temp: Optional[int] = None
     max_firing_temp: Optional[int] = None
@@ -1334,6 +1336,7 @@ def _serialize_typology(t: KilnLoadingTypology, db: Session = None) -> dict:
         "methods": t.methods or [],
         "min_size_cm": float(t.min_size_cm) if t.min_size_cm else None,
         "max_size_cm": float(t.max_size_cm) if t.max_size_cm else None,
+        "max_short_side_cm": float(t.max_short_side_cm) if t.max_short_side_cm else None,
         "preferred_loading": t.preferred_loading,
         "min_firing_temp": t.min_firing_temp,
         "max_firing_temp": t.max_firing_temp,

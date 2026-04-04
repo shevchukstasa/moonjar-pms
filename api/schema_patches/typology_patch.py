@@ -61,6 +61,9 @@ STATEMENTS = [
 
     # Zone column for mixed loading support
     "ALTER TABLE kiln_typology_capacities ADD COLUMN IF NOT EXISTS zone VARCHAR(20) NOT NULL DEFAULT 'primary'",
+
+    # max_short_side_cm — upper bound on the shorter tile dimension
+    "ALTER TABLE kiln_loading_typologies ADD COLUMN IF NOT EXISTS max_short_side_cm NUMERIC(8,2)",
 ]
 
 

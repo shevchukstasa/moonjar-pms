@@ -69,6 +69,9 @@ def _size_in_range(typology: KilnLoadingTypology, position: OrderPosition) -> bo
         return False
     if typology.max_size_cm and max_dim > float(typology.max_size_cm):
         return False
+    # max_short_side_cm: restrict the shorter side (e.g. 15 cm for small tiles)
+    if typology.max_short_side_cm and min_dim > float(typology.max_short_side_cm):
+        return False
     return True
 
 

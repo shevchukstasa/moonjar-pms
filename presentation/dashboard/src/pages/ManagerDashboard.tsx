@@ -1426,8 +1426,10 @@ function TypologySpeedsSection({ factoryId }: { factoryId: string | null }) {
                     <span className="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
                       {typ.product_types?.join(', ') || 'All products'}
                     </span>
-                    {typ.min_size_cm != null && (
-                      <span className="text-xs text-gray-400">{typ.min_size_cm}–{typ.max_size_cm} cm</span>
+                    {typ.max_size_cm != null && (
+                      <span className="text-xs text-gray-400">
+                        ≤{typ.max_size_cm}cm{typ.max_short_side_cm ? ` (short ≤${typ.max_short_side_cm}cm)` : ''}
+                      </span>
                     )}
                   </div>
                   <div className="flex items-center gap-2">

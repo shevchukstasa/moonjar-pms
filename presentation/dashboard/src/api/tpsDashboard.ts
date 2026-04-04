@@ -171,6 +171,7 @@ export interface TypologyItem {
   methods: string[];
   min_size_cm: number | null;
   max_size_cm: number | null;
+  max_short_side_cm: number | null;
   preferred_loading: string;
   min_firing_temp: number | null;
   max_firing_temp: number | null;
@@ -191,6 +192,7 @@ export interface TypologyCreate {
   methods?: string[];
   min_size_cm?: number;
   max_size_cm?: number;
+  max_short_side_cm?: number;
   preferred_loading?: string;
   min_firing_temp?: number;
   max_firing_temp?: number;

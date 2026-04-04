@@ -494,6 +494,17 @@ def _calc_hours_from_speed(
     return max(1, math.ceil(hours_needed / hours_per_day))
 
 
+def _get_factory_daily_kiln_cap(db: Session, factory_id: UUID) -> float:
+    """Sum of operational kiln capacities for a factory (sqm/day)."""
+    kilns = db.query(Resource).filter(
+        Resource.factory_id == factory_id,
+        Resource.resource_type == "kiln",
+        Resource.status == "operational",
+    ).all()
+    cap = sum(float(k.capacity_sqm or 0) for k in kilns)
+    return cap if cap > 0 else 10.0  # fallback
+
+
 def _skip_weekends(target: date) -> date:
     """If target falls on Sunday, move to Monday."""
     # In Bali/Java production, Saturday is a workday; Sunday is off.
@@ -824,11 +835,39 @@ def schedule_position(
     )
 
     # Guard: planned_glazing must be >= today.
+    # When overdue, find the earliest day with available capacity instead of
+    # blindly stuffing everything onto today.
     today = date.today()
     if planned_glazing < today:
+        # Get daily capacity (kiln throughput = the constraint)
+        _kiln_cap = _get_factory_daily_kiln_cap(db, _fid)
+
+        # Find first day from today with room
         planned_glazing = today
+        for _shift in range(30):
+            candidate = _skip_weekends(today + timedelta(days=_shift))
+            existing_load = float(
+                db.query(sa_func.coalesce(
+                    sa_func.sum(OrderPosition.glazeable_sqm * OrderPosition.quantity), 0
+                )).filter(
+                    OrderPosition.factory_id == _fid,
+                    OrderPosition.planned_glazing_date == candidate,
+                    OrderPosition.status != PositionStatus.CANCELLED.value,
+                    OrderPosition.id != position.id,
+                ).scalar() or 0
+            )
+            if existing_load + _pos_sqm <= _kiln_cap * 1.1:
+                planned_glazing = candidate
+                break
+            # Also accept an empty day even if single position exceeds cap
+            if existing_load == 0 and _shift > 0:
+                planned_glazing = candidate
+                break
+        else:
+            planned_glazing = _skip_weekends(today + timedelta(days=30))
+
         planned_kiln = _skip_weekends(
-            today + timedelta(days=pre_kiln_total + BUFFER_DAYS)
+            planned_glazing + timedelta(days=pre_kiln_total + BUFFER_DAYS)
         )
         planned_sorting = _skip_weekends(
             planned_kiln + timedelta(
@@ -839,10 +878,11 @@ def schedule_position(
         planned_completion = _skip_weekends(
             planned_sorting + timedelta(days=sorting_days + packing_days)
         )
-        logger.warning(
-            "TIGHT_DEADLINE | position=%s deadline=%s | "
-            "glazing shifted to today, completion pushed to %s",
-            position.id, deadline, planned_completion,
+        logger.info(
+            "OVERDUE_SPREAD | position=%s deadline=%s | "
+            "glazing=%s (load=%.1f/%.1f sqm) completion=%s",
+            position.id, deadline, planned_glazing,
+            existing_load + _pos_sqm, _kiln_cap, planned_completion,
         )
 
     # Find best kiln with capacity-aware date adjustment

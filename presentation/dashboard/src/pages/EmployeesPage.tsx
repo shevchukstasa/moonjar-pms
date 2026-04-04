@@ -106,6 +106,7 @@ export default function EmployeesPage() {
   const [attOvertime, setAttOvertime] = useState('0');
   const [attNotes, setAttNotes] = useState('');
   const [attExistingId, setAttExistingId] = useState<string | null>(null);
+  const [attHoursWorked, setAttHoursWorked] = useState('');
 
   // Form state
   const [formData, setFormData] = useState<EmployeeCreatePayload>({
@@ -243,9 +244,9 @@ export default function EmployeesPage() {
   });
 
   const attendanceMutation = useMutation({
-    mutationFn: ({ empId, existingId, data }: { empId: string; existingId: string | null; data: { date: string; status: string; overtime_hours: number; notes?: string } }) =>
+    mutationFn: ({ empId, existingId, data }: { empId: string; existingId: string | null; data: { date: string; status: string; overtime_hours: number; hours_worked?: number; notes?: string } }) =>
       existingId
-        ? employeesApi.updateAttendance(existingId, { status: data.status, overtime_hours: data.overtime_hours, notes: data.notes })
+        ? employeesApi.updateAttendance(existingId, { status: data.status, overtime_hours: data.overtime_hours, hours_worked: data.hours_worked, notes: data.notes })
         : employeesApi.recordAttendance(empId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['attendance-grid'] });
@@ -361,7 +362,7 @@ export default function EmployeesPage() {
     }
   }, [formData, editingEmployee, factoryId, createMutation, updateMutation]);
 
-  const openAttendanceDialog = useCallback((emp: Employee, dateStr: string, existingRecord?: { id?: string; status: string; overtime_hours?: number; notes?: string }) => {
+  const openAttendanceDialog = useCallback((emp: Employee, dateStr: string, existingRecord?: { id?: string; status: string; overtime_hours?: number; hours_worked?: number | null; notes?: string }) => {
     setAttEmployee(emp);
     setAttDate(dateStr);
     setFormError('');
@@ -371,10 +372,12 @@ export default function EmployeesPage() {
       // Pre-fill from existing record (editing mode)
       setAttStatus(existingRecord.status);
       setAttOvertime(String(existingRecord.overtime_hours ?? 0));
+      setAttHoursWorked(existingRecord.hours_worked != null ? String(existingRecord.hours_worked) : '');
       setAttNotes(existingRecord.notes ?? '');
     } else {
       // New record
       setAttStatus('present');
+      setAttHoursWorked('');
 
       // Check if this date is a non-working day (holiday or Sunday)
       const dateObj = new Date(dateStr);
@@ -397,6 +400,7 @@ export default function EmployeesPage() {
 
   const handleAttendanceSubmit = useCallback(() => {
     if (!attEmployee || !attDate) return;
+    const hwVal = attHoursWorked ? parseFloat(attHoursWorked) : undefined;
     attendanceMutation.mutate({
       empId: attEmployee.id,
       existingId: attExistingId,
@@ -404,10 +408,11 @@ export default function EmployeesPage() {
         date: attDate,
         status: attStatus,
         overtime_hours: parseFloat(attOvertime) || 0,
+        hours_worked: hwVal != null && !isNaN(hwVal) ? hwVal : undefined,
         notes: attNotes || undefined,
       },
     });
-  }, [attEmployee, attDate, attStatus, attOvertime, attNotes, attExistingId, attendanceMutation]);
+  }, [attEmployee, attDate, attStatus, attOvertime, attHoursWorked, attNotes, attExistingId, attendanceMutation]);
 
   // Month nav
   const prevMonth = () => {
@@ -758,6 +763,21 @@ export default function EmployeesPage() {
             value={attOvertime}
             onChange={(e) => setAttOvertime(e.target.value)}
           />
+          <div>
+            <Input
+              label="Hours Worked"
+              type="number"
+              step="0.5"
+              min="0"
+              max="8"
+              placeholder="Leave empty for full day"
+              value={attHoursWorked}
+              onChange={(e) => setAttHoursWorked(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Leave empty = full working day. Enter hours if employee came late or left early (e.g. 5 = worked 5h out of 7/8h standard).
+            </p>
+          </div>
           <Input
             label="Notes"
             value={attNotes}
@@ -898,7 +918,7 @@ function AttendanceTab({
   year: number;
   month: number;
   daysInMonth: number;
-  onCellClick: (emp: Employee, dateStr: string, existingRecord?: { id?: string; status: string; overtime_hours?: number; notes?: string }) => void;
+  onCellClick: (emp: Employee, dateStr: string, existingRecord?: { id?: string; status: string; overtime_hours?: number; hours_worked?: number | null; notes?: string }) => void;
   calendarMap: Map<string, CalendarEntry>;
   workingDaysData: WorkingDaysResponse | null;
 }) {
@@ -997,7 +1017,14 @@ function AttendanceTab({
                   {days.map((d) => {
                     const dateStr = toISO(year, month, d);
                     const record = empRecords[dateStr];
-                    if (record?.status === 'present') presentCount++;
+                    if (record?.status === 'present') {
+                      if (record.hours_worked != null) {
+                        // Partial day: count fraction (assume 7h for 6-day, 8h for 5-day — use 7.5 avg)
+                        presentCount += Math.min(record.hours_worked / 7.5, 1);
+                      } else {
+                        presentCount++;
+                      }
+                    }
                     if (record?.status === 'half_day') presentCount += 0.5;
                     const statusInfo = record
                       ? ATTENDANCE_STATUSES.find((s) => s.value === record.status)
@@ -1017,7 +1044,7 @@ function AttendanceTab({
                       : 'bg-gray-50 text-gray-300 hover:bg-gray-100';
 
                     const cellTitle = record
-                      ? `${record.status}${record.overtime_hours ? ` +${record.overtime_hours}h OT` : ''}`
+                      ? `${record.status}${record.hours_worked != null ? ` (${record.hours_worked}h)` : ''}${record.overtime_hours ? ` +${record.overtime_hours}h OT` : ''}`
                       : isNonWorking
                         ? (calEntry?.holiday_name ?? 'Non-working day') + ' (overtime if recorded)'
                         : 'Click to record';

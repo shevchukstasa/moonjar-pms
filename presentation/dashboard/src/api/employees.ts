@@ -88,6 +88,7 @@ export interface AttendanceRecord {
   date: string;
   status: string;
   overtime_hours: number;
+  hours_worked: number | null;
   notes: string | null;
   recorded_by: string | null;
   created_at: string | null;
@@ -101,12 +102,14 @@ export interface AttendanceCreatePayload {
   date: string;
   status: string;
   overtime_hours?: number;
+  hours_worked?: number | null;
   notes?: string | null;
 }
 
 export interface AttendanceUpdatePayload {
   status?: string;
   overtime_hours?: number;
+  hours_worked?: number | null;
   notes?: string | null;
 }
 

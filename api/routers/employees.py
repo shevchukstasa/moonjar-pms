@@ -110,6 +110,7 @@ class AttendanceOut(BaseModel):
     date: str
     status: str
     overtime_hours: float
+    hours_worked: Optional[float] = None  # NULL = full day; e.g. 5.0 = came late
     notes: Optional[str] = None
     recorded_by: Optional[str] = None
     created_at: Optional[str] = None
@@ -123,12 +124,14 @@ class AttendanceCreateInput(BaseModel):
     date: str  # YYYY-MM-DD
     status: str  # present, absent, sick, leave, half_day
     overtime_hours: float = 0
+    hours_worked: Optional[float] = None  # NULL = full day; e.g. 5.0 = came late
     notes: Optional[str] = None
 
 
 class AttendanceUpdateInput(BaseModel):
     status: Optional[str] = None
     overtime_hours: Optional[float] = None
+    hours_worked: Optional[float] = None  # NULL = full day; e.g. 5.0 = came late
     notes: Optional[str] = None
 
 
@@ -268,6 +271,7 @@ def _serialize_attendance(att: Attendance, db: Session) -> dict:
         "date": str(att.date),
         "status": att.status,
         "overtime_hours": float(att.overtime_hours or 0),
+        "hours_worked": float(att.hours_worked) if att.hours_worked is not None else None,
         "notes": att.notes,
         "recorded_by": str(att.recorded_by) if att.recorded_by else None,
         "created_at": att.created_at.isoformat() if att.created_at else None,
@@ -363,21 +367,47 @@ async def payroll_summary(
         _factory_holidays.setdefault(fid_str, set()).add(row.date)
 
     # Pre-compute working days for calendar month
+    # Must subtract holidays from factory calendar (not just raw weekday count)
     cal = calendar.Calendar()
     month_days_list = list(cal.itermonthdays2(year, month))
-    weekdays_in_month = sum(1 for day, wd in month_days_list if day != 0 and wd < 5)
-    six_day_working = sum(1 for day, wd in month_days_list if day != 0 and wd < 6)
 
-    # Pre-compute working days for 25-to-24 period
-    def _working_days_in_range(start: _date, end: _date, six_day: bool) -> int:
+    # Collect ALL holiday dates across all factories for this month
+    all_holiday_dates: set = set()
+    for dates_set in _factory_holidays.values():
+        all_holiday_dates.update(dates_set)
+
+    # Per-factory working day counts (holidays differ per factory)
+    def _working_days_for_factory(fid_str: str, six_day: bool) -> int:
+        fac_holidays = _factory_holidays.get(fid_str, set())
         count = 0
-        cur = start
-        while cur <= end:
-            wd = cur.weekday()
+        for day_num, wd in month_days_list:
+            if day_num == 0:
+                continue
+            d = _date(year, month, day_num)
+            if d in fac_holidays:
+                continue  # holiday — not a working day
             if six_day and wd < 6:
                 count += 1
             elif not six_day and wd < 5:
                 count += 1
+        return count
+
+    # Fallback: raw weekday count (used only if no factory calendar)
+    weekdays_in_month = sum(1 for day, wd in month_days_list if day != 0 and wd < 5)
+    six_day_working = sum(1 for day, wd in month_days_list if day != 0 and wd < 6)
+
+    # Pre-compute working days for 25-to-24 period
+    def _working_days_in_range(start: _date, end: _date, six_day: bool, fid_str: str = "") -> int:
+        fac_holidays = _factory_holidays.get(fid_str, set())
+        count = 0
+        cur = start
+        while cur <= end:
+            if cur not in fac_holidays:
+                wd = cur.weekday()
+                if six_day and wd < 6:
+                    count += 1
+                elif not six_day and wd < 5:
+                    count += 1
             from datetime import timedelta
             cur += timedelta(days=1)
         return count
@@ -419,7 +449,8 @@ async def payroll_summary(
                 )
                 .all()
             )
-            working_days = _working_days_in_range(period_start, period_end, ws == 'six_day')
+            emp_fid = str(emp.factory_id) if emp.factory_id else ""
+            working_days = _working_days_in_range(period_start, period_end, ws == 'six_day', emp_fid)
         else:
             # Calendar month
             attendance_records = (
@@ -431,10 +462,14 @@ async def payroll_summary(
                 )
                 .all()
             )
-            working_days = six_day_working if ws == 'six_day' else weekdays_in_month
+            emp_fid = str(emp.factory_id) if emp.factory_id else ""
+            # Use factory-specific working days (subtracting holidays)
+            if _factory_holidays.get(emp_fid):
+                working_days = _working_days_for_factory(emp_fid, ws == 'six_day')
+            else:
+                working_days = six_day_working if ws == 'six_day' else weekdays_in_month
 
-        # Get holiday dates for this employee's factory
-        emp_fid = str(emp.factory_id) if emp.factory_id else ""
+        # Get holiday dates for this employee's factory (already resolved emp_fid above)
         emp_holidays = _factory_holidays.get(emp_fid, set())
 
         payroll = calculate_monthly_payroll(
@@ -794,6 +829,7 @@ async def record_attendance(
         date=att_date,
         status=data.status,
         overtime_hours=data.overtime_hours,
+        hours_worked=data.hours_worked,
         notes=data.notes,
         recorded_by=current_user.id,
     )

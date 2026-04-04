@@ -55,6 +55,10 @@ EMPLOYEE_SQL = [
     "ALTER TABLE employees ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
     "ALTER TABLE employees ADD COLUMN IF NOT EXISTS birth_date DATE",
     "ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_own_bpjs BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE employees ADD COLUMN IF NOT EXISTS pay_period VARCHAR(20) NOT NULL DEFAULT 'calendar_month'",
+
+    # Attendance: hours_worked for partial-day tracking (NULL = full day)
+    "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS hours_worked NUMERIC(4,1)",
 ]
 
 

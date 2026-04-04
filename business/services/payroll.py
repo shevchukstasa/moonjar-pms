@@ -431,12 +431,36 @@ def calculate_monthly_payroll(
     leave_days = 0
     half_days = 0
     total_overtime_hours = Decimal("0")
+    # hours_worked proration: accumulate fractional days from hours_worked field
+    _partial_day_total = Decimal("0")  # sum of (hours_worked / standard_hours) for partial days
+
+    # Standard hours per day by schedule
+    # 6-day: Mon-Fri = 7h, Saturday = 5h. 5-day: Mon-Fri = 8h.
+    _std_hours_default = Decimal("7") if work_schedule == 'six_day' else Decimal("8")
+    _std_hours_sat = Decimal("5")  # Saturday for 6-day schedule
+
+    def _get_std_hours_for_date(att_date_val) -> Decimal:
+        """Return standard working hours for a given date."""
+        if work_schedule == 'six_day' and att_date_val is not None:
+            wd = getattr(att_date_val, 'weekday', lambda: -1)()
+            if wd == 5:  # Saturday
+                return _std_hours_sat
+        return _std_hours_default
 
     for att in attendance_records:
         status = getattr(att, 'status', '') or ''
         ot = _d(getattr(att, 'overtime_hours', 0) or 0)
+        hw = getattr(att, 'hours_worked', None)
+        att_date_val = getattr(att, 'date', None)
+
         if status == 'present':
-            present_days += 1
+            if hw is not None:
+                # Partial day: prorate by hours_worked / standard_hours (capped at 1.0)
+                std_h = _get_std_hours_for_date(att_date_val)
+                fraction = min(_d(hw) / std_h, Decimal("1"))
+                _partial_day_total += fraction
+            else:
+                present_days += 1
         elif status == 'absent':
             absent_days += 1
         elif status == 'sick':
@@ -444,11 +468,18 @@ def calculate_monthly_payroll(
         elif status == 'leave':
             leave_days += 1
         elif status == 'half_day':
-            half_days += 1
+            if hw is not None:
+                std_h = _get_std_hours_for_date(att_date_val)
+                fraction = min(_d(hw) / std_h, Decimal("1"))
+                _partial_day_total += fraction
+            else:
+                half_days += 1
         total_overtime_hours += ot
 
-    # Effective working days: present + leave + sick + half_day*0.5
-    effective_days = Decimal(str(present_days + leave_days + sick_days)) + Decimal(str(half_days)) * Decimal("0.5")
+    # Effective working days: full present + leave + sick + half_day*0.5 + partial days
+    effective_days = (Decimal(str(present_days + leave_days + sick_days))
+                      + Decimal(str(half_days)) * Decimal("0.5")
+                      + _partial_day_total)
 
     # ── Proration ────────────────────────────────────────────────────────
     if working_days_in_month <= 0:
@@ -583,6 +614,7 @@ def calculate_monthly_payroll(
         "sick_days": sick_days,
         "leave_days": leave_days,
         "half_days": half_days,
+        "partial_day_fraction": float(_partial_day_total),  # fractional days from hours_worked
         "effective_days": float(effective_days),
         "overtime_hours": float(total_overtime_hours),
 

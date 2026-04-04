@@ -2649,6 +2649,7 @@ class Attendance(Base):
     employee_id = Column(UUID(as_uuid=True), ForeignKey('employees.id'), nullable=False)
     date = Column(sa.Date, nullable=False)
     status = Column(sa.String(20), nullable=False)  # present, absent, sick, leave, half_day
+    hours_worked = Column(sa.Numeric(4, 1), nullable=True)  # NULL = full day; e.g. 5.0 = came late
     overtime_hours = Column(sa.Numeric(4, 1), nullable=False, server_default='0')
     notes = Column(sa.Text, nullable=True)
     recorded_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)

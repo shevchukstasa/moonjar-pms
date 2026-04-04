@@ -346,13 +346,15 @@ def generate_payslip_pdf(item: dict, year: int, month: int, factory_name: str = 
     # PPh 21 — always shown for formal employees
     if category == "formal":
         pph21_val = item.get("pph21", 0)
+        ter_rate = item.get("pph21_ter_rate_pct", 0)
+        ter_rate_str = f"{ter_rate:.2f}".rstrip('0').rstrip('.')
         elements.append(Paragraph("PPh 21", section_style))
         pph_note = ParagraphStyle("pph_note", parent=styles["Normal"], fontSize=7,
                                    textColor=colors.HexColor("#6b7280"), italics=True)
         pph_data = [
-            [Paragraph("PPh 21 (TER)", label_style),
+            [Paragraph(f"PPh 21 (TER {ter_rate_str}%)", label_style),
              Paragraph(_fmt_idr(pph21_val) + " IDR", value_style)],
-            [Paragraph("Paid by employer (gross-up method — not deducted from salary)", pph_note),
+            [Paragraph(f"TER rate {ter_rate_str}% applied to gross salary — paid by employer (not deducted from salary)", pph_note),
              Paragraph("", label_style)],
         ]
         pph_t = Table(pph_data, colWidths=[100 * mm, 65 * mm])

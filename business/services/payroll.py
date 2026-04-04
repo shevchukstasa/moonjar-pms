@@ -578,6 +578,7 @@ def calculate_monthly_payroll(
     bpjs_employer_total = ZERO
     bpjs_breakdown = {}
     pph21 = ZERO
+    pph21_ter_rate_pct = 0.0
     contractor_tax = ZERO
     # company_bpjs_for_employee: BPJS employee share borne by company (not from employee net)
     company_bpjs_for_employee = ZERO
@@ -602,6 +603,7 @@ def calculate_monthly_payroll(
 
         # PPh21 via TER — always gross-up (company bears, not deducted from employee)
         pph21 = calculate_pph21_ter(gross_salary, ptkp_status)
+        pph21_ter_rate_pct = float(_ter_rate(gross_salary, ptkp_status) * Decimal("100"))
 
     elif employment_category == 'contractor':
         # PPh 23: 2.5% deducted from contractor payment
@@ -686,6 +688,7 @@ def calculate_monthly_payroll(
 
         # Tax (PPh21 gross-up: borne by company, not deducted from employee)
         "pph21": float(pph21),
+        "pph21_ter_rate_pct": pph21_ter_rate_pct if employment_category == 'formal' else 0.0,
         "pph21_borne_by_company": float(pph21) if employment_category == 'formal' else 0.0,
         "contractor_tax": float(contractor_tax),
 

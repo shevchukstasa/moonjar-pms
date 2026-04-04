@@ -376,6 +376,7 @@ def calculate_monthly_payroll(
     sales_revenue: float = 0,
     payroll_year: int = 0,
     payroll_month: int = 0,
+    holiday_dates: set | None = None,
 ) -> dict:
     """Calculate full monthly payroll for one employee.
 
@@ -464,7 +465,11 @@ def calculate_monthly_payroll(
     # ── Overtime pay ─────────────────────────────────────────────────────
     # For 6-day schedule: Saturdays where status=present and no manual OT entered
     # automatically get 2 hours OT (1st hour 1.5x, 2nd hour 2x) per Indonesian law.
+    # Holiday OT uses higher multipliers (2x from first hour) per PP 35/2021.
+    _holidays = holiday_dates or set()
     overtime_pay = ZERO
+    holiday_overtime_hours = Decimal("0")
+    weekday_overtime_hours = Decimal("0")
     saturday_auto_overtime_hours = Decimal("0")
     for att in attendance_records:
         ot = float(getattr(att, 'overtime_hours', 0) or 0)
@@ -481,7 +486,25 @@ def calculate_monthly_payroll(
             saturday_auto_overtime_hours += Decimal("2")
 
         if ot > 0:
-            overtime_pay += calculate_overtime_pay(hourly_rate, ot, work_schedule, is_holiday=False)
+            # Check if this day is a holiday/non-working day from factory calendar
+            # OR a rest day (weekend) for the employee's work schedule
+            is_holiday = False
+            if att_date is not None:
+                if att_date in _holidays:
+                    is_holiday = True
+                else:
+                    wd = getattr(att_date, 'weekday', lambda: -1)()
+                    # 5-day schedule: Saturday(5) and Sunday(6) are rest days
+                    # 6-day schedule: Sunday(6) is the only rest day
+                    if work_schedule == 'five_day' and wd >= 5:
+                        is_holiday = True
+                    elif work_schedule == 'six_day' and wd == 6:
+                        is_holiday = True
+            overtime_pay += calculate_overtime_pay(hourly_rate, ot, work_schedule, is_holiday=is_holiday)
+            if is_holiday:
+                holiday_overtime_hours += _d(ot)
+            else:
+                weekday_overtime_hours += _d(ot)
 
     # ── Commission (sales department only) ───────────────────────────────
     commission = ZERO
@@ -581,6 +604,8 @@ def calculate_monthly_payroll(
 
         # Overtime
         "overtime_pay": float(overtime_pay),
+        "holiday_overtime_hours": float(holiday_overtime_hours),
+        "weekday_overtime_hours": float(weekday_overtime_hours),
         "saturday_auto_overtime_hours": float(saturday_auto_overtime_hours),
 
         # Commission

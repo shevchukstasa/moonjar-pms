@@ -339,6 +339,7 @@ async def payroll_summary(
 ):
     """Calculate full payroll summary with Indonesian tax/BPJS for a given month."""
     from business.services.payroll import calculate_monthly_payroll
+    from api.models import FactoryCalendar
     import calendar
     from datetime import date as _date
 
@@ -348,6 +349,18 @@ async def payroll_summary(
         query = query.filter(Employee.factory_id == fid)
 
     employees = query.order_by(Employee.full_name).all()
+
+    # Load holiday dates from factory calendar for OT multiplier calculation
+    holiday_query = db.query(FactoryCalendar.date, FactoryCalendar.factory_id).filter(
+        FactoryCalendar.is_working_day == False,
+        extract("year", FactoryCalendar.date) == year,
+        extract("month", FactoryCalendar.date) == month,
+    )
+    # Group holidays by factory_id for multi-factory payroll
+    _factory_holidays: dict[str, set] = {}
+    for row in holiday_query.all():
+        fid_str = str(row.factory_id)
+        _factory_holidays.setdefault(fid_str, set()).add(row.date)
 
     # Pre-compute working days for calendar month
     cal = calendar.Calendar()
@@ -420,12 +433,17 @@ async def payroll_summary(
             )
             working_days = six_day_working if ws == 'six_day' else weekdays_in_month
 
+        # Get holiday dates for this employee's factory
+        emp_fid = str(emp.factory_id) if emp.factory_id else ""
+        emp_holidays = _factory_holidays.get(emp_fid, set())
+
         payroll = calculate_monthly_payroll(
             employee=emp,
             attendance_records=attendance_records,
             working_days_in_month=working_days,
             payroll_year=year,
             payroll_month=month,
+            holiday_dates=emp_holidays,
         )
 
         result.append(payroll)
@@ -526,22 +544,58 @@ async def payroll_pdf_employee(
 
     # Calculate payroll for this employee
     from business.services.payroll import calculate_monthly_payroll
-    payroll = calculate_monthly_payroll(emp, year, month, db, payroll_year=year, payroll_month=month)
+    from api.models import FactoryCalendar
+    import calendar as _cal
 
-    # Apply pay period filtering for attendance
-    pay_period = getattr(emp, "pay_period", "calendar_month")
+    ws = getattr(emp, 'work_schedule', 'six_day') or 'six_day'
+    pay_period = getattr(emp, "pay_period", "calendar_month") or "calendar_month"
+
+    # Load attendance records
     if pay_period == "25_to_24":
-        import calendar as _cal
         prev_month = month - 1 if month > 1 else 12
         prev_year = year if month > 1 else year - 1
         period_start = date(prev_year, prev_month, 25)
         period_end = date(year, month, 24)
-        last_day = _cal.monthrange(year, month)[1]
+        attendance_records = db.query(Attendance).filter(
+            Attendance.employee_id == emp.id,
+            Attendance.date >= period_start,
+            Attendance.date <= period_end,
+        ).all()
         working_days = sum(
             1 for d in range((period_end - period_start).days + 1)
-            if (period_start + timedelta(days=d)).weekday() < 5
+            if (period_start + timedelta(days=d)).weekday() < (6 if ws == 'six_day' else 5)
         )
-        payroll["working_days"] = working_days
+    else:
+        attendance_records = db.query(Attendance).filter(
+            Attendance.employee_id == emp.id,
+            extract("year", Attendance.date) == year,
+            extract("month", Attendance.date) == month,
+        ).all()
+        month_days_list = list(_cal.Calendar().itermonthdays2(year, month))
+        if ws == 'six_day':
+            working_days = sum(1 for day, wd in month_days_list if day != 0 and wd < 6)
+        else:
+            working_days = sum(1 for day, wd in month_days_list if day != 0 and wd < 5)
+
+    # Load holiday dates
+    emp_holidays = set()
+    if emp.factory_id:
+        for row in db.query(FactoryCalendar.date).filter(
+            FactoryCalendar.factory_id == emp.factory_id,
+            FactoryCalendar.is_working_day == False,
+            extract("year", FactoryCalendar.date) == year,
+            extract("month", FactoryCalendar.date) == month,
+        ).all():
+            emp_holidays.add(row[0])
+
+    payroll = calculate_monthly_payroll(
+        employee=emp,
+        attendance_records=attendance_records,
+        working_days_in_month=working_days,
+        payroll_year=year,
+        payroll_month=month,
+        holiday_dates=emp_holidays,
+    )
 
     buf = generate_payslip_pdf(
         item=payroll,

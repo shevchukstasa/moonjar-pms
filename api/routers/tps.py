@@ -1314,6 +1314,7 @@ class TypologyUpdate(BaseModel):
     max_firing_temp: Optional[int] = None
     shift_count: Optional[int] = None
     auto_calibrate: Optional[bool] = None
+    is_active: Optional[bool] = None
     priority: Optional[int] = None
     notes: Optional[str] = None
 

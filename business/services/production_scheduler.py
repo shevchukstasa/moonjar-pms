@@ -965,6 +965,9 @@ def schedule_order(db: Session, order: ProductionOrder) -> int:
     for position in positions:
         try:
             schedule_position(db, position, deadline)
+            # Flush so next position's capacity query sees this one's dates
+            # (autoflush=False means ORM won't do it automatically)
+            db.flush()
             count += 1
         except Exception as e:
             logger.error(
@@ -1115,6 +1118,9 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
         try:
             count = schedule_order(db, order)
             total += count
+            # Flush after each order so the next order's capacity queries
+            # see the updated planned dates (autoflush is OFF).
+            db.flush()
         except Exception as e:
             logger.error(
                 "Failed to reschedule order %s: %s", order.order_number, e,

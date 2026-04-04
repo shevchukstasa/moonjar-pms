@@ -1435,27 +1435,31 @@ async def monthly_points_reset():
 
 async def nightly_reschedule_overdue():
     """
-    Nightly auto-reschedule: find positions with past planned dates
-    and reschedule them forward from today.
+    Nightly capacity-aware reschedule: find overdue positions and spread them
+    across days starting from today, respecting daily kiln/glazing capacity.
+
+    Instead of naively stuffing everything onto today (creating bottlenecks),
+    this calculates daily capacity and distributes positions so no day is
+    overloaded beyond kiln throughput × 1.1 (10% tolerance).
+
     Runs at 00:05 UTC (08:05 Bali) daily.
     """
     logger.info("Running nightly reschedule of overdue positions")
     db = _get_db_session()
     try:
-        from datetime import date
-        from api.models import OrderPosition, ProductionOrder
-        from api.enums import OrderStatus
-        from business.services.production_scheduler import reschedule_position
+        from datetime import date, timedelta
+        from sqlalchemy import func as sa_func
+        from api.models import OrderPosition, ProductionOrder, Resource
+        from api.enums import OrderStatus, PositionStatus
 
         today = date.today()
 
-        # Terminal statuses — don't reschedule these
         terminal_statuses = [
             'COMPLETED', 'SHIPPED', 'CANCELLED', 'DELIVERED',
             'READY_FOR_SHIPMENT', 'PACKED',
         ]
 
-        # Find positions with any planned date in the past and non-terminal status
+        # Find positions with any planned date in the past
         overdue = db.query(OrderPosition).join(ProductionOrder).filter(
             ProductionOrder.status.in_([
                 OrderStatus.NEW.value,
@@ -1466,14 +1470,150 @@ async def nightly_reschedule_overdue():
             (OrderPosition.planned_glazing_date < today) |
             (OrderPosition.planned_kiln_date < today) |
             (OrderPosition.planned_sorting_date < today),
+        ).order_by(
+            OrderPosition.priority_order.asc().nullslast(),
+            ProductionOrder.final_deadline.asc().nullslast(),
         ).all()
 
+        if not overdue:
+            logger.info("NIGHTLY_RESCHEDULE_DONE | no overdue positions")
+            return
+
+        # ── Get daily capacity per factory (kiln sqm = constraint) ──
+        factory_ids = set()
+        for pos in overdue:
+            fid = pos.factory_id or (pos.order.factory_id if pos.order else None)
+            if fid:
+                factory_ids.add(fid)
+
+        factory_daily_cap = {}
+        for fid in factory_ids:
+            kilns = db.query(Resource).filter(
+                Resource.factory_id == fid,
+                Resource.resource_type == "kiln",
+                Resource.status == "operational",
+            ).all()
+            cap = sum(float(k.capacity_sqm or 0) for k in kilns)
+            factory_daily_cap[fid] = cap if cap > 0 else 10.0  # fallback
+
+        # ── Build existing day loads (glazing stage = bottleneck) ──
+        # Track loads in memory so we account for positions we just moved
+        # Key: (factory_id, date) → current sqm load
+        day_loads: dict[tuple, float] = {}
+
+        def _get_load(fid, d):
+            key = (fid, d)
+            if key not in day_loads:
+                existing = float(
+                    db.query(sa_func.coalesce(
+                        sa_func.sum(OrderPosition.glazeable_sqm * OrderPosition.quantity),
+                        0,
+                    )).filter(
+                        OrderPosition.factory_id == fid,
+                        OrderPosition.planned_glazing_date == d,
+                        OrderPosition.status != PositionStatus.CANCELLED.value,
+                    ).scalar() or 0
+                )
+                day_loads[key] = existing
+            return day_loads[key]
+
+        def _skip_sunday(d):
+            """Skip Sundays (Saturday is a workday in Bali)."""
+            if d.weekday() == 6:
+                return d + timedelta(days=1)
+            return d
+
+        # ── Distribute overdue positions across days ──
         rescheduled = 0
         errors = 0
+
         for pos in overdue:
             try:
-                reschedule_position(db, pos)
+                fid = pos.factory_id or (pos.order.factory_id if pos.order else None)
+                if not fid:
+                    continue
+
+                daily_cap = factory_daily_cap.get(fid, 10.0)
+                pos_area = float(pos.glazeable_sqm or 0) * float(pos.quantity or 1)
+                if pos_area <= 0:
+                    pos_area = 0.1
+
+                # Find the first day from today with available capacity
+                target_day = _skip_sunday(today)
+                max_lookahead = 30  # don't push more than 30 days
+
+                for shift in range(max_lookahead):
+                    candidate = _skip_sunday(today + timedelta(days=shift))
+                    current_load = _get_load(fid, candidate)
+                    # Allow up to 110% capacity (10% tolerance)
+                    if current_load + pos_area <= daily_cap * 1.1:
+                        target_day = candidate
+                        break
+                    # Also allow if day is empty (even if pos_area > cap — single large item)
+                    if current_load == 0 and shift > 0:
+                        target_day = candidate
+                        break
+                else:
+                    # All days full for 30 days — use last day as fallback
+                    target_day = _skip_sunday(today + timedelta(days=max_lookahead))
+
+                # Calculate day shift delta
+                old_glazing = pos.planned_glazing_date
+                if old_glazing and old_glazing < today:
+                    delta_days = (target_day - old_glazing).days
+                else:
+                    delta_days = 0
+
+                # Move all planned dates forward by delta
+                if pos.planned_glazing_date and pos.planned_glazing_date < today:
+                    pos.planned_glazing_date = target_day
+
+                if pos.planned_kiln_date and pos.planned_kiln_date < today:
+                    if delta_days > 0 and old_glazing:
+                        # Maintain relative gap between stages
+                        pos.planned_kiln_date = _skip_sunday(
+                            pos.planned_kiln_date + timedelta(days=delta_days)
+                        )
+                    else:
+                        pos.planned_kiln_date = _skip_sunday(target_day + timedelta(days=1))
+
+                if pos.planned_sorting_date and pos.planned_sorting_date < today:
+                    if delta_days > 0 and old_glazing:
+                        pos.planned_sorting_date = _skip_sunday(
+                            pos.planned_sorting_date + timedelta(days=delta_days)
+                        )
+                    else:
+                        pos.planned_sorting_date = _skip_sunday(
+                            (pos.planned_kiln_date or target_day) + timedelta(days=2)
+                        )
+
+                if pos.planned_completion_date and pos.planned_completion_date < today:
+                    if delta_days > 0 and old_glazing:
+                        pos.planned_completion_date = _skip_sunday(
+                            pos.planned_completion_date + timedelta(days=delta_days)
+                        )
+                    else:
+                        pos.planned_completion_date = _skip_sunday(
+                            (pos.planned_sorting_date or target_day) + timedelta(days=1)
+                        )
+
+                # Update in-memory load tracker
+                load_key = (fid, target_day)
+                day_loads[load_key] = day_loads.get(load_key, _get_load(fid, target_day)) + pos_area
+
+                pos.schedule_version = (pos.schedule_version or 0) + 1
                 rescheduled += 1
+
+                logger.info(
+                    "NIGHTLY_RESCHEDULE | pos=%s order=%s | glazing=%s kiln=%s "
+                    "sorting=%s | day_load=%.1f/%.1f sqm",
+                    pos.id,
+                    pos.order.order_number if pos.order else "?",
+                    pos.planned_glazing_date, pos.planned_kiln_date,
+                    pos.planned_sorting_date,
+                    day_loads.get(load_key, 0), daily_cap,
+                )
+
             except Exception as e:
                 errors += 1
                 logger.error(
@@ -1483,20 +1623,15 @@ async def nightly_reschedule_overdue():
 
         db.commit()
         logger.info(
-            "NIGHTLY_RESCHEDULE_DONE | overdue=%d rescheduled=%d errors=%d",
+            "NIGHTLY_RESCHEDULE_DONE | overdue=%d rescheduled=%d errors=%d "
+            "| spread across days with capacity check",
             len(overdue), rescheduled, errors,
         )
 
-        # Notify PMs if positions were rescheduled
+        # Notify PMs
         if rescheduled > 0:
             from api.models import Notification, User, UserFactory
             from api.enums import NotificationType, UserRole
-
-            # Get unique factory IDs from rescheduled positions
-            factory_ids = set()
-            for pos in overdue:
-                if pos.order and pos.order.factory_id:
-                    factory_ids.add(pos.order.factory_id)
 
             for fid in factory_ids:
                 pm_ids = [
@@ -1510,8 +1645,11 @@ async def nightly_reschedule_overdue():
                     db.add(Notification(
                         user_id=uid,
                         type=NotificationType.SYSTEM.value,
-                        title="Schedule auto-updated",
-                        message=f"{rescheduled} overdue position(s) rescheduled to today or later.",
+                        title="Jadwal diperbarui otomatis",
+                        message=(
+                            f"{rescheduled} posisi terlambat dijadwalkan ulang "
+                            f"dengan memperhatikan kapasitas harian."
+                        ),
                         data={"event": "nightly_reschedule", "count": rescheduled},
                     ))
             db.commit()

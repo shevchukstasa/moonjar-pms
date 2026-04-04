@@ -961,8 +961,9 @@ function AttendanceTab({
                 const dateStr = toISO(year, month, d);
                 const dateObj = new Date(year, month - 1, d);
                 const isSunday = dateObj.getDay() === 0;
+                const isSaturday = dateObj.getDay() === 6;
                 const calEntry = calendarMap.get(dateStr);
-                // Determine day type: holiday (from calendar), Sunday, or working day
+                // Determine day type: holiday (from calendar), Sunday, Saturday, or working day
                 const isHoliday = calEntry ? !calEntry.is_working_day : false;
                 const isCalendarWorkingDay = calEntry ? calEntry.is_working_day : !isSunday;
 
@@ -980,8 +981,12 @@ function AttendanceTab({
                   // Sunday overridden to working day (overtime)
                   headerBg = 'bg-amber-50';
                   headerText = 'text-amber-600 font-semibold';
+                } else if (isSaturday && isCalendarWorkingDay) {
+                  // Saturday — working day for 6-day schedule, half day + auto-OT
+                  headerBg = 'bg-blue-50';
+                  headerText = 'text-blue-600 font-semibold';
                 } else if (isCalendarWorkingDay) {
-                  // Normal working day
+                  // Normal working day (Mon-Fri)
                   headerBg = 'bg-emerald-50';
                   headerText = 'text-emerald-700';
                 }
@@ -990,7 +995,9 @@ function AttendanceTab({
                   ? calEntry.holiday_name
                   : isSunday
                     ? 'Sunday'
-                    : 'Working day';
+                    : isSaturday
+                      ? 'Saturday'
+                      : 'Working day';
 
                 return (
                   <th
@@ -1099,6 +1106,11 @@ function AttendanceTab({
               <span className="inline-block h-3 w-3 rounded bg-red-200" />
               <span className="text-gray-600">Holidays:</span>
               <span className="font-bold text-red-600">{workingDaysData.holidays}</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="inline-block h-3 w-3 rounded bg-blue-200" />
+              <span className="text-gray-600">Saturdays:</span>
+              <span className="font-bold text-blue-600">{workingDaysData.saturdays ?? Math.floor(workingDaysData.total_days / 7) + (new Date(year, month - 1, workingDaysData.total_days).getDay() >= 6 ? 1 : 0)}</span>
             </div>
             <div className="flex items-center gap-2 text-sm">
               <span className="inline-block h-3 w-3 rounded bg-gray-200" />

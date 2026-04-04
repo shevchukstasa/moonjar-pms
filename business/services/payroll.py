@@ -424,6 +424,9 @@ def calculate_monthly_payroll(
 
     total_allowances = allowance_bike + allowance_housing + allowance_food + allowance_bpjs + allowance_other
 
+    # ── Holiday set (used by both attendance analysis and overtime calc) ─
+    _holidays = holiday_dates or set()
+
     # ── Attendance analysis ──────────────────────────────────────────────
     present_days = 0
     absent_days = 0
@@ -519,7 +522,6 @@ def calculate_monthly_payroll(
     # For 6-day schedule: Saturdays where status=present and no manual OT entered
     # automatically get 2 hours OT (1st hour 1.5x, 2nd hour 2x) per Indonesian law.
     # Holiday OT uses higher multipliers (2x from first hour) per PP 35/2021.
-    _holidays = holiday_dates or set()
     overtime_pay = ZERO
     holiday_overtime_hours = Decimal("0")
     weekday_overtime_hours = Decimal("0")

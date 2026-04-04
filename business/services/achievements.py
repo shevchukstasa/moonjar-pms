@@ -59,6 +59,16 @@ ACHIEVEMENT_TYPES = {
         "icon": "\u2B50",
         "thresholds": [50, 200, 500, 1500, 5000],
     },
+    "skill_collector": {
+        "label": "Skill Collector",
+        "icon": "\U0001F393",
+        "thresholds": [2, 5, 10, 15, 20],
+    },
+    "competition_winner": {
+        "label": "Competition Winner",
+        "icon": "\U0001F3C6",
+        "thresholds": [1, 5, 10, 25, 50],
+    },
 }
 
 LEVEL_NAMES = {
@@ -344,12 +354,34 @@ def _measure_quality_star(db: Session, user_id: UUID) -> int:
 
 # ── Main update function ──────────────────────────────────────
 
+def _measure_skill_collector(db: Session, user_id: UUID) -> int:
+    """Count certified skills for this user."""
+    from api.models import UserSkill
+    count = db.query(sa_func.count(UserSkill.id)).filter(
+        UserSkill.user_id == user_id,
+        UserSkill.status == "certified",
+    ).scalar() or 0
+    return count
+
+
+def _measure_competition_winner(db: Session, user_id: UUID) -> int:
+    """Count competition wins (rank=1) for this user."""
+    from api.models import CompetitionEntry
+    count = db.query(sa_func.count(CompetitionEntry.id)).filter(
+        CompetitionEntry.user_id == user_id,
+        CompetitionEntry.rank == 1,
+    ).scalar() or 0
+    return count
+
+
 MEASURERS = {
     "glazing_master": _measure_glazing_master,
     "zero_defect_hero": _measure_zero_defect_hero,
     "speed_champion": _measure_speed_champion,
     "kiln_expert": _measure_kiln_expert,
     "quality_star": _measure_quality_star,
+    "skill_collector": _measure_skill_collector,
+    "competition_winner": _measure_competition_winner,
 }
 
 

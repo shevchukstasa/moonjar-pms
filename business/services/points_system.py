@@ -9,9 +9,17 @@ Accuracy thresholds:
   > 10%   = 1 pt (participation)
 
 Bonus sources:
-  streak_bonus       = +5 pts/day
-  challenge_complete = +20 pts
-  achievement_unlock = +50 pts
+  streak_bonus         = +5 pts/day
+  challenge_complete   = +20 pts
+  achievement_unlock   = +50 pts
+  skill_certification  = +100 pts (per skill badge earned)
+  competition_win_1st  = +50 pts
+  competition_win_2nd  = +30 pts
+  competition_win_3rd  = +20 pts
+  team_win_bonus       = +30 pts (all team members)
+  speed_bonus_glazing  = +3/5/10 pts (20%/50%/100%+ above avg)
+  speed_bonus_firing   = +3/5/10 pts
+  speed_bonus_sorting  = +3/5/10 pts
 """
 
 import logging

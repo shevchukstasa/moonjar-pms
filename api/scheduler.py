@@ -1523,6 +1523,138 @@ async def nightly_reschedule_overdue():
         db.close()
 
 
+# ── Gamification Engine v2 jobs ──────────────────────────────
+
+
+async def gamification_update_scores():
+    """Update scores for all active competitions across factories."""
+    logger.info("Running gamification score update")
+    db = _get_db_session()
+    try:
+        from business.services.competitions import update_all_active_competitions
+        for fid in _get_all_factory_ids(db):
+            try:
+                update_all_active_competitions(db, fid)
+            except Exception as e:
+                logger.error("Competition score update failed for %s: %s", fid, e)
+        db.commit()
+    except Exception as e:
+        logger.error("Gamification score update failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def gamification_auto_weekly():
+    """Auto-create weekly competitions for each factory."""
+    logger.info("Running auto weekly competition creation")
+    db = _get_db_session()
+    try:
+        from business.services.competitions import auto_create_weekly_competition
+        for fid in _get_all_factory_ids(db):
+            try:
+                auto_create_weekly_competition(db, fid)
+            except Exception as e:
+                logger.error("Auto weekly competition failed for %s: %s", fid, e)
+        db.commit()
+    except Exception as e:
+        logger.error("Auto weekly competition failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def gamification_finalize():
+    """Finalize ended competitions and award points."""
+    logger.info("Running competition finalization")
+    db = _get_db_session()
+    try:
+        from business.services.competitions import finalize_ended_competitions
+        for fid in _get_all_factory_ids(db):
+            try:
+                finalize_ended_competitions(db, fid)
+            except Exception as e:
+                logger.error("Competition finalization failed for %s: %s", fid, e)
+        db.commit()
+    except Exception as e:
+        logger.error("Competition finalization failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def gamification_monthly_prizes():
+    """Generate monthly prize recommendations for each factory."""
+    logger.info("Running monthly prize generation")
+    db = _get_db_session()
+    try:
+        from business.services.prize_advisor import generate_monthly_prizes
+        for fid in _get_all_factory_ids(db):
+            try:
+                generate_monthly_prizes(db, fid)
+            except Exception as e:
+                logger.error("Monthly prize generation failed for %s: %s", fid, e)
+        db.commit()
+    except Exception as e:
+        logger.error("Monthly prize generation failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def gamification_ceo_report():
+    """Send weekly gamification report to CEO/Owner via Telegram."""
+    logger.info("Running CEO gamification report")
+    db = _get_db_session()
+    try:
+        from business.services.ceo_reports import send_weekly_report_all_factories
+        send_weekly_report_all_factories(db)
+        db.commit()
+    except Exception as e:
+        logger.error("CEO gamification report failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def gamification_skill_progress():
+    """Batch update skill progress for all users."""
+    logger.info("Running skill progress batch update")
+    db = _get_db_session()
+    try:
+        from business.services.skill_system import batch_update_all_skills
+        for fid in _get_all_factory_ids(db):
+            try:
+                batch_update_all_skills(db, fid)
+            except Exception as e:
+                logger.error("Skill progress update failed for %s: %s", fid, e)
+        db.commit()
+    except Exception as e:
+        logger.error("Skill progress batch failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def gamification_new_season():
+    """Start a new gamification season (quarterly)."""
+    logger.info("Running new season creation")
+    db = _get_db_session()
+    try:
+        from business.services.competitions import start_new_season
+        for fid in _get_all_factory_ids(db):
+            try:
+                start_new_season(db, fid)
+            except Exception as e:
+                logger.error("New season failed for %s: %s", fid, e)
+        db.commit()
+    except Exception as e:
+        logger.error("New season creation failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 # --- Scheduler setup ---
 
 def setup_scheduler():
@@ -1600,6 +1732,29 @@ def setup_scheduler():
 
     # Daily 00:05 UTC (08:05 Bali) — reschedule overdue positions forward
     scheduler.add_job(nightly_reschedule_overdue, CronTrigger(hour=0, minute=5), id="nightly_reschedule")
+
+    # ── Gamification Engine v2 ──
+
+    # Daily 15:00 UTC (23:00 WITA) — update competition scores
+    scheduler.add_job(gamification_update_scores, CronTrigger(hour=15, minute=0), id="gamification_scores")
+
+    # Sunday 22:00 UTC (Monday 06:00 WITA) — auto-create weekly competition
+    scheduler.add_job(gamification_auto_weekly, CronTrigger(day_of_week="sun", hour=22, minute=0), id="gamification_weekly")
+
+    # Daily 16:05 UTC (00:05 WITA next day) — finalize ended competitions
+    scheduler.add_job(gamification_finalize, CronTrigger(hour=16, minute=5), id="gamification_finalize")
+
+    # Monthly 1st 00:00 UTC (08:00 WITA) — generate prize recommendations
+    scheduler.add_job(gamification_monthly_prizes, CronTrigger(day=1, hour=0, minute=0), id="gamification_prizes")
+
+    # Sunday 12:00 UTC (20:00 WITA) — CEO weekly gamification report
+    scheduler.add_job(gamification_ceo_report, CronTrigger(day_of_week="sun", hour=12, minute=0), id="gamification_ceo_report")
+
+    # Daily 14:00 UTC (22:00 WITA) — batch update skill progress
+    scheduler.add_job(gamification_skill_progress, CronTrigger(hour=14, minute=5), id="gamification_skills")
+
+    # Quarterly 1st 16:01 UTC (00:01 WITA) — start new season
+    scheduler.add_job(gamification_new_season, CronTrigger(month="1,4,7,10", day=1, hour=16, minute=1), id="gamification_season")
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

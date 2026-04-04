@@ -79,6 +79,7 @@ from api.routers import mana_shipments
 from api.routers import pdf_templates
 from api.routers import shipments
 from api.routers import firing_logs
+from api.routers import gamification
 
 
 def _ensure_schema():
@@ -1850,6 +1851,7 @@ async def lifespan(app: FastAPI):
         ("production_line_resources", "api.schema_patches.production_line_resources_patch", "apply"),
         ("kiln_shelves", "api.schema_patches.kiln_shelves_patch", "apply"),
         ("seed_typologies", "api.schema_patches.seed_typologies_patch", "apply"),
+        ("gamification_v2", "api.schema_patches.gamification_v2_patch", "apply"),
     ]
 
     # Inline patches (too small for separate files)
@@ -2075,6 +2077,7 @@ def setup_routers():
     app.include_router(delivery.router, prefix="/api/delivery", tags=["delivery"])
     app.include_router(employees.router, prefix="/api/employees", tags=["employees"])
     app.include_router(mana_shipments.router, prefix="/api/mana-shipments", tags=["mana-shipments"])
+    app.include_router(gamification.router, prefix="/api/gamification", tags=["gamification"])
     app.include_router(shipments.router, prefix="/api/shipments", tags=["shipments"])
     app.include_router(pdf_templates.router, prefix="/api/pdf/templates", tags=["pdf-templates"])
 

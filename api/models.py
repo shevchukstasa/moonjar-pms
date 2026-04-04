@@ -2897,3 +2897,164 @@ class TranscriptionLog(Base):
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     user = relationship('User', foreign_keys=[user_id])
+
+
+# ────────────────────────────────────────────────────────────────
+# Gamification Engine v2
+# ────────────────────────────────────────────────────────────────
+
+class SkillBadge(Base):
+    """Learnable skill in the factory — workers earn certification."""
+    __tablename__ = 'skill_badges'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id', ondelete='CASCADE'), nullable=False)
+    code = Column(sa.String(50), nullable=False)
+    name = Column(sa.String(200), nullable=False)
+    name_id = Column(sa.String(200), nullable=True)  # Indonesian
+    category = Column(sa.String(50), nullable=False)  # production, specialized, quality, safety, leadership
+    icon = Column(sa.String(10), nullable=True)
+    description = Column(sa.Text, nullable=True)
+    required_operations = Column(sa.Integer, nullable=False, server_default='50')
+    required_zero_defect_pct = Column(sa.Numeric(5, 2), nullable=True, server_default='90')
+    required_mentor_approval = Column(sa.Boolean, nullable=False, server_default='false')
+    points_on_earn = Column(sa.Integer, nullable=False, server_default='100')
+    operation_id = Column(UUID(as_uuid=True), ForeignKey('operations.id', ondelete='SET NULL'), nullable=True)
+    is_active = Column(sa.Boolean, nullable=False, server_default='true')
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (UniqueConstraint('factory_id', 'code', name='uq_skill_badge_factory_code'),)
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    operation = relationship('Operation', foreign_keys=[operation_id])
+
+
+class UserSkill(Base):
+    """Worker's progress toward a skill badge."""
+    __tablename__ = 'user_skills'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    skill_badge_id = Column(UUID(as_uuid=True), ForeignKey('skill_badges.id', ondelete='CASCADE'), nullable=False)
+    status = Column(sa.String(20), nullable=False, server_default='learning')
+    operations_completed = Column(sa.Integer, nullable=False, server_default='0')
+    defect_free_pct = Column(sa.Numeric(5, 2), nullable=False, server_default='0')
+    certified_at = Column(sa.DateTime(timezone=True), nullable=True)
+    certified_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    started_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), onupdate=sa.func.now())
+
+    __table_args__ = (UniqueConstraint('user_id', 'skill_badge_id', name='uq_user_skill'),)
+    user = relationship('User', foreign_keys=[user_id])
+    skill_badge = relationship('SkillBadge', foreign_keys=[skill_badge_id])
+    certifier = relationship('User', foreign_keys=[certified_by])
+
+
+class Competition(Base):
+    """Time-bounded competition between individuals or teams."""
+    __tablename__ = 'competitions'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id', ondelete='CASCADE'), nullable=False)
+    title = Column(sa.String(300), nullable=False)
+    title_id = Column(sa.String(300), nullable=True)
+    competition_type = Column(sa.String(20), nullable=False)  # individual, team
+    metric = Column(sa.String(50), nullable=False, server_default='combined')
+    scoring_formula = Column(sa.String(20), nullable=False, server_default='combined')
+    quality_weight = Column(sa.Numeric(3, 1), nullable=False, server_default='1.0')
+    start_date = Column(sa.Date, nullable=False)
+    end_date = Column(sa.Date, nullable=False)
+    status = Column(sa.String(20), nullable=False, server_default='upcoming')
+    season_tag = Column(sa.String(50), nullable=True)
+    prize_description = Column(sa.Text, nullable=True)
+    prize_budget_idr = Column(sa.Numeric(12, 2), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    proposed_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    creator = relationship('User', foreign_keys=[created_by])
+
+
+class CompetitionTeam(Base):
+    """Team in a team competition."""
+    __tablename__ = 'competition_teams'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    competition_id = Column(UUID(as_uuid=True), ForeignKey('competitions.id', ondelete='CASCADE'), nullable=False)
+    name = Column(sa.String(200), nullable=False)
+    team_type = Column(sa.String(30), nullable=False)
+    filter_key = Column(sa.String(100), nullable=True)
+    icon = Column(sa.String(10), nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    competition = relationship('Competition', foreign_keys=[competition_id], backref='teams')
+
+
+class CompetitionEntry(Base):
+    """Score entry for a participant in a competition."""
+    __tablename__ = 'competition_entries'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    competition_id = Column(UUID(as_uuid=True), ForeignKey('competitions.id', ondelete='CASCADE'), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey('competition_teams.id', ondelete='CASCADE'), nullable=True)
+    throughput_score = Column(sa.Numeric(10, 2), nullable=False, server_default='0')
+    quality_score = Column(sa.Numeric(5, 2), nullable=False, server_default='100')
+    combined_score = Column(sa.Numeric(10, 2), nullable=False, server_default='0')
+    bonus_points = Column(sa.Integer, nullable=False, server_default='0')
+    rank = Column(sa.Integer, nullable=True)
+    entries_count = Column(sa.Integer, nullable=False, server_default='0')
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), onupdate=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('competition_id', 'user_id', name='uq_comp_user'),
+        UniqueConstraint('competition_id', 'team_id', name='uq_comp_team'),
+    )
+    competition = relationship('Competition', foreign_keys=[competition_id])
+    user = relationship('User', foreign_keys=[user_id])
+    team = relationship('CompetitionTeam', foreign_keys=[team_id])
+
+
+class PrizeRecommendation(Base):
+    """AI-generated prize recommendation."""
+    __tablename__ = 'prize_recommendations'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id', ondelete='CASCADE'), nullable=False)
+    period = Column(sa.String(20), nullable=False)
+    period_label = Column(sa.String(50), nullable=False)
+    prize_type = Column(sa.String(30), nullable=False)
+    recipient_user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    recipient_team_name = Column(sa.String(200), nullable=True)
+    prize_title = Column(sa.String(300), nullable=False)
+    prize_description = Column(sa.Text, nullable=True)
+    estimated_cost_idr = Column(sa.Numeric(12, 2), nullable=False)
+    productivity_gain_pct = Column(sa.Numeric(5, 2), nullable=True)
+    roi_estimate = Column(sa.Numeric(8, 2), nullable=True)
+    ai_reasoning = Column(sa.Text, nullable=True)
+    status = Column(sa.String(20), nullable=False, server_default='suggested')
+    approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    approved_at = Column(sa.DateTime(timezone=True), nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    recipient = relationship('User', foreign_keys=[recipient_user_id])
+    approver = relationship('User', foreign_keys=[approved_by])
+
+
+class GamificationSeason(Base):
+    """Monthly gamification season with reset and final standings."""
+    __tablename__ = 'gamification_seasons'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id', ondelete='CASCADE'), nullable=False)
+    name = Column(sa.String(100), nullable=False)
+    start_date = Column(sa.Date, nullable=False)
+    end_date = Column(sa.Date, nullable=False)
+    status = Column(sa.String(20), nullable=False, server_default='active')
+    final_standings = Column(JSONB, nullable=True)
+    prizes_awarded = Column(JSONB, nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (UniqueConstraint('factory_id', 'start_date', name='uq_season_factory_start'),)
+    factory = relationship('Factory', foreign_keys=[factory_id])

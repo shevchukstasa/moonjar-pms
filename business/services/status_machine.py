@@ -382,6 +382,18 @@ def transition_position_status(
     # These trigger immediately via Telegram (not waiting for 21:00 daily batch)
     _send_realtime_alerts(db, position, old_status, new_ps, notes)
 
+    # ── Pull System: auto-pull next work when capacity available ──
+    try:
+        from business.services.pull_system import try_pull_next_work
+        pulled = try_pull_next_work(db, position, new_ps.value, changed_by)
+        if pulled:
+            logger.info(
+                "PULL_TRIGGERED | position=%s → %s | pulled %d forward",
+                position_id, new_ps.value, len(pulled),
+            )
+    except Exception as _e:
+        logger.warning("Pull system error (non-blocking): %s", _e)
+
     db.commit()
     db.refresh(position)
     return position

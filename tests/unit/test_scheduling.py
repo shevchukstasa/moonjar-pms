@@ -500,3 +500,258 @@ class TestRealWorldScenarios:
         from business.services.typology_matcher import classify_loading_zone
         zone = classify_loading_zone(pos)
         assert zone == "flat"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Line Resource Constraints
+# ═══════════════════════════════════════════════════════════════════════════
+
+from business.services.production_scheduler import (
+    _apply_resource_constraint,
+    _STAGE_RESOURCE_MAP,
+    _get_tiles_per_board,
+)
+
+
+class TestStageResourceMap:
+    """Verify stage→resource_type mapping is correct."""
+
+    def test_engobe_uses_work_table(self):
+        assert _STAGE_RESOURCE_MAP['engobe'] == 'work_table'
+
+    def test_glazing_uses_work_table(self):
+        assert _STAGE_RESOURCE_MAP['glazing'] == 'work_table'
+
+    def test_drying_engobe_uses_drying_rack(self):
+        assert _STAGE_RESOURCE_MAP['drying_engobe'] == 'drying_rack'
+
+    def test_drying_glaze_uses_drying_rack(self):
+        assert _STAGE_RESOURCE_MAP['drying_glaze'] == 'drying_rack'
+
+    def test_edge_cleaning_uses_glazing_board(self):
+        assert _STAGE_RESOURCE_MAP['edge_cleaning_loading'] == 'glazing_board'
+
+    def test_firing_has_no_constraint(self):
+        assert 'firing' not in _STAGE_RESOURCE_MAP
+
+    def test_sorting_has_no_constraint(self):
+        assert 'sorting' not in _STAGE_RESOURCE_MAP
+
+    def test_packing_has_no_constraint(self):
+        assert 'packing' not in _STAGE_RESOURCE_MAP
+
+
+class TestApplyResourceConstraint:
+    """Test _apply_resource_constraint for each resource type."""
+
+    # ── Work Table (engobe, glazing) ──
+
+    def test_no_constraint_returns_speed_days(self):
+        """Empty resource_cap → no effect."""
+        result = _apply_resource_constraint(
+            speed_days=2, stage='glazing', resource_cap={},
+            total_sqm=10.0, total_pcs=100,
+        )
+        assert result == 2
+
+    def test_table_small_batch_no_constraint(self):
+        """1 m² batch on 3 m² table → 1 cycle, no constraint."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='glazing',
+            resource_cap={"total_sqm": 3.0, "total_boards": 0, "total_pcs": 0},
+            total_sqm=1.0, total_pcs=100,
+        )
+        assert result == 1
+
+    def test_table_large_batch_extends_days(self):
+        """10 m² batch on 3 m² total table area → ceil(10/3)=4 cycles → 4 days."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='glazing',
+            resource_cap={"total_sqm": 3.0, "total_boards": 0, "total_pcs": 0},
+            total_sqm=10.0, total_pcs=1000,
+        )
+        assert result == 4
+
+    def test_table_exact_fit(self):
+        """6 m² batch on 3 m² table → 2 cycles = 2 days."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='engobe',
+            resource_cap={"total_sqm": 3.0, "total_boards": 0, "total_pcs": 0},
+            total_sqm=6.0, total_pcs=600,
+        )
+        assert result == 2
+
+    def test_table_constraint_doesnt_reduce_speed_days(self):
+        """If speed says 3 days but tables only need 2 cycles → still 3 days."""
+        result = _apply_resource_constraint(
+            speed_days=3, stage='glazing',
+            resource_cap={"total_sqm": 5.0, "total_boards": 0, "total_pcs": 0},
+            total_sqm=8.0, total_pcs=800,
+        )
+        assert result == 3  # max(3, ceil(8/5)=2) = 3
+
+    # ── Drying Rack (drying_engobe, drying_glaze) ──
+
+    def test_rack_small_batch_single_cycle(self):
+        """2 m² batch on 10 m² rack → 1 cycle, no constraint."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='drying_engobe',
+            resource_cap={"total_sqm": 10.0, "total_boards": 0, "total_pcs": 0},
+            total_sqm=2.0, total_pcs=200, fixed_hours=3.0,
+        )
+        assert result == 1
+
+    def test_rack_multiple_cycles_extends_days(self):
+        """30 m² batch on 10 m² rack → 3 drying cycles × 3h each = 9h → 1 day (16h/day).
+        But speed_days=1, so max(1, 1) = 1."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='drying_engobe',
+            resource_cap={"total_sqm": 10.0, "total_boards": 0, "total_pcs": 0},
+            total_sqm=30.0, total_pcs=3000, fixed_hours=3.0,
+        )
+        assert result == 1  # 3 cycles × 3h = 9h, ceil(9/16) = 1
+
+    def test_rack_many_cycles_extends_to_multiday(self):
+        """100 m² on 10 m² rack → 10 cycles × 4h = 40h → ceil(40/16) = 3 days."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='drying_glaze',
+            resource_cap={"total_sqm": 10.0, "total_boards": 0, "total_pcs": 0},
+            total_sqm=100.0, total_pcs=10000, fixed_hours=4.0,
+        )
+        assert result == 3
+
+    def test_rack_boards_based_with_tiles_per_board(self):
+        """1000 pcs, 10 tiles/board → 100 boards needed. 60 boards on rack → ceil(100/60)=2 cycles.
+        2 cycles × 3h = 6h → ceil(6/16) = 1 day."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='drying_engobe',
+            resource_cap={"total_sqm": 0, "total_boards": 60, "total_pcs": 0},
+            total_sqm=0, total_pcs=1000, fixed_hours=3.0, tiles_per_board=10,
+        )
+        assert result == 1
+
+    def test_rack_boards_many_tiles_per_board(self):
+        """5000 pcs, 25 tiles/board → 200 boards needed. 60 on rack → ceil(200/60)=4 cycles.
+        4 × 3h = 12h → ceil(12/16) = 1 day."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='drying_engobe',
+            resource_cap={"total_sqm": 0, "total_boards": 60, "total_pcs": 0},
+            total_sqm=0, total_pcs=5000, fixed_hours=3.0, tiles_per_board=25,
+        )
+        assert result == 1  # 200 boards / 60 = 4 cycles, 12h / 16h = 1 day
+
+    def test_rack_boards_small_tiles_per_board(self):
+        """5000 pcs, 4 tiles/board → 1250 boards needed. 60 on rack → ceil(1250/60)=21 cycles.
+        21 × 3h = 63h → ceil(63/16) = 4 days."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='drying_glaze',
+            resource_cap={"total_sqm": 0, "total_boards": 60, "total_pcs": 0},
+            total_sqm=0, total_pcs=5000, fixed_hours=3.0, tiles_per_board=4,
+        )
+        assert result == 4
+
+    # ── Glazing Board (edge_cleaning_loading) ──
+
+    def test_board_small_batch_no_constraint(self):
+        """50 pcs, 200 boards available → 1 cycle."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='edge_cleaning_loading',
+            resource_cap={"total_sqm": 0, "total_boards": 0, "total_pcs": 200},
+            total_sqm=0.5, total_pcs=50,
+        )
+        assert result == 1
+
+    def test_board_large_batch_extends(self):
+        """500 pcs, 200 boards → ceil(500/200) = 3 cycles → 3 days."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='edge_cleaning_loading',
+            resource_cap={"total_sqm": 0, "total_boards": 0, "total_pcs": 200},
+            total_sqm=5.0, total_pcs=500,
+        )
+        assert result == 3
+
+    def test_board_constraint_vs_speed(self):
+        """Speed says 2 days, boards say 4 → 4 days (max)."""
+        result = _apply_resource_constraint(
+            speed_days=2, stage='edge_cleaning_loading',
+            resource_cap={"total_sqm": 0, "total_boards": 0, "total_pcs": 100},
+            total_sqm=3.0, total_pcs=350,
+        )
+        assert result == 4  # max(2, ceil(350/100))
+
+    # ── Real scenarios ──
+
+    def test_real_scenario_small_factory(self):
+        """Small factory: 2 tables × 1.5 m² = 3 m² total.
+        Order 1000 pcs 10×10 = 10 m² → ceil(10/3) = 4 days glazing.
+        Speed says 1 day → constraint extends to 4."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='glazing',
+            resource_cap={"total_sqm": 3.0, "total_boards": 0, "total_pcs": 0},
+            total_sqm=10.0, total_pcs=1000,
+        )
+        assert result == 4
+
+    def test_real_scenario_ample_resources(self):
+        """Large factory: 6 tables × 2 m² = 12 m² total.
+        Order 10 m² → ceil(10/12) = 1 cycle → no constraint."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='glazing',
+            resource_cap={"total_sqm": 12.0, "total_boards": 0, "total_pcs": 0},
+            total_sqm=10.0, total_pcs=1000,
+        )
+        assert result == 1
+
+    def test_zero_sqm_no_crash(self):
+        """Zero total_sqm with table constraint → no effect."""
+        result = _apply_resource_constraint(
+            speed_days=1, stage='glazing',
+            resource_cap={"total_sqm": 3.0, "total_boards": 0, "total_pcs": 0},
+            total_sqm=0, total_pcs=0,
+        )
+        assert result == 1
+
+
+class TestGetTilesPerBoard:
+    """Test tiles_per_board resolution from GlazingBoardSpec and fallback calculation."""
+
+    def test_none_position_returns_default(self):
+        db = MagicMock()
+        assert _get_tiles_per_board(db, None) == 10
+
+    def test_no_size_id_calculates_from_dimensions(self):
+        """Position with width/length but no size_id → calculate on the fly."""
+        db = MagicMock()
+        pos = SimpleNamespace(size_id=None, width_cm=Decimal("10"), length_cm=Decimal("10"))
+        result = _get_tiles_per_board(db, pos)
+        # 10x10 cm on 122x21 board: should be > 1
+        assert result > 1
+        assert isinstance(result, int)
+
+    def test_10x10_tiles_per_board(self):
+        """10x10 cm tile: should get ~25 tiles per standard board."""
+        db = MagicMock()
+        pos = SimpleNamespace(size_id=None, width_cm=Decimal("10"), length_cm=Decimal("10"))
+        result = _get_tiles_per_board(db, pos)
+        assert 20 <= result <= 30  # 122x21 board, 10x10 tiles
+
+    def test_20x20_tiles_per_board(self):
+        """20x20 cm tile: should get ~6 tiles per standard board."""
+        db = MagicMock()
+        pos = SimpleNamespace(size_id=None, width_cm=Decimal("20"), length_cm=Decimal("20"))
+        result = _get_tiles_per_board(db, pos)
+        assert 4 <= result <= 8
+
+    def test_5x20_tiles_per_board(self):
+        """5x20 tile on standard board."""
+        db = MagicMock()
+        pos = SimpleNamespace(size_id=None, width_cm=Decimal("5"), length_cm=Decimal("20"))
+        result = _get_tiles_per_board(db, pos)
+        assert result >= 4
+
+    def test_no_dimensions_returns_default(self):
+        """No width, no length, no size_id → default 10."""
+        db = MagicMock()
+        pos = SimpleNamespace(size_id=None, width_cm=None, length_cm=None)
+        result = _get_tiles_per_board(db, pos)
+        assert result == 10

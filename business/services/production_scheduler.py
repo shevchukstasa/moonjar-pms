@@ -60,6 +60,188 @@ QC_DAYS = 1                     # quality check (rounded up from 0.5)
 BUFFER_DAYS = 1                 # TOC buffer — safety margin around the constraint
 
 
+
+# ────────────────────────────────────────────────────────────────
+# Line Resource Constraints
+# ────────────────────────────────────────────────────────────────
+
+# Which production stage is bottlenecked by which line resource type.
+# If a stage is not listed, no line resource constraint is applied.
+_STAGE_RESOURCE_MAP = {
+    'engobe':               'work_table',     # engobe applied on work tables
+    'glazing':              'work_table',     # glazing applied on work tables
+    'drying_engobe':        'drying_rack',    # drying on shelving racks
+    'drying_glaze':         'drying_rack',    # drying on shelving racks
+    'edge_cleaning_loading': 'glazing_board', # tiles sit on glazing boards
+}
+
+
+def _get_line_resource_capacity(
+    db: Session,
+    factory_id: UUID,
+    resource_type: str,
+) -> dict:
+    """Get total capacity of a line resource type across all active units.
+
+    Returns dict with aggregated values:
+      total_sqm     — sum(capacity_sqm * num_units)
+      total_boards  — sum(capacity_boards * num_units)
+      total_pcs     — sum(capacity_pcs * num_units)
+
+    Returns empty dict if no resources configured (= no constraint).
+    """
+    from sqlalchemy import text
+
+    try:
+        result = db.execute(text("""
+            SELECT
+                COALESCE(SUM(capacity_sqm * num_units), 0) as total_sqm,
+                COALESCE(SUM(capacity_boards * num_units), 0) as total_boards,
+                COALESCE(SUM(capacity_pcs * num_units), 0) as total_pcs,
+                COUNT(*) as cnt
+            FROM production_line_resources
+            WHERE factory_id = :fid
+              AND resource_type = :rtype
+              AND is_active = true
+        """), {"fid": str(factory_id), "rtype": resource_type}).fetchone()
+
+        if not result or result.cnt == 0:
+            return {}  # no constraint configured
+
+        return {
+            "total_sqm": float(result.total_sqm or 0),
+            "total_boards": int(result.total_boards or 0),
+            "total_pcs": int(result.total_pcs or 0),
+        }
+    except Exception as e:
+        logger.debug("Line resource lookup failed for %s: %s", resource_type, e)
+        return {}
+
+
+def _get_tiles_per_board(
+    db: Session,
+    position: "Optional[OrderPosition]",
+) -> int:
+    """Get tiles_per_board from GlazingBoardSpec if available.
+
+    Uses position.size_id -> glazing_board_specs lookup.
+    Falls back to on-the-fly calculation from tile dimensions.
+    """
+    if position is None:
+        return 10
+
+    # Try GlazingBoardSpec lookup via size_id
+    size_id = getattr(position, 'size_id', None)
+    if size_id:
+        try:
+            from api.models import GlazingBoardSpec
+            spec = db.query(GlazingBoardSpec).filter(
+                GlazingBoardSpec.size_id == size_id,
+            ).first()
+            if spec and spec.tiles_per_board:
+                return int(spec.tiles_per_board)
+        except Exception:
+            pass
+
+    # Fallback: calculate on-the-fly from tile dimensions
+    w = float(position.width_cm or 0) if getattr(position, 'width_cm', None) else 0
+    h = float(position.length_cm or 0) if getattr(position, 'length_cm', None) else 0
+    if w > 0 and h > 0:
+        try:
+            from business.services.glazing_board import calculate_glazing_board
+            result = calculate_glazing_board(int(w * 10), int(h * 10))
+            return result.tiles_per_board
+        except Exception:
+            pass
+
+    return 10  # safe default
+
+
+def _apply_resource_constraint(
+    speed_days: int,
+    stage: str,
+    resource_cap: dict,
+    total_sqm: float,
+    total_pcs: int,
+    fixed_hours: float = 0,
+    tiles_per_board: int = 10,
+) -> int:
+    """Apply line resource constraint to a stage duration.
+
+    Logic per resource type:
+      work_table: batch_area_sqm / table_total_sqm → cycles needed
+      drying_rack: batch_area_sqm / rack_total_sqm → drying cycles,
+                   each cycle = fixed_duration hours
+      glazing_board: batch_pcs / total_pcs → cycles needed
+
+    Returns max(speed_days, constraint_days).
+    """
+    import math
+
+    if not resource_cap:
+        return speed_days
+
+    constraint_days = speed_days
+
+    if stage in ('engobe', 'glazing'):
+        # Work table constraint: total batch sqm / available table area
+        # = how many "batches" need to pass through the tables
+        table_sqm = resource_cap.get("total_sqm", 0)
+        if table_sqm > 0 and total_sqm > 0:
+            cycles = math.ceil(total_sqm / table_sqm)
+            constraint_days = max(constraint_days, cycles)
+            if cycles > speed_days:
+                logger.info(
+                    "LINE_CONSTRAINT | %s | tables=%.1f m² batch=%.1f m² "
+                    "→ %d cycles (was %d days from speed)",
+                    stage, table_sqm, total_sqm, cycles, speed_days,
+                )
+
+    elif stage in ('drying_engobe', 'drying_glaze'):
+        # Drying rack constraint: batch sqm / rack capacity → drying cycles
+        # Each cycle takes fixed_hours to dry (from stage speed)
+        rack_sqm = resource_cap.get("total_sqm", 0)
+        rack_boards = resource_cap.get("total_boards", 0)
+
+        if rack_sqm > 0 and total_sqm > 0:
+            cycles = math.ceil(total_sqm / rack_sqm)
+            if cycles > 1:
+                # Multiple drying cycles: each takes fixed_hours
+                total_hours = fixed_hours * cycles if fixed_hours > 0 else cycles * 3.0
+                hours_per_day = 16.0  # 2 shifts × 8h
+                constraint_days = max(constraint_days, math.ceil(total_hours / hours_per_day))
+                if constraint_days > speed_days:
+                    logger.info(
+                        "LINE_CONSTRAINT | %s | rack=%.1f m² batch=%.1f m² "
+                        "→ %d cycles × %.1fh = %d days (was %d)",
+                        stage, rack_sqm, total_sqm,
+                        cycles, fixed_hours, constraint_days, speed_days,
+                    )
+        elif rack_boards > 0 and total_pcs > 0:
+            # Board-based constraint using tiles_per_board from GlazingBoardSpec
+            boards_needed = math.ceil(total_pcs / tiles_per_board)
+            cycles = math.ceil(boards_needed / rack_boards)
+            if cycles > 1:
+                total_hours = fixed_hours * cycles if fixed_hours > 0 else cycles * 3.0
+                hours_per_day = 16.0
+                constraint_days = max(constraint_days, math.ceil(total_hours / hours_per_day))
+
+    elif stage == 'edge_cleaning_loading':
+        # Glazing board constraint: all tiles must be on boards for edge cleaning
+        board_pcs = resource_cap.get("total_pcs", 0)
+        if board_pcs > 0 and total_pcs > 0:
+            cycles = math.ceil(total_pcs / board_pcs)
+            constraint_days = max(constraint_days, cycles)
+            if cycles > speed_days:
+                logger.info(
+                    "LINE_CONSTRAINT | %s | boards=%d pcs batch=%d pcs "
+                    "→ %d cycles (was %d days)",
+                    stage, board_pcs, total_pcs, cycles, speed_days,
+                )
+
+    return constraint_days
+
+
 def _get_stage_duration_days(
     db: Session,
     factory_id: UUID,
@@ -74,8 +256,15 @@ def _get_stage_duration_days(
       1. StageTypologySpeed — match position to typology, then look up speed
       2. ProcessStep — generic factory-level speed for the stage
       3. Fallback to 1 day
+
+    After calculating speed-based duration, applies line resource constraints
+    (work tables, drying racks, glazing boards) — the actual days is the MAX
+    of speed-based days and resource-constrained days.
     """
     import math
+
+    speed_days = 1
+    fixed_hours = 0  # track fixed_duration hours for drying constraint calc
 
     # ── Priority 1: StageTypologySpeed (typology-aware) ──
     if position is not None:
@@ -91,10 +280,13 @@ def _get_stage_duration_days(
                 ).first()
 
                 if speed and speed.productivity_rate:
+                    rate_basis = speed.rate_basis or 'per_person'
+                    if rate_basis == 'fixed_duration':
+                        fixed_hours = float(speed.productivity_rate)
                     result = _calc_hours_from_speed(
                         rate=float(speed.productivity_rate),
                         rate_unit=speed.rate_unit or 'pcs',
-                        rate_basis=speed.rate_basis or 'per_person',
+                        rate_basis=rate_basis,
                         time_unit=speed.time_unit or 'hour',
                         shift_count=speed.shift_count or 2,
                         shift_duration_hours=float(speed.shift_duration_hours or 8.0),
@@ -103,7 +295,18 @@ def _get_stage_duration_days(
                         total_pcs=total_pcs,
                     )
                     if result is not None:
-                        return result
+                        speed_days = result
+                        # Apply resource constraint and return
+                        if stage in _STAGE_RESOURCE_MAP:
+                            resource_cap = _get_line_resource_capacity(
+                                db, factory_id, _STAGE_RESOURCE_MAP[stage],
+                            )
+                            tpb = _get_tiles_per_board(db, position)
+                            return _apply_resource_constraint(
+                                speed_days, stage, resource_cap,
+                                total_sqm, total_pcs, fixed_hours, tpb,
+                            )
+                        return speed_days
         except Exception as e:
             logger.debug("StageTypologySpeed lookup failed for %s: %s", stage, e)
 
@@ -117,28 +320,39 @@ def _get_stage_duration_days(
             ProcessStep.productivity_rate.isnot(None),
         ).first()
 
-        if not step or not step.productivity_rate:
-            return 1  # fallback
+        if step and step.productivity_rate:
+            rate = float(step.productivity_rate)
+            if rate > 0:
+                shift_count = step.shift_count or 2
+                hours_per_day = 8.0 * shift_count
+                unit = (step.productivity_unit or '').lower()
 
-        rate = float(step.productivity_rate)
-        if rate <= 0:
-            return 1
+                if 'sqm' in unit and total_sqm > 0:
+                    hours_needed = total_sqm / rate
+                elif 'pcs' in unit and total_pcs > 0:
+                    hours_needed = total_pcs / rate
+                else:
+                    hours_needed = 8.0
 
-        shift_count = step.shift_count or 2
-        hours_per_day = 8.0 * shift_count
-        unit = (step.productivity_unit or '').lower()
-
-        if 'sqm' in unit and total_sqm > 0:
-            hours_needed = total_sqm / rate
-        elif 'pcs' in unit and total_pcs > 0:
-            hours_needed = total_pcs / rate
-        else:
-            hours_needed = 8.0  # fallback: 1 shift
-
-        return max(1, math.ceil(hours_needed / hours_per_day))
+                speed_days = max(1, math.ceil(hours_needed / hours_per_day))
     except Exception as e:
         logger.debug("_get_stage_duration_days fallback for %s: %s", stage, e)
-        return 1
+
+    # ── Apply line resource constraint ──
+    if stage in _STAGE_RESOURCE_MAP:
+        try:
+            resource_cap = _get_line_resource_capacity(
+                db, factory_id, _STAGE_RESOURCE_MAP[stage],
+            )
+            tpb = _get_tiles_per_board(db, position)
+            return _apply_resource_constraint(
+                speed_days, stage, resource_cap,
+                total_sqm, total_pcs, fixed_hours, tpb,
+            )
+        except Exception as e:
+            logger.debug("Resource constraint failed for %s: %s", stage, e)
+
+    return speed_days
 
 
 def _calc_hours_from_speed(

@@ -343,15 +343,36 @@ def generate_payslip_pdf(item: dict, year: int, month: int, factory_name: str = 
     ]))
     elements.append(gross_t)
 
-    # Company contributions (not deducted from employee)
+    # PPh 21 — always shown for formal employees
+    if category == "formal":
+        pph21_val = item.get("pph21", 0)
+        elements.append(Paragraph("PPh 21", section_style))
+        pph_note = ParagraphStyle("pph_note", parent=styles["Normal"], fontSize=7,
+                                   textColor=colors.HexColor("#6b7280"), italics=True)
+        pph_data = [
+            [Paragraph("PPh 21 (TER)", label_style),
+             Paragraph(_fmt_idr(pph21_val) + " IDR", value_style)],
+            [Paragraph("Paid by employer (gross-up method — not deducted from salary)", pph_note),
+             Paragraph("", label_style)],
+        ]
+        pph_t = Table(pph_data, colWidths=[100 * mm, 65 * mm])
+        pph_t.setStyle(TableStyle([
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("SPAN", (0, 1), (1, 1)),
+            ("LINEBELOW", (0, 0), (-1, 0), 0.3, colors.HexColor("#e5e7eb")),
+        ]))
+        elements.append(pph_t)
+
+    # Company contributions (BPJS — not deducted from employee)
     if category == "formal":
         company_rows = []
         if item.get("bpjs_employer", 0) > 0:
             company_rows.append(("BPJS Employer Contribution", item.get("bpjs_employer", 0)))
         if item.get("company_bpjs_for_employee", 0) > 0:
             company_rows.append(("BPJS Employee Share (paid by company)", item.get("company_bpjs_for_employee", 0)))
-        if item.get("pph21", 0) > 0:
-            company_rows.append((f"PPh 21 TER (gross-up, paid by company)", item.get("pph21", 0)))
         if is_probation:
             company_rows.append(("⚠ Probation period — BPJS not registered", 0))
         if company_rows:

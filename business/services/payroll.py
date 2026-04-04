@@ -174,117 +174,146 @@ def calculate_pph21_monthly(
 # Each entry: (upper_limit_inclusive, rate_decimal)
 # Last entry has upper_limit = None (open-ended)
 
+# Full 44-row table per PMK 168/2023 Lampiran — verified against official gazette
 _TER_A = [
-    (5_400_000, Decimal("0.0000")),
-    (5_650_000, Decimal("0.0025")),
-    (5_950_000, Decimal("0.0050")),
-    (6_300_000, Decimal("0.0075")),
-    (6_750_000, Decimal("0.0100")),
-    (7_500_000, Decimal("0.0125")),
-    (8_550_000, Decimal("0.0150")),
-    (9_650_000, Decimal("0.0200")),
-    (10_050_000, Decimal("0.0250")),
-    (10_350_000, Decimal("0.0300")),
-    (10_700_000, Decimal("0.0350")),
-    (11_050_000, Decimal("0.0400")),
-    (11_600_000, Decimal("0.0450")),
-    (12_500_000, Decimal("0.0500")),
-    (13_750_000, Decimal("0.0550")),
-    (15_100_000, Decimal("0.0600")),
-    (16_950_000, Decimal("0.0650")),
-    (19_750_000, Decimal("0.0700")),
-    (24_150_000, Decimal("0.0750")),
-    (26_450_000, Decimal("0.0800")),
-    (28_000_000, Decimal("0.0850")),
-    (30_050_000, Decimal("0.0900")),
-    (32_400_000, Decimal("0.0950")),
-    (35_400_000, Decimal("0.1000")),
-    (39_100_000, Decimal("0.1050")),
-    (43_850_000, Decimal("0.1100")),
-    (47_800_000, Decimal("0.1150")),
-    (51_400_000, Decimal("0.1200")),
-    (56_300_000, Decimal("0.1250")),
-    (62_200_000, Decimal("0.1300")),
-    (69_200_000, Decimal("0.1350")),
-    (79_000_000, Decimal("0.1400")),
-    (93_200_000, Decimal("0.1450")),
-    (None, Decimal("0.1500")),
+    (5_400_000, Decimal("0.0000")),      # 0%
+    (5_650_000, Decimal("0.0025")),      # 0.25%
+    (5_950_000, Decimal("0.0050")),      # 0.5%
+    (6_300_000, Decimal("0.0075")),      # 0.75%
+    (6_750_000, Decimal("0.0100")),      # 1%
+    (7_500_000, Decimal("0.0125")),      # 1.25%
+    (8_550_000, Decimal("0.0150")),      # 1.5%
+    (9_650_000, Decimal("0.0175")),      # 1.75%
+    (10_050_000, Decimal("0.0200")),     # 2%
+    (10_350_000, Decimal("0.0225")),     # 2.25%
+    (10_700_000, Decimal("0.0250")),     # 2.5%
+    (11_050_000, Decimal("0.0300")),     # 3%
+    (11_600_000, Decimal("0.0350")),     # 3.5%
+    (12_500_000, Decimal("0.0400")),     # 4%
+    (13_750_000, Decimal("0.0500")),     # 5%
+    (15_100_000, Decimal("0.0600")),     # 6%
+    (16_950_000, Decimal("0.0700")),     # 7%
+    (19_750_000, Decimal("0.0800")),     # 8%
+    (24_150_000, Decimal("0.0900")),     # 9%
+    (26_450_000, Decimal("0.1000")),     # 10%
+    (28_000_000, Decimal("0.1100")),     # 11%
+    (30_050_000, Decimal("0.1200")),     # 12%
+    (32_400_000, Decimal("0.1300")),     # 13%
+    (35_400_000, Decimal("0.1400")),     # 14%
+    (39_100_000, Decimal("0.1500")),     # 15%
+    (43_850_000, Decimal("0.1600")),     # 16%
+    (47_800_000, Decimal("0.1700")),     # 17%
+    (51_400_000, Decimal("0.1800")),     # 18%
+    (56_300_000, Decimal("0.1900")),     # 19%
+    (62_200_000, Decimal("0.2000")),     # 20%
+    (68_600_000, Decimal("0.2100")),     # 21%
+    (77_500_000, Decimal("0.2200")),     # 22%
+    (89_000_000, Decimal("0.2300")),     # 23%
+    (103_000_000, Decimal("0.2400")),    # 24%
+    (125_000_000, Decimal("0.2500")),    # 25%
+    (157_000_000, Decimal("0.2600")),    # 26%
+    (206_000_000, Decimal("0.2700")),    # 27%
+    (337_000_000, Decimal("0.2800")),    # 28%
+    (454_000_000, Decimal("0.2900")),    # 29%
+    (550_000_000, Decimal("0.3000")),    # 30%
+    (695_000_000, Decimal("0.3100")),    # 31%
+    (910_000_000, Decimal("0.3200")),    # 32%
+    (1_400_000_000, Decimal("0.3300")),  # 33%
+    (None, Decimal("0.3400")),           # 34%
 ]
 
 _TER_B = [
-    (6_200_000, Decimal("0.0000")),
-    (6_500_000, Decimal("0.0025")),
-    (6_850_000, Decimal("0.0050")),
-    (7_300_000, Decimal("0.0075")),
-    (9_200_000, Decimal("0.0100")),
-    (10_750_000, Decimal("0.0150")),
-    (11_250_000, Decimal("0.0200")),
-    (11_600_000, Decimal("0.0250")),
-    (12_600_000, Decimal("0.0300")),
-    (13_600_000, Decimal("0.0350")),
-    (14_950_000, Decimal("0.0400")),
-    (16_400_000, Decimal("0.0450")),
-    (18_450_000, Decimal("0.0500")),
-    (21_850_000, Decimal("0.0550")),
-    (26_000_000, Decimal("0.0600")),
-    (27_700_000, Decimal("0.0650")),
-    (29_350_000, Decimal("0.0700")),
-    (31_450_000, Decimal("0.0750")),
-    (33_950_000, Decimal("0.0800")),
-    (37_100_000, Decimal("0.0850")),
-    (41_100_000, Decimal("0.0900")),
-    (45_800_000, Decimal("0.0950")),
-    (49_500_000, Decimal("0.1000")),
-    (53_800_000, Decimal("0.1050")),
-    (58_500_000, Decimal("0.1100")),
-    (64_000_000, Decimal("0.1150")),
-    (71_000_000, Decimal("0.1200")),
-    (80_000_000, Decimal("0.1250")),
-    (93_000_000, Decimal("0.1300")),
-    (107_000_000, Decimal("0.1400")),
-    (None, Decimal("0.1500")),
+    (6_200_000, Decimal("0.0000")),      # 0%
+    (6_500_000, Decimal("0.0025")),      # 0.25%
+    (6_850_000, Decimal("0.0050")),      # 0.5%
+    (7_300_000, Decimal("0.0075")),      # 0.75%
+    (9_200_000, Decimal("0.0100")),      # 1%
+    (10_750_000, Decimal("0.0150")),     # 1.5%
+    (11_250_000, Decimal("0.0200")),     # 2%
+    (11_600_000, Decimal("0.0250")),     # 2.5%
+    (12_600_000, Decimal("0.0300")),     # 3%
+    (13_600_000, Decimal("0.0400")),     # 4%
+    (14_950_000, Decimal("0.0500")),     # 5%
+    (16_400_000, Decimal("0.0600")),     # 6%
+    (18_450_000, Decimal("0.0700")),     # 7%
+    (21_850_000, Decimal("0.0800")),     # 8%
+    (26_000_000, Decimal("0.0900")),     # 9%
+    (27_700_000, Decimal("0.1000")),     # 10%
+    (29_350_000, Decimal("0.1100")),     # 11%
+    (31_450_000, Decimal("0.1200")),     # 12%
+    (33_950_000, Decimal("0.1300")),     # 13%
+    (37_100_000, Decimal("0.1400")),     # 14%
+    (41_100_000, Decimal("0.1500")),     # 15%
+    (45_800_000, Decimal("0.1600")),     # 16%
+    (49_500_000, Decimal("0.1700")),     # 17%
+    (53_800_000, Decimal("0.1800")),     # 18%
+    (58_500_000, Decimal("0.1900")),     # 19%
+    (64_000_000, Decimal("0.2000")),     # 20%
+    (71_000_000, Decimal("0.2100")),     # 21%
+    (80_000_000, Decimal("0.2200")),     # 22%
+    (93_000_000, Decimal("0.2300")),     # 23%
+    (109_000_000, Decimal("0.2400")),    # 24%
+    (129_000_000, Decimal("0.2500")),    # 25%
+    (163_000_000, Decimal("0.2600")),    # 26%
+    (211_000_000, Decimal("0.2700")),    # 27%
+    (374_000_000, Decimal("0.2800")),    # 28%
+    (459_000_000, Decimal("0.2900")),    # 29%
+    (555_000_000, Decimal("0.3000")),    # 30%
+    (704_000_000, Decimal("0.3100")),    # 31%
+    (957_000_000, Decimal("0.3200")),    # 32%
+    (1_405_000_000, Decimal("0.3300")),  # 33%
+    (None, Decimal("0.3400")),           # 34%
 ]
 
 _TER_C = [
-    (7_050_000, Decimal("0.0000")),
-    (7_450_000, Decimal("0.0025")),
-    (7_800_000, Decimal("0.0050")),
-    (8_250_000, Decimal("0.0075")),
-    (8_850_000, Decimal("0.0100")),
-    (9_800_000, Decimal("0.0125")),
-    (10_950_000, Decimal("0.0150")),
-    (11_200_000, Decimal("0.0175")),
-    (12_050_000, Decimal("0.0200")),
-    (12_950_000, Decimal("0.0250")),
-    (14_150_000, Decimal("0.0300")),
-    (15_550_000, Decimal("0.0350")),
-    (17_050_000, Decimal("0.0400")),
-    (19_500_000, Decimal("0.0450")),
-    (22_700_000, Decimal("0.0500")),
-    (26_600_000, Decimal("0.0550")),
-    (28_100_000, Decimal("0.0600")),
-    (30_100_000, Decimal("0.0650")),
-    (32_600_000, Decimal("0.0700")),
-    (35_400_000, Decimal("0.0750")),
-    (38_900_000, Decimal("0.0800")),
-    (43_000_000, Decimal("0.0850")),
-    (47_400_000, Decimal("0.0900")),
-    (51_200_000, Decimal("0.0950")),
-    (55_800_000, Decimal("0.1000")),
-    (60_400_000, Decimal("0.1050")),
-    (66_700_000, Decimal("0.1100")),
-    (74_500_000, Decimal("0.1150")),
-    (83_200_000, Decimal("0.1200")),
-    (95_600_000, Decimal("0.1250")),
-    (110_000_000, Decimal("0.1300")),
-    (134_000_000, Decimal("0.1400")),
-    (None, Decimal("0.1500")),
+    (6_600_000, Decimal("0.0000")),      # 0%
+    (6_950_000, Decimal("0.0025")),      # 0.25%
+    (7_350_000, Decimal("0.0050")),      # 0.5%
+    (7_800_000, Decimal("0.0075")),      # 0.75%
+    (8_850_000, Decimal("0.0100")),      # 1%
+    (9_800_000, Decimal("0.0150")),      # 1.5%
+    (10_950_000, Decimal("0.0200")),     # 2%
+    (11_200_000, Decimal("0.0250")),     # 2.5%
+    (12_050_000, Decimal("0.0300")),     # 3%
+    (12_950_000, Decimal("0.0400")),     # 4%
+    (14_150_000, Decimal("0.0500")),     # 5%
+    (15_550_000, Decimal("0.0600")),     # 6%
+    (17_050_000, Decimal("0.0700")),     # 7%
+    (19_500_000, Decimal("0.0800")),     # 8%
+    (22_700_000, Decimal("0.0900")),     # 9%
+    (26_600_000, Decimal("0.1000")),     # 10%
+    (28_100_000, Decimal("0.1100")),     # 11%
+    (30_100_000, Decimal("0.1200")),     # 12%
+    (32_600_000, Decimal("0.1300")),     # 13%
+    (35_400_000, Decimal("0.1400")),     # 14%
+    (38_900_000, Decimal("0.1500")),     # 15%
+    (43_000_000, Decimal("0.1600")),     # 16%
+    (47_400_000, Decimal("0.1700")),     # 17%
+    (51_200_000, Decimal("0.1800")),     # 18%
+    (55_800_000, Decimal("0.1900")),     # 19%
+    (60_400_000, Decimal("0.2000")),     # 20%
+    (66_700_000, Decimal("0.2100")),     # 21%
+    (74_500_000, Decimal("0.2200")),     # 22%
+    (83_200_000, Decimal("0.2300")),     # 23%
+    (95_600_000, Decimal("0.2400")),     # 24%
+    (110_000_000, Decimal("0.2500")),    # 25%
+    (134_000_000, Decimal("0.2600")),    # 26%
+    (169_000_000, Decimal("0.2700")),    # 27%
+    (221_000_000, Decimal("0.2800")),    # 28%
+    (390_000_000, Decimal("0.2900")),    # 29%
+    (463_000_000, Decimal("0.3000")),    # 30%
+    (561_000_000, Decimal("0.3100")),    # 31%
+    (709_000_000, Decimal("0.3200")),    # 32%
+    (965_000_000, Decimal("0.3300")),    # 33%
+    (None, Decimal("0.3400")),           # 34%
 ]
 
+# PMK 168/2023 Pasal 2:
+# A = TK/0, TK/1  |  B = TK/2, TK/3, K/0, K/1  |  C = K/2, K/3
 _TER_CATEGORY_MAP = {
-    "TK/0": _TER_A,
-    "TK/1": _TER_B, "TK/2": _TER_B, "TK/3": _TER_B, "K/0": _TER_B,
-    "K/1": _TER_C, "K/2": _TER_C, "K/3": _TER_C,
+    "TK/0": _TER_A, "TK/1": _TER_A,
+    "TK/2": _TER_B, "TK/3": _TER_B, "K/0": _TER_B, "K/1": _TER_B,
+    "K/2": _TER_C, "K/3": _TER_C,
 }
 
 
@@ -322,48 +351,59 @@ def calculate_overtime_pay(
 
     Multipliers reset daily (not cumulative across days).
     """
+    result = calculate_overtime_pay_detailed(hourly_rate, overtime_hours, work_schedule, is_holiday)
+    return result["total"]
+
+
+def calculate_overtime_pay_detailed(
+    hourly_rate: Decimal,
+    overtime_hours: float,
+    work_schedule: str = "six_day",
+    is_holiday: bool = False,
+) -> dict:
+    """Calculate overtime pay with per-multiplier breakdown.
+
+    Returns dict with: total, and hours/pay per multiplier (1.5x, 2x, 3x, 4x).
+    """
     hours = Decimal(str(overtime_hours))
+    breakdown = {"1.5": Decimal("0"), "2": Decimal("0"), "3": Decimal("0"), "4": Decimal("0")}
+
     if hours <= ZERO:
-        return ZERO
+        return {"total": ZERO, "breakdown": breakdown}
 
     total = ZERO
 
     if not is_holiday:
-        # Weekday overtime
-        # 1st hour: 1.5x, 2nd+ hour: 2x
+        # Weekday overtime: 1st hour 1.5x, 2nd+ 2x
         if hours >= Decimal("1"):
             total += hourly_rate * Decimal("1.5")
+            breakdown["1.5"] += Decimal("1")
             remaining = hours - Decimal("1")
             if remaining > ZERO:
                 total += hourly_rate * Decimal("2") * remaining
+                breakdown["2"] += remaining
         else:
             total += hourly_rate * Decimal("1.5") * hours
+            breakdown["1.5"] += hours
     else:
         # Holiday / Rest day overtime
-        if work_schedule == "five_day":
-            # 1-8h: 2x, 9th: 3x, 10+: 4x
-            if hours <= Decimal("8"):
-                total += hourly_rate * Decimal("2") * hours
-            elif hours <= Decimal("9"):
-                total += hourly_rate * Decimal("2") * Decimal("8")
-                total += hourly_rate * Decimal("3") * (hours - Decimal("8"))
-            else:
-                total += hourly_rate * Decimal("2") * Decimal("8")
-                total += hourly_rate * Decimal("3") * Decimal("1")
-                total += hourly_rate * Decimal("4") * (hours - Decimal("9"))
-        else:
-            # 6-day schedule: 1-7h: 2x, 8th: 3x, 9+: 4x
-            if hours <= Decimal("7"):
-                total += hourly_rate * Decimal("2") * hours
-            elif hours <= Decimal("8"):
-                total += hourly_rate * Decimal("2") * Decimal("7")
-                total += hourly_rate * Decimal("3") * (hours - Decimal("7"))
-            else:
-                total += hourly_rate * Decimal("2") * Decimal("7")
-                total += hourly_rate * Decimal("3") * Decimal("1")
-                total += hourly_rate * Decimal("4") * (hours - Decimal("8"))
+        limit = Decimal("8") if work_schedule == "five_day" else Decimal("7")
+        # 1-limit: 2x
+        h2 = min(hours, limit)
+        total += hourly_rate * Decimal("2") * h2
+        breakdown["2"] += h2
+        # next 1 hour: 3x
+        if hours > limit:
+            h3 = min(hours - limit, Decimal("1"))
+            total += hourly_rate * Decimal("3") * h3
+            breakdown["3"] += h3
+        # remaining: 4x
+        if hours > limit + Decimal("1"):
+            h4 = hours - limit - Decimal("1")
+            total += hourly_rate * Decimal("4") * h4
+            breakdown["4"] += h4
 
-    return _round(total)
+    return {"total": _round(total), "breakdown": breakdown}
 
 
 # ── Main Payroll Calculation ─────────────────────────────────────────────────
@@ -526,6 +566,12 @@ def calculate_monthly_payroll(
     holiday_overtime_hours = Decimal("0")
     weekday_overtime_hours = Decimal("0")
     saturday_auto_overtime_hours = Decimal("0")
+    # Accumulate hours per multiplier across all days
+    ot_hours_at_1_5x = Decimal("0")
+    ot_hours_at_2x = Decimal("0")
+    ot_hours_at_3x = Decimal("0")
+    ot_hours_at_4x = Decimal("0")
+
     for att in attendance_records:
         ot = float(getattr(att, 'overtime_hours', 0) or 0)
         att_date = getattr(att, 'date', None)
@@ -549,13 +595,17 @@ def calculate_monthly_payroll(
                     is_holiday = True
                 else:
                     wd = getattr(att_date, 'weekday', lambda: -1)()
-                    # 5-day schedule: Saturday(5) and Sunday(6) are rest days
-                    # 6-day schedule: Sunday(6) is the only rest day
                     if work_schedule == 'five_day' and wd >= 5:
                         is_holiday = True
                     elif work_schedule == 'six_day' and wd == 6:
                         is_holiday = True
-            overtime_pay += calculate_overtime_pay(hourly_rate, ot, work_schedule, is_holiday=is_holiday)
+            detail = calculate_overtime_pay_detailed(hourly_rate, ot, work_schedule, is_holiday=is_holiday)
+            overtime_pay += detail["total"]
+            bd = detail["breakdown"]
+            ot_hours_at_1_5x += bd["1.5"]
+            ot_hours_at_2x += bd["2"]
+            ot_hours_at_3x += bd["3"]
+            ot_hours_at_4x += bd["4"]
             if is_holiday:
                 holiday_overtime_hours += _d(ot)
             else:
@@ -668,6 +718,10 @@ def calculate_monthly_payroll(
         "holiday_overtime_hours": float(holiday_overtime_hours),
         "weekday_overtime_hours": float(weekday_overtime_hours),
         "saturday_auto_overtime_hours": float(saturday_auto_overtime_hours),
+        "ot_hours_at_1_5x": float(ot_hours_at_1_5x),
+        "ot_hours_at_2x": float(ot_hours_at_2x),
+        "ot_hours_at_3x": float(ot_hours_at_3x),
+        "ot_hours_at_4x": float(ot_hours_at_4x),
 
         # Commission
         "commission_rate": float(commission_rate),

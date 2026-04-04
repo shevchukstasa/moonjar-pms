@@ -322,11 +322,62 @@ def generate_payslip_pdf(item: dict, year: int, month: int, factory_name: str = 
         ("Base Salary (prorated)", item.get("prorated_salary", 0)),
         ("Allowances (prorated)", item.get("prorated_allowances", 0)),
     ]
-    if item.get("overtime_pay", 0) > 0:
-        earn_rows.append(("Overtime Pay", item.get("overtime_pay", 0)))
     if item.get("commission", 0) > 0:
         earn_rows.append(("Commission", item.get("commission", 0)))
     _section("EARNINGS", earn_rows)
+
+    # Overtime detailed breakdown
+    if item.get("overtime_pay", 0) > 0:
+        hr = item.get("hourly_rate", 0)
+        elements.append(Paragraph("OVERTIME PAY", section_style))
+        elements.append(Paragraph(
+            f"Hourly rate: {_fmt_idr(hr)} IDR (base salary / 173)",
+            ParagraphStyle("hr_note", parent=styles["Normal"], fontSize=7,
+                           textColor=colors.HexColor("#6b7280"), spaceAfter=3)
+        ))
+        ot_detail = []
+        h15 = item.get("ot_hours_at_1_5x", 0)
+        h2 = item.get("ot_hours_at_2x", 0)
+        h3 = item.get("ot_hours_at_3x", 0)
+        h4 = item.get("ot_hours_at_4x", 0)
+        if h15 > 0:
+            pay15 = round(h15 * hr * 1.5)
+            ot_detail.append([
+                Paragraph(f"1.5\u00d7 rate \u2014 {h15:.1f} hrs \u00d7 {_fmt_idr(hr)} \u00d7 1.5", label_style),
+                Paragraph(f"{_fmt_idr(pay15)} IDR", value_style),
+            ])
+        if h2 > 0:
+            pay2 = round(h2 * hr * 2)
+            ot_detail.append([
+                Paragraph(f"2\u00d7 rate \u2014 {h2:.1f} hrs \u00d7 {_fmt_idr(hr)} \u00d7 2", label_style),
+                Paragraph(f"{_fmt_idr(pay2)} IDR", value_style),
+            ])
+        if h3 > 0:
+            pay3 = round(h3 * hr * 3)
+            ot_detail.append([
+                Paragraph(f"3\u00d7 rate \u2014 {h3:.1f} hrs \u00d7 {_fmt_idr(hr)} \u00d7 3", label_style),
+                Paragraph(f"{_fmt_idr(pay3)} IDR", value_style),
+            ])
+        if h4 > 0:
+            pay4 = round(h4 * hr * 4)
+            ot_detail.append([
+                Paragraph(f"4\u00d7 rate \u2014 {h4:.1f} hrs \u00d7 {_fmt_idr(hr)} \u00d7 4", label_style),
+                Paragraph(f"{_fmt_idr(pay4)} IDR", value_style),
+            ])
+        # Total OT row
+        ot_detail.append([
+            Paragraph("Total Overtime Pay", ParagraphStyle("otb", parent=value_style, fontSize=8)),
+            Paragraph(f"{_fmt_idr(item.get('overtime_pay', 0))} IDR", value_style),
+        ])
+        ot_t = Table(ot_detail, colWidths=[100 * mm, 65 * mm])
+        ot_t.setStyle(TableStyle([
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+            ("LINEABOVE", (0, -1), (-1, -1), 0.3, colors.HexColor("#d1d5db")),
+        ]))
+        elements.append(ot_t)
 
     # Gross
     gross_data = [[

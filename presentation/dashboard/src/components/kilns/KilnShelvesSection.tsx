@@ -185,6 +185,7 @@ export function KilnShelvesSection({
       <EditShelfDialog
         shelf={editShelf}
         onClose={() => setEditShelf(null)}
+        kilns={kilns}
       />
     </div>
   );
@@ -576,9 +577,11 @@ function WriteOffDialog({
 function EditShelfDialog({
   shelf,
   onClose,
+  kilns,
 }: {
   shelf: KilnShelfItem | null;
   onClose: () => void;
+  kilns: KilnItem[];
 }) {
   const qc = useQueryClient();
   const [form, setForm] = useState<Record<string, any>>({});
@@ -589,6 +592,7 @@ function EditShelfDialog({
     if (shelf) {
       setForm({
         name: shelf.name,
+        resource_id: shelf.resource_id,
         length_cm: shelf.length_cm,
         width_cm: shelf.width_cm,
         thickness_mm: shelf.thickness_mm,
@@ -614,6 +618,7 @@ function EditShelfDialog({
   if (form.name === undefined && shelf) {
     setForm({
       name: shelf.name,
+      resource_id: shelf.resource_id,
       length_cm: shelf.length_cm,
       width_cm: shelf.width_cm,
       thickness_mm: shelf.thickness_mm,
@@ -624,9 +629,17 @@ function EditShelfDialog({
     });
   }
 
+  const kilnOptions = kilns.map((k) => ({ value: k.id, label: k.name }));
+
   return (
     <Dialog open={!!shelf} onClose={onClose} title="Edit Shelf" className="w-[440px]">
       <div className="space-y-3">
+        <Select
+          label="Assigned Kiln (move between kilns)"
+          options={kilnOptions}
+          value={form.resource_id || shelf.resource_id}
+          onChange={(e) => setForm({ ...form, resource_id: e.target.value })}
+        />
         <Input
           label="Name"
           value={form.name || ''}

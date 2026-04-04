@@ -13,6 +13,7 @@ import { KilnEditDialog } from '@/components/kilns/KilnEditDialog';
 import { LoadingRulesDialog } from '@/components/kilns/LoadingRulesDialog';
 import { KilnConstantsTable } from '@/components/kilns/KilnConstantsTable';
 import { KilnBreakdownDialog, KilnRestoreDialog } from '@/components/kilns/KilnBreakdownDialog';
+import { KilnShelvesSection } from '@/components/kilns/KilnShelvesSection';
 import apiClient from '@/api/client';
 
 const GLOBAL_ROLES = new Set(['owner', 'administrator', 'ceo']);
@@ -137,6 +138,11 @@ export default function ManagerKilnsPage() {
             />
           ))}
         </div>
+      )}
+
+      {/* Kiln Shelves */}
+      {selectedFactory && (
+        <KilnShelvesSection factoryId={selectedFactory} kilns={kilns} />
       )}
 
       {/* Kiln Constants */}

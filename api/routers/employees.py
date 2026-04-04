@@ -612,7 +612,7 @@ async def payroll_pdf_employee(
         else:
             working_days = sum(1 for day, wd in month_days_list if day != 0 and wd < 5)
 
-    # Load holiday dates
+    # Load holiday dates and subtract from working days
     emp_holidays = set()
     if emp.factory_id:
         for row in db.query(FactoryCalendar.date).filter(
@@ -622,6 +622,22 @@ async def payroll_pdf_employee(
             extract("month", FactoryCalendar.date) == month,
         ).all():
             emp_holidays.add(row[0])
+
+    # Subtract factory holidays from working days count
+    if emp_holidays and pay_period == "calendar_month":
+        month_days_list2 = list(_cal.Calendar().itermonthdays2(year, month))
+        count = 0
+        for day_num, wd in month_days_list2:
+            if day_num == 0:
+                continue
+            d = date(year, month, day_num)
+            if d in emp_holidays:
+                continue
+            if ws == 'six_day' and wd < 6:
+                count += 1
+            elif ws != 'six_day' and wd < 5:
+                count += 1
+        working_days = count
 
     payroll = calculate_monthly_payroll(
         employee=emp,
@@ -639,7 +655,7 @@ async def payroll_pdf_employee(
         factory_name=factory_name,
     )
 
-    emp_name = (emp.name or "employee").replace(" ", "_")
+    emp_name = (emp.full_name or "employee").replace(" ", "_")
     month_str = str(month).zfill(2)
     filename = f"payslip_{emp_name}_{year}_{month_str}.pdf"
     return StreamingResponse(

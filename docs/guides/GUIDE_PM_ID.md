@@ -1616,4 +1616,109 @@ Untuk menambah pembacaan:
 
 ---
 
+## 32. Manajemen Rak Kiln (Kiln Shelves)
+
+Rak kiln adalah platform tahan api yang digunakan di dalam kiln saat pembakaran. Ini adalah bahan habis pakai mahal dengan umur terbatas, sehingga sistem melacak setiap rak secara individual.
+
+### 32.1. Melihat Rak
+
+Buka halaman **Kilns**. Di bawah kartu kiln, Anda akan melihat bagian **Kiln Shelves**:
+- Rak dikelompokkan berdasarkan kiln
+- Setiap grup menunjukkan jumlah rak aktif dan total area (m²)
+- Setiap baris rak menampilkan: nama, material, dimensi, area, status, dan progress bar siklus pembakaran
+
+**Warna progress bar siklus:**
+- **Hijau** -- di bawah 70% dari maks siklus (sehat)
+- **Kuning** -- 70-90% dari maks siklus (pantau lebih dekat)
+- **Merah** -- di atas 90% dari maks siklus (jadwalkan penggantian)
+
+### 32.2. Menambah Rak Baru
+
+1. Klik **+ Add Shelf**
+2. Pilih **Kiln** tempat rak ini
+3. Masukkan **dimensi**: panjang (cm), lebar (cm), tebal (mm)
+4. Pilih **Material** -- sistem otomatis mengatur maks siklus pembakaran:
+   - Silicon Carbide (SiC): 200 siklus
+   - Cordierite: 150 siklus
+   - Mullite: 300 siklus
+   - Alumina: 250 siklus
+5. Opsional: tanggal pembelian, harga (IDR), dan catatan
+6. **Nama** otomatis dihasilkan jika dikosongkan: misal `SiC-SmallK-001`
+
+### 32.3. Mengedit Rak
+
+Klik **Edit** pada baris rak. Anda dapat:
+- Mengubah dimensi, material, catatan, maks siklus
+- **Memindahkan rak ke kiln lain** dengan memilih kiln baru dari dropdown
+- Mengubah status antara Active dan Damaged
+
+### 32.4. Mencatat Siklus Pembakaran
+
+Klik **+1** pada baris rak setelah setiap pembakaran. Sistem akan:
+- Menambah penghitung siklus pembakaran
+- Menampilkan **peringatan** saat rak mencapai 90% dari maks siklus
+- Progress bar siklus diperbarui secara otomatis
+
+### 32.5. Menghapus/Write-Off Rak
+
+Ketika rak retak, melengkung, atau tidak dapat digunakan:
+
+1. Klik **Write Off** pada baris rak
+2. Masukkan **alasan** (wajib): misal "Retak setelah thermal shock"
+3. Opsional lampirkan **URL foto** kerusakan
+4. Klik **Confirm Write Off**
+
+**Yang terjadi otomatis:**
+- Status rak berubah menjadi `written_off`, menjadi tidak aktif
+- Jika rak memiliki harga beli, entri **pengeluaran OPEX** dibuat dengan perhitungan biaya-per-siklus
+- Jika rak tersisa untuk kiln tersebut sangat sedikit, tugas **SHELF_REPLACEMENT_NEEDED** dibuat untuk Anda
+
+### 32.6. Memahami Siklus Hidup Rak
+
+Sistem melacak siklus hidup lengkap setiap rak:
+- **Pembelian** → catat tanggal dan harga
+- **Penggunaan aktif** → hitung siklus pembakaran, pantau keausan
+- **Kerusakan** → tandai sebagai damaged, tambahkan catatan kondisi
+- **Write-off** → catat alasan dengan bukti foto
+- **Dampak OPEX** → biaya per siklus dihitung otomatis
+
+---
+
+## 33. Sumber Daya Lini Produksi (Line Resources)
+
+Sumber daya lini produksi (meja kerja, rak pengeringan, papan glazur) langsung mempengaruhi seberapa cepat pabrik dapat memproses ubin.
+
+### 33.1. Jenis Sumber Daya
+
+| Jenis | Apa Itu | Bagaimana Membatasi |
+|-------|---------|---------------------|
+| **Meja Kerja** | Area meja untuk engobe/glazur | Membatasi berapa banyak area yang dapat diproses per siklus |
+| **Rak Pengeringan** | Rak untuk papan pengeringan | Membatasi berapa banyak papan yang dapat mengering bersamaan |
+| **Papan Glazur** | Papan tempat ubin saat glazur | Total papan tersedia membatasi throughput batch |
+
+### 33.2. Mengelola Sumber Daya
+
+Di **Dashboard PM** → tab TPS, temukan bagian **Line Resources**:
+- Sumber daya dikelompokkan berdasarkan jenis
+- Gunakan formulir inline untuk menambah sumber daya baru
+
+### 33.3. Peringatan Defisit Papan
+
+Jika scheduler mendeteksi bahwa lebih banyak papan glazur dibutuhkan daripada yang tersedia:
+- Tugas **BOARD_ORDER_NEEDED** otomatis dibuat untuk Anda
+- Tugas mencakup: berapa papan dibutuhkan, berapa yang tersedia, dan defisitnya
+
+---
+
+## 34. Pemuatan Kiln Berbasis Zona
+
+Kiln memiliki zona pemuatan berbeda untuk jenis ubin berbeda:
+
+- **Zona Edge** -- ubin dimuat berdiri (face only, 1-2 edge). Kepadatan tinggi, untuk ubin kecil (≤15cm)
+- **Zona Flat** -- ubin dimuat datar (all edges, with back). Kepadatan lebih rendah, untuk ubin besar
+
+Scheduler otomatis mengklasifikasikan setiap posisi ke zona yang tepat. Overflow di satu zona **tidak** tumpah ke zona lain.
+
+---
+
 > **Ada pertanyaan?** Hubungi administrator sistem atau gunakan **AI Chat** bawaan di dashboard PM.

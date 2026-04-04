@@ -109,3 +109,71 @@ Rendered as Telegram inline keyboard below the briefing message:
 | Path | Component | Role Guard |
 |------|-----------|------------|
 | `/kiln-inspections` | `KilnInspectionsPage` | `production_manager` |
+
+---
+
+## New Components (April 2026)
+
+### KilnShelvesSection (`components/kilns/KilnShelvesSection.tsx`)
+
+**Embedded in:** `ManagerKilnsPage` — between kiln grid and constants table
+**Props:** `{ factoryId: string, kilns: KilnItem[] }`
+
+**Features:**
+- Shelves grouped by kiln with area stats and count
+- CycleBar progress bars (green <70%, yellow 70-90%, red 90%+)
+- Filter by kiln + toggle written-off visibility
+- Visual alerts for nearing end-of-life (80%+ cycles)
+
+**Dialogs:**
+
+| Dialog | Purpose | Key Fields |
+|--------|---------|------------|
+| `CreateShelfDialog` | Add new shelf | Kiln select, dimensions, material (auto-sets max cycles), auto-naming |
+| `EditShelfDialog` | Modify shelf | All fields + kiln reassignment (move shelf between kilns) |
+| `WriteOffDialog` | Retire shelf | Mandatory reason + optional photo URL, shows remaining count |
+
+---
+
+### ShelfOpexCard (`pages/CeoDashboard.tsx`)
+
+**Embedded in:** CEO Dashboard "Kilns & Schedule" tab
+**Data source:** `kilnShelvesApi.analytics()` endpoint
+
+**Displays:**
+- 4 KPI cards: active shelves, avg lifespan, cost/cycle, total investment
+- Projected replacements alert (30/90 day forecast)
+- Nearing end-of-life list with progress bars
+- By-material breakdown grid
+- Monthly write-off cost bar chart (6 months)
+
+---
+
+### LineResourcesSection (`pages/ManagerDashboard.tsx`)
+
+**Embedded in:** TPS tab in ManagerDashboard
+**Data source:** `lineResourcesApi` for CRUD operations
+
+**Features:**
+- Inline add forms per resource type card (`work_table`, `drying_rack`, `glazing_board`)
+- Contextual field labels and hints per resource type
+
+---
+
+### API Module Updates (`api/tpsDashboard.ts`)
+
+**New interfaces:**
+- `KilnShelfItem` — shelf entity with dimensions, material, cycle count, status
+- `KilnShelfCreate` — creation payload
+- `ShelfAnalytics` — aggregated analytics response
+
+**New API clients:**
+
+| Client | Methods |
+|--------|---------|
+| `kilnShelvesApi` | `list`, `create`, `update`, `writeOff`, `incrementCycles`, `analytics` |
+| `lineResourcesApi` | `list`, `create`, `update`, `remove` |
+
+**New constants:**
+- `SHELF_MATERIALS` — material options with `defaultCycles` per material type
+- `LINE_RESOURCE_TYPES` — resource type definitions (`work_table`, `drying_rack`, `glazing_board`)

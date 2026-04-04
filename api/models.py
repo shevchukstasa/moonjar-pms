@@ -1667,6 +1667,38 @@ class NotificationPreference(Base):
     user = relationship('User', foreign_keys=[user_id])
 
 
+class KilnShelf(Base):
+    """Kiln shelf (fire-resistant platform) with lifecycle tracking."""
+    __tablename__ = 'kiln_shelves'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    resource_id = Column(UUID(as_uuid=True), ForeignKey('resources.id', ondelete='CASCADE'), nullable=False)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
+    name = Column(sa.String(200), nullable=False)
+    length_cm = Column(sa.Numeric(8, 2), nullable=False)
+    width_cm = Column(sa.Numeric(8, 2), nullable=False)
+    thickness_mm = Column(sa.Numeric(6, 2), nullable=False, default=15)
+    material = Column(sa.String(100), default='silicon_carbide')
+    # area_sqm is GENERATED ALWAYS in DB — read-only
+    status = Column(sa.String(30), nullable=False, default='active')
+    condition_notes = Column(sa.Text)
+    write_off_reason = Column(sa.Text)
+    write_off_photo_url = Column(sa.String(500))
+    written_off_at = Column(sa.DateTime(timezone=True))
+    written_off_by = Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    purchase_date = Column(sa.Date)
+    purchase_cost = Column(sa.Numeric(10, 2))
+    firing_cycles_count = Column(sa.Integer, default=0)
+    max_firing_cycles = Column(sa.Integer)
+    is_active = Column(sa.Boolean, nullable=False, default=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    kiln = relationship('Resource', foreign_keys=[resource_id])
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    written_off_by_user = relationship('User', foreign_keys=[written_off_by])
+
+
 class FinancialEntry(Base):
     __tablename__ = 'financial_entries'
 

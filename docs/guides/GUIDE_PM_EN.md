@@ -1739,4 +1739,131 @@ At 6 PM, the bot sends an evening summary with today's results: pieces completed
 
 ---
 
+## 36. Kiln Shelves Management
+
+Kiln shelves are fire-resistant platforms used inside kilns during firing. They are expensive consumables with a limited lifespan, so the system tracks each shelf individually.
+
+### 36.1. Viewing Shelves
+
+Navigate to **Kilns** page. Below the kiln cards, you will see the **Kiln Shelves** section:
+- Shelves are grouped by kiln
+- Each group shows total active shelves and combined area (m²)
+- Each shelf row shows: name, material, dimensions, area, status, and firing cycle progress bar
+
+**Cycle progress bar colors:**
+- **Green** -- below 70% of max cycles (healthy)
+- **Yellow** -- 70-90% of max cycles (monitor closely)
+- **Red** -- above 90% of max cycles (schedule replacement)
+
+Use the **filter** dropdown to show shelves for a specific kiln. Check **Show written-off** to see decommissioned shelves.
+
+### 36.2. Adding a New Shelf
+
+1. Click **+ Add Shelf**
+2. Select the **Kiln** this shelf belongs to
+3. Enter **dimensions**: length (cm), width (cm), thickness (mm)
+4. Select **Material** -- the system will auto-set the default max firing cycles:
+   - Silicon Carbide (SiC): 200 cycles
+   - Cordierite: 150 cycles
+   - Mullite: 300 cycles
+   - Alumina: 250 cycles
+5. Optionally enter purchase date, cost (IDR), and notes
+6. **Name** is auto-generated if left empty: e.g., `SiC-SmallK-001`
+
+### 36.3. Editing a Shelf
+
+Click **Edit** on any shelf row. You can:
+- Change dimensions, material, notes, max firing cycles
+- **Move the shelf to a different kiln** by selecting a new kiln from the dropdown
+- Change status between Active and Damaged
+
+### 36.4. Recording Firing Cycles
+
+Click **+1** on a shelf row after each firing. The system will:
+- Increment the firing cycle counter
+- Show a **warning** when the shelf reaches 90% of its max cycles
+- The cycle progress bar updates automatically
+
+### 36.5. Writing Off a Shelf
+
+When a shelf is cracked, warped, or otherwise unusable:
+
+1. Click **Write Off** on the shelf row
+2. Enter the **reason** (mandatory): e.g., "Cracked after thermal shock"
+3. Optionally attach a **photo URL** of the damage
+4. Click **Confirm Write Off**
+
+**What happens automatically:**
+- Shelf status changes to `written_off`, becomes inactive
+- If the shelf had a purchase cost, an **OPEX expense entry** is created with cost-per-cycle calculation
+- If remaining shelves for that kiln are critically low (0 shelves or <0.5 m²), a **SHELF_REPLACEMENT_NEEDED** task is created for you
+
+### 36.6. Understanding Shelf Lifecycle
+
+The system tracks the full lifecycle of each shelf:
+- **Purchase** → track date and cost
+- **Active use** → count firing cycles, monitor wear
+- **Damage** → mark as damaged, add condition notes
+- **Write-off** → record reason with photo evidence
+- **OPEX impact** → cost per cycle calculated automatically
+
+CEO sees a dedicated **OPEX analytics widget** with: average lifespan per material, projected replacements, monthly write-off costs.
+
+---
+
+## 37. Production Line Resources
+
+Production line resources (work tables, drying racks, glazing boards) directly affect how fast the factory can process tiles. The scheduler uses these resources to calculate realistic stage durations.
+
+### 37.1. What Are Line Resources?
+
+| Resource Type | What It Is | How It Constrains |
+|--------------|------------|-------------------|
+| **Work Table** | Table area for engobe/glazing | Limits how much area can be processed per cycle |
+| **Drying Rack** | Shelving for drying boards | Limits how many boards can dry simultaneously |
+| **Glazing Board** | Boards tiles sit on during glazing | Total available boards limit batch throughput |
+
+### 37.2. Managing Resources
+
+On the **PM Dashboard** → TPS tab, find the **Line Resources** section:
+- Resources are grouped by type (work table, drying rack, glazing board)
+- Each card shows name, capacity, and number of units
+- Use the inline form to add new resources
+
+### 37.3. How Resources Affect Scheduling
+
+The scheduler formula: **stage_days = max(speed_days, constraint_days)**
+
+- If you have enough resources, the stage completes at normal speed
+- If resources are limited, the stage takes longer (constraint extends it)
+- If no resources are configured, the scheduler uses speed-only calculation (backward compatible)
+
+### 37.4. Board Deficit Alerts
+
+If the scheduler detects that more glazing boards are needed than available:
+- A **BOARD_ORDER_NEEDED** task is automatically created for you
+- The task includes: how many boards are needed, how many are available, and the deficit
+- One task per factory (no spam — deduplication is built in)
+
+---
+
+## 38. Zone-Based Kiln Loading
+
+Kilns have different loading zones for different tile types:
+
+### 38.1. Loading Zones
+
+- **Edge zone** -- tiles loaded on edge (face only, 1-2 edges). High density, used for smaller tiles (≤15cm)
+- **Flat zone** -- tiles loaded flat (all edges, with back). Lower density, required for larger tiles or full-coverage glazing
+
+### 38.2. How Zones Work in Scheduling
+
+The scheduler automatically classifies each position:
+- face_only, edges_1, edges_2 tiles ≤15cm → **Edge zone**
+- all_edges, with_back, or tiles >15cm → **Flat zone**
+
+Each zone has its own capacity. Overflow in one zone does **not** spill into the other — they are physically separate areas in the kiln. If the edge zone is full but flat zone has space, edge positions must wait for the next firing day.
+
+---
+
 > **Questions?** Contact your system administrator or use the built-in **AI Chat** on the PM dashboard.

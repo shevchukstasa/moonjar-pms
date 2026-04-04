@@ -350,3 +350,196 @@ Removed legacy database triggers that were auto-updating material balances on tr
 - Re-validates consumption data for `AWAITING_CONSUMPTION_DATA`
 - Re-runs color matching for `AWAITING_COLOR_MATCHING`
 - Positions that can be unblocked are moved back to `PLANNED`
+
+---
+
+## Zone-Based Kiln Capacity (NEW — April 4, 2026)
+
+### Overview
+Kiln capacity is split into independent loading zones rather than a single total number. This reflects real kiln loading practice where tiles are positioned differently depending on their glazing method and size.
+
+### Zone Types
+
+| Zone | Description | Placement |
+|------|-------------|-----------|
+| `edge` | For face_only, edges_1, edges_2 tiles ≤15cm | High density, tiles standing on edge |
+| `flat` | For all_edges, with_back tiles or tiles >15cm | On flat shelves |
+| `filler` | Small gap-fillers | Packed into remaining gaps |
+
+### Classification Logic (`classify_loading_zone`)
+
+```
+classify_loading_zone(position):
+  │
+  ├─ if place_of_application in (face_only, edges_1, edges_2)
+  │   AND max(width, height) ≤ 15cm
+  │   → return 'edge'
+  │
+  └─ otherwise
+      → return 'flat'
+```
+
+### Scheduler Zone Check
+The scheduler validates capacity per zone independently:
+
+```
+zone_used + pos_area ≤ zone_cap * 1.1
+```
+
+- Each zone is checked separately — edge and flat zones **cannot overflow into each other**
+- The 10% tolerance (×1.1) accounts for minor packing variations
+- If either zone exceeds its capacity, the position is deferred to the next batch
+
+---
+
+## Production Line Resource Constraints (NEW — April 4, 2026)
+
+### Overview
+Production stages are mapped to constraining physical resources via `_STAGE_RESOURCE_MAP`. When a resource constraint exists, it can extend stage duration but never reduce it.
+
+### Stage-to-Resource Mapping
+
+| Stage | Constraining Resource |
+|-------|----------------------|
+| `engobe` | work_table |
+| `glazing` | work_table |
+| `drying_engobe` | drying_rack |
+| `drying_glaze` | drying_rack |
+| `edge_cleaning_loading` | glazing_board |
+
+### Duration Formula
+```
+stage_days = max(speed_days, constraint_days)
+```
+
+Resources can only extend stage duration. If no resources are configured for a factory, the scheduler behaves as before (speed_days only).
+
+### Work Table Constraint
+```
+constraint_hours = batch_area_sqm / table_area_sqm * cycle_time
+```
+Where `table_area_sqm` is the usable surface of the work table and `cycle_time` is the processing time per table load.
+
+### Drying Rack Constraint
+```
+boards_needed = batch_pcs / tiles_per_board
+cycles = boards_needed / rack_board_capacity
+constraint_hours = cycles * drying_hours_per_cycle
+```
+Where `rack_board_capacity` is the number of boards the rack holds simultaneously and `drying_hours_per_cycle` is the time per full drying cycle.
+
+### Glazing Board Constraint
+If `boards_needed > boards_available`, the scheduler creates a `BOARD_ORDER_NEEDED` task for PM instead of blocking the position (see Board Deficit Auto-Task below).
+
+---
+
+## Board Deficit Auto-Task (NEW — April 4, 2026)
+
+### Overview
+When the scheduler detects that a batch requires more glazing boards than are currently available, it auto-creates a task for the Production Manager.
+
+### Flow
+```
+scheduler detects boards_needed > boards_available
+  │
+  ├─ Check for existing PENDING task with same position_id
+  │   (deduplication — skip if already exists)
+  │
+  └─ Create Task:
+       ├─ type = BOARD_ORDER_NEEDED
+       ├─ priority = 6
+       ├─ blocking = False
+       └─ metadata:
+            ├─ boards_needed
+            ├─ boards_available
+            ├─ deficit = boards_needed - boards_available
+            ├─ position_id
+            └─ order_id
+```
+
+The task is non-blocking — production continues with available boards, but PM is alerted to order more.
+
+---
+
+## GlazingBoardSpec Integration (NEW — April 4, 2026)
+
+### Overview
+`_get_tiles_per_board()` determines how many tiles fit on a single glazing board. It uses a cascading resolution strategy.
+
+### Resolution Order
+```
+_get_tiles_per_board(position):
+  │
+  ├─ 1. Look up GlazingBoardSpec by position's size_id
+  │     → if found, return spec.tiles_per_board
+  │
+  ├─ 2. If no spec exists, calculate on-the-fly:
+  │     → calculate_glazing_board(width, height, board_width, board_height)
+  │     → returns computed tiles_per_board from tile dimensions
+  │
+  └─ 3. Safe default: 10 tiles/board
+         (used only if both lookup and calculation fail)
+```
+
+---
+
+## Kiln Shelf Lifecycle Management (NEW — April 4, 2026)
+
+### Asset Tracking
+Each physical kiln shelf is tracked as an individual asset with:
+- Dimensions, material type, purchase cost
+- Current firing cycle count vs maximum
+- Active status and assigned kiln
+
+### Auto-Naming Convention
+```
+{MaterialPrefix}-{KilnShort}-{SeqNumber}
+```
+Example: `SiC-SmallK-001` (Silicon Carbide shelf #1 in Small Kiln)
+
+### Material Defaults
+
+| Material | Max Firing Cycles | Prefix |
+|----------|------------------|--------|
+| Silicon Carbide | 200 | SiC |
+| Cordierite | 150 | CRD |
+| Mullite | 300 | MUL |
+| Alumina | 250 | ALM |
+
+### Write-Off Workflow
+
+```
+PM selects shelf for write-off
+  │
+  ├─ Enter reason + optional damage photo URL
+  │
+  ├─ System updates shelf:
+  │     ├─ status = written_off
+  │     ├─ is_active = false
+  │     └─ records written_off_by, written_off_at
+  │
+  ├─ If purchase_cost > 0:
+  │     └─ Auto-create FinancialEntry:
+  │          ├─ type = OPEX
+  │          ├─ category = equipment
+  │          └─ amount = purchase_cost
+  │          (includes cost_per_cycle = purchase_cost / firing_cycles)
+  │
+  └─ If remaining shelves critically low:
+       (active shelf count = 0 OR total active area < 0.5 m²)
+       └─ Create Task:
+            ├─ type = SHELF_REPLACEMENT_NEEDED
+            └─ assigned_role = PRODUCTION_MANAGER
+```
+
+### Lifecycle Analytics (CEO Dashboard)
+
+| Metric | Calculation |
+|--------|-------------|
+| Average lifespan per material | Mean firing cycles of written-off shelves grouped by material |
+| Cost per firing cycle | total_written_off_cost / (avg_cycles x written_off_count) |
+| Projected replacements (30/90 day) | Based on daily cycle rate extrapolation from active shelves |
+| Monthly OPEX trend | Aggregated from FinancialEntry records (category=equipment) |
+
+### Shelf Movement
+Shelves can be reassigned between kilns via `PATCH /kiln-shelves/{id}` updating the `resource_id` field. This supports scenarios where kilns are decommissioned or shelf inventory is rebalanced across kilns.

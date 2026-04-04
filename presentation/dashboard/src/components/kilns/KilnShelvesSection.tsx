@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -587,8 +587,7 @@ function EditShelfDialog({
   const [form, setForm] = useState<Record<string, any>>({});
 
   // Sync form when shelf changes
-  const shelfId = shelf?.id;
-  useState(() => {
+  useEffect(() => {
     if (shelf) {
       setForm({
         name: shelf.name,
@@ -602,7 +601,7 @@ function EditShelfDialog({
         status: shelf.status,
       });
     }
-  });
+  }, [shelf?.id]);
 
   const updateMut = useMutation({
     mutationFn: (payload: Record<string, any>) => kilnShelvesApi.update(shelf!.id, payload),
@@ -613,21 +612,6 @@ function EditShelfDialog({
   });
 
   if (!shelf) return null;
-
-  // Re-init form on shelf change
-  if (form.name === undefined && shelf) {
-    setForm({
-      name: shelf.name,
-      resource_id: shelf.resource_id,
-      length_cm: shelf.length_cm,
-      width_cm: shelf.width_cm,
-      thickness_mm: shelf.thickness_mm,
-      material: shelf.material,
-      max_firing_cycles: shelf.max_firing_cycles,
-      condition_notes: shelf.condition_notes || '',
-      status: shelf.status,
-    });
-  }
 
   const kilnOptions = kilns.map((k) => ({ value: k.id, label: k.name }));
 

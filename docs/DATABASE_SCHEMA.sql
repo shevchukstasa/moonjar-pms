@@ -96,3 +96,70 @@ CREATE TABLE IF NOT EXISTS kiln_repair_logs (
 );
 CREATE INDEX IF NOT EXISTS ix_kiln_repair_logs_resource ON kiln_repair_logs(resource_id);
 CREATE INDEX IF NOT EXISTS ix_kiln_repair_logs_status   ON kiln_repair_logs(status);
+
+
+-- ────────────────────────────────────────────────────────────
+-- §36  Production Line Resources (NEW)
+-- ────────────────────────────────────────────────────────────
+
+-- Generic resource registry for production line equipment
+-- (grinding tables, glazing stations, drying racks, etc.)
+CREATE TABLE IF NOT EXISTS production_line_resources (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    factory_id      UUID NOT NULL REFERENCES factories(id),
+    resource_type   VARCHAR(50) NOT NULL,       -- e.g. 'grinding_table', 'glazing_station', 'drying_rack'
+    name            VARCHAR(200) NOT NULL,
+    capacity_sqm    NUMERIC(10,3),              -- area capacity (m2)
+    capacity_boards INTEGER,                    -- board/shelf slots
+    capacity_pcs    INTEGER,                    -- piece capacity
+    num_units       INTEGER DEFAULT 1,
+    notes           TEXT,
+    is_active       BOOLEAN NOT NULL DEFAULT true,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_prod_line_resource UNIQUE (factory_id, resource_type, name)
+);
+
+
+-- ────────────────────────────────────────────────────────────
+-- §37  Kiln Shelves (NEW)
+-- ────────────────────────────────────────────────────────────
+
+-- Individual kiln shelf tracking — lifecycle, condition, write-off
+CREATE TABLE IF NOT EXISTS kiln_shelves (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    resource_id         UUID NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+    factory_id          UUID NOT NULL REFERENCES factories(id),
+    name                VARCHAR(200) NOT NULL,
+    length_cm           NUMERIC(8, 2) NOT NULL,
+    width_cm            NUMERIC(8, 2) NOT NULL,
+    thickness_mm        NUMERIC(6, 2) NOT NULL DEFAULT 15,
+    material            VARCHAR(100) DEFAULT 'silicon_carbide',
+    area_sqm            NUMERIC(10, 4) GENERATED ALWAYS AS (length_cm * width_cm / 10000.0) STORED,
+    status              VARCHAR(30) NOT NULL DEFAULT 'active',  -- active | damaged | written_off
+    condition_notes     TEXT,
+    write_off_reason    TEXT,
+    write_off_photo_url VARCHAR(500),
+    written_off_at      TIMESTAMPTZ,
+    written_off_by      UUID REFERENCES users(id),
+    purchase_date       DATE,
+    purchase_cost       NUMERIC(10, 2),
+    firing_cycles_count INTEGER DEFAULT 0,
+    max_firing_cycles   INTEGER,
+    is_active           BOOLEAN NOT NULL DEFAULT true,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_kiln_shelves_resource ON kiln_shelves (resource_id, is_active);
+CREATE INDEX idx_kiln_shelves_factory  ON kiln_shelves (factory_id, status);
+
+
+-- ────────────────────────────────────────────────────────────
+-- §38  Kiln Typology Capacities — zone column (ALTER)
+-- ────────────────────────────────────────────────────────────
+
+-- Adds placement zone to kiln typology capacity rows.
+-- Values: 'edge', 'flat', 'filler', 'primary' (default).
+ALTER TABLE kiln_typology_capacities
+    ADD COLUMN IF NOT EXISTS zone VARCHAR(20) DEFAULT 'primary';

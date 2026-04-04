@@ -464,6 +464,188 @@
 | POST | /master-permissions | management | `[Frontend planned]` | Grant permission |
 | DELETE | /master-permissions/{permission_id} | management | `[Frontend planned]` | Revoke permission |
 
+### Kiln Shelves (`/api/tps/kiln-shelves`)
+
+| Method | Path | Auth | Frontend | Description |
+|--------|------|------|----------|-------------|
+| GET | /kiln-shelves | any_auth | checkmark | List kiln shelves |
+| POST | /kiln-shelves | management | checkmark | Create kiln shelf |
+| PATCH | /kiln-shelves/{shelf_id} | management | checkmark | Update kiln shelf |
+| POST | /kiln-shelves/{shelf_id}/write-off | management | checkmark | Write off kiln shelf |
+| POST | /kiln-shelves/{shelf_id}/increment-cycles | any_auth | checkmark | Increment firing cycle count |
+| GET | /kiln-shelves/analytics | any_auth | checkmark | Shelf analytics & projections |
+
+#### GET `/api/tps/kiln-shelves`
+
+List kiln shelves for a factory/kiln.
+
+**Query parameters:**
+
+| Param | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| factory_id | UUID | yes | — | Filter by factory |
+| resource_id | UUID | no | — | Filter by specific kiln resource |
+| include_written_off | bool | no | false | Include written-off shelves |
+
+**Response:** `{ items: KilnShelfItem[], total: number }`
+
+#### POST `/api/tps/kiln-shelves`
+
+Create a new kiln shelf. Name is auto-generated if omitted (e.g. `SiC-KilnName-001`).
+
+**Body:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| resource_id | UUID | yes | — | Kiln resource to assign shelf to |
+| factory_id | UUID | yes | — | Factory |
+| name | string | no | auto-generated | Shelf display name |
+| length_cm | number | yes | — | Shelf length in cm |
+| width_cm | number | yes | — | Shelf width in cm |
+| thickness_mm | number | no | — | Shelf thickness in mm |
+| material | string | no | — | Material type (SiC, Cordierite, Mullite, Alumina) |
+| purchase_date | date | no | — | Date of purchase |
+| purchase_cost | number | no | — | Cost in IDR |
+| max_firing_cycles | int | no | auto from material | Override max cycles |
+
+**Material defaults for `max_firing_cycles`:** SiC = 200, Cordierite = 150, Mullite = 300, Alumina = 250.
+
+**Response:** `{ id: UUID, name: string, max_firing_cycles: int, status: "created" }`
+
+#### PATCH `/api/tps/kiln-shelves/{shelf_id}`
+
+Update shelf properties. Supports moving shelf to a different kiln via `resource_id`.
+
+**Body (all optional):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| name | string | Display name |
+| length_cm | number | Length in cm |
+| width_cm | number | Width in cm |
+| thickness_mm | number | Thickness in mm |
+| material | string | Material type |
+| condition_notes | string | Free-text condition notes |
+| purchase_date | date | Date of purchase |
+| purchase_cost | number | Cost in IDR |
+| max_firing_cycles | int | Override max cycles |
+| resource_id | UUID | Move to different kiln |
+
+**Response:** `{ status: "updated", id: UUID }`
+
+#### POST `/api/tps/kiln-shelves/{shelf_id}/write-off`
+
+Write off a shelf (damaged, end-of-life, etc).
+
+**Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| reason | string | yes | Write-off reason |
+| photo_url | string | no | Photo evidence URL |
+
+**Response:** `{ status: "written_off", id: UUID, remaining_shelves: int }`
+
+**Side effects:**
+- Creates `FinancialEntry` (OPEX / equipment) if `purchase_cost > 0`.
+- Creates `SHELF_REPLACEMENT_NEEDED` task if remaining active shelves for kiln is critically low.
+
+#### POST `/api/tps/kiln-shelves/{shelf_id}/increment-cycles`
+
+Increment firing cycle counter (called after each firing).
+
+**Query parameters:**
+
+| Param | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| count | int | no | 1 | Number of cycles to add (1-10) |
+
+**Response:** `{ status: "updated", firing_cycles_count: int, warning?: string }`
+
+**Notes:** Warning string returned when shelf is at 90%+ of `max_firing_cycles`.
+
+#### GET `/api/tps/kiln-shelves/analytics`
+
+Shelf lifecycle analytics and OPEX projections. CEO-level widget.
+
+**Query parameters:**
+
+| Param | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| factory_id | UUID | no | all factories | Filter by factory |
+
+**Response:**
+```json
+{
+  "overview": { "total_active": 42, "total_written_off": 8, "avg_utilization_pct": 67.3 },
+  "by_material": [
+    { "material": "SiC", "count": 20, "avg_cycles_used": 120, "avg_max_cycles": 200 }
+  ],
+  "nearing_end_of_life": [
+    { "id": "...", "name": "SiC-Kiln1-003", "cycles_used": 185, "max_cycles": 200, "pct": 92.5 }
+  ],
+  "projections": { "replacements_next_30d": 3, "estimated_cost_idr": 4500000 },
+  "monthly_opex_trend": [
+    { "month": "2026-03", "write_offs": 2, "total_cost_idr": 3000000 }
+  ]
+}
+```
+
+---
+
+### Production Line Resources (`/api/tps/line-resources`)
+
+| Method | Path | Auth | Frontend | Description |
+|--------|------|------|----------|-------------|
+| GET | /line-resources | any_auth | checkmark | List line resources |
+| POST | /line-resources | management | checkmark | Create/upsert line resource |
+| PATCH | /line-resources/{id} | management | checkmark | Update line resource |
+| DELETE | /line-resources/{id} | management | checkmark | Soft-delete line resource |
+
+#### GET `/api/tps/line-resources`
+
+List production line resources for a factory.
+
+**Query parameters:**
+
+| Param | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| factory_id | UUID | yes | — | Filter by factory |
+| resource_type | string | no | — | Filter: `work_table`, `drying_rack`, `glazing_board` |
+
+**Response:** `{ items: LineResourceItem[] }`
+
+#### POST `/api/tps/line-resources`
+
+Create a line resource. UPSERT on `(factory_id, resource_type, name)` conflict.
+
+**Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| factory_id | UUID | yes | Factory |
+| resource_type | string | yes | `work_table`, `drying_rack`, `glazing_board` |
+| name | string | yes | Resource name |
+| capacity_sqm | number | no | Capacity in square meters |
+| capacity_boards | int | no | Capacity in boards |
+| capacity_pcs | int | no | Capacity in pieces |
+| num_units | int | no | Number of units |
+| notes | string | no | Free-text notes |
+
+**Response:** `{ id: UUID, status: "created" }`
+
+#### PATCH `/api/tps/line-resources/{id}`
+
+Update a line resource. Accepts partial body (same fields as POST, all optional).
+
+**Response:** `{ status: "updated" }`
+
+#### DELETE `/api/tps/line-resources/{id}`
+
+Soft-delete a line resource (sets `is_active = false`).
+
+**Response:** `{ status: "deleted" }`
+
 ---
 
 ## Notifications (`/api/notifications`)
@@ -987,4 +1169,4 @@
 
 ---
 
-*Generated 2026-04-02. Total: ~55 routers, ~360+ endpoints.*
+*Generated 2026-04-04. Total: ~57 routers, ~370+ endpoints.*

@@ -214,348 +214,288 @@ def generate_payroll_summary_pdf(
 
 
 def generate_payslip_pdf(item: dict, year: int, month: int, factory_name: str = "") -> BytesIO:
-    """Generate a single-employee payslip (portrait A4)."""
+    """Generate a premium single-page payslip in Moonjar brand style."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import mm
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
+    from reportlab.graphics.shapes import Drawing, Rect, Circle, String
+    from reportlab.graphics import renderPDF
+
+    # ── Moonjar brand palette ──────────────────────────────────
+    CHARCOAL = colors.HexColor("#2D2926")       # primary dark (lava stone)
+    WARM_CLAY = colors.HexColor("#8B6F47")       # warm brown (craft)
+    EMBER = colors.HexColor("#C4713B")           # terracotta accent
+    SAND = colors.HexColor("#F5F0EB")            # warm paper bg
+    CREAM = colors.HexColor("#FAF8F5")           # lighter bg
+    GOLD_DARK = colors.HexColor("#A68B5B")       # gold accent
+    SAGE = colors.HexColor("#4A6741")            # green for net salary
+    SAGE_BG = colors.HexColor("#F0F4ED")         # light sage bg
+    DIVIDER = colors.HexColor("#D4C5B0")         # warm divider
+    MUTED = colors.HexColor("#8C8078")           # muted text
 
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
-        leftMargin=20 * mm, rightMargin=20 * mm,
-        topMargin=16 * mm, bottomMargin=16 * mm,
+        leftMargin=18 * mm, rightMargin=18 * mm,
+        topMargin=14 * mm, bottomMargin=12 * mm,
     )
 
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("t", parent=styles["Heading1"], fontSize=14, alignment=TA_CENTER, spaceAfter=2)
-    sub_style = ParagraphStyle("s", parent=styles["Normal"], fontSize=9, alignment=TA_CENTER, textColor=colors.grey, spaceAfter=10)
-    label_style = ParagraphStyle("lbl", parent=styles["Normal"], fontSize=8, textColor=colors.grey)
-    value_style = ParagraphStyle("val", parent=styles["Normal"], fontSize=9, fontName="Helvetica-Bold")
-    section_style = ParagraphStyle("sec", parent=styles["Normal"], fontSize=8, fontName="Helvetica-Bold",
-                                   textColor=colors.HexColor("#1e3a5f"), spaceBefore=8, spaceAfter=4)
+    W = 174 * mm  # usable width
+
+    # ── Style definitions ──────────────────────────────────────
+    lbl = ParagraphStyle("lbl", parent=styles["Normal"], fontSize=7, textColor=MUTED)
+    val = ParagraphStyle("val", parent=styles["Normal"], fontSize=7.5, fontName="Helvetica-Bold", textColor=CHARCOAL)
+    sec = ParagraphStyle("sec", parent=styles["Normal"], fontSize=7, fontName="Helvetica-Bold",
+                         textColor=WARM_CLAY, spaceBefore=5, spaceAfter=2,
+                         borderPadding=(0, 0, 1, 0))
+    note = ParagraphStyle("note", parent=styles["Normal"], fontSize=6, textColor=MUTED)
+    COL_L = 100 * mm
+    COL_R = 74 * mm
 
     period_label = MONTH_NAMES[month - 1] if 1 <= month <= 12 else str(month)
-    generated_at = datetime.now().strftime("%d %b %Y %H:%M")
     is_probation = item.get("is_on_probation", False)
     category = item.get("employment_category", "formal")
 
-    company_style = ParagraphStyle("co", parent=styles["Normal"], fontSize=11, fontName="Helvetica-Bold",
-                                    alignment=TA_CENTER, spaceAfter=1)
-    address_style = ParagraphStyle("addr", parent=styles["Normal"], fontSize=7.5, alignment=TA_CENTER,
-                                    textColor=colors.HexColor("#4b5563"), spaceAfter=8)
+    elements = []
 
-    elements = [
-        Paragraph("PT MOONJAR DESIGN BALI", company_style),
-        Paragraph("Jl. Sunset Road 900B, Seminyak, Kuta, Kab. Badung, Bali", address_style),
-        HRFlowable(width="100%", thickness=0.8, color=colors.HexColor("#1e3a5f"), spaceAfter=6),
-        Paragraph("PAYSLIP", title_style),
-        Paragraph(f"{period_label} {year}{' — ' + factory_name if factory_name else ''}", sub_style),
-    ]
+    # ══════════════════════════════════════════════════════════
+    # HEADER — Moonjar brand block
+    # ══════════════════════════════════════════════════════════
+    logo_text = ParagraphStyle("logo", parent=styles["Normal"], fontSize=13, fontName="Helvetica-Bold",
+                                textColor=CHARCOAL, alignment=TA_LEFT, leading=16)
+    tagline = ParagraphStyle("tag", parent=styles["Normal"], fontSize=6.5, textColor=GOLD_DARK,
+                              alignment=TA_LEFT, fontName="Helvetica-Oblique")
+    addr = ParagraphStyle("addr", parent=styles["Normal"], fontSize=6.5, textColor=MUTED, alignment=TA_RIGHT)
+    slip_title = ParagraphStyle("slip", parent=styles["Normal"], fontSize=8, textColor=EMBER,
+                                 fontName="Helvetica-Bold", alignment=TA_RIGHT)
 
-    # ── Employee info block ─────────────────────────────────────
-    def _row(label, value, bold=False):
-        lbl = Paragraph(label, label_style)
-        val_s = ParagraphStyle("v2", parent=value_style if bold else styles["Normal"], fontSize=9)
-        val = Paragraph(str(value), val_s)
-        return [lbl, val]
-
-    info_data = [
-        _row("Employee", item.get("full_name", "")),
-        _row("Position", item.get("position", "")),
-        _row("Department", item.get("department", "").title()),
-        _row("Category", ("Formal" if category == "formal" else "Contractor") +
-             (" — PROBATION" if is_probation else "")),
-        _row("Work Schedule", "6-day (Mon–Sat)" if item.get("work_schedule") == "six_day" else "5-day (Mon–Fri)"),
-        _row("PTKP Status", "TK/0"),
-    ]
-    info_table = Table(info_data, colWidths=[45 * mm, 120 * mm])
-    info_table.setStyle(TableStyle([
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    header_data = [[
+        [Paragraph("MOONJAR", logo_text),
+         Paragraph("Poetic craftsmanship in lava stone", tagline)],
+        [Paragraph("PAYSLIP", slip_title),
+         Paragraph(f"{period_label} {year}" + (f"  \u2022  {factory_name}" if factory_name else ""), addr),
+         Paragraph("Jl. Sunset Road 900B, Seminyak, Bali", addr)],
+    ]]
+    header_t = Table(header_data, colWidths=[90 * mm, 84 * mm])
+    header_t.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
     ]))
-    elements.append(info_table)
-    elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#e5e7eb"), spaceAfter=4))
+    elements.append(header_t)
 
-    # ── Helper to build a two-column detail table ───────────────
-    def _section(title, rows):
-        elements.append(Paragraph(title, section_style))
-        tdata = [[Paragraph(r[0], label_style), Paragraph(_fmt_idr(r[1]) + " IDR", value_style)] for r in rows]
-        t = Table(tdata, colWidths=[100 * mm, 65 * mm])
-        t.setStyle(TableStyle([
+    # Warm accent line
+    elements.append(Spacer(1, 2 * mm))
+    elements.append(HRFlowable(width="100%", thickness=1.5, color=EMBER, spaceAfter=1 * mm))
+    elements.append(HRFlowable(width="100%", thickness=0.3, color=DIVIDER, spaceAfter=4 * mm))
+
+    # ══════════════════════════════════════════════════════════
+    # EMPLOYEE INFO — compact two-column
+    # ══════════════════════════════════════════════════════════
+    sched = "6-day (Mon\u2013Sat)" if item.get("work_schedule") == "six_day" else "5-day (Mon\u2013Fri)"
+    cat_text = ("Formal" if category == "formal" else "Contractor") + (" \u2022 PROBATION" if is_probation else "")
+
+    info = [
+        [Paragraph("Employee", lbl), Paragraph(item.get("full_name", ""), val),
+         Paragraph("Schedule", lbl), Paragraph(sched, val)],
+        [Paragraph("Position", lbl), Paragraph(item.get("position", ""), val),
+         Paragraph("Category", lbl), Paragraph(cat_text, val)],
+    ]
+    info_t = Table(info, colWidths=[22 * mm, 65 * mm, 22 * mm, 65 * mm])
+    info_t.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+        ("BACKGROUND", (0, 0), (-1, -1), SAND),
+        ("BOX", (0, 0), (-1, -1), 0.3, DIVIDER),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(info_t)
+    elements.append(Spacer(1, 3 * mm))
+
+    # ── Helper ─────────────────────────────────────────────────
+    def _tbl(rows, total_row=False):
+        t = Table(rows, colWidths=[COL_L, COL_R])
+        style_cmds = [
             ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-            ("LINEBELOW", (0, -1), (-1, -1), 0.3, colors.HexColor("#e5e7eb")),
-        ]))
-        elements.append(t)
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),
+        ]
+        if total_row:
+            style_cmds.append(("LINEABOVE", (0, -1), (-1, -1), 0.3, DIVIDER))
+        t.setStyle(TableStyle(style_cmds))
+        return t
 
-    # Attendance
-    elements.append(Paragraph("ATTENDANCE", section_style))
-    att_data = [
-        [Paragraph("Working Days in Month", label_style), Paragraph(str(item.get("working_days_in_month", 0)), value_style)],
-        [Paragraph("Present Days", label_style), Paragraph(str(item.get("present_days", 0)), value_style)],
-        [Paragraph("Absent Days", label_style), Paragraph(str(item.get("absent_days", 0)), value_style)],
-        [Paragraph("Sick / Leave", label_style), Paragraph(f"{item.get('sick_days',0)} / {item.get('leave_days',0)}", value_style)],
-        [Paragraph("Overtime Hours", label_style), Paragraph(f"{item.get('overtime_hours', 0):.1f} hrs", value_style)],
+    # ══════════════════════════════════════════════════════════
+    # ATTENDANCE + EARNINGS side by side — compact
+    # ══════════════════════════════════════════════════════════
+    elements.append(Paragraph("ATTENDANCE", sec))
+    att_rows = [
+        [Paragraph(f"Working Days", lbl), Paragraph(f"{item.get('present_days', 0)} / {item.get('working_days_in_month', 0)}", val)],
+        [Paragraph(f"Absent / Sick / Leave", lbl), Paragraph(f"{item.get('absent_days', 0)} / {item.get('sick_days',0)} / {item.get('leave_days',0)}", val)],
+        [Paragraph(f"Overtime", lbl), Paragraph(f"{item.get('overtime_hours', 0):.1f} hrs" +
+            (f"  (incl. {item.get('saturday_auto_overtime_hours', 0):.0f}h Sat auto-OT)" if item.get("saturday_auto_overtime_hours", 0) > 0 else ""), val)],
     ]
-    if item.get("saturday_auto_overtime_hours", 0) > 0:
-        att_data.append([
-            Paragraph("  incl. Saturday Auto-OT", label_style),
-            Paragraph(f"{item.get('saturday_auto_overtime_hours', 0):.1f} hrs", value_style),
-        ])
-    att_t = Table(att_data, colWidths=[100 * mm, 65 * mm])
-    att_t.setStyle(TableStyle([
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-    ]))
-    elements.append(att_t)
+    elements.append(_tbl(att_rows))
 
-    # Earnings
-    earn_rows = [
-        ("Base Salary (prorated)", item.get("prorated_salary", 0)),
-        ("Allowances (prorated)", item.get("prorated_allowances", 0)),
+    # ── EARNINGS ───────────────────────────────────────────────
+    elements.append(Paragraph("EARNINGS", sec))
+    earn = [
+        [Paragraph("Base Salary (prorated)", lbl), Paragraph(f"{_fmt_idr(item.get('prorated_salary', 0))} IDR", val)],
+        [Paragraph("Allowances (prorated)", lbl), Paragraph(f"{_fmt_idr(item.get('prorated_allowances', 0))} IDR", val)],
     ]
     if item.get("commission", 0) > 0:
-        earn_rows.append(("Commission", item.get("commission", 0)))
-    _section("EARNINGS", earn_rows)
+        earn.append([Paragraph("Commission", lbl), Paragraph(f"{_fmt_idr(item.get('commission', 0))} IDR", val)])
+    elements.append(_tbl(earn))
 
-    # Overtime detailed breakdown
+    # ── OVERTIME BREAKDOWN ─────────────────────────────────────
     if item.get("overtime_pay", 0) > 0:
         hr = item.get("hourly_rate", 0)
-        elements.append(Paragraph("OVERTIME PAY", section_style))
-        elements.append(Paragraph(
-            f"Hourly rate: {_fmt_idr(hr)} IDR (base salary / 173)",
-            ParagraphStyle("hr_note", parent=styles["Normal"], fontSize=7,
-                           textColor=colors.HexColor("#6b7280"), spaceAfter=3)
-        ))
-        ot_detail = []
-        h15 = item.get("ot_hours_at_1_5x", 0)
-        h2 = item.get("ot_hours_at_2x", 0)
-        h3 = item.get("ot_hours_at_3x", 0)
-        h4 = item.get("ot_hours_at_4x", 0)
-        if h15 > 0:
-            pay15 = round(h15 * hr * 1.5)
-            ot_detail.append([
-                Paragraph(f"1.5\u00d7 rate \u2014 {h15:.1f} hrs \u00d7 {_fmt_idr(hr)} \u00d7 1.5", label_style),
-                Paragraph(f"{_fmt_idr(pay15)} IDR", value_style),
-            ])
-        if h2 > 0:
-            pay2 = round(h2 * hr * 2)
-            ot_detail.append([
-                Paragraph(f"2\u00d7 rate \u2014 {h2:.1f} hrs \u00d7 {_fmt_idr(hr)} \u00d7 2", label_style),
-                Paragraph(f"{_fmt_idr(pay2)} IDR", value_style),
-            ])
-        if h3 > 0:
-            pay3 = round(h3 * hr * 3)
-            ot_detail.append([
-                Paragraph(f"3\u00d7 rate \u2014 {h3:.1f} hrs \u00d7 {_fmt_idr(hr)} \u00d7 3", label_style),
-                Paragraph(f"{_fmt_idr(pay3)} IDR", value_style),
-            ])
-        if h4 > 0:
-            pay4 = round(h4 * hr * 4)
-            ot_detail.append([
-                Paragraph(f"4\u00d7 rate \u2014 {h4:.1f} hrs \u00d7 {_fmt_idr(hr)} \u00d7 4", label_style),
-                Paragraph(f"{_fmt_idr(pay4)} IDR", value_style),
-            ])
-        # Total OT row
-        ot_detail.append([
-            Paragraph("Total Overtime Pay", ParagraphStyle("otb", parent=value_style, fontSize=8)),
-            Paragraph(f"{_fmt_idr(item.get('overtime_pay', 0))} IDR", value_style),
+        elements.append(Paragraph(f"OVERTIME  \u2022  Hourly rate: Rp {_fmt_idr(hr)} (base / 173)", sec))
+        ot_rows = []
+        for mult_key, mult_val, mult_label in [("ot_hours_at_1_5x", 1.5, "1.5\u00d7"), ("ot_hours_at_2x", 2, "2\u00d7"),
+                                                  ("ot_hours_at_3x", 3, "3\u00d7"), ("ot_hours_at_4x", 4, "4\u00d7")]:
+            h = item.get(mult_key, 0)
+            if h > 0:
+                pay = round(h * hr * mult_val)
+                ot_rows.append([
+                    Paragraph(f"{mult_label}  {h:.1f} hrs \u00d7 Rp {_fmt_idr(hr)} \u00d7 {mult_val:.1f}", lbl),
+                    Paragraph(f"{_fmt_idr(pay)} IDR", val),
+                ])
+        ot_rows.append([
+            Paragraph("Total Overtime", ParagraphStyle("otb", parent=val, fontSize=7)),
+            Paragraph(f"{_fmt_idr(item.get('overtime_pay', 0))} IDR", val),
         ])
-        ot_t = Table(ot_detail, colWidths=[100 * mm, 65 * mm])
-        ot_t.setStyle(TableStyle([
-            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
-            ("LINEABOVE", (0, -1), (-1, -1), 0.3, colors.HexColor("#d1d5db")),
-        ]))
-        elements.append(ot_t)
+        elements.append(_tbl(ot_rows, total_row=True))
 
-    # Gross
-    gross_data = [[
-        Paragraph("GROSS SALARY", ParagraphStyle("g", parent=value_style, fontSize=10)),
-        Paragraph(_fmt_idr(item.get("gross_salary", 0)) + " IDR",
-                  ParagraphStyle("g2", parent=value_style, fontSize=10, alignment=2)),
+    # ══════════════════════════════════════════════════════════
+    # GROSS — highlighted bar
+    # ══════════════════════════════════════════════════════════
+    elements.append(Spacer(1, 2 * mm))
+    gross_row = [[
+        Paragraph("GROSS SALARY", ParagraphStyle("g", parent=val, fontSize=8.5, textColor=CHARCOAL)),
+        Paragraph(f"Rp {_fmt_idr(item.get('gross_salary', 0))}", ParagraphStyle("g2", parent=val, fontSize=9, textColor=CHARCOAL, alignment=TA_RIGHT)),
     ]]
-    gross_t = Table(gross_data, colWidths=[100 * mm, 65 * mm])
+    gross_t = Table(gross_row, colWidths=[COL_L, COL_R])
     gross_t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f0f4f8")),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("BACKGROUND", (0, 0), (-1, -1), SAND),
+        ("BOX", (0, 0), (-1, -1), 0.5, DIVIDER),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
     ]))
     elements.append(gross_t)
 
-    # PPh 21 — always shown for formal employees
+    # ══════════════════════════════════════════════════════════
+    # TAX & CONTRIBUTIONS — compact
+    # ══════════════════════════════════════════════════════════
     if category == "formal":
+        # PPh 21
         pph21_val = item.get("pph21", 0)
         ter_rate = item.get("pph21_ter_rate_pct", 0)
-        ter_rate_str = f"{ter_rate:.2f}".rstrip('0').rstrip('.')
-        elements.append(Paragraph("PPh 21", section_style))
-        pph_note = ParagraphStyle("pph_note", parent=styles["Normal"], fontSize=7,
-                                   textColor=colors.HexColor("#6b7280"), italics=True)
-        pph_data = [
-            [Paragraph(f"PPh 21 (TER {ter_rate_str}%)", label_style),
-             Paragraph(_fmt_idr(pph21_val) + " IDR", value_style)],
-            [Paragraph(f"TER rate {ter_rate_str}% applied to gross salary — paid by employer (not deducted from salary)", pph_note),
-             Paragraph("", label_style)],
-        ]
-        pph_t = Table(pph_data, colWidths=[100 * mm, 65 * mm])
-        pph_t.setStyle(TableStyle([
-            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-            ("SPAN", (0, 1), (1, 1)),
-            ("LINEBELOW", (0, 0), (-1, 0), 0.3, colors.HexColor("#e5e7eb")),
+        ter_s = f"{ter_rate:.2f}".rstrip('0').rstrip('.')
+        elements.append(Paragraph(f"PPh 21  \u2022  TER {ter_s}% \u2022  paid by employer", sec))
+        elements.append(_tbl([
+            [Paragraph(f"PPh 21 (TER {ter_s}% \u00d7 gross)", lbl), Paragraph(f"{_fmt_idr(pph21_val)} IDR", val)],
         ]))
-        elements.append(pph_t)
 
-    # BPJS detailed breakdown
-    if category == "formal":
+        # BPJS
         bd = item.get("bpjs_breakdown", {})
-        bpjs_note = ParagraphStyle("bpjs_note", parent=styles["Normal"], fontSize=7,
-                                    textColor=colors.HexColor("#6b7280"), italics=True)
-
         if item.get("bpjs_employer", 0) > 0 or item.get("company_bpjs_for_employee", 0) > 0:
-            # ── BPJS Employer ──
-            elements.append(Paragraph("BPJS — EMPLOYER CONTRIBUTION", section_style))
-            employer_lines = [
-                [Paragraph("JKN / BPJS Kesehatan (4%)", label_style),
-                 Paragraph(_fmt_idr(bd.get("jkn_employer", 0)) + " IDR", value_style)],
-                [Paragraph("JKK / Kecelakaan Kerja (0.89%)", label_style),
-                 Paragraph(_fmt_idr(bd.get("jkk_employer", 0)) + " IDR", value_style)],
-                [Paragraph("JKM / Kematian (0.3%)", label_style),
-                 Paragraph(_fmt_idr(bd.get("jkm_employer", 0)) + " IDR", value_style)],
-                [Paragraph("JHT / Hari Tua (3.7%)", label_style),
-                 Paragraph(_fmt_idr(bd.get("jht_employer", 0)) + " IDR", value_style)],
-                [Paragraph("JP / Pensiun (2%)", label_style),
-                 Paragraph(_fmt_idr(bd.get("jp_employer", 0)) + " IDR", value_style)],
-                [Paragraph("Total Employer BPJS (10.89%)", ParagraphStyle("b", parent=value_style, fontSize=8)),
-                 Paragraph(_fmt_idr(item.get("bpjs_employer", 0)) + " IDR", value_style)],
+            elements.append(Paragraph("BPJS \u2014 EMPLOYER (10.89%)", sec))
+            er_rows = [
+                [Paragraph("JKN 4% + JKK 0.89% + JKM 0.3%", lbl),
+                 Paragraph(f"{_fmt_idr(bd.get('jkn_employer', 0) + bd.get('jkk_employer', 0) + bd.get('jkm_employer', 0))} IDR", val)],
+                [Paragraph("JHT 3.7% + JP 2%", lbl),
+                 Paragraph(f"{_fmt_idr(bd.get('jht_employer', 0) + bd.get('jp_employer', 0))} IDR", val)],
+                [Paragraph("Total Employer", ParagraphStyle("b", parent=val, fontSize=7)),
+                 Paragraph(f"{_fmt_idr(item.get('bpjs_employer', 0))} IDR", val)],
             ]
-            er_t = Table(employer_lines, colWidths=[100 * mm, 65 * mm])
-            er_t.setStyle(TableStyle([
-                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-                ("FONTSIZE", (0, 0), (-1, -1), 8),
-                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
-                ("LINEABOVE", (0, -1), (-1, -1), 0.3, colors.HexColor("#d1d5db")),
-            ]))
-            elements.append(er_t)
+            elements.append(_tbl(er_rows, total_row=True))
 
-            # ── BPJS Employee (paid by company) ──
-            elements.append(Paragraph("BPJS — EMPLOYEE CONTRIBUTION (paid by company)", section_style))
-            employee_lines = [
-                [Paragraph("JKN / BPJS Kesehatan (1%)", label_style),
-                 Paragraph(_fmt_idr(bd.get("jkn_employee", 0)) + " IDR", value_style)],
-                [Paragraph("JHT / Hari Tua (2%)", label_style),
-                 Paragraph(_fmt_idr(bd.get("jht_employee", 0)) + " IDR", value_style)],
-                [Paragraph("JP / Pensiun (1%)", label_style),
-                 Paragraph(_fmt_idr(bd.get("jp_employee", 0)) + " IDR", value_style)],
-                [Paragraph("Total Employee BPJS (4%)", ParagraphStyle("b2", parent=value_style, fontSize=8)),
-                 Paragraph(_fmt_idr(item.get("company_bpjs_for_employee", bd.get("employee_total", 0))) + " IDR", value_style)],
+            elements.append(Paragraph("BPJS \u2014 EMPLOYEE (4%)  \u2022  paid by company", sec))
+            ee_rows = [
+                [Paragraph("JKN 1% + JHT 2% + JP 1%", lbl),
+                 Paragraph(f"{_fmt_idr(bd.get('jkn_employee', 0) + bd.get('jht_employee', 0) + bd.get('jp_employee', 0))} IDR", val)],
             ]
-            ee_t = Table(employee_lines, colWidths=[100 * mm, 65 * mm])
-            ee_t.setStyle(TableStyle([
-                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-                ("FONTSIZE", (0, 0), (-1, -1), 8),
-                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
-                ("LINEABOVE", (0, -1), (-1, -1), 0.3, colors.HexColor("#d1d5db")),
-            ]))
-            elements.append(ee_t)
-            elements.append(Paragraph("Employee BPJS contribution is fully paid by the company — not deducted from salary", bpjs_note))
+            elements.append(_tbl(ee_rows))
+            elements.append(Paragraph("Employee BPJS is fully paid by the company \u2014 not deducted from salary", note))
 
         elif is_probation:
-            elements.append(Paragraph("BPJS", section_style))
-            elements.append(Paragraph("Probation period — BPJS not yet registered", bpjs_note))
+            elements.append(Paragraph("BPJS \u2014 Probation period, not yet registered", note))
 
-    # Deductions from employee
-    ded_rows = []
-    if item.get("absence_deduction", 0) > 0:
-        ded_rows.append(("Absence Deduction", item.get("absence_deduction", 0)))
-    if item.get("contractor_tax", 0) > 0:
-        ded_rows.append(("PPh 23 (2.5%)", item.get("contractor_tax", 0)))
-    if ded_rows:
-        _section("DEDUCTIONS", ded_rows)
+    # Deductions
+    if item.get("absence_deduction", 0) > 0 or item.get("contractor_tax", 0) > 0:
+        elements.append(Paragraph("DEDUCTIONS", sec))
+        ded = []
+        if item.get("absence_deduction", 0) > 0:
+            ded.append([Paragraph("Absence Deduction", lbl), Paragraph(f"{_fmt_idr(item.get('absence_deduction', 0))} IDR", val)])
+        if item.get("contractor_tax", 0) > 0:
+            ded.append([Paragraph("PPh 23 (2.5%)", lbl), Paragraph(f"{_fmt_idr(item.get('contractor_tax', 0))} IDR", val)])
+        elements.append(_tbl(ded))
 
-    # Net
+    # ══════════════════════════════════════════════════════════
+    # NET SALARY — premium green bar
+    # ══════════════════════════════════════════════════════════
     elements.append(Spacer(1, 3 * mm))
-    net_green = colors.HexColor("#166534")
-    net_data = [[
-        Paragraph("NET SALARY (TAKE HOME)", ParagraphStyle("n", parent=value_style, fontSize=11, textColor=net_green)),
-        Paragraph(_fmt_idr(item.get("net_salary", 0)) + " IDR",
-                  ParagraphStyle("n2", parent=value_style, fontSize=11, textColor=net_green, alignment=2)),
+    net_row = [[
+        Paragraph("NET SALARY", ParagraphStyle("n", parent=val, fontSize=9, textColor=SAGE)),
+        Paragraph(f"Rp {_fmt_idr(item.get('net_salary', 0))}", ParagraphStyle("n2", parent=val, fontSize=10, textColor=SAGE, alignment=TA_RIGHT)),
     ]]
-    net_t = Table(net_data, colWidths=[100 * mm, 65 * mm])
+    net_t = Table(net_row, colWidths=[COL_L, COL_R])
     net_t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f0fdf4")),
-        ("LINEABOVE", (0, 0), (-1, 0), 1, net_green),
-        ("LINEBELOW", (0, 0), (-1, 0), 1, net_green),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("BACKGROUND", (0, 0), (-1, -1), SAGE_BG),
+        ("BOX", (0, 0), (-1, -1), 0.8, SAGE),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
     ]))
     elements.append(net_t)
 
-    # Total cost to company
-    elements.append(Spacer(1, 4 * mm))
-    cost_data = [[
-        Paragraph("Total Cost to Company", label_style),
-        Paragraph(_fmt_idr(item.get("total_cost_to_company", 0)) + " IDR",
-                  ParagraphStyle("c", parent=value_style, fontSize=8, alignment=2)),
-    ]]
-    cost_t = Table(cost_data, colWidths=[100 * mm, 65 * mm])
-    cost_t.setStyle(TableStyle([
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    # Cost to company (small)
+    elements.append(Spacer(1, 2 * mm))
+    elements.append(_tbl([
+        [Paragraph("Total Cost to Company", lbl), Paragraph(f"Rp {_fmt_idr(item.get('total_cost_to_company', 0))}", val)],
     ]))
-    elements.append(cost_t)
 
-    # ── Signature block ─────────────────────────────────────────
-    elements.append(Spacer(1, 14 * mm))
-    sig_label_style = ParagraphStyle("sig_l", parent=styles["Normal"], fontSize=8, textColor=colors.grey,
-                                      alignment=TA_CENTER)
-    sig_name_style = ParagraphStyle("sig_n", parent=styles["Normal"], fontSize=9, fontName="Helvetica-Bold",
-                                     alignment=TA_CENTER, spaceBefore=16 * mm)
-    sig_title_style = ParagraphStyle("sig_t", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#4b5563"),
-                                      alignment=TA_CENTER)
+    # ══════════════════════════════════════════════════════════
+    # SIGNATURE — right-aligned, compact
+    # ══════════════════════════════════════════════════════════
+    elements.append(Spacer(1, 8 * mm))
+    sig_lbl = ParagraphStyle("sl", parent=styles["Normal"], fontSize=7, textColor=MUTED, alignment=TA_CENTER)
+    sig_name = ParagraphStyle("sn", parent=styles["Normal"], fontSize=8, fontName="Helvetica-Bold",
+                               textColor=CHARCOAL, alignment=TA_CENTER)
+    sig_title = ParagraphStyle("st", parent=styles["Normal"], fontSize=7, textColor=MUTED, alignment=TA_CENTER)
 
     sig_data = [
-        [Paragraph("", sig_label_style),
-         Paragraph("Approved by", sig_label_style)],
-        [Paragraph("", sig_label_style),
-         Paragraph("", sig_label_style)],
-        [Paragraph("", sig_label_style),
-         Paragraph("_______________________", sig_label_style)],
-        [Paragraph("", sig_label_style),
-         Paragraph("Stanislav Shevchuk", sig_name_style)],
-        [Paragraph("", sig_label_style),
-         Paragraph("Direktur", sig_title_style)],
+        [Paragraph("", sig_lbl), Paragraph("Approved by", sig_lbl)],
+        [Paragraph("", sig_lbl), Paragraph("", sig_lbl)],
+        [Paragraph("", sig_lbl), Paragraph("____________________", sig_lbl)],
+        [Paragraph("", sig_lbl), Paragraph("Stanislav Shevchuk", sig_name)],
+        [Paragraph("", sig_lbl), Paragraph("Direktur", sig_title)],
     ]
-    sig_table = Table(sig_data, colWidths=[82.5 * mm, 82.5 * mm])
-    sig_table.setStyle(TableStyle([
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-        ("TOPPADDING", (0, 2), (-1, 2), 14 * mm),  # space for actual signature
+    sig_t = Table(sig_data, colWidths=[W * 0.55, W * 0.45])
+    sig_t.setStyle(TableStyle([
+        ("ALIGN", (1, 0), (1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ("TOPPADDING", (0, 2), (-1, 2), 10 * mm),
     ]))
-    elements.append(sig_table)
+    elements.append(sig_t)
 
-    elements.append(Spacer(1, 6 * mm))
+    # ── Footer accent ──────────────────────────────────────────
+    elements.append(Spacer(1, 4 * mm))
+    elements.append(HRFlowable(width="100%", thickness=0.3, color=DIVIDER, spaceAfter=1))
     elements.append(Paragraph(
-        f"Generated: {generated_at} | This payslip is confidential.",
-        ParagraphStyle("foot", parent=styles["Normal"], fontSize=7, textColor=colors.grey, alignment=TA_CENTER)
+        "PT Moonjar Design Bali  \u2022  This document is confidential",
+        ParagraphStyle("ft", parent=styles["Normal"], fontSize=6, textColor=MUTED, alignment=TA_CENTER)
     ))
 
     doc.build(elements)

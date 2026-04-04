@@ -1,5 +1,6 @@
 import { formatDate } from "@/lib/format";
 import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   BarChart3, Clock, AlertTriangle, Percent, Flame, Activity,
   Download, Trash2, Factory, Zap, CalendarDays, Wrench,
@@ -29,6 +30,7 @@ import { useKilns, type KilnItem } from '@/hooks/useKilns';
 import { useTasks } from '@/hooks/useTasks';
 import { useKilnSchedule } from '@/hooks/useSchedule';
 import { useChangeRequests } from '@/hooks/useOrders';
+import { kilnShelvesApi, SHELF_MATERIALS, type ShelfAnalytics } from '@/api/tpsDashboard';
 import apiClient from '@/api/client';
 import type { FactoryComparison } from '@/api/analytics';
 import type { TaskItem } from '@/api/tasks';
@@ -111,6 +113,173 @@ function CleanupPermissionsCard({ factoryId }: { factoryId: string | null }) {
           <span className="text-sm text-gray-700">PM can delete orders</span>
         </label>
       </div>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Kiln Shelves OPEX Widget (CEO)
+// ---------------------------------------------------------------------------
+const MATERIAL_LABELS: Record<string, string> = Object.fromEntries(
+  SHELF_MATERIALS.map((m) => [m.value, m.label]),
+);
+
+function formatIDR(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+  return n.toFixed(0);
+}
+
+function ShelfOpexCard({ factoryId }: { factoryId: string | null }) {
+  const { data, isLoading, isError } = useQuery<ShelfAnalytics>({
+    queryKey: ['shelf-analytics', factoryId],
+    queryFn: () => kilnShelvesApi.analytics(factoryId || undefined),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  if (isLoading) return <Card title="Kiln Shelves OPEX"><Spinner /></Card>;
+  if (isError || !data) return null;
+
+  const { overview, by_material, nearing_end_of_life, projections, monthly_opex_trend } = data;
+
+  return (
+    <Card>
+      <div className="flex items-center gap-2 mb-4">
+        <Flame className="h-4 w-4 text-orange-500" />
+        <span className="text-sm font-semibold text-gray-800">Kiln Shelves &mdash; Lifecycle &amp; OPEX</span>
+      </div>
+
+      {/* KPI Row */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-4">
+        <div className="rounded-lg border border-gray-200 p-3 text-center">
+          <p className="text-xs text-gray-500">Active Shelves</p>
+          <p className="text-xl font-bold text-gray-900">{overview.total_active}</p>
+          <p className="text-xs text-gray-400">{overview.active_area_sqm} m&sup2;</p>
+        </div>
+        <div className="rounded-lg border border-gray-200 p-3 text-center">
+          <p className="text-xs text-gray-500">Avg Lifespan</p>
+          <p className="text-xl font-bold text-gray-900">
+            {overview.avg_lifespan_cycles > 0 ? `${overview.avg_lifespan_cycles.toFixed(0)}` : '--'}
+          </p>
+          <p className="text-xs text-gray-400">
+            {overview.sample_size > 0
+              ? `${overview.min_lifespan_cycles ?? '?'}–${overview.max_lifespan_cycles ?? '?'} range (${overview.sample_size} samples)`
+              : 'No write-off data yet'}
+          </p>
+        </div>
+        <div className="rounded-lg border border-gray-200 p-3 text-center">
+          <p className="text-xs text-gray-500">Cost / Cycle</p>
+          <p className="text-xl font-bold text-emerald-700">
+            {overview.avg_cost_per_cycle_idr > 0 ? `${formatIDR(overview.avg_cost_per_cycle_idr)}` : '--'}
+          </p>
+          <p className="text-xs text-gray-400">IDR per firing</p>
+        </div>
+        <div className="rounded-lg border border-gray-200 p-3 text-center">
+          <p className="text-xs text-gray-500">Total Investment</p>
+          <p className="text-xl font-bold text-gray-900">{formatIDR(overview.total_investment_idr)}</p>
+          <p className="text-xs text-gray-400">
+            {overview.written_off_cost_idr > 0 && (
+              <span className="text-red-500">{formatIDR(overview.written_off_cost_idr)} written off</span>
+            )}
+          </p>
+        </div>
+      </div>
+
+      {/* Projections */}
+      {(projections.replacements_next_30d > 0 || projections.replacements_next_90d > 0) && (
+        <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 p-3">
+          <p className="text-xs font-semibold text-amber-800 mb-1">Projected Replacements</p>
+          <div className="flex gap-6 text-sm">
+            <div>
+              <span className="font-bold text-amber-900">{projections.replacements_next_30d}</span>
+              <span className="text-amber-700"> in 30 days</span>
+              {projections.replacement_cost_30d_idr > 0 && (
+                <span className="text-xs text-amber-600 ml-1">({formatIDR(projections.replacement_cost_30d_idr)} IDR)</span>
+              )}
+            </div>
+            <div>
+              <span className="font-bold text-amber-900">{projections.replacements_next_90d}</span>
+              <span className="text-amber-700"> in 90 days</span>
+              {projections.replacement_cost_90d_idr > 0 && (
+                <span className="text-xs text-amber-600 ml-1">({formatIDR(projections.replacement_cost_90d_idr)} IDR)</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Nearing End of Life */}
+      {nearing_end_of_life.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs font-semibold text-red-700 mb-2">
+            Nearing End of Life ({nearing_end_of_life.length})
+          </p>
+          <div className="space-y-1.5">
+            {nearing_end_of_life.slice(0, 6).map((s) => (
+              <div key={s.id} className="flex items-center justify-between rounded bg-red-50 px-3 py-1.5">
+                <div>
+                  <span className="text-sm font-medium text-gray-800">{s.name}</span>
+                  <span className="ml-2 text-xs text-gray-500">{s.kiln_name}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <div className="h-1.5 w-12 overflow-hidden rounded-full bg-gray-200">
+                      <div
+                        className={`h-full rounded-full ${s.percent >= 95 ? 'bg-red-600' : 'bg-red-400'}`}
+                        style={{ width: `${Math.min(s.percent, 100)}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-medium text-red-700">{s.percent}%</span>
+                  </div>
+                  <span className="text-xs text-gray-500">{s.cycles}/{s.max_cycles}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* By Material */}
+      {by_material.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs font-semibold text-gray-600 mb-2">By Material</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {by_material.map((m) => (
+              <div key={m.material} className="rounded-lg border border-gray-100 p-2.5">
+                <p className="text-xs font-medium text-gray-700">{MATERIAL_LABELS[m.material] || m.material}</p>
+                <p className="text-sm font-bold text-gray-900">{m.active} active</p>
+                <p className="text-xs text-gray-400">
+                  {m.written_off > 0 && `${m.written_off} written off · `}
+                  {m.avg_lifespan_cycles > 0 ? `avg ${m.avg_lifespan_cycles.toFixed(0)} cycles` : 'no data'}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Monthly OPEX Trend (simple bar chart) */}
+      {monthly_opex_trend.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-600 mb-2">Monthly Write-off Cost</p>
+          <div className="flex items-end gap-1 h-16">
+            {monthly_opex_trend.map((m) => {
+              const maxCost = Math.max(...monthly_opex_trend.map((t) => t.cost_idr), 1);
+              const height = Math.max((m.cost_idr / maxCost) * 100, 4);
+              return (
+                <div key={m.month} className="flex-1 flex flex-col items-center gap-0.5">
+                  <div
+                    className="w-full rounded-t bg-red-400 transition-all"
+                    style={{ height: `${height}%` }}
+                    title={`${m.month}: ${formatIDR(m.cost_idr)} IDR (${m.write_offs} write-offs)`}
+                  />
+                  <span className="text-[9px] text-gray-400">{m.month.slice(5)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
@@ -593,6 +762,9 @@ export default function CeoDashboard() {
               </div>
             )}
           </Card>
+
+          {/* Kiln Shelves OPEX */}
+          <ShelfOpexCard factoryId={factoryId} />
 
           {/* Buffer Health in kilns tab context */}
           <Card title="Buffer Health (TOC)">

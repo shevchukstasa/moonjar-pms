@@ -357,14 +357,25 @@ function CreateShelfDialog({
     factory_id: factoryId,
     material: 'silicon_carbide',
     thickness_mm: 15,
+    max_firing_cycles: 200,
   });
   const [error, setError] = useState('');
 
+  // Auto-update max_firing_cycles when material changes
+  const handleMaterialChange = (mat: string) => {
+    const defaults = SHELF_MATERIALS.find((m) => m.value === mat);
+    setForm((f) => ({
+      ...f,
+      material: mat,
+      max_firing_cycles: defaults?.defaultCycles ?? 100,
+    }));
+  };
+
   const createMut = useMutation({
     mutationFn: (payload: KilnShelfCreate) => kilnShelvesApi.create(payload),
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['kiln-shelves'] });
-      setForm({ factory_id: factoryId, material: 'silicon_carbide', thickness_mm: 15 });
+      setForm({ factory_id: factoryId, material: 'silicon_carbide', thickness_mm: 15, max_firing_cycles: 200 });
       setError('');
       onClose();
     },
@@ -373,7 +384,6 @@ function CreateShelfDialog({
 
   const handleSubmit = () => {
     if (!form.resource_id) { setError('Select a kiln'); return; }
-    if (!form.name?.trim()) { setError('Enter shelf name'); return; }
     if (!form.length_cm || form.length_cm <= 0) { setError('Enter valid length'); return; }
     if (!form.width_cm || form.width_cm <= 0) { setError('Enter valid width'); return; }
     createMut.mutate({
@@ -406,8 +416,8 @@ function CreateShelfDialog({
           onChange={(e) => setForm({ ...form, resource_id: e.target.value })}
         />
         <Input
-          label="Shelf Name"
-          placeholder="e.g. SiC Shelf #1"
+          label="Shelf Name (auto-generated if empty)"
+          placeholder="Auto: SiC-KilnName-001"
           value={form.name || ''}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
         />
@@ -438,7 +448,7 @@ function CreateShelfDialog({
           label="Material"
           options={SHELF_MATERIALS}
           value={form.material || 'silicon_carbide'}
-          onChange={(e) => setForm({ ...form, material: e.target.value })}
+          onChange={(e) => handleMaterialChange(e.target.value)}
         />
         <div className="grid grid-cols-2 gap-3">
           <Input

@@ -492,6 +492,52 @@ export interface KilnShelfCreate {
   condition_notes?: string;
 }
 
+// Shelf lifecycle analytics response
+export interface ShelfAnalytics {
+  overview: {
+    total_active: number;
+    total_written_off: number;
+    active_area_sqm: number;
+    total_investment_idr: number;
+    written_off_cost_idr: number;
+    avg_lifespan_cycles: number;
+    min_lifespan_cycles: number | null;
+    max_lifespan_cycles: number | null;
+    avg_cost_per_cycle_idr: number;
+    sample_size: number;
+  };
+  by_material: {
+    material: string;
+    active: number;
+    written_off: number;
+    avg_lifespan_cycles: number;
+    total_cost_idr: number;
+    active_area_sqm: number;
+  }[];
+  nearing_end_of_life: {
+    id: string;
+    name: string;
+    material: string;
+    kiln_name: string;
+    cycles: number;
+    max_cycles: number;
+    percent: number;
+    replacement_cost_idr: number;
+  }[];
+  projections: {
+    avg_daily_cycles_per_shelf: number;
+    replacements_next_30d: number;
+    replacement_cost_30d_idr: number;
+    replacements_next_90d: number;
+    replacement_cost_90d_idr: number;
+  };
+  monthly_opex_trend: {
+    month: string;
+    cost_idr: number;
+    write_offs: number;
+  }[];
+}
+
 export const kilnShelvesApi = {
   list: async (factoryId: string, resourceId?: string, includeWrittenOff = false): Promise<{ items: KilnShelfItem[] }> => {
     const params: Record<string, string> = { factory_id: factoryId };
@@ -501,7 +547,7 @@ export const kilnShelvesApi = {
     return data;
   },
 
-  create: async (payload: KilnShelfCreate): Promise<{ id: string }> => {
+  create: async (payload: KilnShelfCreate): Promise<{ id: string; name: string; max_firing_cycles: number }> => {
     const { data } = await apiClient.post('/tps/kiln-shelves', payload);
     return data;
   },
@@ -523,12 +569,19 @@ export const kilnShelvesApi = {
     });
     return data;
   },
+
+  analytics: async (factoryId?: string): Promise<ShelfAnalytics> => {
+    const params: Record<string, string> = {};
+    if (factoryId) params.factory_id = factoryId;
+    const { data } = await apiClient.get('/tps/kiln-shelves/analytics', { params });
+    return data;
+  },
 };
 
 export const SHELF_MATERIALS = [
-  { value: 'silicon_carbide', label: 'Silicon Carbide (SiC)' },
-  { value: 'cordierite', label: 'Cordierite' },
-  { value: 'mullite', label: 'Mullite' },
-  { value: 'alumina', label: 'Alumina' },
-  { value: 'other', label: 'Other' },
+  { value: 'silicon_carbide', label: 'Silicon Carbide (SiC)', defaultCycles: 200 },
+  { value: 'cordierite', label: 'Cordierite', defaultCycles: 150 },
+  { value: 'mullite', label: 'Mullite', defaultCycles: 300 },
+  { value: 'alumina', label: 'Alumina', defaultCycles: 250 },
+  { value: 'other', label: 'Other', defaultCycles: 100 },
 ];

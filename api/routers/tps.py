@@ -1891,17 +1891,42 @@ async def delete_line_resource(
 # Kiln Shelves — CRUD + write-off with reason and photo
 # ────────────────────────────────────────────────────────────────
 
+# Material defaults: max_firing_cycles per material type
+SHELF_MATERIAL_DEFAULTS: dict = {
+    "silicon_carbide": {"max_cycles": 200, "prefix": "SiC"},
+    "cordierite":      {"max_cycles": 150, "prefix": "CRD"},
+    "mullite":         {"max_cycles": 300, "prefix": "MUL"},
+    "alumina":         {"max_cycles": 250, "prefix": "ALM"},
+    "other":           {"max_cycles": 100, "prefix": "OTH"},
+}
+
+
+def _generate_shelf_name(db, factory_id: str, material: str, kiln_name: str) -> str:
+    """Auto-generate sequential shelf name: SiC-KilnName-001."""
+    from sqlalchemy import text
+    prefix = SHELF_MATERIAL_DEFAULTS.get(material, {}).get("prefix", "SHF")
+    # Short kiln name: take first word or abbreviation
+    kiln_short = kiln_name.replace(" ", "")[:6] if kiln_name else "K"
+    # Get next sequence number
+    row = db.execute(text("""
+        SELECT COUNT(*) + 1 FROM kiln_shelves
+        WHERE factory_id = :fid AND material = :mat
+    """), {"fid": factory_id, "mat": material}).fetchone()
+    seq = row[0] if row else 1
+    return f"{prefix}-{kiln_short}-{seq:03d}"
+
+
 class KilnShelfCreate(BaseModel):
     resource_id: UUID          # kiln id
     factory_id: UUID
-    name: str
+    name: Optional[str] = None  # auto-generated if empty
     length_cm: float
     width_cm: float
     thickness_mm: float = 15.0
     material: str = "silicon_carbide"
     purchase_date: Optional[str] = None
     purchase_cost: Optional[float] = None
-    max_firing_cycles: Optional[int] = None
+    max_firing_cycles: Optional[int] = None  # auto from material if empty
     condition_notes: Optional[str] = None
 
 
@@ -1956,8 +1981,28 @@ async def create_kiln_shelf(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
-    """Create a kiln shelf linked to a specific kiln."""
+    """Create a kiln shelf linked to a specific kiln.
+
+    Auto-generates name (SiC-KilnName-001) and max_firing_cycles from
+    material defaults if not provided.
+    """
     from sqlalchemy import text
+
+    # Resolve kiln name for auto-naming
+    kiln_row = db.execute(text(
+        "SELECT name FROM resources WHERE id = :rid"
+    ), {"rid": str(data.resource_id)}).fetchone()
+    kiln_name = kiln_row[0] if kiln_row else "Kiln"
+
+    # Auto-generate name if not provided
+    name = data.name
+    if not name or not name.strip():
+        name = _generate_shelf_name(db, str(data.factory_id), data.material, kiln_name)
+
+    # Auto-set max_firing_cycles from material defaults if not provided
+    max_cycles = data.max_firing_cycles
+    if max_cycles is None:
+        max_cycles = SHELF_MATERIAL_DEFAULTS.get(data.material, {}).get("max_cycles", 100)
 
     result = db.execute(text("""
         INSERT INTO kiln_shelves
@@ -1969,14 +2014,14 @@ async def create_kiln_shelf(
         RETURNING id
     """), {
         "rid": str(data.resource_id), "fid": str(data.factory_id),
-        "name": data.name, "lcm": data.length_cm, "wcm": data.width_cm,
+        "name": name, "lcm": data.length_cm, "wcm": data.width_cm,
         "tmm": data.thickness_mm, "mat": data.material,
         "pdate": data.purchase_date, "pcost": data.purchase_cost,
-        "mfc": data.max_firing_cycles, "notes": data.condition_notes,
+        "mfc": max_cycles, "notes": data.condition_notes,
     })
     row = result.fetchone()
     db.commit()
-    return {"id": str(row[0]), "status": "created"}
+    return {"id": str(row[0]), "name": name, "max_firing_cycles": max_cycles, "status": "created"}
 
 
 @router.patch("/kiln-shelves/{shelf_id}")
@@ -2038,15 +2083,47 @@ async def write_off_kiln_shelf(
         "photo": data.photo_url, "uid": user_id,
     })
 
-    # 2. Check remaining shelf count for this kiln
+    # 2. Get shelf data for financial entry + remaining count check
     shelf_row = db.execute(text(
-        "SELECT resource_id, factory_id, name FROM kiln_shelves WHERE id = :sid"
+        "SELECT resource_id, factory_id, name, purchase_cost, material, "
+        "       firing_cycles_count, max_firing_cycles "
+        "FROM kiln_shelves WHERE id = :sid"
     ), {"sid": str(shelf_id)}).fetchone()
 
     if shelf_row:
         kiln_id = str(shelf_row[0])
         factory_id = str(shelf_row[1])
         shelf_name = shelf_row[2]
+        purchase_cost = float(shelf_row[3]) if shelf_row[3] else None
+        material = shelf_row[4]
+        cycles_used = shelf_row[5] or 0
+        max_cycles = shelf_row[6]
+
+        # 3. Auto-create OPEX FinancialEntry for the write-off cost
+        if purchase_cost and purchase_cost > 0:
+            from api.enums import ExpenseType, ExpenseCategory
+            from api.models import FinancialEntry
+            import datetime
+
+            cost_per_cycle = round(purchase_cost / max(cycles_used, 1), 2)
+            fin_entry = FinancialEntry(
+                factory_id=factory_id,
+                entry_type=ExpenseType.OPEX,
+                category=ExpenseCategory.EQUIPMENT,
+                amount=purchase_cost,
+                currency="IDR",
+                description=(
+                    f"Kiln shelf write-off: {shelf_name} ({material}). "
+                    f"Reason: {data.reason}. "
+                    f"Lifespan: {cycles_used} cycles "
+                    f"({cost_per_cycle:,.0f} IDR/cycle)"
+                ),
+                entry_date=datetime.date.today(),
+                reference_id=shelf_id,
+                reference_type="kiln_shelf",
+                created_by=user_id or factory_id,  # fallback
+            )
+            db.add(fin_entry)
 
         remaining = db.execute(text("""
             SELECT COUNT(*) as cnt,
@@ -2137,4 +2214,207 @@ async def increment_shelf_cycles(
         "status": "updated",
         "firing_cycles_count": row[0] if row else None,
         "warning": warning,
+    }
+
+
+# ── Kiln Shelves Lifecycle Analytics (CEO) ───────────────────
+
+@router.get("/kiln-shelves/analytics")
+async def kiln_shelves_analytics(
+    factory_id: Optional[UUID] = Query(None, description="Filter by factory, or all"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Lifecycle analytics for kiln shelves — OPEX impact, projected replacements.
+
+    Returns:
+    - total_active, total_written_off
+    - total_investment (sum purchase_cost of all)
+    - written_off_cost (sum purchase_cost of written-off)
+    - avg_lifespan_cycles (mean firing_cycles at write-off)
+    - avg_cost_per_cycle
+    - by_material: breakdown per material type
+    - nearing_end_of_life: shelves at 80%+ of max_firing_cycles
+    - projected_replacements_30d / 90d
+    - monthly_opex_trend: last 6 months of shelf write-off costs
+    """
+    from sqlalchemy import text
+    import datetime
+
+    fid_filter = "AND ks.factory_id = :fid" if factory_id else ""
+    params: dict = {"fid": str(factory_id)} if factory_id else {}
+
+    # ── 1. Overview stats ──
+    overview = db.execute(text(f"""
+        SELECT
+            COUNT(*) FILTER (WHERE is_active = true) as active_count,
+            COUNT(*) FILTER (WHERE status = 'written_off') as written_off_count,
+            COALESCE(SUM(purchase_cost), 0) as total_investment,
+            COALESCE(SUM(purchase_cost) FILTER (WHERE status = 'written_off'), 0) as written_off_cost,
+            COALESCE(SUM(area_sqm) FILTER (WHERE is_active = true), 0) as active_area_sqm
+        FROM kiln_shelves ks
+        WHERE 1=1 {fid_filter}
+    """), params).fetchone()
+
+    # ── 2. Average lifespan of written-off shelves ──
+    lifespan = db.execute(text(f"""
+        SELECT
+            AVG(firing_cycles_count) as avg_cycles,
+            MIN(firing_cycles_count) as min_cycles,
+            MAX(firing_cycles_count) as max_cycles,
+            COUNT(*) as sample_size
+        FROM kiln_shelves ks
+        WHERE status = 'written_off' AND firing_cycles_count > 0 {fid_filter}
+    """), params).fetchone()
+
+    avg_cycles = float(lifespan[0]) if lifespan and lifespan[0] else 0
+    total_written_off_cost = float(overview[3]) if overview else 0
+    written_off_count = overview[1] if overview else 0
+    avg_cost_per_cycle = (
+        round(total_written_off_cost / max(avg_cycles * max(written_off_count, 1), 1), 2)
+        if avg_cycles > 0 else 0
+    )
+
+    # ── 3. Breakdown by material ──
+    by_material = db.execute(text(f"""
+        SELECT
+            material,
+            COUNT(*) FILTER (WHERE is_active = true) as active,
+            COUNT(*) FILTER (WHERE status = 'written_off') as written_off,
+            COALESCE(AVG(firing_cycles_count) FILTER (WHERE status = 'written_off'), 0) as avg_lifespan,
+            COALESCE(SUM(purchase_cost), 0) as total_cost,
+            COALESCE(SUM(area_sqm) FILTER (WHERE is_active = true), 0) as active_area
+        FROM kiln_shelves ks
+        WHERE 1=1 {fid_filter}
+        GROUP BY material
+        ORDER BY total_cost DESC
+    """), params).mappings().all()
+
+    # ── 4. Shelves nearing end-of-life (80%+) ──
+    eol_shelves = db.execute(text(f"""
+        SELECT ks.id, ks.name, ks.material, ks.firing_cycles_count,
+               ks.max_firing_cycles, ks.purchase_cost,
+               ks.resource_id, r.name as kiln_name,
+               ROUND(ks.firing_cycles_count::numeric / NULLIF(ks.max_firing_cycles, 0) * 100) as pct
+        FROM kiln_shelves ks
+        LEFT JOIN resources r ON r.id = ks.resource_id
+        WHERE ks.is_active = true
+          AND ks.max_firing_cycles IS NOT NULL
+          AND ks.max_firing_cycles > 0
+          AND ks.firing_cycles_count >= ks.max_firing_cycles * 0.8
+          {fid_filter}
+        ORDER BY pct DESC
+    """), params).mappings().all()
+
+    # ── 5. Projected replacements (linear extrapolation) ──
+    # Based on average daily cycle rate of active shelves
+    cycle_rate = db.execute(text(f"""
+        SELECT
+            AVG(
+                CASE WHEN EXTRACT(EPOCH FROM now() - ks.created_at) > 86400
+                THEN ks.firing_cycles_count / (EXTRACT(EPOCH FROM now() - ks.created_at) / 86400.0)
+                ELSE 0 END
+            ) as avg_daily_cycles
+        FROM kiln_shelves ks
+        WHERE ks.is_active = true AND ks.firing_cycles_count > 0 {fid_filter}
+    """), params).fetchone()
+
+    avg_daily = float(cycle_rate[0]) if cycle_rate and cycle_rate[0] else 0
+    projected_30d = 0
+    projected_90d = 0
+    replacement_cost_30d = 0.0
+    replacement_cost_90d = 0.0
+
+    if avg_daily > 0:
+        # For each active shelf, estimate days until max_firing_cycles
+        active_shelves = db.execute(text(f"""
+            SELECT firing_cycles_count, max_firing_cycles, purchase_cost
+            FROM kiln_shelves ks
+            WHERE is_active = true AND max_firing_cycles IS NOT NULL
+                  AND max_firing_cycles > 0 {fid_filter}
+        """), params).mappings().all()
+
+        for s in active_shelves:
+            remaining_cycles = (s["max_firing_cycles"] or 0) - (s["firing_cycles_count"] or 0)
+            if remaining_cycles <= 0:
+                projected_30d += 1
+                projected_90d += 1
+                replacement_cost_30d += float(s["purchase_cost"] or 0)
+                replacement_cost_90d += float(s["purchase_cost"] or 0)
+            else:
+                days_left = remaining_cycles / avg_daily
+                cost = float(s["purchase_cost"] or 0)
+                if days_left <= 30:
+                    projected_30d += 1
+                    replacement_cost_30d += cost
+                if days_left <= 90:
+                    projected_90d += 1
+                    replacement_cost_90d += cost
+
+    # ── 6. Monthly OPEX trend (last 6 months from financial_entries) ──
+    monthly_trend = db.execute(text(f"""
+        SELECT
+            TO_CHAR(entry_date, 'YYYY-MM') as month,
+            SUM(amount) as total_cost,
+            COUNT(*) as write_offs
+        FROM financial_entries fe
+        WHERE reference_type = 'kiln_shelf'
+          AND entry_date >= (CURRENT_DATE - INTERVAL '6 months')
+          {"AND fe.factory_id = :fid" if factory_id else ""}
+        GROUP BY TO_CHAR(entry_date, 'YYYY-MM')
+        ORDER BY month
+    """), params).mappings().all()
+
+    return {
+        "overview": {
+            "total_active": overview[0] if overview else 0,
+            "total_written_off": overview[1] if overview else 0,
+            "active_area_sqm": round(float(overview[4]), 2) if overview else 0,
+            "total_investment_idr": round(float(overview[2]), 0) if overview else 0,
+            "written_off_cost_idr": round(total_written_off_cost, 0),
+            "avg_lifespan_cycles": round(avg_cycles, 1),
+            "min_lifespan_cycles": int(lifespan[1]) if lifespan and lifespan[1] else None,
+            "max_lifespan_cycles": int(lifespan[2]) if lifespan and lifespan[2] else None,
+            "avg_cost_per_cycle_idr": avg_cost_per_cycle,
+            "sample_size": int(lifespan[3]) if lifespan else 0,
+        },
+        "by_material": [
+            {
+                "material": str(m["material"]),
+                "active": int(m["active"]),
+                "written_off": int(m["written_off"]),
+                "avg_lifespan_cycles": round(float(m["avg_lifespan"]), 1),
+                "total_cost_idr": round(float(m["total_cost"]), 0),
+                "active_area_sqm": round(float(m["active_area"]), 2),
+            }
+            for m in by_material
+        ],
+        "nearing_end_of_life": [
+            {
+                "id": str(s["id"]),
+                "name": str(s["name"]),
+                "material": str(s["material"]),
+                "kiln_name": str(s["kiln_name"] or ""),
+                "cycles": int(s["firing_cycles_count"]),
+                "max_cycles": int(s["max_firing_cycles"]),
+                "percent": int(s["pct"]) if s["pct"] else 0,
+                "replacement_cost_idr": float(s["purchase_cost"]) if s["purchase_cost"] else 0,
+            }
+            for s in eol_shelves
+        ],
+        "projections": {
+            "avg_daily_cycles_per_shelf": round(avg_daily, 2),
+            "replacements_next_30d": projected_30d,
+            "replacement_cost_30d_idr": round(replacement_cost_30d, 0),
+            "replacements_next_90d": projected_90d,
+            "replacement_cost_90d_idr": round(replacement_cost_90d, 0),
+        },
+        "monthly_opex_trend": [
+            {
+                "month": str(m["month"]),
+                "cost_idr": round(float(m["total_cost"]), 0),
+                "write_offs": int(m["write_offs"]),
+            }
+            for m in monthly_trend
+        ],
     }

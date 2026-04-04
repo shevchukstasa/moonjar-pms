@@ -1433,6 +1433,96 @@ async def monthly_points_reset():
         db.close()
 
 
+async def nightly_reschedule_overdue():
+    """
+    Nightly auto-reschedule: find positions with past planned dates
+    and reschedule them forward from today.
+    Runs at 00:05 UTC (08:05 Bali) daily.
+    """
+    logger.info("Running nightly reschedule of overdue positions")
+    db = _get_db_session()
+    try:
+        from datetime import date
+        from api.models import OrderPosition, ProductionOrder
+        from api.enums import OrderStatus
+        from business.services.production_scheduler import reschedule_position
+
+        today = date.today()
+
+        # Terminal statuses — don't reschedule these
+        terminal_statuses = [
+            'COMPLETED', 'SHIPPED', 'CANCELLED', 'DELIVERED',
+            'READY_FOR_SHIPMENT', 'PACKED',
+        ]
+
+        # Find positions with any planned date in the past and non-terminal status
+        overdue = db.query(OrderPosition).join(ProductionOrder).filter(
+            ProductionOrder.status.in_([
+                OrderStatus.NEW.value,
+                OrderStatus.IN_PRODUCTION.value,
+                OrderStatus.PARTIALLY_READY.value,
+            ]),
+            OrderPosition.status.notin_(terminal_statuses),
+            (OrderPosition.planned_glazing_date < today) |
+            (OrderPosition.planned_kiln_date < today) |
+            (OrderPosition.planned_sorting_date < today),
+        ).all()
+
+        rescheduled = 0
+        errors = 0
+        for pos in overdue:
+            try:
+                reschedule_position(db, pos)
+                rescheduled += 1
+            except Exception as e:
+                errors += 1
+                logger.error(
+                    "NIGHTLY_RESCHEDULE_FAIL | pos=%s order=%s | %s",
+                    pos.id, pos.order_id, e,
+                )
+
+        db.commit()
+        logger.info(
+            "NIGHTLY_RESCHEDULE_DONE | overdue=%d rescheduled=%d errors=%d",
+            len(overdue), rescheduled, errors,
+        )
+
+        # Notify PMs if positions were rescheduled
+        if rescheduled > 0:
+            from api.models import Notification, User, UserFactory
+            from api.enums import NotificationType, UserRole
+
+            # Get unique factory IDs from rescheduled positions
+            factory_ids = set()
+            for pos in overdue:
+                if pos.order and pos.order.factory_id:
+                    factory_ids.add(pos.order.factory_id)
+
+            for fid in factory_ids:
+                pm_ids = [
+                    uf.user_id for uf in db.query(UserFactory).join(User).filter(
+                        UserFactory.factory_id == fid,
+                        User.role.in_([UserRole.PRODUCTION_MANAGER.value, UserRole.CEO.value]),
+                        User.is_active.is_(True),
+                    ).all()
+                ]
+                for uid in pm_ids:
+                    db.add(Notification(
+                        user_id=uid,
+                        type=NotificationType.SYSTEM.value,
+                        title="Schedule auto-updated",
+                        message=f"{rescheduled} overdue position(s) rescheduled to today or later.",
+                        data={"event": "nightly_reschedule", "count": rescheduled},
+                    ))
+            db.commit()
+
+    except Exception as e:
+        logger.error("Nightly reschedule failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 # --- Scheduler setup ---
 
 def setup_scheduler():
@@ -1507,6 +1597,9 @@ def setup_scheduler():
 
     # Daily 14:00 UTC (22:00 Bali) — TPS auto-calibration
     scheduler.add_job(daily_tps_calibration, CronTrigger(hour=14, minute=0), id="tps_calibration")
+
+    # Daily 00:05 UTC (08:05 Bali) — reschedule overdue positions forward
+    scheduler.add_job(nightly_reschedule_overdue, CronTrigger(hour=0, minute=5), id="nightly_reschedule")
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

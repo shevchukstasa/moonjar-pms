@@ -447,14 +447,34 @@ def calculate_monthly_payroll(
                 return _std_hours_sat
         return _std_hours_default
 
+    def _is_non_working_day(d) -> bool:
+        """Check if date is a holiday or rest day (not a scheduled working day).
+        Work on these days is compensated via OT pay, NOT via proration."""
+        if d is None:
+            return False
+        if d in _holidays:
+            return True
+        wd = getattr(d, 'weekday', lambda: -1)()
+        if work_schedule == 'five_day' and wd >= 5:
+            return True
+        if work_schedule == 'six_day' and wd == 6:
+            return True
+        return False
+
     for att in attendance_records:
         status = getattr(att, 'status', '') or ''
         ot = _d(getattr(att, 'overtime_hours', 0) or 0)
         hw = getattr(att, 'hours_worked', None)
         att_date_val = getattr(att, 'date', None)
 
+        # Days that are holidays/rest days don't count toward present_days for proration.
+        # Their work is compensated via overtime pay instead.
+        is_non_working = _is_non_working_day(att_date_val)
+
         if status == 'present':
-            if hw is not None:
+            if is_non_working:
+                pass  # Don't count — OT pay covers this
+            elif hw is not None:
                 # Partial day: prorate by hours_worked / standard_hours (capped at 1.0)
                 std_h = _get_std_hours_for_date(att_date_val)
                 fraction = min(_d(hw) / std_h, Decimal("1"))
@@ -468,7 +488,9 @@ def calculate_monthly_payroll(
         elif status == 'leave':
             leave_days += 1
         elif status == 'half_day':
-            if hw is not None:
+            if is_non_working:
+                pass  # Don't count — OT pay covers this
+            elif hw is not None:
                 std_h = _get_std_hours_for_date(att_date_val)
                 fraction = min(_d(hw) / std_h, Decimal("1"))
                 _partial_day_total += fraction

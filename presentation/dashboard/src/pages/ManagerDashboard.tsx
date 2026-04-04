@@ -31,7 +31,7 @@ import { FactorySelector } from '@/components/layout/FactorySelector';
 import { OrderCreateDialog } from '@/components/orders/OrderCreateDialog';
 import { PdfUploadDialog } from '@/components/orders/PdfUploadDialog';
 import { tpsApi, type TpsParameter } from '@/api/tps';
-import { tpsDashboardApi, stageSpeedsApi, RATE_UNITS, RATE_BASIS, TIME_UNITS, type StageSpeedItem } from '@/api/tpsDashboard';
+import { tpsDashboardApi, stageSpeedsApi, lineResourcesApi, RATE_UNITS, RATE_BASIS, TIME_UNITS, LINE_RESOURCE_TYPES, type StageSpeedItem, type LineResourceItem } from '@/api/tpsDashboard';
 import { tocApi } from '@/api/toc';
 import { defectsApi } from '@/api/defects';
 import { aiChatApi } from '@/api/ai_chat';
@@ -1336,6 +1336,9 @@ function TpsTabContent({ factoryId }: { factoryId: string | null }) {
 
       {/* Typology Speeds */}
       <TypologySpeedsSection factoryId={factoryId} />
+
+      {/* Production Line Resources */}
+      <LineResourcesSection factoryId={factoryId} />
     </div>
   );
 }
@@ -1364,8 +1367,13 @@ function TypologySpeedsSection({ factoryId }: { factoryId: string | null }) {
   const typs = typologies?.items ?? [];
 
   const STAGE_LABELS: Record<string, string> = {
-    engobe: 'Engobe', glazing: 'Glazing', firing: 'Firing',
-    sorting: 'Sorting', packing: 'Packing', pre_kiln_check: 'Pre-Kiln QC',
+    unpacking_sorting: 'Unpack & Sort', engobe: 'Engobe',
+    drying_engobe: 'Drying (Engobe)', glazing: 'Glazing',
+    drying_glaze: 'Drying (Glaze)', edge_cleaning_loading: 'Edge Clean + Load',
+    firing: 'Firing', kiln_cooling_initial: 'Cooling (unload)',
+    kiln_unloading: 'Unloading', kiln_cooling_full: 'Cooling (next load)',
+    tile_cooling: 'Tile Cooling', sorting: 'Sorting', packing: 'Packing',
+    quality_check: 'QC',
   };
 
   const formatSpeed = (s: StageSpeedItem) =>
@@ -1513,6 +1521,141 @@ function TypologySpeedsSection({ factoryId }: { factoryId: string | null }) {
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Line Resources Section ──────────────────────────────── */
+
+function LineResourcesSection({ factoryId }: { factoryId: string | null }) {
+  const queryClient = useQueryClient();
+  const [showAdd, setShowAdd] = useState(false);
+  const [addForm, setAddForm] = useState<{ resource_type: string; name: string; capacity_sqm?: number; capacity_boards?: number; capacity_pcs?: number; num_units?: number; notes?: string }>({
+    resource_type: 'work_table', name: '', num_units: 1,
+  });
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<Partial<LineResourceItem>>({});
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['line-resources', factoryId],
+    queryFn: () => lineResourcesApi.list(factoryId!),
+    enabled: !!factoryId,
+  });
+  const items = data?.items ?? [];
+
+  const grouped = LINE_RESOURCE_TYPES.map((rt) => ({
+    ...rt,
+    items: items.filter((i) => i.resource_type === rt.value),
+  }));
+
+  const handleAdd = async () => {
+    if (!factoryId || !addForm.name) return;
+    await lineResourcesApi.create({ ...addForm, factory_id: factoryId });
+    queryClient.invalidateQueries({ queryKey: ['line-resources'] });
+    setShowAdd(false);
+    setAddForm({ resource_type: 'work_table', name: '', num_units: 1 });
+  };
+
+  const handleSave = async (id: string) => {
+    await lineResourcesApi.update(id, editForm);
+    queryClient.invalidateQueries({ queryKey: ['line-resources'] });
+    setEditId(null);
+  };
+
+  if (!factoryId) return null;
+
+  return (
+    <div className="mt-6">
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Production Line Resources</h2>
+          <p className="text-sm text-gray-500">Work tables, drying racks, glazing boards — capacity constraints for scheduling.</p>
+        </div>
+        <button onClick={() => setShowAdd(!showAdd)} className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+          + Add Resource
+        </button>
+      </div>
+
+      {/* Add form */}
+      {showAdd && (
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Type</label>
+              <select className="w-full rounded border px-2 py-1.5 text-sm" value={addForm.resource_type}
+                onChange={(e) => setAddForm({ ...addForm, resource_type: e.target.value })}>
+                {LINE_RESOURCE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Name</label>
+              <input className="w-full rounded border px-2 py-1.5 text-sm" placeholder="e.g. Main table A"
+                value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Area (m2)</label>
+              <input type="number" step="0.1" className="w-full rounded border px-2 py-1.5 text-sm"
+                value={addForm.capacity_sqm ?? ''} onChange={(e) => setAddForm({ ...addForm, capacity_sqm: parseFloat(e.target.value) || undefined })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Boards / pcs</label>
+              <input type="number" className="w-full rounded border px-2 py-1.5 text-sm"
+                value={addForm.capacity_boards ?? ''} onChange={(e) => setAddForm({ ...addForm, capacity_boards: parseInt(e.target.value) || undefined })} />
+            </div>
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button onClick={handleAdd} className="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700">Save</button>
+            <button onClick={() => setShowAdd(false)} className="rounded bg-gray-200 px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-300">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="flex justify-center py-4"><Spinner className="h-5 w-5" /></div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-3">
+          {grouped.map((group) => (
+            <div key={group.value} className="rounded-lg border border-gray-200 bg-white p-4">
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-800">
+                <span className="text-lg">{group.icon}</span> {group.label}
+              </h3>
+              {group.items.length === 0 ? (
+                <p className="text-xs text-gray-400">No {group.label.toLowerCase()} configured</p>
+              ) : (
+                <div className="space-y-2">
+                  {group.items.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between rounded bg-gray-50 px-3 py-2">
+                      {editId === item.id ? (
+                        <div className="flex flex-1 gap-2">
+                          <input className="w-28 rounded border px-2 py-1 text-xs" value={editForm.capacity_sqm ?? ''}
+                            placeholder="m2" onChange={(e) => setEditForm({ ...editForm, capacity_sqm: parseFloat(e.target.value) || null })} />
+                          <input className="w-20 rounded border px-2 py-1 text-xs" value={editForm.capacity_boards ?? ''}
+                            placeholder="boards" onChange={(e) => setEditForm({ ...editForm, capacity_boards: parseInt(e.target.value) || null })} />
+                          <button onClick={() => handleSave(item.id)} className="text-xs font-medium text-green-600">Save</button>
+                          <button onClick={() => setEditId(null)} className="text-xs text-gray-400">Cancel</button>
+                        </div>
+                      ) : (
+                        <>
+                          <div>
+                            <span className="text-sm font-medium text-gray-700">{item.name}</span>
+                            <div className="mt-0.5 text-xs text-gray-400">
+                              {item.capacity_sqm != null && <span>{item.capacity_sqm} m2</span>}
+                              {item.capacity_boards != null && <span className="ml-2">{item.capacity_boards} boards</span>}
+                              {item.capacity_pcs != null && <span className="ml-2">{item.capacity_pcs} pcs</span>}
+                              {item.num_units > 1 && <span className="ml-2">x{item.num_units}</span>}
+                            </div>
+                          </div>
+                          <button onClick={() => { setEditId(item.id); setEditForm(item); }} className="text-xs text-blue-600 hover:underline">Edit</button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

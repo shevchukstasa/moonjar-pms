@@ -122,6 +122,32 @@ export interface StageSpeedMatrix {
   speeds: StageSpeedItem[];
 }
 
+// ── Production Line Resources ────────────────────────────────
+
+export interface LineResourceItem {
+  id: string;
+  factory_id: string;
+  resource_type: string;   // 'work_table' | 'drying_rack' | 'glazing_board'
+  name: string;
+  capacity_sqm: number | null;
+  capacity_boards: number | null;
+  capacity_pcs: number | null;
+  num_units: number;
+  notes: string | null;
+  is_active: boolean;
+}
+
+export interface LineResourceCreate {
+  factory_id: string;
+  resource_type: string;
+  name: string;
+  capacity_sqm?: number;
+  capacity_boards?: number;
+  capacity_pcs?: number;
+  num_units?: number;
+  notes?: string;
+}
+
 // ── Typology Types ───────────────────────────────────────────
 
 export interface KilnCapacityItem {
@@ -305,16 +331,44 @@ export const stageSpeedsApi = {
   },
 };
 
+// ── Production Line Resources API ────────────────────────────
+
+export const lineResourcesApi = {
+  list: async (factoryId: string, resourceType?: string): Promise<{ items: LineResourceItem[] }> => {
+    const params: Record<string, string> = { factory_id: factoryId };
+    if (resourceType) params.resource_type = resourceType;
+    const { data } = await apiClient.get('/tps/line-resources', { params });
+    return data;
+  },
+
+  create: async (payload: LineResourceCreate): Promise<{ id: string }> => {
+    const { data } = await apiClient.post('/tps/line-resources', payload);
+    return data;
+  },
+
+  update: async (id: string, payload: Partial<LineResourceCreate>): Promise<void> => {
+    await apiClient.patch(`/tps/line-resources/${id}`, payload);
+  },
+
+  remove: async (id: string): Promise<void> => {
+    await apiClient.delete(`/tps/line-resources/${id}`);
+  },
+};
+
 // ── Constants ────────────────────────────────────────────────
 
 export const PRODUCTION_STAGES = [
-  { value: 'incoming_inspection', label: 'Incoming Inspection' },
+  { value: 'unpacking_sorting', label: 'Unpacking & Sorting onto Boards' },
   { value: 'engobe', label: 'Engobe Application' },
-  { value: 'engobe_check', label: 'Engobe Check' },
+  { value: 'drying_engobe', label: 'Drying (after Engobe)' },
   { value: 'glazing', label: 'Glazing' },
-  { value: 'pre_kiln_check', label: 'Pre-Kiln Check' },
-  { value: 'kiln_loading', label: 'Kiln Loading' },
+  { value: 'drying_glaze', label: 'Drying (after Glaze)' },
+  { value: 'edge_cleaning_loading', label: 'Edge Cleaning + Kiln Loading' },
   { value: 'firing', label: 'Firing' },
+  { value: 'kiln_cooling_initial', label: 'Kiln Cooling (for unloading)' },
+  { value: 'kiln_unloading', label: 'Kiln Unloading' },
+  { value: 'kiln_cooling_full', label: 'Kiln Cooling (for next load)' },
+  { value: 'tile_cooling', label: 'Tile Cooling (before Sorting)' },
   { value: 'sorting', label: 'Sorting' },
   { value: 'packing', label: 'Packing' },
   { value: 'quality_check', label: 'Quality Check' },
@@ -338,6 +392,7 @@ export const RATE_UNITS = [
 export const RATE_BASIS = [
   { value: 'per_person', label: '/ person' },
   { value: 'per_brigade', label: '/ brigade' },
+  { value: 'fixed_duration', label: 'fixed duration' },
 ];
 
 export const TIME_UNITS = [
@@ -389,4 +444,10 @@ export const LOADING_METHODS = [
   { value: 'auto', label: 'Auto (optimal)' },
   { value: 'flat', label: 'Flat (face up)' },
   { value: 'edge', label: 'Edge (standing)' },
+];
+
+export const LINE_RESOURCE_TYPES = [
+  { value: 'work_table', label: 'Work Table', icon: '🪵', capacityLabel: 'Area (m\u00b2) / Boards' },
+  { value: 'drying_rack', label: 'Drying Rack / Shelving', icon: '📐', capacityLabel: 'Area (m\u00b2) / Boards' },
+  { value: 'glazing_board', label: 'Glazing Board', icon: '📋', capacityLabel: 'Total boards' },
 ];

@@ -162,6 +162,12 @@ def _calc_hours_from_speed(
     if rate <= 0:
         return None
 
+    # Fixed-duration stages (drying, cooling, firing): rate IS the hours needed
+    if rate_basis == 'fixed_duration':
+        hours_needed = rate  # productivity_rate stores total hours
+        hours_per_day = shift_duration_hours * shift_count
+        return max(1, math.ceil(hours_needed / hours_per_day))
+
     # Convert rate to "units per hour"
     if time_unit == 'min':
         rate_per_hour = rate * 60.0
@@ -471,52 +477,70 @@ def schedule_position(
     # Calculate position area and quantity for duration estimation
     _pos_sqm = float(position.glazeable_sqm or 0) * float(position.quantity or 1)
     _pos_pcs = int(position.quantity or 0)
+    _fid = position.factory_id
 
-    # Dynamic stage durations (fall back to hardcoded 1 if not configured)
-    glazing_days = _get_stage_duration_days(db, position.factory_id, 'glazing', _pos_sqm, _pos_pcs, position=position)
-    pre_kiln_days = _get_stage_duration_days(db, position.factory_id, 'pre_kiln_check', _pos_sqm, _pos_pcs, position=position)
-    firing_days = _get_stage_duration_days(db, position.factory_id, 'firing', _pos_sqm, _pos_pcs, position=position)
-    cooling_days = COOLING_DAYS  # physical process, not worker-dependent
-    sorting_days = _get_stage_duration_days(db, position.factory_id, 'sorting', _pos_sqm, _pos_pcs, position=position)
-    qc_days = _get_stage_duration_days(db, position.factory_id, 'quality_check', _pos_sqm, _pos_pcs, position=position)
+    def _dur(stage: str) -> int:
+        return _get_stage_duration_days(db, _fid, stage, _pos_sqm, _pos_pcs, position=position)
+
+    # ── Full process durations (typology-aware) ──
+    # Pre-kiln stages
+    unpacking_days = _dur('unpacking_sorting')
+    engobe_days = _dur('engobe')
+    drying_engobe_days = _dur('drying_engobe')
+    glazing_days = _dur('glazing')
+    drying_glaze_days = _dur('drying_glaze')
+    edge_clean_load_days = _dur('edge_cleaning_loading')
+    # Kiln stages
+    firing_days = _dur('firing')
+    kiln_cool_initial_days = _dur('kiln_cooling_initial')
+    kiln_unloading_days = _dur('kiln_unloading')
+    tile_cooling_days = _dur('tile_cooling')
+    # Post-kiln stages
+    sorting_days = _dur('sorting')
+    packing_days = _dur('packing')
+
+    # Pre-kiln total (everything before kiln loading)
+    pre_kiln_total = (unpacking_days + engobe_days + drying_engobe_days
+                      + glazing_days + drying_glaze_days + edge_clean_load_days)
+    # Post-kiln total (firing + cooling + unloading + tile cooling + sorting + packing)
+    post_kiln_total = (firing_days + kiln_cool_initial_days + kiln_unloading_days
+                       + tile_cooling_days + sorting_days + packing_days)
 
     # Backward schedule calculation
     planned_completion = _skip_weekends(deadline)
 
     planned_sorting = _skip_weekends(
-        planned_completion - timedelta(days=sorting_days + qc_days)
+        planned_completion - timedelta(days=sorting_days + packing_days)
     )
 
     planned_kiln = _skip_weekends(
         planned_sorting - timedelta(
-            days=firing_days + cooling_days + BUFFER_DAYS
+            days=firing_days + kiln_cool_initial_days + kiln_unloading_days
+            + tile_cooling_days + BUFFER_DAYS
         )
     )
 
     planned_glazing = _skip_weekends(
         planned_kiln - timedelta(
-            days=glazing_days + pre_kiln_days + BUFFER_DAYS
+            days=pre_kiln_total + BUFFER_DAYS
         )
     )
 
     # Guard: planned_glazing must be >= today.
-    # For overdue deadlines, don't clamp all to today — find the first
-    # available day with glazing capacity (TOC: don't flood the pipeline).
     today = date.today()
     if planned_glazing < today:
-        planned_glazing = today  # start from today, will be adjusted below
+        planned_glazing = today
         planned_kiln = _skip_weekends(
-            today + timedelta(
-                days=glazing_days + pre_kiln_days + BUFFER_DAYS
-            )
+            today + timedelta(days=pre_kiln_total + BUFFER_DAYS)
         )
         planned_sorting = _skip_weekends(
             planned_kiln + timedelta(
-                days=firing_days + cooling_days + BUFFER_DAYS
+                days=firing_days + kiln_cool_initial_days + kiln_unloading_days
+                + tile_cooling_days + BUFFER_DAYS
             )
         )
         planned_completion = _skip_weekends(
-            planned_sorting + timedelta(days=sorting_days + qc_days)
+            planned_sorting + timedelta(days=sorting_days + packing_days)
         )
         logger.warning(
             "TIGHT_DEADLINE | position=%s deadline=%s | "
@@ -534,11 +558,12 @@ def schedule_position(
             planned_kiln = actual_kiln_date
             planned_sorting = _skip_weekends(
                 planned_kiln + timedelta(
-                    days=firing_days + cooling_days + BUFFER_DAYS
+                    days=firing_days + kiln_cool_initial_days + kiln_unloading_days
+                    + tile_cooling_days + BUFFER_DAYS
                 )
             )
             planned_completion = _skip_weekends(
-                planned_sorting + timedelta(days=sorting_days + qc_days)
+                planned_sorting + timedelta(days=sorting_days + packing_days)
             )
     else:
         position.estimated_kiln_id = None

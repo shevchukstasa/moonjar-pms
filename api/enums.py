@@ -136,6 +136,9 @@ class ResourceType(str, Enum):
     KILN = 'kiln'
     GLAZING_STATION = 'glazing_station'
     SORTING_STATION = 'sorting_station'
+    WORK_TABLE = 'work_table'
+    DRYING_RACK = 'drying_rack'
+    GLAZING_BOARD = 'glazing_board'
 
 class ResourceStatus(str, Enum):
     ACTIVE = 'active'

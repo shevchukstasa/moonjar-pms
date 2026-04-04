@@ -1762,3 +1762,122 @@ async def get_stage_speeds_matrix(
         "typologies": list(by_typology.values()),
         "all_stages": all_stages,
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Production Line Resources
+# ═══════════════════════════════════════════════════════════════
+
+class LineResourceCreate(BaseModel):
+    factory_id: UUID
+    resource_type: str  # 'work_table', 'drying_rack', 'glazing_board'
+    name: str
+    capacity_sqm: Optional[float] = None
+    capacity_boards: Optional[int] = None
+    capacity_pcs: Optional[int] = None
+    num_units: Optional[int] = 1
+    notes: Optional[str] = None
+
+
+@router.get("/line-resources")
+async def list_line_resources(
+    factory_id: UUID = Query(...),
+    resource_type: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List production line resources (work tables, drying racks, boards)."""
+    from sqlalchemy import text
+
+    q = "SELECT * FROM production_line_resources WHERE factory_id = :fid AND is_active = true"
+    params = {"fid": str(factory_id)}
+    if resource_type:
+        q += " AND resource_type = :rt"
+        params["rt"] = resource_type
+    q += " ORDER BY resource_type, name"
+
+    rows = db.execute(text(q), params).mappings().all()
+    items = [dict(r) for r in rows]
+    # Convert UUIDs to strings
+    for item in items:
+        item["id"] = str(item["id"])
+        item["factory_id"] = str(item["factory_id"])
+        for k in ("capacity_sqm",):
+            if item.get(k) is not None:
+                item[k] = float(item[k])
+    return {"items": items, "total": len(items)}
+
+
+@router.post("/line-resources", status_code=201)
+async def create_line_resource(
+    data: LineResourceCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Create a production line resource."""
+    from sqlalchemy import text
+
+    result = db.execute(text("""
+        INSERT INTO production_line_resources
+            (factory_id, resource_type, name, capacity_sqm, capacity_boards,
+             capacity_pcs, num_units, notes)
+        VALUES
+            (:fid, :rt, :name, :csqm, :cb, :cpcs, :nu, :notes)
+        ON CONFLICT (factory_id, resource_type, name) DO UPDATE
+        SET capacity_sqm = EXCLUDED.capacity_sqm,
+            capacity_boards = EXCLUDED.capacity_boards,
+            capacity_pcs = EXCLUDED.capacity_pcs,
+            num_units = EXCLUDED.num_units,
+            notes = EXCLUDED.notes,
+            updated_at = now()
+        RETURNING id
+    """), {
+        "fid": str(data.factory_id), "rt": data.resource_type,
+        "name": data.name, "csqm": data.capacity_sqm,
+        "cb": data.capacity_boards, "cpcs": data.capacity_pcs,
+        "nu": data.num_units, "notes": data.notes,
+    })
+    row = result.fetchone()
+    db.commit()
+    return {"id": str(row[0]), "status": "created"}
+
+
+@router.patch("/line-resources/{resource_id}")
+async def update_line_resource(
+    resource_id: UUID,
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Update a production line resource."""
+    from sqlalchemy import text
+
+    allowed = {"name", "capacity_sqm", "capacity_boards", "capacity_pcs",
+               "num_units", "notes", "is_active"}
+    updates = {k: v for k, v in data.items() if k in allowed and v is not None}
+    if not updates:
+        raise HTTPException(400, "No valid fields to update")
+
+    set_clause = ", ".join(f"{k} = :{k}" for k in updates)
+    updates["rid"] = str(resource_id)
+    db.execute(text(
+        f"UPDATE production_line_resources SET {set_clause}, updated_at = now() WHERE id = :rid"
+    ), updates)
+    db.commit()
+    return {"status": "updated", "id": str(resource_id)}
+
+
+@router.delete("/line-resources/{resource_id}")
+async def delete_line_resource(
+    resource_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Soft-delete a production line resource."""
+    from sqlalchemy import text
+
+    db.execute(text(
+        "UPDATE production_line_resources SET is_active = false WHERE id = :rid"
+    ), {"rid": str(resource_id)})
+    db.commit()
+    return {"status": "deleted", "id": str(resource_id)}

@@ -1533,10 +1533,12 @@ function TypologySpeedsSection({ factoryId }: { factoryId: string | null }) {
 
 function LineResourcesSection({ factoryId }: { factoryId: string | null }) {
   const queryClient = useQueryClient();
-  const [showAdd, setShowAdd] = useState(false);
-  const [addForm, setAddForm] = useState<{ resource_type: string; name: string; capacity_sqm?: number; capacity_boards?: number; capacity_pcs?: number; num_units?: number; notes?: string }>({
-    resource_type: 'work_table', name: '', num_units: 1,
-  });
+  const [addingType, setAddingType] = useState<string | null>(null);
+  const [addName, setAddName] = useState('');
+  const [addSqm, setAddSqm] = useState('');
+  const [addBoards, setAddBoards] = useState('');
+  const [addPcs, setAddPcs] = useState('');
+  const [addUnits, setAddUnits] = useState('1');
   const [editId, setEditId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<LineResourceItem>>({});
 
@@ -1552,12 +1554,17 @@ function LineResourcesSection({ factoryId }: { factoryId: string | null }) {
     items: items.filter((i) => i.resource_type === rt.value),
   }));
 
-  const handleAdd = async () => {
-    if (!factoryId || !addForm.name) return;
-    await lineResourcesApi.create({ ...addForm, factory_id: factoryId });
+  const handleAdd = async (resourceType: string) => {
+    if (!factoryId || !addName) return;
+    await lineResourcesApi.create({
+      factory_id: factoryId, resource_type: resourceType, name: addName,
+      capacity_sqm: addSqm ? parseFloat(addSqm) : undefined,
+      capacity_boards: addBoards ? parseInt(addBoards) : undefined,
+      capacity_pcs: addPcs ? parseInt(addPcs) : undefined,
+      num_units: addUnits ? parseInt(addUnits) : 1,
+    });
     queryClient.invalidateQueries({ queryKey: ['line-resources'] });
-    setShowAdd(false);
-    setAddForm({ resource_type: 'work_table', name: '', num_units: 1 });
+    setAddingType(null); setAddName(''); setAddSqm(''); setAddBoards(''); setAddPcs(''); setAddUnits('1');
   };
 
   const handleSave = async (id: string) => {
@@ -1568,96 +1575,142 @@ function LineResourcesSection({ factoryId }: { factoryId: string | null }) {
 
   if (!factoryId) return null;
 
+  const FIELD_HINTS: Record<string, { nameHint: string; fields: { key: string; label: string; hint: string }[] }> = {
+    work_table: {
+      nameHint: 'e.g. "Glazing table #1"',
+      fields: [
+        { key: 'sqm', label: 'Table area (m\u00b2)', hint: 'Working surface area' },
+        { key: 'boards', label: 'Board capacity', hint: 'How many boards fit on table' },
+        { key: 'units', label: 'Number of tables', hint: 'Total identical tables' },
+      ],
+    },
+    drying_rack: {
+      nameHint: 'e.g. "Main shelving A"',
+      fields: [
+        { key: 'sqm', label: 'Total capacity (m\u00b2)', hint: 'Total drying area across all shelves' },
+        { key: 'boards', label: 'Board capacity', hint: 'How many boards fit on rack' },
+        { key: 'units', label: 'Number of racks', hint: 'Total identical racks' },
+      ],
+    },
+    glazing_board: {
+      nameHint: 'e.g. "Standard 122\u00d730 cm boards"',
+      fields: [
+        { key: 'pcs', label: 'Total boards available', hint: 'Number of glazing boards' },
+        { key: 'sqm', label: 'Board area (m\u00b2)', hint: 'Area per single board' },
+      ],
+    },
+  };
+
   return (
     <div className="mt-6">
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">Production Line Resources</h2>
-          <p className="text-sm text-gray-500">Work tables, drying racks, glazing boards — capacity constraints for scheduling.</p>
-        </div>
-        <button onClick={() => setShowAdd(!showAdd)} className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
-          + Add Resource
-        </button>
+      <div className="mb-3">
+        <h2 className="text-lg font-semibold text-gray-900">Production Line Resources</h2>
+        <p className="text-sm text-gray-500">Equipment capacity — affects how much work can be processed simultaneously.</p>
       </div>
-
-      {/* Add form */}
-      {showAdd && (
-        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Type</label>
-              <select className="w-full rounded border px-2 py-1.5 text-sm" value={addForm.resource_type}
-                onChange={(e) => setAddForm({ ...addForm, resource_type: e.target.value })}>
-                {LINE_RESOURCE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Name</label>
-              <input className="w-full rounded border px-2 py-1.5 text-sm" placeholder="e.g. Main table A"
-                value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Area (m2)</label>
-              <input type="number" step="0.1" className="w-full rounded border px-2 py-1.5 text-sm"
-                value={addForm.capacity_sqm ?? ''} onChange={(e) => setAddForm({ ...addForm, capacity_sqm: parseFloat(e.target.value) || undefined })} />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Boards / pcs</label>
-              <input type="number" className="w-full rounded border px-2 py-1.5 text-sm"
-                value={addForm.capacity_boards ?? ''} onChange={(e) => setAddForm({ ...addForm, capacity_boards: parseInt(e.target.value) || undefined })} />
-            </div>
-          </div>
-          <div className="mt-3 flex gap-2">
-            <button onClick={handleAdd} className="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700">Save</button>
-            <button onClick={() => setShowAdd(false)} className="rounded bg-gray-200 px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-300">Cancel</button>
-          </div>
-        </div>
-      )}
 
       {isLoading ? (
         <div className="flex justify-center py-4"><Spinner className="h-5 w-5" /></div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-3">
-          {grouped.map((group) => (
-            <div key={group.value} className="rounded-lg border border-gray-200 bg-white p-4">
-              <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-800">
-                <span className="text-lg">{group.icon}</span> {group.label}
-              </h3>
-              {group.items.length === 0 ? (
-                <p className="text-xs text-gray-400">No {group.label.toLowerCase()} configured</p>
-              ) : (
-                <div className="space-y-2">
-                  {group.items.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between rounded bg-gray-50 px-3 py-2">
-                      {editId === item.id ? (
-                        <div className="flex flex-1 gap-2">
-                          <input className="w-28 rounded border px-2 py-1 text-xs" value={editForm.capacity_sqm ?? ''}
-                            placeholder="m2" onChange={(e) => setEditForm({ ...editForm, capacity_sqm: parseFloat(e.target.value) || null })} />
-                          <input className="w-20 rounded border px-2 py-1 text-xs" value={editForm.capacity_boards ?? ''}
-                            placeholder="boards" onChange={(e) => setEditForm({ ...editForm, capacity_boards: parseInt(e.target.value) || null })} />
-                          <button onClick={() => handleSave(item.id)} className="text-xs font-medium text-green-600">Save</button>
-                          <button onClick={() => setEditId(null)} className="text-xs text-gray-400">Cancel</button>
-                        </div>
-                      ) : (
-                        <>
-                          <div>
-                            <span className="text-sm font-medium text-gray-700">{item.name}</span>
-                            <div className="mt-0.5 text-xs text-gray-400">
-                              {item.capacity_sqm != null && <span>{item.capacity_sqm} m2</span>}
-                              {item.capacity_boards != null && <span className="ml-2">{item.capacity_boards} boards</span>}
-                              {item.capacity_pcs != null && <span className="ml-2">{item.capacity_pcs} pcs</span>}
-                              {item.num_units > 1 && <span className="ml-2">x{item.num_units}</span>}
+          {grouped.map((group) => {
+            const hints = FIELD_HINTS[group.value] || FIELD_HINTS.work_table;
+            const isAdding = addingType === group.value;
+
+            return (
+              <div key={group.value} className="rounded-lg border border-gray-200 bg-white p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                    <span className="text-lg">{group.icon}</span> {group.label}
+                  </h3>
+                  {!isAdding && (
+                    <button onClick={() => { setAddingType(group.value); setAddName(''); setAddSqm(''); setAddBoards(''); setAddPcs(''); setAddUnits('1'); }}
+                      className="rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-100">+ Add</button>
+                  )}
+                </div>
+
+                {/* Inline add form */}
+                {isAdding && (
+                  <div className="mb-3 space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
+                    <div>
+                      <label className="mb-0.5 block text-xs font-medium text-gray-600">Name</label>
+                      <input className="w-full rounded border px-2 py-1.5 text-sm" placeholder={hints.nameHint}
+                        value={addName} onChange={(e) => setAddName(e.target.value)} autoFocus />
+                    </div>
+                    {hints.fields.map((f) => (
+                      <div key={f.key}>
+                        <label className="mb-0.5 block text-xs font-medium text-gray-600">{f.label}</label>
+                        <input type="number" step={f.key === 'sqm' ? '0.01' : '1'}
+                          className="w-full rounded border px-2 py-1.5 text-sm" placeholder={f.hint}
+                          value={f.key === 'sqm' ? addSqm : f.key === 'boards' ? addBoards : f.key === 'pcs' ? addPcs : addUnits}
+                          onChange={(e) => {
+                            if (f.key === 'sqm') setAddSqm(e.target.value);
+                            else if (f.key === 'boards') setAddBoards(e.target.value);
+                            else if (f.key === 'pcs') setAddPcs(e.target.value);
+                            else setAddUnits(e.target.value);
+                          }} />
+                      </div>
+                    ))}
+                    <div className="flex gap-2 pt-1">
+                      <button onClick={() => handleAdd(group.value)}
+                        className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700">Save</button>
+                      <button onClick={() => setAddingType(null)}
+                        className="rounded bg-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-300">Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Existing items */}
+                {group.items.length === 0 && !isAdding ? (
+                  <button onClick={() => { setAddingType(group.value); setAddName(''); }}
+                    className="w-full rounded-lg border-2 border-dashed border-gray-200 py-4 text-center text-xs text-gray-400 hover:border-blue-300 hover:text-blue-500 transition-colors">
+                    Click to add {group.label.toLowerCase()}
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    {group.items.map((item) => (
+                      <div key={item.id} className="rounded bg-gray-50 px-3 py-2">
+                        {editId === item.id ? (
+                          <div className="space-y-1.5">
+                            <input className="w-full rounded border px-2 py-1 text-sm font-medium" value={editForm.name ?? ''}
+                              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[10px] text-gray-500">Area (m\u00b2)</label>
+                                <input type="number" step="0.01" className="w-full rounded border px-2 py-1 text-xs" value={editForm.capacity_sqm ?? ''}
+                                  onChange={(e) => setEditForm({ ...editForm, capacity_sqm: parseFloat(e.target.value) || null })} />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-gray-500">Boards</label>
+                                <input type="number" className="w-full rounded border px-2 py-1 text-xs" value={editForm.capacity_boards ?? ''}
+                                  onChange={(e) => setEditForm({ ...editForm, capacity_boards: parseInt(e.target.value) || null })} />
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={() => handleSave(item.id)} className="text-xs font-medium text-green-600">Save</button>
+                              <button onClick={() => setEditId(null)} className="text-xs text-gray-400">Cancel</button>
                             </div>
                           </div>
-                          <button onClick={() => { setEditId(item.id); setEditForm(item); }} className="text-xs text-blue-600 hover:underline">Edit</button>
-                        </>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+                        ) : (
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <span className="text-sm font-medium text-gray-700">{item.name}</span>
+                              <div className="mt-0.5 flex gap-3 text-xs text-gray-400">
+                                {item.capacity_sqm != null && <span>{item.capacity_sqm} m\u00b2</span>}
+                                {item.capacity_boards != null && <span>{item.capacity_boards} boards</span>}
+                                {item.capacity_pcs != null && <span>{item.capacity_pcs} pcs</span>}
+                                {item.num_units > 1 && <span>\u00d7{item.num_units}</span>}
+                              </div>
+                            </div>
+                            <button onClick={() => { setEditId(item.id); setEditForm(item); }} className="text-xs text-blue-600 hover:underline">Edit</button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

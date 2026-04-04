@@ -606,16 +606,17 @@ def schedule_position(
                             # Recalculate downstream dates from new glazing date
                             planned_kiln = _skip_weekends(
                                 planned_glazing + timedelta(
-                                    days=glazing_days + pre_kiln_days + BUFFER_DAYS
+                                    days=pre_kiln_total + BUFFER_DAYS
                                 )
                             )
                             planned_sorting = _skip_weekends(
                                 planned_kiln + timedelta(
-                                    days=firing_days + cooling_days + BUFFER_DAYS
+                                    days=firing_days + kiln_cool_initial_days
+                                    + kiln_unloading_days + tile_cooling_days + BUFFER_DAYS
                                 )
                             )
                             planned_completion = _skip_weekends(
-                                planned_sorting + timedelta(days=sorting_days + qc_days)
+                                planned_sorting + timedelta(days=sorting_days + packing_days)
                             )
                             break
         except Exception as e:

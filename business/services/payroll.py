@@ -561,6 +561,9 @@ def calculate_monthly_payroll(
             else:
                 weekday_overtime_hours += _d(ot)
 
+    # Add auto-OT to total (it's not in the DB records, only computed above)
+    total_overtime_hours += saturday_auto_overtime_hours
+
     # ── Commission (sales department only) ───────────────────────────────
     commission = ZERO
     if department == 'sales' and commission_rate > ZERO and sales_revenue > 0:

@@ -62,7 +62,19 @@ def generate_payroll_summary_pdf(
     factory_label = f" — {factory_name}" if factory_name else ""
     generated_at = datetime.now().strftime("%d %b %Y %H:%M")
 
+    from reportlab.platypus import HRFlowable
+    company_style = ParagraphStyle(
+        "co", parent=styles["Normal"], fontSize=11, fontName="Helvetica-Bold", alignment=TA_CENTER, spaceAfter=1
+    )
+    address_style = ParagraphStyle(
+        "addr", parent=styles["Normal"], fontSize=7.5, alignment=TA_CENTER,
+        textColor=colors.grey, spaceAfter=6
+    )
+
     elements = [
+        Paragraph("PT MOONJAR DESIGN BALI", company_style),
+        Paragraph("Jl. Sunset Road 900B, Seminyak, Kuta, Kab. Badung, Bali", address_style),
+        HRFlowable(width="100%", thickness=0.8, color=colors.HexColor("#1e3a5f"), spaceAfter=4),
         Paragraph(f"Payroll Report{factory_label}", title_style),
         Paragraph(f"{period_label} {year}", sub_style),
         Paragraph(f"Generated: {generated_at}", small_right),
@@ -230,7 +242,15 @@ def generate_payslip_pdf(item: dict, year: int, month: int, factory_name: str = 
     is_probation = item.get("is_on_probation", False)
     category = item.get("employment_category", "formal")
 
+    company_style = ParagraphStyle("co", parent=styles["Normal"], fontSize=11, fontName="Helvetica-Bold",
+                                    alignment=TA_CENTER, spaceAfter=1)
+    address_style = ParagraphStyle("addr", parent=styles["Normal"], fontSize=7.5, alignment=TA_CENTER,
+                                    textColor=colors.HexColor("#4b5563"), spaceAfter=8)
+
     elements = [
+        Paragraph("PT MOONJAR DESIGN BALI", company_style),
+        Paragraph("Jl. Sunset Road 900B, Seminyak, Kuta, Kab. Badung, Bali", address_style),
+        HRFlowable(width="100%", thickness=0.8, color=colors.HexColor("#1e3a5f"), spaceAfter=6),
         Paragraph("PAYSLIP", title_style),
         Paragraph(f"{period_label} {year}{' — ' + factory_name if factory_name else ''}", sub_style),
     ]
@@ -380,7 +400,37 @@ def generate_payslip_pdf(item: dict, year: int, month: int, factory_name: str = 
     ]))
     elements.append(cost_t)
 
-    elements.append(Spacer(1, 8 * mm))
+    # ── Signature block ─────────────────────────────────────────
+    elements.append(Spacer(1, 14 * mm))
+    sig_label_style = ParagraphStyle("sig_l", parent=styles["Normal"], fontSize=8, textColor=colors.grey,
+                                      alignment=TA_CENTER)
+    sig_name_style = ParagraphStyle("sig_n", parent=styles["Normal"], fontSize=9, fontName="Helvetica-Bold",
+                                     alignment=TA_CENTER, spaceBefore=16 * mm)
+    sig_title_style = ParagraphStyle("sig_t", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#4b5563"),
+                                      alignment=TA_CENTER)
+
+    sig_data = [
+        [Paragraph("Acknowledged by Employee", sig_label_style),
+         Paragraph("Approved by", sig_label_style)],
+        [Paragraph("", sig_label_style),  # blank space for signature
+         Paragraph("", sig_label_style)],
+        [Paragraph("_______________________", sig_label_style),
+         Paragraph("_______________________", sig_label_style)],
+        [Paragraph(item.get("full_name", ""), sig_name_style),
+         Paragraph("Stanislav Shevchuk", sig_name_style)],
+        [Paragraph(item.get("position", ""), sig_title_style),
+         Paragraph("Direktur", sig_title_style)],
+    ]
+    sig_table = Table(sig_data, colWidths=[82.5 * mm, 82.5 * mm])
+    sig_table.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 2), (-1, 2), 14 * mm),  # space for actual signature
+    ]))
+    elements.append(sig_table)
+
+    elements.append(Spacer(1, 6 * mm))
     elements.append(Paragraph(
         f"Generated: {generated_at} | This payslip is confidential.",
         ParagraphStyle("foot", parent=styles["Normal"], fontSize=7, textColor=colors.grey, alignment=TA_CENTER)

@@ -1885,3 +1885,256 @@ async def delete_line_resource(
     ), {"rid": str(resource_id)})
     db.commit()
     return {"status": "deleted", "id": str(resource_id)}
+
+
+# ────────────────────────────────────────────────────────────────
+# Kiln Shelves — CRUD + write-off with reason and photo
+# ────────────────────────────────────────────────────────────────
+
+class KilnShelfCreate(BaseModel):
+    resource_id: UUID          # kiln id
+    factory_id: UUID
+    name: str
+    length_cm: float
+    width_cm: float
+    thickness_mm: float = 15.0
+    material: str = "silicon_carbide"
+    purchase_date: Optional[str] = None
+    purchase_cost: Optional[float] = None
+    max_firing_cycles: Optional[int] = None
+    condition_notes: Optional[str] = None
+
+
+class KilnShelfWriteOff(BaseModel):
+    reason: str
+    photo_url: Optional[str] = None
+
+
+@router.get("/kiln-shelves")
+async def list_kiln_shelves(
+    factory_id: UUID = Query(...),
+    resource_id: Optional[UUID] = Query(None, description="Filter by kiln"),
+    include_written_off: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List kiln shelves, optionally filtered by kiln."""
+    from sqlalchemy import text
+
+    conditions = ["factory_id = :fid"]
+    params: dict = {"fid": str(factory_id)}
+
+    if resource_id:
+        conditions.append("resource_id = :rid")
+        params["rid"] = str(resource_id)
+
+    if not include_written_off:
+        conditions.append("is_active = true")
+
+    where = " AND ".join(conditions)
+    rows = db.execute(text(
+        f"SELECT * FROM kiln_shelves WHERE {where} ORDER BY resource_id, name"
+    ), params).mappings().all()
+
+    items = []
+    for r in rows:
+        item = dict(r)
+        for k in ("id", "factory_id", "resource_id", "written_off_by"):
+            if item.get(k) is not None:
+                item[k] = str(item[k])
+        for k in ("length_cm", "width_cm", "thickness_mm", "area_sqm", "purchase_cost"):
+            if item.get(k) is not None:
+                item[k] = float(item[k])
+        items.append(item)
+
+    return {"items": items, "total": len(items)}
+
+
+@router.post("/kiln-shelves", status_code=201)
+async def create_kiln_shelf(
+    data: KilnShelfCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Create a kiln shelf linked to a specific kiln."""
+    from sqlalchemy import text
+
+    result = db.execute(text("""
+        INSERT INTO kiln_shelves
+            (resource_id, factory_id, name, length_cm, width_cm, thickness_mm,
+             material, purchase_date, purchase_cost, max_firing_cycles, condition_notes)
+        VALUES
+            (:rid, :fid, :name, :lcm, :wcm, :tmm,
+             :mat, :pdate, :pcost, :mfc, :notes)
+        RETURNING id
+    """), {
+        "rid": str(data.resource_id), "fid": str(data.factory_id),
+        "name": data.name, "lcm": data.length_cm, "wcm": data.width_cm,
+        "tmm": data.thickness_mm, "mat": data.material,
+        "pdate": data.purchase_date, "pcost": data.purchase_cost,
+        "mfc": data.max_firing_cycles, "notes": data.condition_notes,
+    })
+    row = result.fetchone()
+    db.commit()
+    return {"id": str(row[0]), "status": "created"}
+
+
+@router.patch("/kiln-shelves/{shelf_id}")
+async def update_kiln_shelf(
+    shelf_id: UUID,
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Update a kiln shelf."""
+    from sqlalchemy import text
+
+    allowed = {"name", "length_cm", "width_cm", "thickness_mm", "material",
+               "condition_notes", "purchase_date", "purchase_cost",
+               "max_firing_cycles", "resource_id"}
+    updates = {k: v for k, v in data.items() if k in allowed and v is not None}
+    if not updates:
+        raise HTTPException(400, "No valid fields to update")
+
+    set_clause = ", ".join(f"{k} = :{k}" for k in updates)
+    updates["sid"] = str(shelf_id)
+    db.execute(text(
+        f"UPDATE kiln_shelves SET {set_clause}, updated_at = now() WHERE id = :sid"
+    ), updates)
+    db.commit()
+    return {"status": "updated", "id": str(shelf_id)}
+
+
+@router.post("/kiln-shelves/{shelf_id}/write-off")
+async def write_off_kiln_shelf(
+    shelf_id: UUID,
+    data: KilnShelfWriteOff,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Write off a kiln shelf with reason and optional photo.
+
+    Sets status='written_off', is_active=false, records who/when/why.
+    If shelves drop below threshold for kiln capacity, creates a PM task.
+    """
+    from sqlalchemy import text
+    import json
+
+    user_id = str(current_user.id) if hasattr(current_user, 'id') else None
+
+    # 1. Write off the shelf
+    db.execute(text("""
+        UPDATE kiln_shelves
+        SET status = 'written_off',
+            is_active = false,
+            write_off_reason = :reason,
+            write_off_photo_url = :photo,
+            written_off_at = now(),
+            written_off_by = :uid,
+            updated_at = now()
+        WHERE id = :sid
+    """), {
+        "sid": str(shelf_id), "reason": data.reason,
+        "photo": data.photo_url, "uid": user_id,
+    })
+
+    # 2. Check remaining shelf count for this kiln
+    shelf_row = db.execute(text(
+        "SELECT resource_id, factory_id, name FROM kiln_shelves WHERE id = :sid"
+    ), {"sid": str(shelf_id)}).fetchone()
+
+    if shelf_row:
+        kiln_id = str(shelf_row[0])
+        factory_id = str(shelf_row[1])
+        shelf_name = shelf_row[2]
+
+        remaining = db.execute(text("""
+            SELECT COUNT(*) as cnt,
+                   COALESCE(SUM(area_sqm), 0) as total_area
+            FROM kiln_shelves
+            WHERE resource_id = :kid AND is_active = true
+        """), {"kid": kiln_id}).fetchone()
+
+        remaining_count = remaining[0] if remaining else 0
+        remaining_area = float(remaining[1]) if remaining else 0
+
+        # Get kiln name
+        kiln_row = db.execute(text(
+            "SELECT name FROM resources WHERE id = :kid"
+        ), {"kid": kiln_id}).fetchone()
+        kiln_name = kiln_row[0] if kiln_row else "Unknown"
+
+        # Create PM task if shelf replacement is needed
+        if remaining_count == 0 or remaining_area < 0.5:
+            from api.enums import TaskType, TaskStatus, UserRole
+            from api.models import Task
+
+            task = Task(
+                factory_id=factory_id,
+                type=TaskType.SHELF_REPLACEMENT_NEEDED,
+                status=TaskStatus.PENDING,
+                assigned_role=UserRole.PRODUCTION_MANAGER,
+                blocking=False,
+                priority=7,
+                description=(
+                    f"Kiln '{kiln_name}' has critically low shelves "
+                    f"({remaining_count} remaining, {remaining_area:.2f} m\u00b2). "
+                    f"Shelf '{shelf_name}' was written off: {data.reason}. "
+                    f"Order replacement shelves."
+                ),
+                metadata_json=json.dumps({
+                    "kiln_id": kiln_id,
+                    "kiln_name": kiln_name,
+                    "remaining_shelves": remaining_count,
+                    "remaining_area_sqm": remaining_area,
+                    "written_off_shelf": shelf_name,
+                    "reason": data.reason,
+                    "photo_url": data.photo_url,
+                }),
+            )
+            db.add(task)
+
+    db.commit()
+    return {
+        "status": "written_off",
+        "id": str(shelf_id),
+        "remaining_shelves": remaining_count if shelf_row else None,
+    }
+
+
+@router.post("/kiln-shelves/{shelf_id}/increment-cycles")
+async def increment_shelf_cycles(
+    shelf_id: UUID,
+    count: int = Query(1, ge=1, le=10),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Increment firing cycles counter. Auto-warns when approaching max."""
+    from sqlalchemy import text
+
+    db.execute(text("""
+        UPDATE kiln_shelves
+        SET firing_cycles_count = firing_cycles_count + :cnt,
+            updated_at = now()
+        WHERE id = :sid
+    """), {"sid": str(shelf_id), "cnt": count})
+
+    # Check if approaching max cycles
+    row = db.execute(text("""
+        SELECT firing_cycles_count, max_firing_cycles, name, resource_id, factory_id
+        FROM kiln_shelves WHERE id = :sid
+    """), {"sid": str(shelf_id)}).fetchone()
+
+    warning = None
+    if row and row[1] and row[0] >= row[1] * 0.9:
+        warning = (
+            f"Shelf '{row[2]}' at {row[0]}/{row[1]} cycles "
+            f"({int(row[0]/row[1]*100)}%) — consider replacement"
+        )
+
+    db.commit()
+    return {
+        "status": "updated",
+        "firing_cycles_count": row[0] if row else None,
+        "warning": warning,
+    }

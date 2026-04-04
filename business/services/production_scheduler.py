@@ -157,6 +157,63 @@ def _get_tiles_per_board(
     return 10  # safe default
 
 
+def _create_board_order_task(
+    db: Session,
+    factory_id: UUID,
+    boards_needed: int,
+    boards_available: int,
+    deficit: int,
+    position_id: "Optional[UUID]" = None,
+    order_id: "Optional[UUID]" = None,
+) -> None:
+    """Create a PM task to order additional glazing boards if deficit detected.
+
+    Deduplicates: won't create if a PENDING task already exists for this factory.
+    """
+    try:
+        from api.models import Task
+        from api.enums import TaskType, TaskStatus, UserRole
+        import json
+
+        # Check for existing pending task (avoid spam)
+        existing = db.query(Task).filter(
+            Task.factory_id == factory_id,
+            Task.type == TaskType.BOARD_ORDER_NEEDED,
+            Task.status == TaskStatus.PENDING,
+        ).first()
+        if existing:
+            return  # already has a pending task
+
+        task = Task(
+            factory_id=factory_id,
+            type=TaskType.BOARD_ORDER_NEEDED,
+            status=TaskStatus.PENDING,
+            assigned_role=UserRole.PRODUCTION_MANAGER,
+            related_order_id=order_id,
+            related_position_id=position_id,
+            blocking=False,
+            priority=6,
+            description=(
+                f"Glazing board shortage: need {boards_needed} boards "
+                f"but only {boards_available} available (deficit: {deficit}). "
+                f"Order or prepare additional boards for optimal production flow."
+            ),
+            metadata_json=json.dumps({
+                "boards_needed": boards_needed,
+                "boards_available": boards_available,
+                "deficit": deficit,
+            }),
+        )
+        db.add(task)
+        db.flush()
+        logger.info(
+            "BOARD_ORDER_TASK | factory=%s | need=%d avail=%d deficit=%d",
+            factory_id, boards_needed, boards_available, deficit,
+        )
+    except Exception as e:
+        logger.debug("Failed to create board order task: %s", e)
+
+
 def _apply_resource_constraint(
     speed_days: int,
     stage: str,
@@ -165,6 +222,8 @@ def _apply_resource_constraint(
     total_pcs: int,
     fixed_hours: float = 0,
     tiles_per_board: int = 10,
+    db: "Optional[Session]" = None,
+    position: "Optional[OrderPosition]" = None,
 ) -> int:
     """Apply line resource constraint to a stage duration.
 
@@ -227,14 +286,36 @@ def _apply_resource_constraint(
                 constraint_days = max(constraint_days, math.ceil(total_hours / hours_per_day))
 
     elif stage == 'edge_cleaning_loading':
-        # Glazing board constraint: all tiles must be on boards for edge cleaning
+        # Glazing board constraint: tiles sit on boards during edge cleaning
         board_pcs = resource_cap.get("total_pcs", 0)
         if board_pcs > 0 and total_pcs > 0:
+            # Calculate actual boards needed using tiles_per_board
+            boards_needed = math.ceil(total_pcs / tiles_per_board)
+            if boards_needed > board_pcs:
+                deficit = boards_needed - board_pcs
+                logger.info(
+                    "BOARD_DEFICIT | need=%d boards, have=%d, deficit=%d "
+                    "(%d pcs, %d tiles/board)",
+                    boards_needed, board_pcs, deficit,
+                    total_pcs, tiles_per_board,
+                )
+                # Create PM task to order more boards
+                if db and position:
+                    _create_board_order_task(
+                        db,
+                        factory_id=position.factory_id,
+                        boards_needed=boards_needed,
+                        boards_available=board_pcs,
+                        deficit=deficit,
+                        position_id=getattr(position, 'id', None),
+                        order_id=getattr(position, 'order_id', None),
+                    )
+
             cycles = math.ceil(total_pcs / board_pcs)
             constraint_days = max(constraint_days, cycles)
             if cycles > speed_days:
                 logger.info(
-                    "LINE_CONSTRAINT | %s | boards=%d pcs batch=%d pcs "
+                    "LINE_CONSTRAINT | %s | boards=%d available, need=%d pcs "
                     "→ %d cycles (was %d days)",
                     stage, board_pcs, total_pcs, cycles, speed_days,
                 )
@@ -305,6 +386,7 @@ def _get_stage_duration_days(
                             return _apply_resource_constraint(
                                 speed_days, stage, resource_cap,
                                 total_sqm, total_pcs, fixed_hours, tpb,
+                                db=db, position=position,
                             )
                         return speed_days
         except Exception as e:
@@ -348,6 +430,7 @@ def _get_stage_duration_days(
             return _apply_resource_constraint(
                 speed_days, stage, resource_cap,
                 total_sqm, total_pcs, fixed_hours, tpb,
+                db=db, position=position,
             )
         except Exception as e:
             logger.debug("Resource constraint failed for %s: %s", stage, e)

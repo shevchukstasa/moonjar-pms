@@ -453,3 +453,82 @@ export const LINE_RESOURCE_TYPES = [
   { value: 'drying_rack', label: 'Drying Rack / Shelving', icon: '📐', capacityLabel: 'Area (m\u00b2) / Boards' },
   { value: 'glazing_board', label: 'Glazing Board', icon: '📋', capacityLabel: 'Total boards' },
 ];
+
+// ── Kiln Shelves ────────────────────────────────────────────
+
+export interface KilnShelfItem {
+  id: string;
+  resource_id: string;
+  factory_id: string;
+  name: string;
+  length_cm: number;
+  width_cm: number;
+  thickness_mm: number;
+  area_sqm: number;
+  material: string;
+  status: string;
+  condition_notes: string | null;
+  write_off_reason: string | null;
+  write_off_photo_url: string | null;
+  written_off_at: string | null;
+  purchase_date: string | null;
+  purchase_cost: number | null;
+  firing_cycles_count: number;
+  max_firing_cycles: number | null;
+  is_active: boolean;
+}
+
+export interface KilnShelfCreate {
+  resource_id: string;
+  factory_id: string;
+  name: string;
+  length_cm: number;
+  width_cm: number;
+  thickness_mm?: number;
+  material?: string;
+  purchase_date?: string;
+  purchase_cost?: number;
+  max_firing_cycles?: number;
+  condition_notes?: string;
+}
+
+export const kilnShelvesApi = {
+  list: async (factoryId: string, resourceId?: string, includeWrittenOff = false): Promise<{ items: KilnShelfItem[] }> => {
+    const params: Record<string, string> = { factory_id: factoryId };
+    if (resourceId) params.resource_id = resourceId;
+    if (includeWrittenOff) params.include_written_off = 'true';
+    const { data } = await apiClient.get('/tps/kiln-shelves', { params });
+    return data;
+  },
+
+  create: async (payload: KilnShelfCreate): Promise<{ id: string }> => {
+    const { data } = await apiClient.post('/tps/kiln-shelves', payload);
+    return data;
+  },
+
+  update: async (id: string, payload: Partial<KilnShelfCreate>): Promise<void> => {
+    await apiClient.patch(`/tps/kiln-shelves/${id}`, payload);
+  },
+
+  writeOff: async (id: string, reason: string, photoUrl?: string): Promise<{ remaining_shelves: number }> => {
+    const { data } = await apiClient.post(`/tps/kiln-shelves/${id}/write-off`, {
+      reason, photo_url: photoUrl,
+    });
+    return data;
+  },
+
+  incrementCycles: async (id: string, count = 1): Promise<{ firing_cycles_count: number; warning: string | null }> => {
+    const { data } = await apiClient.post(`/tps/kiln-shelves/${id}/increment-cycles`, null, {
+      params: { count },
+    });
+    return data;
+  },
+};
+
+export const SHELF_MATERIALS = [
+  { value: 'silicon_carbide', label: 'Silicon Carbide (SiC)' },
+  { value: 'cordierite', label: 'Cordierite' },
+  { value: 'mullite', label: 'Mullite' },
+  { value: 'alumina', label: 'Alumina' },
+  { value: 'other', label: 'Other' },
+];

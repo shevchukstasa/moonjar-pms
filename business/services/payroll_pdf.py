@@ -431,15 +431,15 @@ def generate_payslip_pdf(item: dict, year: int, month: int, factory_name: str = 
                                       alignment=TA_CENTER)
 
     sig_data = [
-        [Paragraph("Acknowledged by Employee", sig_label_style),
+        [Paragraph("", sig_label_style),
          Paragraph("Approved by", sig_label_style)],
-        [Paragraph("", sig_label_style),  # blank space for signature
+        [Paragraph("", sig_label_style),
          Paragraph("", sig_label_style)],
-        [Paragraph("_______________________", sig_label_style),
+        [Paragraph("", sig_label_style),
          Paragraph("_______________________", sig_label_style)],
-        [Paragraph(item.get("full_name", ""), sig_name_style),
+        [Paragraph("", sig_label_style),
          Paragraph("Stanislav Shevchuk", sig_name_style)],
-        [Paragraph(item.get("position", ""), sig_title_style),
+        [Paragraph("", sig_label_style),
          Paragraph("Direktur", sig_title_style)],
     ]
     sig_table = Table(sig_data, colWidths=[82.5 * mm, 82.5 * mm])

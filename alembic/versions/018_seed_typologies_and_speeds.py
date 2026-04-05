@@ -126,7 +126,7 @@ def upgrade() -> None:
                  preferred_loading, priority, is_active, auto_calibrate)
             VALUES
                 (gen_random_uuid(), :factory_id, :name,
-                 :ptypes::JSONB, :places::JSONB, :colls::JSONB, :methods::JSONB,
+                 CAST(:ptypes AS JSONB), CAST(:places AS JSONB), CAST(:colls AS JSONB), CAST(:methods AS JSONB),
                  :min_sz, :max_sz, :pref_loading, :priority, TRUE, FALSE)
             ON CONFLICT (factory_id, name) DO NOTHING
         """), {

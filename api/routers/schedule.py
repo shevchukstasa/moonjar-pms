@@ -473,6 +473,57 @@ async def reschedule_order_endpoint(
     return {"ok": True, "positions_rescheduled": count, "order_id": str(order_id)}
 
 
+@router.post("/orders/{order_id}/reschedule-debug")
+async def reschedule_order_debug(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Debug: reschedule order and return errors."""
+    import traceback
+    from api.models import OrderPosition
+    from api.enums import PositionStatus
+    order = db.query(ProductionOrder).filter(ProductionOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+
+    deadline = order.final_deadline or order.desired_delivery_date
+    if not deadline:
+        from datetime import date, timedelta
+        deadline = date.today() + timedelta(days=30)
+
+    from business.services.production_scheduler import schedule_position
+
+    positions = db.query(OrderPosition).filter(
+        OrderPosition.order_id == order.id,
+        OrderPosition.status != PositionStatus.CANCELLED.value,
+    ).all()
+
+    results = []
+    for pos in positions:
+        try:
+            schedule_position(db, pos, deadline)
+            db.flush()
+            results.append({
+                "position_id": str(pos.id),
+                "position_number": pos.position_number,
+                "status": pos.status,
+                "ok": True,
+                "planned_glazing_date": str(pos.planned_glazing_date),
+            })
+        except Exception as e:
+            results.append({
+                "position_id": str(pos.id),
+                "position_number": pos.position_number,
+                "status": pos.status,
+                "ok": False,
+                "error": str(e),
+                "traceback": traceback.format_exc()[-500:],
+            })
+
+    return {"order": order.order_number, "positions": len(positions), "results": results}
+
+
 @router.post("/factory/{factory_id}/reschedule")
 async def reschedule_factory_endpoint(
     factory_id: UUID,

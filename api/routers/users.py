@@ -250,3 +250,27 @@ async def toggle_user_active(
     db.commit()
     db.refresh(user)
     return _serialize_user(user, db)
+
+
+@router.post("/{user_id}/reset-password")
+async def admin_reset_password(
+    user_id: UUID,
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Admin resets another user's password."""
+    from api.auth import hash_password
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    new_pw = data.get("new_password", "")
+    if len(new_pw) < 10:
+        raise HTTPException(422, "Password must be at least 10 characters")
+
+    user.password_hash = hash_password(new_pw)
+    user.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"status": "ok", "message": f"Password reset for {user.email}"}

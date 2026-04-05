@@ -11,6 +11,20 @@ Algorithm:
   4. If |EMA - planned_rate| / planned_rate > threshold (15%):
      - auto_calibrate=true -> update rate + log + return adjustment
      - auto_calibrate=false -> return suggestion only
+
+FAQ (for PM / architecture reference):
+  Q: Фактическая выработка учитывается с учётом типологий?
+  A: YES — calibrate_typology_speeds() filters TpsShiftMetric by typology_id,
+     so each typology gets its own independent EMA.
+
+  Q: Почему порог 15%?
+  A: EMA(alpha=0.3) already smooths daily noise — each new data point shifts
+     the average by only 30%. With min_data_points=7, a 15% drift means a
+     persistent shift over ~2 weeks, not random variation.
+
+  Auto-calibration is ENABLED by default (ProcessStep.auto_calibrate=True,
+  StageTypologySpeed.auto_calibrate=True). PM can toggle per-step via
+  PATCH /tps/calibration/toggle/{step_id}.
 """
 
 import logging

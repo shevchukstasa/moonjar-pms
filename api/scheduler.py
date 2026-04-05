@@ -1262,29 +1262,36 @@ async def daily_tps_calibration():
     logger.info("Running daily TPS calibration")
     db = _get_db_session()
     try:
-        from business.services.tps_calibration import run_calibration
+        from business.services.tps_calibration import run_calibration, calibrate_typology_speeds
         from business.services.notifications import send_telegram_to_role
 
         factory_ids = _get_all_factory_ids(db)
         for fid in factory_ids:
             try:
+                # 1) Calibrate ProcessStep rates (generic per-stage)
                 suggestions = run_calibration(db, fid, auto_apply=True)
+                # 2) Calibrate StageTypologySpeed rates (per typology — accounts for
+                #    actual production rates filtered by typology_id)
+                typology_suggestions = calibrate_typology_speeds(db, fid, auto_apply=True)
                 db.commit()
 
-                if suggestions:
-                    applied = [s for s in suggestions if s.get("applied")]
-                    pending = [s for s in suggestions if not s.get("applied")]
+                all_suggestions = suggestions + typology_suggestions
+                if all_suggestions:
+                    applied = [s for s in all_suggestions if s.get("applied")]
+                    pending = [s for s in all_suggestions if not s.get("applied")]
 
                     lines = []
                     for s in applied:
+                        label = s.get("step_name") or f"typology:{s.get('typology_id', '?')[:8]}/{s.get('stage', '?')}"
                         lines.append(
-                            f"  {s['step_name']}: {s['current_rate']} -> {s['suggested_rate']} "
+                            f"  {label}: {s['current_rate']} -> {s['suggested_rate']} "
                             f"{s.get('productivity_unit', '')}\n"
                             f"    (fact {s['data_points']}d: {s['ema_value']}, drift: {s['drift_percent']:+.1f}%)"
                         )
                     for s in pending:
+                        label = s.get("step_name") or f"typology:{s.get('typology_id', '?')[:8]}/{s.get('stage', '?')}"
                         lines.append(
-                            f"  {s['step_name']}: drift {s['drift_percent']:+.1f}% (needs approval)"
+                            f"  {label}: drift {s['drift_percent']:+.1f}% (needs approval)"
                         )
 
                     from api.models import Factory
@@ -1896,6 +1903,40 @@ async def eve_of_kiln_check():
         db.close()
 
 
+async def proactive_pull_left_job():
+    """
+    Proactive pull-left: scan all factories for underloaded stages
+    and pull future work to today to eliminate idle time.
+
+    Runs at 00:00, 02:00, 05:00, 07:00 UTC = 08:00, 10:00, 13:00, 15:00 WITA.
+    """
+    logger.info("Running proactive pull-left scan")
+    db = _get_db_session()
+    try:
+        from business.services.pull_system import proactive_pull_left
+
+        factory_ids = _get_all_factory_ids(db)
+        total_pulled = 0
+
+        for fid in factory_ids:
+            try:
+                pulled = proactive_pull_left(db, fid)
+                total_pulled += len(pulled)
+            except Exception as e:
+                logger.error("Proactive pull-left failed for factory %s: %s", fid, e)
+
+        db.commit()
+        logger.info(
+            "Proactive pull-left complete: %d positions pulled across %d factories",
+            total_pulled, len(factory_ids),
+        )
+    except Exception as e:
+        logger.error("Proactive pull-left job failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 # --- Scheduler setup ---
 
 def setup_scheduler():
@@ -1993,6 +2034,13 @@ def setup_scheduler():
 
     # Daily 15:10 UTC (23:10 WITA) — eve-of-kiln firing profile check
     scheduler.add_job(eve_of_kiln_check, CronTrigger(hour=15, minute=10), id="eve_of_kiln_check")
+
+    # Proactive pull-left: 08:00, 10:00, 13:00, 15:00 WITA = 00:00, 02:00, 05:00, 07:00 UTC
+    scheduler.add_job(
+        proactive_pull_left_job,
+        CronTrigger(hour="0,2,5,7", minute=0),
+        id="proactive_pull_left",
+    )
 
     # Daily 14:00 UTC (22:00 WITA) — batch update skill progress
     scheduler.add_job(gamification_skill_progress, CronTrigger(hour=14, minute=5), id="gamification_skills")

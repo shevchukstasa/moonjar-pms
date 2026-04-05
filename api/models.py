@@ -663,6 +663,8 @@ class OrderPosition(Base):
     planned_sorting_date = Column(sa.Date)          # when sorting should happen
     planned_completion_date = Column(sa.Date)       # when position should be complete
     estimated_kiln_id = Column(UUID(as_uuid=True), ForeignKey('resources.id', ondelete='SET NULL'))
+    estimated_num_loads = Column(sa.Integer, nullable=True)  # how many kiln firings this position needs
+    schedule_metadata = Column(JSONB)                        # scheduler/batch planner metadata (original dates, deferrals)
     schedule_version = Column(sa.Integer, nullable=False, default=1)
     # Human-readable position numbering within the order:
     #   position_number — sequential integer for root positions (1, 2, 3, …)
@@ -1186,8 +1188,8 @@ class ProcessStep(Base):
     applicable_collections = Column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb"))  # e.g. ["raku","gold"]
     applicable_methods = Column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb"))      # e.g. ["ss","bs"]
     applicable_product_types = Column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb"))  # e.g. ["tile"]
-    # AI auto-calibration
-    auto_calibrate = Column(sa.Boolean, nullable=False, server_default=sa.text('false'))
+    # AI auto-calibration (enabled by default — EMA α=0.3 + 15% threshold + 7 min points = safe)
+    auto_calibrate = Column(sa.Boolean, nullable=False, server_default=sa.text('true'))
     calibration_ema = Column(sa.Numeric(10, 2), nullable=True)
     last_calibrated_at = Column(sa.DateTime(timezone=True), nullable=True)
 
@@ -1263,8 +1265,8 @@ class KilnLoadingTypology(Base):
     max_firing_temp = Column(sa.Integer, nullable=True)
     # Shifts
     shift_count = Column(sa.Integer, nullable=False, server_default=sa.text('2'))
-    # AI
-    auto_calibrate = Column(sa.Boolean, nullable=False, server_default=sa.text('false'))
+    # AI auto-calibration (enabled by default)
+    auto_calibrate = Column(sa.Boolean, nullable=False, server_default=sa.text('true'))
     is_active = Column(sa.Boolean, nullable=False, server_default=sa.text('true'))
     priority = Column(sa.Integer, nullable=False, server_default=sa.text('0'))
     notes = Column(sa.Text, nullable=True)
@@ -1330,7 +1332,11 @@ class StageTypologySpeed(Base):
     shift_duration_hours = Column(sa.Numeric(4, 1), server_default=sa.text('8.0'))
     brigade_size = Column(sa.Integer, server_default=sa.text('1'))  # people per brigade
 
-    auto_calibrate = Column(sa.Boolean, server_default=sa.text('false'))
+    # Auto-calibration enabled by default — EMA α=0.3 smooths noise, 15% threshold
+    # catches only persistent drift over ~2 weeks (min 7 data points).
+    # Фактическая выработка учитывается с учётом типологий: YES —
+    # calibrate_typology_speeds() filters TpsShiftMetric by typology_id.
+    auto_calibrate = Column(sa.Boolean, server_default=sa.text('true'))
     calibration_ema = Column(sa.Numeric(10, 2), nullable=True)
     last_calibrated_at = Column(sa.DateTime(timezone=True), nullable=True)
     notes = Column(sa.Text, nullable=True)
@@ -3121,3 +3127,20 @@ class ShiftAssignment(Base):
     user = relationship('User', foreign_keys=[user_id])
     shift_definition = relationship('ShiftDefinition', foreign_keys=[shift_definition_id])
     assigner = relationship('User', foreign_keys=[assigned_by])
+
+
+class SchedulerConfig(Base):
+    """Per-factory scheduler configuration — configurable buffer days and auto-buffer."""
+    __tablename__ = 'scheduler_configs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id', ondelete='CASCADE'), nullable=False, unique=True)
+    pre_kiln_buffer_days = Column(sa.Integer, nullable=False, default=1)
+    post_kiln_buffer_days = Column(sa.Integer, nullable=False, default=1)
+    auto_buffer = Column(sa.Boolean, nullable=False, default=False)
+    auto_buffer_multiplier = Column(sa.Numeric(4, 2), nullable=False, default=1.5)
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'))
+
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    updater = relationship('User', foreign_keys=[updated_by])

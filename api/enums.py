@@ -85,6 +85,9 @@ class TaskType(str, Enum):
     BOARD_ORDER_NEEDED = 'board_order_needed'
     SHELF_REPLACEMENT_NEEDED = 'shelf_replacement_needed'
     FIRING_PROFILE_NEEDED = 'firing_profile_needed'
+    DEADLINE_EXCEEDED = 'deadline_exceeded'
+    TYPOLOGY_SPEEDS_NEEDED = 'typology_speeds_needed'
+    PACKING_MATERIALS_NEEDED = 'packing_materials_needed'
 
 class TaskStatus(str, Enum):
     PENDING = 'pending'

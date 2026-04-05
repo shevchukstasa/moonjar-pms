@@ -540,15 +540,15 @@ def _send_to_factory_chat(
 # ────────────────────────────────────────────────────────────────
 
 def _try_reserve_packaging(db: Session, position: OrderPosition):
-    """Best-effort packaging reservation when entering sorting."""
+    """Best-effort packaging reservation + availability check when entering sorting."""
     try:
-        from business.services.packaging_consumption import reserve_packaging
+        from business.services.packaging_consumption import on_sorting_start
         if position.factory_id:
-            reserve_packaging(db, position.id, position.factory_id)
+            on_sorting_start(db, position.id, position.factory_id)
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning(
-            "Failed to reserve packaging for position %s: %s", position.id, e
+            "Failed to process sorting start for position %s: %s", position.id, e
         )
 
 

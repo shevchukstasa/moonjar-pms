@@ -971,7 +971,7 @@ class ProcessStepCreate(BaseModel):
     applicable_collections: List[str] = []
     applicable_methods: List[str] = []
     applicable_product_types: List[str] = []
-    auto_calibrate: bool = False
+    auto_calibrate: bool = True
     notes: Optional[str] = None
 
 
@@ -1281,6 +1281,104 @@ async def apply_calibration_endpoint(
     return {"status": "applied", "step_id": data.step_id, "new_rate": data.new_rate}
 
 
+# ── Calibration Toggle (PM auto/manual mode) ──────────────────────────────
+#
+# Design notes:
+# Q: "Фактическая выработка учитывается с учётом типологий?"
+# A: YES — calibrate_typology_speeds() filters TpsShiftMetric by typology_id,
+#    so each typology gets its own EMA based on actual production data for that
+#    specific product type.
+#
+# Q: "Почему порог 15%?"
+# A: EMA with alpha=0.3 already smooths daily noise (each new data point only
+#    shifts the average by 30%). With min_data_points=7, a 15% drift means a
+#    persistent shift over ~2 weeks — not random variation. This threshold
+#    catches real process changes while ignoring normal day-to-day fluctuations.
+
+
+@router.patch("/calibration/toggle/{step_id}")
+async def toggle_step_auto_calibrate(
+    step_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Toggle auto_calibrate on/off for a ProcessStep. PM only."""
+    step = db.query(ProcessStep).filter(ProcessStep.id == step_id).first()
+    if not step:
+        raise HTTPException(404, "Process step not found")
+    step.auto_calibrate = not step.auto_calibrate
+    db.commit()
+    return {
+        "step_id": str(step.id),
+        "step_name": step.name,
+        "stage": step.stage,
+        "auto_calibrate": step.auto_calibrate,
+    }
+
+
+@router.patch("/calibration/typology-toggle/{speed_id}")
+async def toggle_typology_speed_auto_calibrate(
+    speed_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Toggle auto_calibrate on/off for a StageTypologySpeed. PM only."""
+    speed = db.query(StageTypologySpeed).filter(StageTypologySpeed.id == speed_id).first()
+    if not speed:
+        raise HTTPException(404, "Stage typology speed not found")
+    speed.auto_calibrate = not speed.auto_calibrate
+    db.commit()
+    return {
+        "speed_id": str(speed.id),
+        "typology_id": str(speed.typology_id),
+        "stage": speed.stage,
+        "auto_calibrate": speed.auto_calibrate,
+    }
+
+
+@router.post("/calibration/apply/{step_id}")
+async def apply_calibration_for_step(
+    step_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Manually apply the current EMA-suggested rate for a specific step. PM only.
+
+    Reads the current EMA from the calibration service and applies it,
+    regardless of auto_calibrate setting.
+    """
+    from business.services.tps_calibration import check_calibration_needed, apply_calibration
+
+    step = db.query(ProcessStep).filter(ProcessStep.id == step_id).first()
+    if not step:
+        raise HTTPException(404, "Process step not found")
+
+    suggestion = check_calibration_needed(db, step.factory_id, step, threshold=0.0)
+    if not suggestion:
+        raise HTTPException(
+            400,
+            "No calibration data available — need at least 7 shift metric data points",
+        )
+
+    apply_calibration(
+        db,
+        step_id=step.id,
+        new_rate=suggestion["suggested_rate"],
+        approved_by=current_user.id,
+        ema_value=suggestion["ema_value"],
+        data_points=suggestion["data_points"],
+        trigger="manual_pm",
+    )
+    db.commit()
+    return {
+        "status": "applied",
+        "step_id": str(step.id),
+        "previous_rate": suggestion["current_rate"],
+        "new_rate": suggestion["suggested_rate"],
+        "drift_percent": suggestion["drift_percent"],
+    }
+
+
 # ── Kiln Loading Typologies ───────────────────────────────────────────────
 
 class TypologyCreate(BaseModel):
@@ -1297,7 +1395,7 @@ class TypologyCreate(BaseModel):
     min_firing_temp: Optional[int] = None
     max_firing_temp: Optional[int] = None
     shift_count: int = 2
-    auto_calibrate: bool = False
+    auto_calibrate: bool = True
     priority: int = 0
     notes: Optional[str] = None
 
@@ -1574,7 +1672,7 @@ class StageSpeedCreate(BaseModel):
     shift_count: int = 2
     shift_duration_hours: float = 8.0
     brigade_size: int = 1
-    auto_calibrate: bool = False
+    auto_calibrate: bool = True
     notes: Optional[str] = None
 
 

@@ -79,6 +79,7 @@ export const TaskType = {
   RECIPE_CONFIGURATION: 'recipe_configuration',
   REPAIR_SLA_ALERT: 'repair_sla_alert',
   RECONCILIATION_ALERT: 'reconciliation_alert',
+  PACKING_MATERIALS_NEEDED: 'packing_materials_needed',
 } as const;
 export type TaskTypeType = (typeof TaskType)[keyof typeof TaskType];
 

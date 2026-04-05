@@ -432,6 +432,7 @@ class SmartAvailabilityResult:
     reason: str       # "in_stock", "ordered_arriving_in_time", "not_ordered", "ordered_late"
     deficit: Decimal
     ordered_qty: Decimal  # total qty across pending purchase requests
+    expected_delivery_date: Optional[date] = None  # earliest delivery date from purchase requests
 
 
 def check_material_availability_smart(
@@ -512,6 +513,13 @@ def check_material_availability_smart(
             ordered_qty=Decimal("0"),
         )
 
+    # Compute earliest expected delivery date across all relevant requests
+    _delivery_dates = [
+        pr.expected_delivery_date for pr in relevant_requests
+        if pr.expected_delivery_date is not None
+    ]
+    _earliest_delivery = min(_delivery_dates) if _delivery_dates else None
+
     # 3. Material is ordered — check if it arrives in time
     if planned_glazing_date:
         deadline = planned_glazing_date - timedelta(days=buffer_days)
@@ -546,6 +554,7 @@ def check_material_availability_smart(
                     reason="ordered_arriving_in_time",
                     deficit=deficit,
                     ordered_qty=total_ordered_qty,
+                    expected_delivery_date=_earliest_delivery,
                 )
             # Enough arriving in time but qty not sufficient
             # — still ordered_late because timely portion doesn't cover need
@@ -554,6 +563,7 @@ def check_material_availability_smart(
                 reason="ordered_late",
                 deficit=deficit,
                 ordered_qty=total_ordered_qty,
+                expected_delivery_date=_earliest_delivery,
             )
 
         # All orders have dates past the deadline
@@ -562,6 +572,7 @@ def check_material_availability_smart(
             reason="ordered_late",
             deficit=deficit,
             ordered_qty=total_ordered_qty,
+            expected_delivery_date=_earliest_delivery,
         )
 
     # 4. No planned glazing date — can't evaluate timing.
@@ -571,6 +582,7 @@ def check_material_availability_smart(
         reason="ordered_arriving_in_time",
         deficit=deficit,
         ordered_qty=total_ordered_qty,
+        expected_delivery_date=_earliest_delivery,
     )
 
 

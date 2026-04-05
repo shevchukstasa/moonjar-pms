@@ -665,3 +665,135 @@ async def recalculate_schedule_endpoint(
 
     from business.planning_engine.scheduler import recalculate_schedule
     return recalculate_schedule(db, factory_id)
+
+
+# ────────────────────────────────────────────────────────────────
+# Scheduler Config — configurable buffer days per factory
+# ────────────────────────────────────────────────────────────────
+
+class SchedulerConfigResponse(BaseModel):
+    factory_id: str
+    pre_kiln_buffer_days: int
+    post_kiln_buffer_days: int
+    auto_buffer: bool
+    auto_buffer_multiplier: float
+    updated_at: Optional[str] = None
+    updated_by: Optional[str] = None
+
+
+class SchedulerConfigUpdate(BaseModel):
+    pre_kiln_buffer_days: Optional[int] = None
+    post_kiln_buffer_days: Optional[int] = None
+    auto_buffer: Optional[bool] = None
+    auto_buffer_multiplier: Optional[float] = None
+
+
+@router.get("/config/{factory_id}")
+async def get_scheduler_config(
+    factory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Get scheduler configuration for a factory (buffer days, auto-buffer settings)."""
+    from api.models import SchedulerConfig, Factory
+
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory:
+        raise HTTPException(404, detail="Factory not found")
+
+    config = db.query(SchedulerConfig).filter(
+        SchedulerConfig.factory_id == factory_id
+    ).first()
+
+    if not config:
+        # Return defaults
+        return SchedulerConfigResponse(
+            factory_id=str(factory_id),
+            pre_kiln_buffer_days=1,
+            post_kiln_buffer_days=1,
+            auto_buffer=False,
+            auto_buffer_multiplier=1.5,
+        )
+
+    return SchedulerConfigResponse(
+        factory_id=str(config.factory_id),
+        pre_kiln_buffer_days=config.pre_kiln_buffer_days,
+        post_kiln_buffer_days=config.post_kiln_buffer_days,
+        auto_buffer=config.auto_buffer,
+        auto_buffer_multiplier=float(config.auto_buffer_multiplier),
+        updated_at=config.updated_at.isoformat() if config.updated_at else None,
+        updated_by=str(config.updated_by) if config.updated_by else None,
+    )
+
+
+@router.put("/config/{factory_id}")
+async def update_scheduler_config(
+    factory_id: UUID,
+    body: SchedulerConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Update scheduler configuration for a factory. PM/CEO only.
+
+    Partial update — only provided fields are changed.
+    Invalidates scheduler config cache after update.
+    """
+    from api.models import SchedulerConfig, Factory
+    from datetime import datetime, timezone
+
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory:
+        raise HTTPException(404, detail="Factory not found")
+
+    # Validate ranges
+    if body.pre_kiln_buffer_days is not None and body.pre_kiln_buffer_days < 0:
+        raise HTTPException(422, detail="pre_kiln_buffer_days must be >= 0")
+    if body.post_kiln_buffer_days is not None and body.post_kiln_buffer_days < 0:
+        raise HTTPException(422, detail="post_kiln_buffer_days must be >= 0")
+    if body.auto_buffer_multiplier is not None and body.auto_buffer_multiplier <= 0:
+        raise HTTPException(422, detail="auto_buffer_multiplier must be > 0")
+
+    config = db.query(SchedulerConfig).filter(
+        SchedulerConfig.factory_id == factory_id
+    ).first()
+
+    if not config:
+        config = SchedulerConfig(
+            factory_id=factory_id,
+            pre_kiln_buffer_days=body.pre_kiln_buffer_days if body.pre_kiln_buffer_days is not None else 1,
+            post_kiln_buffer_days=body.post_kiln_buffer_days if body.post_kiln_buffer_days is not None else 1,
+            auto_buffer=body.auto_buffer if body.auto_buffer is not None else False,
+            auto_buffer_multiplier=body.auto_buffer_multiplier if body.auto_buffer_multiplier is not None else 1.5,
+            updated_by=current_user.id,
+        )
+        db.add(config)
+    else:
+        if body.pre_kiln_buffer_days is not None:
+            config.pre_kiln_buffer_days = body.pre_kiln_buffer_days
+        if body.post_kiln_buffer_days is not None:
+            config.post_kiln_buffer_days = body.post_kiln_buffer_days
+        if body.auto_buffer is not None:
+            config.auto_buffer = body.auto_buffer
+        if body.auto_buffer_multiplier is not None:
+            config.auto_buffer_multiplier = body.auto_buffer_multiplier
+        config.updated_at = datetime.now(timezone.utc)
+        config.updated_by = current_user.id
+
+    db.commit()
+    db.refresh(config)
+
+    # Invalidate cache
+    from business.services.production_scheduler import invalidate_scheduler_config_cache
+    invalidate_scheduler_config_cache(factory_id)
+
+    logger.info("Scheduler config updated for factory %s by user %s", factory_id, current_user.id)
+
+    return SchedulerConfigResponse(
+        factory_id=str(config.factory_id),
+        pre_kiln_buffer_days=config.pre_kiln_buffer_days,
+        post_kiln_buffer_days=config.post_kiln_buffer_days,
+        auto_buffer=config.auto_buffer,
+        auto_buffer_multiplier=float(config.auto_buffer_multiplier),
+        updated_at=config.updated_at.isoformat() if config.updated_at else None,
+        updated_by=str(config.updated_by) if config.updated_by else None,
+    )

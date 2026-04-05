@@ -57,8 +57,99 @@ FIRING_DURATION_DAYS = 1        # kiln firing (depends on profile, but 1 day typ
 COOLING_DAYS = 1                # kiln cooldown
 SORTING_DAYS = 1                # sorting + packing
 QC_DAYS = 1                     # quality check (rounded up from 0.5)
-BUFFER_DAYS = 1                 # TOC buffer — safety margin around the constraint
+BUFFER_DAYS = 1                 # TOC buffer — default fallback (use _get_scheduler_config for per-factory)
 
+
+# ────────────────────────────────────────────────────────────────
+# Per-Factory Scheduler Config
+# ────────────────────────────────────────────────────────────────
+
+_scheduler_config_cache: dict[str, tuple] = {}  # factory_id_str → (pre, post, timestamp)
+_CACHE_TTL_SECONDS = 300  # 5 minutes
+
+def _get_scheduler_config(db: Session, factory_id: UUID) -> tuple[int, int]:
+    """Get (pre_kiln_buffer_days, post_kiln_buffer_days) for a factory.
+
+    Queries SchedulerConfig table, falls back to BUFFER_DAYS constant.
+    Results are cached for 5 minutes to avoid repeated queries.
+
+    If auto_buffer is enabled, calculates buffer from historical delay data.
+    """
+    import time
+    fid_str = str(factory_id)
+
+    # Check cache
+    if fid_str in _scheduler_config_cache:
+        pre, post, ts = _scheduler_config_cache[fid_str]
+        if time.time() - ts < _CACHE_TTL_SECONDS:
+            return (pre, post)
+
+    try:
+        from api.models import SchedulerConfig
+        config = db.query(SchedulerConfig).filter(
+            SchedulerConfig.factory_id == factory_id
+        ).first()
+
+        if not config:
+            _scheduler_config_cache[fid_str] = (BUFFER_DAYS, BUFFER_DAYS, time.time())
+            return (BUFFER_DAYS, BUFFER_DAYS)
+
+        pre_buffer = config.pre_kiln_buffer_days
+        post_buffer = config.post_kiln_buffer_days
+
+        if config.auto_buffer:
+            # Calculate buffer from historical delays
+            auto_buf = _calculate_auto_buffer(db, factory_id, float(config.auto_buffer_multiplier))
+            if auto_buf is not None:
+                pre_buffer = max(pre_buffer, auto_buf)
+                post_buffer = max(post_buffer, auto_buf)
+
+        _scheduler_config_cache[fid_str] = (pre_buffer, post_buffer, time.time())
+        return (pre_buffer, post_buffer)
+
+    except Exception as e:
+        logger.debug("_get_scheduler_config fallback: %s", e)
+        return (BUFFER_DAYS, BUFFER_DAYS)
+
+
+def _calculate_auto_buffer(db: Session, factory_id: UUID, multiplier: float) -> int | None:
+    """Calculate auto-buffer from average historical delays over last 90 days.
+
+    Looks at positions where actual completion exceeded planned completion.
+    Returns ceil(avg_delay_days * multiplier), or None if insufficient data.
+    """
+    from sqlalchemy import text
+    try:
+        result = db.execute(text("""
+            SELECT AVG(
+                EXTRACT(EPOCH FROM (
+                    COALESCE(updated_at, now()) - planned_completion_date::timestamp
+                )) / 86400.0
+            ) as avg_delay
+            FROM order_positions
+            WHERE factory_id = :fid
+              AND planned_completion_date IS NOT NULL
+              AND status NOT IN ('cancelled', 'planned')
+              AND planned_completion_date < COALESCE(updated_at, now())::date
+              AND planned_completion_date > (now() - interval '90 days')::date
+        """), {"fid": str(factory_id)}).fetchone()
+
+        if result and result[0] is not None:
+            avg_delay = float(result[0])
+            if avg_delay > 0:
+                import math
+                return max(1, math.ceil(avg_delay * multiplier))
+    except Exception as e:
+        logger.debug("_calculate_auto_buffer failed: %s", e)
+    return None
+
+
+def invalidate_scheduler_config_cache(factory_id: UUID | None = None):
+    """Invalidate the scheduler config cache (called after config update)."""
+    if factory_id:
+        _scheduler_config_cache.pop(str(factory_id), None)
+    else:
+        _scheduler_config_cache.clear()
 
 
 # ────────────────────────────────────────────────────────────────
@@ -928,6 +1019,413 @@ def _check_firing_profile_data(
 
 
 # ────────────────────────────────────────────────────────────────
+# §0.9  Material-ready date helper for INSUFFICIENT_MATERIALS positions
+# ────────────────────────────────────────────────────────────────
+
+DEFAULT_MATERIAL_FALLBACK_DAYS = 14  # ultimate fallback if no supplier lead time
+
+
+def _get_material_ready_date(
+    db: Session,
+    position: OrderPosition,
+) -> date:
+    """Estimate the earliest date when ALL materials for a position will be available.
+
+    Strategy:
+    1. Look up the position's recipe -> recipe materials
+    2. For each material with a deficit, call check_material_availability_smart
+       to find expected_delivery_date from pending purchase requests
+    3. Return the LATEST expected_delivery_date across all deficit materials
+       (all materials must be ready before glazing can start)
+    4. If no expected_delivery_date found, fallback to supplier lead time,
+       then DEFAULT_MATERIAL_FALLBACK_DAYS
+
+    Returns a date (never None).
+    """
+    from api.models import RecipeMaterial, MaterialStock, Material, Supplier
+    from decimal import Decimal
+    from business.services.material_reservation import check_material_availability_smart
+
+    today = date.today()
+    latest_ready_date = today  # at minimum, today
+
+    recipe_id = getattr(position, 'recipe_id', None)
+    if not recipe_id:
+        logger.info(
+            "MATERIAL_READY_DATE | pos=%s | no recipe — fallback +%d days",
+            position.id, DEFAULT_MATERIAL_FALLBACK_DAYS,
+        )
+        return today + timedelta(days=DEFAULT_MATERIAL_FALLBACK_DAYS)
+
+    factory_id = position.factory_id
+
+    recipe_materials = (
+        db.query(RecipeMaterial)
+        .filter(RecipeMaterial.recipe_id == recipe_id)
+        .all()
+    )
+
+    if not recipe_materials:
+        logger.info(
+            "MATERIAL_READY_DATE | pos=%s | no recipe materials — fallback +%d days",
+            position.id, DEFAULT_MATERIAL_FALLBACK_DAYS,
+        )
+        return today + timedelta(days=DEFAULT_MATERIAL_FALLBACK_DAYS)
+
+    for rm in recipe_materials:
+        material = db.query(Material).get(rm.material_id)
+        if not material:
+            continue
+
+        # Calculate required quantity (simplified — mirrors reserve_materials_for_position)
+        required_qty = Decimal(str(rm.quantity_per_unit or 0)) * Decimal(str(position.quantity or 1))
+
+        # Get effective available (stock balance - net reserved)
+        stock = (
+            db.query(MaterialStock)
+            .filter(
+                MaterialStock.material_id == rm.material_id,
+                MaterialStock.factory_id == factory_id,
+            )
+            .first()
+        )
+        effective_available = Decimal(str(stock.balance if stock else 0))
+
+        if effective_available >= required_qty:
+            continue  # this material is fine
+
+        # Material has deficit — check purchase requests
+        result = check_material_availability_smart(
+            db=db,
+            material_id=rm.material_id,
+            factory_id=factory_id,
+            required_qty=required_qty,
+            effective_available=effective_available,
+            planned_glazing_date=None,  # don't evaluate timing, just get delivery date
+        )
+
+        if result.expected_delivery_date:
+            if result.expected_delivery_date > latest_ready_date:
+                latest_ready_date = result.expected_delivery_date
+        else:
+            # No expected delivery date — use supplier lead time or fallback
+            fallback_days = DEFAULT_MATERIAL_FALLBACK_DAYS
+            try:
+                # Try to get supplier lead time from the material's supplier
+                if hasattr(material, 'supplier_id') and material.supplier_id:
+                    supplier = db.query(Supplier).get(material.supplier_id)
+                    if supplier and supplier.default_lead_time_days:
+                        fallback_days = supplier.default_lead_time_days
+            except Exception:
+                pass  # use default fallback
+
+            candidate = today + timedelta(days=fallback_days)
+            if candidate > latest_ready_date:
+                latest_ready_date = candidate
+
+    return latest_ready_date
+
+
+# ────────────────────────────────────────────────────────────────
+# Deadline Exceeded Alert
+# ────────────────────────────────────────────────────────────────
+
+def _create_deadline_exceeded_alert(
+    db: Session,
+    position: OrderPosition,
+    deadline: date,
+    planned_completion: date,
+    stage_durations: dict,
+) -> None:
+    """Create a PM task and CEO notification when planned completion exceeds deadline."""
+    try:
+        from api.models import Task
+        from api.enums import TaskType, TaskStatus, UserRole
+        from business.services.notifications import notify_pm, notify_role
+        import json
+        import math
+
+        overdue_days = (planned_completion - deadline).days
+        bottleneck_stage = max(stage_durations, key=stage_durations.get)
+        bottleneck_duration = stage_durations[bottleneck_stage]
+        extra_workers = max(1, math.ceil(overdue_days / max(bottleneck_duration, 1)))
+
+        pos_label = f"#{position.position_number}" + (
+            f".{position.split_index}" if getattr(position, 'split_index', None) else ""
+        )
+        order_num = ""
+        if hasattr(position, 'order') and position.order:
+            order_num = position.order.order_number
+
+        # Dedup: skip if a PENDING DEADLINE_EXCEEDED task already exists
+        existing = db.query(Task).filter(
+            Task.related_position_id == position.id,
+            Task.type == TaskType.DEADLINE_EXCEEDED,
+            Task.status == TaskStatus.PENDING,
+        ).first()
+        if existing:
+            return
+
+        description = (
+            f"Position {pos_label} (Order {order_num}) is {overdue_days} days late. "
+            f"Deadline: {deadline}, planned completion: {planned_completion}. "
+            f"Bottleneck: {bottleneck_stage} ({bottleneck_duration}d). "
+            f"AI suggestion: Need +{extra_workers} workers on {bottleneck_stage} "
+            f"to meet deadline. Consider working Sunday/overtime."
+        )
+
+        task = Task(
+            factory_id=position.factory_id,
+            type=TaskType.DEADLINE_EXCEEDED,
+            status=TaskStatus.PENDING,
+            assigned_role=UserRole.PRODUCTION_MANAGER,
+            related_order_id=position.order_id,
+            related_position_id=position.id,
+            blocking=False,
+            priority=9,
+            description=description,
+            metadata_json=json.dumps({
+                "position_id": str(position.id),
+                "order_id": str(position.order_id) if position.order_id else None,
+                "deadline": str(deadline),
+                "planned_completion": str(planned_completion),
+                "overdue_days": overdue_days,
+                "bottleneck_stage": bottleneck_stage,
+                "bottleneck_duration_days": bottleneck_duration,
+                "extra_workers_suggested": extra_workers,
+                "stage_durations": stage_durations,
+            }),
+        )
+        db.add(task)
+        db.flush()
+
+        # Notify PM
+        notify_pm(
+            db=db,
+            factory_id=position.factory_id,
+            type="alert",
+            title=f"Deadline exceeded: position {pos_label} +{overdue_days}d late",
+            message=description,
+            related_entity_type="position",
+            related_entity_id=position.id,
+        )
+
+        # Notify CEO (priority 9 = critical)
+        notify_role(
+            db=db,
+            factory_id=position.factory_id,
+            role=UserRole.CEO,
+            type="alert",
+            title=f"DEADLINE EXCEEDED: {pos_label} (Order {order_num}) +{overdue_days}d",
+            message=description,
+            related_entity_type="position",
+            related_entity_id=position.id,
+        )
+
+        logger.warning(
+            "DEADLINE_EXCEEDED | pos=%s | deadline=%s completion=%s | +%d days late",
+            position.id, deadline, planned_completion, overdue_days,
+        )
+    except Exception as e:
+        logger.debug("_create_deadline_exceeded_alert failed: %s", e)
+
+
+# ────────────────────────────────────────────────────────────────
+# Auto-Create Missing Typology
+# ────────────────────────────────────────────────────────────────
+
+def _auto_create_missing_typology(
+    db: Session,
+    position: OrderPosition,
+) -> None:
+    """Auto-create a KilnLoadingTypology when no match found, and create PM task.
+
+    Finds 3 nearest existing typologies by product_type/shape as hints.
+    """
+    try:
+        from api.models import KilnLoadingTypology, Task
+        from api.enums import TaskType, TaskStatus, UserRole
+        import json
+
+        product_type = position.product_type
+        pt_val = product_type.value if hasattr(product_type, 'value') else str(product_type) if product_type else 'tile'
+        shape = getattr(position, 'shape', None)
+        shape_val = shape.value if hasattr(shape, 'value') else str(shape) if shape else None
+        collection = getattr(position, 'collection', None)
+        coll_val = collection.value if hasattr(collection, 'value') else str(collection) if collection else None
+        method = getattr(position, 'application_method_code', None)
+        method_val = method.value if hasattr(method, 'value') else str(method) if method else None
+        place = getattr(position, 'place_of_application', None)
+        place_val = place.value if hasattr(place, 'value') else str(place) if place else None
+
+        w = float(position.width_cm or 0) if getattr(position, 'width_cm', None) else 0
+        l = float(position.length_cm or 0) if getattr(position, 'length_cm', None) else 0
+        if not w and not l and getattr(position, 'size', None):
+            try:
+                parts = str(position.size).lower().replace('\u0445', 'x').split('x')
+                w = float(parts[0])
+                l = float(parts[1]) if len(parts) > 1 else w
+            except (ValueError, IndexError):
+                pass
+
+        size_str = f"{w:.0f}x{l:.0f}" if w and l else "unknown-size"
+        typology_name = f"Auto: {pt_val} {size_str}"
+        if coll_val:
+            typology_name += f" ({coll_val})"
+
+        # Dedup: check if auto-created typology with same name already exists
+        existing_typo = db.query(KilnLoadingTypology).filter(
+            KilnLoadingTypology.factory_id == position.factory_id,
+            KilnLoadingTypology.name == typology_name,
+        ).first()
+        if existing_typo:
+            return
+
+        new_typology = KilnLoadingTypology(
+            factory_id=position.factory_id,
+            name=typology_name,
+            product_types=[pt_val] if pt_val else [],
+            place_of_application=[place_val] if place_val else [],
+            collections=[coll_val] if coll_val else [],
+            methods=[method_val] if method_val else [],
+            min_size_cm=min(w, l) if w and l else None,
+            max_size_cm=max(w, l) if w and l else None,
+            preferred_loading='auto',
+            is_active=True,
+            priority=0,
+            notes="Auto-created by scheduler — needs stage speed configuration.",
+        )
+        db.add(new_typology)
+        db.flush()
+
+        # Find 3 nearest existing typologies as hints (scored by attribute match)
+        hints = (
+            db.query(KilnLoadingTypology)
+            .filter(
+                KilnLoadingTypology.factory_id == position.factory_id,
+                KilnLoadingTypology.is_active == True,  # noqa: E712
+                KilnLoadingTypology.id != new_typology.id,
+            )
+            .all()
+        )
+
+        def _score(t):
+            s = 0
+            if pt_val and pt_val in (t.product_types or []):
+                s += 3
+            if shape_val and shape_val in (t.product_types or []):
+                s += 1
+            if coll_val and coll_val in (t.collections or []):
+                s += 1
+            if method_val and method_val in (t.methods or []):
+                s += 1
+            return s
+
+        hints.sort(key=_score, reverse=True)
+        nearest = hints[:3]
+        hint_names = [h.name for h in nearest]
+
+        pos_label = f"#{position.position_number}" + (
+            f".{position.split_index}" if getattr(position, 'split_index', None) else ""
+        )
+
+        # Dedup task
+        existing_task = db.query(Task).filter(
+            Task.related_position_id == position.id,
+            Task.type == TaskType.TYPOLOGY_SPEEDS_NEEDED,
+            Task.status == TaskStatus.PENDING,
+        ).first()
+        if existing_task:
+            return
+
+        task = Task(
+            factory_id=position.factory_id,
+            type=TaskType.TYPOLOGY_SPEEDS_NEEDED,
+            status=TaskStatus.PENDING,
+            assigned_role=UserRole.PRODUCTION_MANAGER,
+            related_order_id=position.order_id,
+            related_position_id=position.id,
+            blocking=False,
+            priority=6,
+            description=(
+                f"New typology '{typology_name}' auto-created for position {pos_label}. "
+                f"Please configure stage speeds (StageTypologySpeed records). "
+                f"Nearest existing typologies for reference: "
+                f"{', '.join(hint_names) if hint_names else 'none'}."
+            ),
+            metadata_json=json.dumps({
+                "typology_id": str(new_typology.id),
+                "typology_name": typology_name,
+                "position_id": str(position.id),
+                "order_id": str(position.order_id) if position.order_id else None,
+                "nearest_typologies": [
+                    {"id": str(h.id), "name": h.name} for h in nearest
+                ],
+                "product_type": pt_val,
+                "size": size_str,
+                "collection": coll_val,
+                "method": method_val,
+            }),
+        )
+        db.add(task)
+        db.flush()
+
+        logger.info(
+            "TYPOLOGY_AUTO_CREATED | pos=%s | typology='%s' (id=%s) | "
+            "nearest=[%s] | task created",
+            position.id, typology_name, new_typology.id,
+            ", ".join(hint_names),
+        )
+    except Exception as e:
+        logger.debug("_auto_create_missing_typology failed: %s", e)
+
+
+# ────────────────────────────────────────────────────────────────
+# Smart Deadline Fallback
+# ────────────────────────────────────────────────────────────────
+
+def _get_smart_deadline_fallback(db: Session, order: ProductionOrder) -> date:
+    """Calculate a smart deadline fallback when no explicit deadline is set.
+
+    Priority:
+      1. Factory average lead time from last 30 completed orders
+      2. Ultimate fallback: today + 21 days (more realistic than 30)
+    """
+    today = date.today()
+
+    # Try factory average lead time from recent completed orders
+    try:
+        from sqlalchemy import text
+        result = db.execute(text("""
+            SELECT AVG(
+                EXTRACT(EPOCH FROM (
+                    COALESCE(shipped_at, updated_at) - created_at
+                )) / 86400.0
+            ) as avg_lead_days
+            FROM production_orders
+            WHERE factory_id = :fid
+              AND status IN ('shipped', 'ready_for_shipment')
+              AND created_at > (now() - interval '180 days')
+            ORDER BY created_at DESC
+            LIMIT 30
+        """), {"fid": str(order.factory_id)}).fetchone()
+
+        if result and result[0] is not None:
+            avg_days = int(result[0])
+            if 7 <= avg_days <= 90:  # sanity check
+                logger.info(
+                    "SMART_DEADLINE | order=%s | factory avg lead time = %d days",
+                    order.order_number, avg_days,
+                )
+                return today + timedelta(days=avg_days)
+    except Exception as e:
+        logger.debug("_get_smart_deadline_fallback factory avg failed: %s", e)
+
+    # Ultimate fallback: 21 days
+    return today + timedelta(days=21)
+
+
+# ────────────────────────────────────────────────────────────────
 # §1  Schedule a single position (backward from deadline)
 # ────────────────────────────────────────────────────────────────
 
@@ -956,18 +1454,22 @@ def schedule_position(
         - PRE_KILN_CHECK_DAYS             → pre-kiln QC
         - GLAZING_DURATION_DAYS           → planned_glazing_date (rope start)
     """
-    # Guard: skip material-blocked positions — they cannot be scheduled
+    # Material-blocked positions: schedule to expected delivery date instead of skipping
+    _material_ready_date = None
     if position.status == PositionStatus.INSUFFICIENT_MATERIALS.value:
-        logger.warning(
-            "SKIP_SCHEDULE | pos=%s | status=INSUFFICIENT_MATERIALS — skipping",
-            position.id,
+        _material_ready_date = _get_material_ready_date(db, position)
+        logger.info(
+            "MATERIAL_WAIT | pos=%s | scheduled to delivery date %s",
+            position.id, _material_ready_date,
         )
-        return
 
     # Calculate position area and quantity for duration estimation
     _pos_sqm = float(position.glazeable_sqm or 0) * float(position.quantity or 1)
     _pos_pcs = int(position.quantity or 0)
     _fid = position.factory_id
+
+    # Configurable buffer days (per-factory)
+    _pre_buffer, _post_buffer = _get_scheduler_config(db, _fid)
 
     def _dur(stage: str) -> int:
         return _get_stage_duration_days(db, _fid, stage, _pos_sqm, _pos_pcs, position=position)
@@ -1028,6 +1530,9 @@ def schedule_position(
             elif _best_cap_sqm > 0 and _pos_sqm > _best_cap_sqm:
                 _num_loads = math.ceil(_pos_sqm / _best_cap_sqm)
                 _cap_source = f"typology_sqm({_best_cap_sqm:.2f}/firing)"
+        else:
+            # No matching typology — auto-create one and notify PM
+            _auto_create_missing_typology(db, position)
     except Exception as e:
         logger.debug("Multi-load typology lookup failed: %s", e)
 
@@ -1041,6 +1546,9 @@ def schedule_position(
     firing_days = firing_days_single * _num_loads
     kiln_cool_initial_days = kiln_cool_initial_single * _num_loads
     kiln_unloading_days = kiln_unloading_single * _num_loads
+
+    # Persist num_loads for batch planner
+    position.estimated_num_loads = _num_loads
 
     if _num_loads > 1:
         logger.info(
@@ -1067,15 +1575,39 @@ def schedule_position(
     planned_kiln = _skip_weekends(
         planned_sorting - timedelta(
             days=firing_days + kiln_cool_initial_days + kiln_unloading_days
-            + tile_cooling_days + BUFFER_DAYS
+            + tile_cooling_days + _post_buffer
         )
     )
 
     planned_glazing = _skip_weekends(
         planned_kiln - timedelta(
-            days=pre_kiln_total + BUFFER_DAYS
+            days=pre_kiln_total + _pre_buffer
         )
     )
+
+    # ── Material-wait constraint ──────────────────────────────────
+    # If position is material-blocked, glazing cannot start before materials arrive.
+    # Push planned_glazing forward to material_ready_date and recalculate downstream.
+    if _material_ready_date and planned_glazing < _material_ready_date:
+        planned_glazing = _skip_weekends(_material_ready_date)
+        planned_kiln = _skip_weekends(
+            planned_glazing + timedelta(days=pre_kiln_total + _pre_buffer)
+        )
+        planned_sorting = _skip_weekends(
+            planned_kiln + timedelta(
+                days=firing_days + kiln_cool_initial_days + kiln_unloading_days
+                + tile_cooling_days + _post_buffer
+            )
+        )
+        planned_completion = _skip_weekends(
+            planned_sorting + timedelta(days=sorting_days + packing_days)
+        )
+        logger.info(
+            "MATERIAL_WAIT_SHIFT | pos=%s | glazing pushed to %s (material ready %s) | "
+            "completion=%s (deadline=%s)",
+            position.id, planned_glazing, _material_ready_date,
+            planned_completion, deadline,
+        )
 
     # Guard: planned_glazing must be >= today.
     # When overdue, find the earliest day with available capacity instead of
@@ -1110,12 +1642,12 @@ def schedule_position(
             planned_glazing = _skip_weekends(today + timedelta(days=30))
 
         planned_kiln = _skip_weekends(
-            planned_glazing + timedelta(days=pre_kiln_total + BUFFER_DAYS)
+            planned_glazing + timedelta(days=pre_kiln_total + _pre_buffer)
         )
         planned_sorting = _skip_weekends(
             planned_kiln + timedelta(
                 days=firing_days + kiln_cool_initial_days + kiln_unloading_days
-                + tile_cooling_days + BUFFER_DAYS
+                + tile_cooling_days + _post_buffer
             )
         )
         planned_completion = _skip_weekends(
@@ -1139,7 +1671,7 @@ def schedule_position(
             planned_sorting = _skip_weekends(
                 planned_kiln + timedelta(
                     days=firing_days + kiln_cool_initial_days + kiln_unloading_days
-                    + tile_cooling_days + BUFFER_DAYS
+                    + tile_cooling_days + _post_buffer
                 )
             )
             planned_completion = _skip_weekends(
@@ -1186,13 +1718,13 @@ def schedule_position(
                             # Recalculate downstream dates from new glazing date
                             planned_kiln = _skip_weekends(
                                 planned_glazing + timedelta(
-                                    days=pre_kiln_total + BUFFER_DAYS
+                                    days=pre_kiln_total + _pre_buffer
                                 )
                             )
                             planned_sorting = _skip_weekends(
                                 planned_kiln + timedelta(
                                     days=firing_days + kiln_cool_initial_days
-                                    + kiln_unloading_days + tile_cooling_days + BUFFER_DAYS
+                                    + kiln_unloading_days + tile_cooling_days + _post_buffer
                                 )
                             )
                             planned_completion = _skip_weekends(
@@ -1208,11 +1740,41 @@ def schedule_position(
     position.planned_sorting_date = planned_sorting
     position.planned_completion_date = planned_completion
 
+    # Store original kiln date for batch deferral tracking.
+    # Reset on each full reschedule (schedule_position call).
+    _sched_meta = position.schedule_metadata if position.schedule_metadata else {}
+    if not isinstance(_sched_meta, dict):
+        _sched_meta = {}
+    _sched_meta["original_kiln_date"] = planned_kiln.isoformat() if planned_kiln else None
+    _sched_meta["num_loads"] = _num_loads
+    position.schedule_metadata = _sched_meta
+
     # Increment schedule version
     position.schedule_version = (position.schedule_version or 0) + 1
 
     # Check if firing profile data exists — create task if missing
     _check_firing_profile_data(db, position, _fid)
+
+    # ── Feature: Deadline Exceeded Alert ──────────────────────
+    # If planned_completion exceeds the deadline, create a PM task + CEO notification
+    if planned_completion > deadline:
+        _create_deadline_exceeded_alert(
+            db, position, deadline, planned_completion,
+            stage_durations={
+                'unpacking_sorting': unpacking_days,
+                'engobe': engobe_days,
+                'drying_engobe': drying_engobe_days,
+                'glazing': glazing_days,
+                'drying_glaze': drying_glaze_days,
+                'edge_cleaning_loading': edge_clean_load_days,
+                'firing': firing_days,
+                'kiln_cooling_initial': kiln_cool_initial_days,
+                'kiln_unloading': kiln_unloading_days,
+                'tile_cooling': tile_cooling_days,
+                'sorting': sorting_days,
+                'packing': packing_days,
+            },
+        )
 
     logger.info(
         "SCHEDULED | position=%s v%d | glazing=%s kiln=%s sorting=%s "
@@ -1227,25 +1789,36 @@ def schedule_position(
 # §2  Schedule all positions in an order
 # ────────────────────────────────────────────────────────────────
 
-def schedule_order(db: Session, order: ProductionOrder) -> int:
+def schedule_order(
+    db: Session,
+    order: ProductionOrder,
+    skip_batch_planning: bool = False,
+) -> int:
     """
     Schedule all positions in an order using backward scheduling.
 
     Uses the order's final_deadline. If not set, falls back to
-    desired_delivery_date, then today + 30 days.
+    desired_delivery_date, then factory average lead time, then today + 21 days.
+
+    Args:
+        db: Database session
+        order: The production order to schedule
+        skip_batch_planning: If True, skip batch planning step (useful when
+            called from reschedule_factory which does its own batch planning pass)
 
     Returns the number of positions scheduled.
     """
     deadline = (
         order.final_deadline
         or order.desired_delivery_date
-        or (date.today() + timedelta(days=30))
+        or _get_smart_deadline_fallback(db, order)
     )
 
     positions = db.query(OrderPosition).filter(
         OrderPosition.order_id == order.id,
         OrderPosition.status != PositionStatus.CANCELLED.value,
-        OrderPosition.status != PositionStatus.INSUFFICIENT_MATERIALS.value,
+        # INSUFFICIENT_MATERIALS positions are now scheduled to expected delivery date
+        # (no longer excluded — handled in schedule_position)
     ).all()
 
     count = 0
@@ -1275,6 +1848,24 @@ def schedule_order(db: Session, order: ProductionOrder) -> int:
     except Exception as e:
         logger.warning("Failed to update schedule_deadline: %s", e)
 
+    # Run batch planning for positions scheduled in this order.
+    # Collects planned kiln dates and runs plan_kiln_batches for
+    # the factory over the relevant date range.
+    if not skip_batch_planning:
+        try:
+            kiln_dates = [
+                p.planned_kiln_date for p in positions if p.planned_kiln_date
+            ]
+            if kiln_dates and order.factory_id:
+                _date_from = min(kiln_dates)
+                _date_to = max(kiln_dates)
+                plan_kiln_batches(db, order.factory_id, _date_from, _date_to)
+        except Exception as e:
+            logger.warning(
+                "Batch planning after schedule_order failed: %s", e,
+                exc_info=True,
+            )
+
     return count
 
 
@@ -1298,7 +1889,7 @@ def reschedule_position(db: Session, position: OrderPosition) -> None:
     deadline = (
         order.final_deadline
         or order.desired_delivery_date
-        or (date.today() + timedelta(days=30))
+        or _get_smart_deadline_fallback(db, order)
     )
 
     schedule_position(db, position, deadline)
@@ -1404,7 +1995,7 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
     total = 0
     for order in active_orders:
         try:
-            count = schedule_order(db, order)
+            count = schedule_order(db, order, skip_batch_planning=True)
             total += count
             # Flush after each order so the next order's capacity queries
             # see the updated planned dates (autoflush is OFF).
@@ -1414,6 +2005,34 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
                 "Failed to reschedule order %s: %s", order.order_number, e,
                 exc_info=True,
             )
+
+    # Single batch planning pass after all orders are scheduled.
+    # This enables cross-order batching: positions from different orders
+    # with compatible temperatures are grouped to fill kilns completely.
+    try:
+        all_kiln_dates = (
+            db.query(OrderPosition.planned_kiln_date)
+            .filter(
+                OrderPosition.factory_id == factory_id,
+                OrderPosition.planned_kiln_date.isnot(None),
+                OrderPosition.batch_id.is_(None),
+                OrderPosition.status != PositionStatus.CANCELLED.value,
+            )
+            .distinct()
+            .all()
+        )
+        if all_kiln_dates:
+            dates = [row[0] for row in all_kiln_dates]
+            plan_kiln_batches(
+                db, factory_id,
+                date_from=min(dates),
+                date_to=max(dates),
+            )
+    except Exception as e:
+        logger.warning(
+            "Batch planning after reschedule_factory failed: %s", e,
+            exc_info=True,
+        )
 
     db.commit()
     logger.info(
@@ -1543,3 +2162,303 @@ def get_order_schedule_summary(db: Session, order: ProductionOrder) -> dict:
         "positions_scheduled": sum(1 for p in positions if p.planned_glazing_date),
         "positions": position_schedules,
     }
+
+
+# ────────────────────────────────────────────────────────────────
+# §5  Kiln Batch Planning — bridge between scheduler & batch_formation
+# ────────────────────────────────────────────────────────────────
+
+# Configurable thresholds
+MIN_KILN_FILL_PCT = 60       # minimum fill % to fire (below this: wait)
+MAX_BATCH_WAIT_DAYS = 3      # maximum extra days to wait for more work
+DEADLINE_PRESSURE_DAYS = 3   # if deadline within N days of kiln date, fire regardless
+
+
+def plan_kiln_batches(
+    db: Session,
+    factory_id: UUID,
+    date_from: date,
+    date_to: date,
+    force_partial: bool = False,
+) -> list[dict]:
+    """
+    Group scheduled positions into optimal kiln batches.
+
+    This is the bridge between the backward scheduler (which assigns
+    planned_kiln_date per position) and batch_formation (which creates
+    Batch records with kiln assignments and loading plans).
+
+    Algorithm:
+    1. Get all positions with planned_kiln_date in [date_from, date_to]
+       that are NOT yet assigned to a batch.
+    2. Group by temperature compatibility (reuses firing_profiles logic).
+    3. For each temperature group on each date:
+       a. Calculate total area vs best kiln capacity = fill %.
+       b. If fill < MIN_KILN_FILL_PCT and no deadline pressure:
+          - Shift those positions' planned_kiln_date forward by 1 day
+            (max MAX_BATCH_WAIT_DAYS beyond original date).
+          - They'll be picked up in the next batch planning cycle.
+       c. If fill >= MIN_KILN_FILL_PCT OR deadline pressure OR force_partial:
+          - Delegate to suggest_or_create_batches() for actual batch creation.
+    4. Return batch plan summary.
+
+    Args:
+        db: Database session
+        factory_id: Factory to plan batches for
+        date_from: Start of planning window (inclusive)
+        date_to: End of planning window (inclusive)
+        force_partial: If True, fire partial kilns regardless of fill %
+
+    Returns:
+        List of batch detail dicts (from batch_formation).
+    """
+    from business.services.firing_profiles import group_positions_by_temperature
+    from business.services.batch_formation import (
+        _get_available_kilns,
+        _get_position_area_sqm,
+    )
+
+    # Step 1: Collect unbatched positions in the date range
+    positions = (
+        db.query(OrderPosition)
+        .filter(
+            OrderPosition.factory_id == factory_id,
+            OrderPosition.planned_kiln_date >= date_from,
+            OrderPosition.planned_kiln_date <= date_to,
+            OrderPosition.batch_id.is_(None),
+            OrderPosition.status != PositionStatus.CANCELLED.value,
+        )
+        .order_by(
+            OrderPosition.planned_kiln_date.asc(),
+            OrderPosition.priority_order.desc().nulls_last(),
+        )
+        .all()
+    )
+
+    if not positions:
+        logger.info(
+            "BATCH_PLAN | factory=%s | No unbatched positions in %s..%s",
+            factory_id, date_from, date_to,
+        )
+        return []
+
+    logger.info(
+        "BATCH_PLAN | factory=%s | %d unbatched positions in %s..%s",
+        factory_id, len(positions), date_from, date_to,
+    )
+
+    # Step 2: Group by kiln date, then by temperature
+    by_date: dict[date, list[OrderPosition]] = {}
+    for pos in positions:
+        d = pos.planned_kiln_date
+        by_date.setdefault(d, []).append(pos)
+
+    all_created_batches: list[dict] = []
+    deferred_positions: list[OrderPosition] = []  # positions shifted forward
+
+    for kiln_date in sorted(by_date.keys()):
+        day_positions = by_date[kiln_date]
+
+        # Get available kilns for this date
+        available_kilns = _get_available_kilns(db, factory_id, kiln_date)
+        if not available_kilns:
+            logger.warning(
+                "BATCH_PLAN | factory=%s | No kilns available on %s, "
+                "deferring %d positions",
+                factory_id, kiln_date, len(day_positions),
+            )
+            deferred_positions.extend(day_positions)
+            continue
+
+        # Best kiln capacity (largest available)
+        max_kiln_cap = max(
+            float(_get_kiln_capacity_sqm(k)) for k in available_kilns
+        )
+
+        # Group by temperature
+        temp_groups = group_positions_by_temperature(db, day_positions)
+
+        for group_id, group_positions in temp_groups.items():
+            total_area = sum(
+                float(_get_position_area_sqm(p)) for p in group_positions
+            )
+
+            fill_pct = (total_area / max_kiln_cap * 100) if max_kiln_cap > 0 else 0
+
+            # Check deadline pressure: any position with order deadline
+            # within DEADLINE_PRESSURE_DAYS of planned_kiln_date?
+            has_deadline_pressure = _check_deadline_pressure(
+                db, group_positions, kiln_date,
+            )
+
+            should_fire = (
+                force_partial
+                or fill_pct >= MIN_KILN_FILL_PCT
+                or has_deadline_pressure
+            )
+
+            if not should_fire:
+                # Check if we've already waited the maximum
+                max_waited = _get_max_days_waited(group_positions, kiln_date)
+
+                if max_waited >= MAX_BATCH_WAIT_DAYS:
+                    # Waited too long, fire partial
+                    logger.warning(
+                        "PARTIAL_KILN | factory=%s date=%s temp_group=%s | "
+                        "%.0f%% fill after %d days wait — firing partial "
+                        "(%d positions, %.3f/%.3f sqm)",
+                        factory_id, kiln_date, group_id,
+                        fill_pct, max_waited,
+                        len(group_positions), total_area, max_kiln_cap,
+                    )
+                    should_fire = True
+                else:
+                    # Defer: shift planned_kiln_date forward by 1 day.
+                    # original_kiln_date in schedule_metadata (set by
+                    # schedule_position) is preserved for wait tracking.
+                    next_day = _skip_weekends(kiln_date + timedelta(days=1))
+                    for pos in group_positions:
+                        pos.planned_kiln_date = next_day
+                        # Also shift downstream dates
+                        _shift_downstream_dates(pos, days_delta=1)
+                    deferred_positions.extend(group_positions)
+
+                    logger.info(
+                        "BATCH_DEFER | factory=%s | temp_group=%s | "
+                        "%.0f%% fill < %d%% threshold — shifting %d positions "
+                        "from %s to %s (waited %d/%d days)",
+                        factory_id, group_id,
+                        fill_pct, MIN_KILN_FILL_PCT,
+                        len(group_positions), kiln_date, next_day,
+                        max_waited + 1, MAX_BATCH_WAIT_DAYS,
+                    )
+                    continue
+
+            if should_fire:
+                logger.info(
+                    "BATCH_FIRE | factory=%s date=%s temp_group=%s | "
+                    "%.0f%% fill | %d positions, %.3f sqm | "
+                    "deadline_pressure=%s",
+                    factory_id, kiln_date, group_id,
+                    fill_pct, len(group_positions), total_area,
+                    has_deadline_pressure,
+                )
+
+    # Step 3: Flush deferred position date changes
+    if deferred_positions:
+        db.flush()
+        logger.info(
+            "BATCH_PLAN | factory=%s | Deferred %d positions to accumulate "
+            "more work",
+            factory_id, len(deferred_positions),
+        )
+
+    # Step 4: Delegate actual batch creation to batch_formation
+    # It will pick up all positions that are ready (GLAZED/PRE_KILN_CHECK
+    # and still unbatched) for the date range.
+    # For scheduled-but-not-yet-ready positions, batches will be created
+    # when they reach kiln-ready status and batch formation runs.
+    from business.services.batch_formation import suggest_or_create_batches
+
+    # Run batch formation for each date that had positions to fire
+    dates_to_batch = sorted(set(
+        pos.planned_kiln_date for pos in positions
+        if pos not in deferred_positions
+        and pos.batch_id is None
+    ))
+
+    for batch_date in dates_to_batch:
+        try:
+            batches = suggest_or_create_batches(
+                db=db,
+                factory_id=factory_id,
+                target_date=batch_date,
+                mode="auto",
+            )
+            all_created_batches.extend(batches)
+        except Exception as e:
+            logger.error(
+                "BATCH_PLAN | factory=%s date=%s | batch creation failed: %s",
+                factory_id, batch_date, e, exc_info=True,
+            )
+
+    logger.info(
+        "BATCH_PLAN_DONE | factory=%s | %d batches created, %d positions deferred",
+        factory_id, len(all_created_batches), len(deferred_positions),
+    )
+
+    return all_created_batches
+
+
+def _check_deadline_pressure(
+    db: Session,
+    positions: list[OrderPosition],
+    kiln_date: date,
+) -> bool:
+    """
+    Check if any position in the group has deadline pressure.
+
+    Deadline pressure = order's final_deadline is within
+    DEADLINE_PRESSURE_DAYS of the planned kiln date.
+    """
+    if not positions:
+        return False
+
+    pressure_cutoff = kiln_date + timedelta(days=DEADLINE_PRESSURE_DAYS)
+
+    # Single query: get orders whose deadline is within pressure window
+    order_ids = list({pos.order_id for pos in positions})
+    orders = (
+        db.query(ProductionOrder)
+        .filter(ProductionOrder.id.in_(order_ids))
+        .all()
+    )
+    for order in orders:
+        deadline = order.final_deadline or order.desired_delivery_date
+        if deadline and deadline <= pressure_cutoff:
+            return True
+    return False
+
+
+def _get_max_days_waited(
+    positions: list[OrderPosition],
+    current_date: date,
+) -> int:
+    """
+    Calculate the maximum number of days any position in the group
+    has been deferred from its original planned_kiln_date.
+
+    Reads 'original_kiln_date' from position's schedule_metadata,
+    which is set by schedule_position() during backward scheduling.
+
+    Falls back to 0 if no deferral history detected.
+    """
+    max_waited = 0
+    for pos in positions:
+        meta = pos.schedule_metadata or {} if hasattr(pos, 'schedule_metadata') else {}
+        original_str = meta.get("original_kiln_date") if isinstance(meta, dict) else None
+        if original_str:
+            try:
+                original_date = date.fromisoformat(original_str)
+                if current_date > original_date:
+                    waited = (current_date - original_date).days
+                    max_waited = max(max_waited, waited)
+            except (ValueError, TypeError):
+                pass
+    return max_waited
+
+
+
+def _shift_downstream_dates(pos: OrderPosition, days_delta: int) -> None:
+    """
+    Shift sorting and completion dates forward by days_delta
+    when kiln date is deferred.
+    """
+    if pos.planned_sorting_date:
+        pos.planned_sorting_date = _skip_weekends(
+            pos.planned_sorting_date + timedelta(days=days_delta)
+        )
+    if pos.planned_completion_date:
+        pos.planned_completion_date = _skip_weekends(
+            pos.planned_completion_date + timedelta(days=days_delta)
+        )

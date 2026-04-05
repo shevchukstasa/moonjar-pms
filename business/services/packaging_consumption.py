@@ -256,3 +256,213 @@ def consume_packaging(
     logger.info("Consumed packaging for position %s: %d materials",
                 position_id, len(consumed))
     return {"ok": True, "consumed": consumed}
+
+
+# ────────────────────────────────────────────────────────────────
+# Packing Material Availability Check + Blocking Task
+# ────────────────────────────────────────────────────────────────
+
+def check_packing_materials(
+    db: Session,
+    position_id: UUID,
+    factory_id: UUID,
+) -> dict:
+    """Check if packing materials are available for a position entering sorting.
+
+    For each required packaging material (boxes, spacers), checks stock balance.
+    If any material is insufficient, creates a PACKING_MATERIALS_NEEDED blocking task.
+    The task auto-resolves when materials arrive (like INSUFFICIENT_MATERIALS).
+
+    Returns:
+        dict with availability status and any created task info.
+    """
+    from api.models import Task
+    from api.enums import TaskType, TaskStatus
+
+    position = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not position:
+        logger.warning("check_packing_materials: position %s not found", position_id)
+        return {"ok": False, "error": "Position not found"}
+
+    needs = calculate_packaging_needs(db, position)
+    if not needs.materials:
+        return {"ok": True, "sufficient": True, "reason": "No packaging config for this size"}
+
+    shortages = []
+    for need in needs.materials:
+        stock = db.query(MaterialStock).filter(
+            MaterialStock.material_id == need.material_id,
+            MaterialStock.factory_id == factory_id,
+        ).first()
+
+        available = Decimal(str(stock.balance)) if stock else Decimal("0")
+        if available < need.quantity_needed:
+            shortages.append({
+                "material_id": str(need.material_id),
+                "material_name": need.material_name,
+                "needed": float(need.quantity_needed),
+                "available": float(available),
+                "deficit": float(need.quantity_needed - available),
+                "is_box": need.is_box,
+            })
+
+    if not shortages:
+        return {"ok": True, "sufficient": True, "materials_checked": len(needs.materials)}
+
+    # Check if there's already an open PACKING_MATERIALS_NEEDED task for this position
+    existing_task = db.query(Task).filter(
+        Task.related_position_id == position_id,
+        Task.type == TaskType.PACKING_MATERIALS_NEEDED,
+        Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+    ).first()
+
+    if existing_task:
+        # Update metadata with latest shortage info
+        existing_task.metadata_json = {
+            "shortages": shortages,
+            "boxes_needed": needs.boxes_needed,
+            "box_type": needs.box_type_name,
+        }
+        existing_task.updated_at = datetime.now(timezone.utc)
+        logger.info("Updated existing packing materials task %s for position %s",
+                    existing_task.id, position_id)
+        return {
+            "ok": True,
+            "sufficient": False,
+            "task_id": str(existing_task.id),
+            "shortages": shortages,
+            "task_status": "updated",
+        }
+
+    # Create blocking task — warning only (does NOT change position status)
+    shortage_desc = ", ".join(
+        f"{s['material_name']}: need {s['needed']}, have {s['available']}"
+        for s in shortages
+    )
+    task = Task(
+        factory_id=factory_id,
+        type=TaskType.PACKING_MATERIALS_NEEDED,
+        status=TaskStatus.PENDING,
+        assigned_role="warehouse",
+        related_order_id=position.order_id,
+        related_position_id=position_id,
+        blocking=True,
+        description=f"Packing materials shortage for sorting: {shortage_desc}",
+        priority=2,
+        metadata_json={
+            "shortages": shortages,
+            "boxes_needed": needs.boxes_needed,
+            "box_type": needs.box_type_name,
+        },
+    )
+    db.add(task)
+    db.flush()
+
+    logger.info(
+        "PACKING_SHORTAGE | position=%s | %d materials short | task=%s",
+        position_id, len(shortages), task.id,
+    )
+
+    return {
+        "ok": True,
+        "sufficient": False,
+        "task_id": str(task.id),
+        "shortages": shortages,
+        "task_status": "created",
+    }
+
+
+def on_sorting_start(
+    db: Session,
+    position_id: UUID,
+    factory_id: UUID,
+    user_id: UUID | None = None,
+) -> dict:
+    """Hook called when a position transitions to TRANSFERRED_TO_SORTING.
+
+    Orchestrates:
+    1. Reserve packaging materials (existing logic)
+    2. Check packing material availability → create warning task if insufficient
+
+    Does NOT block the position status change — just creates a task as a warning
+    so warehouse knows to restock before packing begins.
+    """
+    result = {"reserve": None, "availability": None}
+
+    # 1. Reserve packaging
+    try:
+        reserve_result = reserve_packaging(db, position_id, factory_id, user_id)
+        result["reserve"] = reserve_result
+    except Exception as e:
+        logger.warning("on_sorting_start: reserve_packaging failed for %s: %s", position_id, e)
+        result["reserve"] = {"ok": False, "error": str(e)}
+
+    # 2. Check availability and create task if insufficient
+    try:
+        availability = check_packing_materials(db, position_id, factory_id)
+        result["availability"] = availability
+    except Exception as e:
+        logger.warning("on_sorting_start: check_packing_materials failed for %s: %s", position_id, e)
+        result["availability"] = {"ok": False, "error": str(e)}
+
+    return result
+
+
+def auto_resolve_packing_tasks(
+    db: Session,
+    factory_id: UUID,
+    material_id: UUID,
+) -> list[str]:
+    """Auto-resolve PACKING_MATERIALS_NEEDED tasks when materials arrive.
+
+    Called after a material receive transaction. Checks all open packing tasks
+    at this factory and resolves those where materials are now sufficient.
+
+    Returns list of resolved task IDs.
+    """
+    from api.models import Task
+    from api.enums import TaskType, TaskStatus
+
+    open_tasks = db.query(Task).filter(
+        Task.factory_id == factory_id,
+        Task.type == TaskType.PACKING_MATERIALS_NEEDED,
+        Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+    ).all()
+
+    resolved_ids = []
+    for task in open_tasks:
+        if not task.related_position_id:
+            continue
+
+        position = db.query(OrderPosition).filter(
+            OrderPosition.id == task.related_position_id
+        ).first()
+        if not position:
+            continue
+
+        needs = calculate_packaging_needs(db, position)
+        if not needs.materials:
+            # No packaging needed — resolve
+            task.status = TaskStatus.DONE
+            task.completed_at = datetime.now(timezone.utc)
+            resolved_ids.append(str(task.id))
+            continue
+
+        all_sufficient = True
+        for need in needs.materials:
+            stock = db.query(MaterialStock).filter(
+                MaterialStock.material_id == need.material_id,
+                MaterialStock.factory_id == factory_id,
+            ).first()
+            available = Decimal(str(stock.balance)) if stock else Decimal("0")
+            if available < need.quantity_needed:
+                all_sufficient = False
+                break
+
+        if all_sufficient:
+            task.status = TaskStatus.DONE
+            task.completed_at = datetime.now(timezone.utc)
+            resolved_ids.append(str(task.id))
+            logger.info("Auto-resolved packing task %s for position %s", task.id, task.related_position_id)
+
+    return resolved_ids

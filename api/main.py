@@ -1854,6 +1854,7 @@ async def lifespan(app: FastAPI):
         ("seed_typologies", "api.schema_patches.seed_typologies_patch", "apply"),
         ("gamification_v2", "api.schema_patches.gamification_v2_patch", "apply"),
         ("workforce", "api.schema_patches.workforce_patch", "apply"),
+        ("scheduler_config", "api.schema_patches.scheduler_config_patch", "apply"),
     ]
 
     # Inline patches (too small for separate files)

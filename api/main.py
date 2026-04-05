@@ -2103,6 +2103,10 @@ if _frontend_dir.is_dir():
     @app.get("/{full_path:path}")
     async def _serve_spa(full_path: str):
         """SPA fallback: serve index.html for all non-API, non-asset routes."""
+        # Never intercept API routes — let FastAPI return proper 404/401
+        if full_path.startswith("api/") or full_path == "api":
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
         file_path = _frontend_dir / full_path
         if full_path and file_path.is_file():
             return FileResponse(str(file_path))

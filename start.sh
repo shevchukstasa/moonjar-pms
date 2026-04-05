@@ -24,20 +24,18 @@ PYEOF
 
 # Build frontend if not already built
 FRONTEND_DIR="presentation/dashboard"
-if [ -d "$FRONTEND_DIR" ] && [ ! -d "$FRONTEND_DIR/dist/assets" ]; then
+if [ -d "$FRONTEND_DIR" ]; then
     echo ""
     echo "=== Building frontend ==="
     if command -v node &> /dev/null; then
         cd "$FRONTEND_DIR"
         npm ci --prefer-offline 2>&1 | tail -3
-        npm run build 2>&1
+        VITE_API_URL="" npm run build 2>&1
         echo "=== Frontend build complete ==="
         cd ../..
     else
         echo "=== WARNING: Node.js not found, skipping frontend build ==="
     fi
-elif [ -d "$FRONTEND_DIR/dist/assets" ]; then
-    echo "Frontend already built — skipping"
 fi
 
 # Run Alembic migrations

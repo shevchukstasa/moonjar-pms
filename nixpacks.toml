@@ -1,11 +1,5 @@
 # Moonjar PMS — Nixpacks configuration for Railway
-# Python backend + Node.js frontend build
+# Python backend + Node.js for frontend build at startup
 
 [phases.setup]
 aptPkgs = ["postgresql-client", "nodejs", "npm"]
-
-[phases.build]
-cmds = [
-    "cd presentation/dashboard && npm ci && npm run build && cd ../..",
-    "pip install -r requirements.txt",
-]

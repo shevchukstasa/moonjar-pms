@@ -22,6 +22,24 @@ except Exception as e:
     print(f"Note: could not expand alembic_version column: {e}", file=sys.stderr)
 PYEOF
 
+# Build frontend if not already built
+FRONTEND_DIR="presentation/dashboard"
+if [ -d "$FRONTEND_DIR" ] && [ ! -d "$FRONTEND_DIR/dist/assets" ]; then
+    echo ""
+    echo "=== Building frontend ==="
+    if command -v node &> /dev/null; then
+        cd "$FRONTEND_DIR"
+        npm ci --prefer-offline 2>&1 | tail -3
+        npm run build 2>&1
+        echo "=== Frontend build complete ==="
+        cd ../..
+    else
+        echo "=== WARNING: Node.js not found, skipping frontend build ==="
+    fi
+elif [ -d "$FRONTEND_DIR/dist/assets" ]; then
+    echo "Frontend already built — skipping"
+fi
+
 # Run Alembic migrations
 echo ""
 echo "=== Running database migrations ==="

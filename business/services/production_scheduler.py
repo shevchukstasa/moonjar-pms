@@ -990,15 +990,53 @@ def schedule_position(
     packing_days = _dur('packing')
 
     # ── Multiple kiln loads ──────────────────────────────────
-    # If position total area > kiln capacity, it needs multiple firings.
-    # Each firing cycle = firing + cooling_initial + cooling_full + unloading.
-    # These are sequential (kiln can only do one batch at a time).
+    # Calculate how many firings are needed based on actual kiln capacity
+    # for this specific product (edge vs flat loading, typology-aware).
+    # KilnTypologyCapacity stores total_pieces per firing — use that.
+    # If no typology data, fallback to area-based estimate.
     import math
-    _kiln_cap = _get_factory_daily_kiln_cap(db, _fid)
-    if _kiln_cap > 0 and _pos_sqm > _kiln_cap:
-        _num_loads = math.ceil(_pos_sqm / _kiln_cap)
-    else:
-        _num_loads = 1
+    _num_loads = 1
+    _cap_source = "fallback"
+    try:
+        from business.services.typology_matcher import (
+            find_matching_typology, get_effective_capacity,
+            classify_loading_zone, get_zone_capacity,
+        )
+        _typology = find_matching_typology(db, position)
+        if _typology:
+            # Try to get pieces-per-firing from KilnTypologyCapacity
+            from api.models import KilnTypologyCapacity
+            _zone = classify_loading_zone(position)
+            _best_pcs = 0
+            _best_cap_sqm = 0.0
+            _kilns = db.query(Resource).filter(
+                Resource.factory_id == _fid,
+                Resource.status == 'active',
+                Resource.capacity_sqm > 0,
+            ).all()
+            for _k in _kilns:
+                _cap_rec = db.query(KilnTypologyCapacity).filter(
+                    KilnTypologyCapacity.typology_id == _typology.id,
+                    KilnTypologyCapacity.resource_id == _k.id,
+                ).first()
+                if _cap_rec and _cap_rec.capacity_pcs and _cap_rec.capacity_pcs > 0:
+                    _best_pcs += int(_cap_rec.capacity_pcs)
+                    _best_cap_sqm += float(_cap_rec.capacity_sqm or 0)
+            if _best_pcs > 0 and _pos_pcs > _best_pcs:
+                _num_loads = math.ceil(_pos_pcs / _best_pcs)
+                _cap_source = f"typology_pcs({_best_pcs}/firing)"
+            elif _best_cap_sqm > 0 and _pos_sqm > _best_cap_sqm:
+                _num_loads = math.ceil(_pos_sqm / _best_cap_sqm)
+                _cap_source = f"typology_sqm({_best_cap_sqm:.2f}/firing)"
+    except Exception as e:
+        logger.debug("Multi-load typology lookup failed: %s", e)
+
+    # Fallback: area-based estimate using raw shelf capacity
+    if _num_loads <= 1 and _pos_sqm > 0:
+        _shelf_cap = _get_factory_daily_kiln_cap(db, _fid)
+        if _shelf_cap > 0 and _pos_sqm > _shelf_cap:
+            _num_loads = math.ceil(_pos_sqm / _shelf_cap)
+            _cap_source = f"shelf_area({_shelf_cap:.2f})"
 
     firing_days = firing_days_single * _num_loads
     kiln_cool_initial_days = kiln_cool_initial_single * _num_loads
@@ -1006,9 +1044,9 @@ def schedule_position(
 
     if _num_loads > 1:
         logger.info(
-            "MULTI_LOAD | pos=%s | %.2f m² / %.2f m² cap = %d loads | "
+            "MULTI_LOAD | pos=%s | %d pcs, %.2f m² | %d loads (%s) | "
             "firing=%dd cool=%dd unload=%dd",
-            position.id, _pos_sqm, _kiln_cap, _num_loads,
+            position.id, _pos_pcs, _pos_sqm, _num_loads, _cap_source,
             firing_days, kiln_cool_initial_days, kiln_unloading_days,
         )
 

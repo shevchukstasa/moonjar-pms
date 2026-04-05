@@ -1,5 +1,11 @@
 # Moonjar PMS — Nixpacks configuration for Railway
-# Ensures postgresql-client is available for pg_dump (used by scheduled backups)
+# Python backend + Node.js frontend build
 
 [phases.setup]
-aptPkgs = ["postgresql-client"]
+aptPkgs = ["postgresql-client", "nodejs", "npm"]
+
+[phases.build]
+cmds = [
+    "cd presentation/dashboard && npm ci && npm run build && cd ../..",
+    "pip install -r requirements.txt",
+]

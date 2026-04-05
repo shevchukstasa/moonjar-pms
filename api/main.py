@@ -2086,3 +2086,26 @@ def setup_routers():
     app.include_router(pdf_templates.router, prefix="/api/pdf/templates", tags=["pdf-templates"])
 
 setup_routers()
+
+
+# ── Serve frontend SPA from presentation/dashboard/dist ──────────
+# Must be AFTER all API routers so /api/* takes priority.
+import pathlib as _pathlib
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+_frontend_dir = _pathlib.Path(__file__).resolve().parent.parent / "presentation" / "dashboard" / "dist"
+if _frontend_dir.is_dir():
+    # Serve static assets (JS, CSS, images)
+    app.mount("/assets", StaticFiles(directory=str(_frontend_dir / "assets")), name="frontend-assets")
+
+    # Serve other static files at root (favicon, manifest, etc.)
+    @app.get("/{full_path:path}")
+    async def _serve_spa(full_path: str):
+        """SPA fallback: serve index.html for all non-API, non-asset routes."""
+        file_path = _frontend_dir / full_path
+        if full_path and file_path.is_file():
+            return FileResponse(str(file_path))
+        return FileResponse(str(_frontend_dir / "index.html"))
+else:
+    logger.warning("Frontend dist not found at %s — SPA not served", _frontend_dir)

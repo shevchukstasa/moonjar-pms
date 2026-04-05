@@ -128,6 +128,7 @@ def _pull_for_stage(
                 PositionStatus.SHIPPED.value,
                 PositionStatus.READY_FOR_SHIPMENT.value,
                 PositionStatus.PACKED.value,
+                PositionStatus.INSUFFICIENT_MATERIALS.value,
             ]),
         )
         .order_by(

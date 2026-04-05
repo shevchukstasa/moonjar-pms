@@ -84,6 +84,7 @@ class TaskType(str, Enum):
     STONE_PROCUREMENT = 'stone_procurement'
     BOARD_ORDER_NEEDED = 'board_order_needed'
     SHELF_REPLACEMENT_NEEDED = 'shelf_replacement_needed'
+    FIRING_PROFILE_NEEDED = 'firing_profile_needed'
 
 class TaskStatus(str, Enum):
     PENDING = 'pending'

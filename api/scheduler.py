@@ -1794,6 +1794,108 @@ async def gamification_new_season():
         db.close()
 
 
+# --- Eve-of-Kiln Firing Profile Check ---
+
+async def eve_of_kiln_check():
+    """Check positions scheduled for kiln tomorrow — block if firing profile data missing.
+
+    Runs daily at 15:10 UTC (23:10 WITA). For each position with
+    planned_kiln_date = tomorrow that still has a PENDING FIRING_PROFILE_NEEDED
+    task, escalate the task to blocking and shift kiln date +3 days to give
+    PM time to configure the firing profile.
+    """
+    logger.info("Running eve-of-kiln firing profile check")
+    db = _get_db_session()
+    try:
+        from datetime import date, timedelta
+        from api.models import OrderPosition, Task
+        from api.enums import TaskType, TaskStatus
+
+        tomorrow = date.today() + timedelta(days=1)
+
+        # Find positions with kiln date = tomorrow that are not yet completed
+        terminal_statuses = (
+            'completed', 'shipped', 'cancelled', 'packed', 'ready_for_shipment',
+        )
+        positions = db.query(OrderPosition).filter(
+            OrderPosition.planned_kiln_date == tomorrow,
+            OrderPosition.status.notin_(terminal_statuses),
+        ).all()
+
+        blocked_count = 0
+        for pos in positions:
+            # Check for a PENDING firing_profile_needed task on this position
+            pending_task = db.query(Task).filter(
+                Task.related_position_id == pos.id,
+                Task.type == TaskType.FIRING_PROFILE_NEEDED,
+                Task.status == TaskStatus.PENDING,
+            ).first()
+
+            if not pending_task:
+                continue
+
+            # Only block if position hasn't passed pre-kiln stages yet
+            pre_kiln_statuses = ('planned', 'engobe_applied', 'glazed', 'pre_kiln_check')
+            if pos.status not in pre_kiln_statuses:
+                continue
+
+            # Escalate task to blocking
+            pending_task.blocking = True
+
+            # Shift kiln date +3 days to give PM time
+            pos.planned_kiln_date = tomorrow + timedelta(days=3)
+
+            # Recalculate downstream dates
+            if pos.planned_sorting_date:
+                pos.planned_sorting_date = pos.planned_kiln_date + timedelta(days=3)
+            if pos.planned_completion_date:
+                base = pos.planned_sorting_date or pos.planned_kiln_date
+                pos.planned_completion_date = base + timedelta(days=2)
+
+            blocked_count += 1
+            logger.warning(
+                "EVE_OF_KILN_BLOCK | pos=%s order=%s | firing profile missing, "
+                "kiln shifted +3d to %s",
+                pos.id,
+                pos.order_id,
+                pos.planned_kiln_date,
+            )
+
+            # Notify PM via Telegram
+            try:
+                from business.services.notifications import notify_pm
+                order_num = pos.order.order_number if pos.order else "?"
+                pos_num = pos.position_number or "?"
+                notify_pm(
+                    db=db,
+                    factory_id=pos.factory_id,
+                    type="schedule_block",
+                    title="Firing profile missing — kiln delayed",
+                    message=(
+                        f"Position {order_num} #{pos_num} scheduled for kiln "
+                        f"tomorrow but firing profile is not configured. "
+                        f"Kiln date pushed +3 days to {pos.planned_kiln_date}."
+                    ),
+                )
+            except Exception as e:
+                logger.warning("Eve-of-kiln PM notification failed: %s", e)
+
+        db.commit()
+
+        if blocked_count:
+            logger.info(
+                "EVE_OF_KILN_CHECK | blocked %d positions with missing firing data",
+                blocked_count,
+            )
+        else:
+            logger.info("EVE_OF_KILN_CHECK | all positions ready for kiln tomorrow")
+    except Exception as e:
+        logger.error("Eve of kiln check failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 # --- Scheduler setup ---
 
 def setup_scheduler():
@@ -1888,6 +1990,9 @@ def setup_scheduler():
 
     # Sunday 12:00 UTC (20:00 WITA) — CEO weekly gamification report
     scheduler.add_job(gamification_ceo_report, CronTrigger(day_of_week="sun", hour=12, minute=0), id="gamification_ceo_report")
+
+    # Daily 15:10 UTC (23:10 WITA) — eve-of-kiln firing profile check
+    scheduler.add_job(eve_of_kiln_check, CronTrigger(hour=15, minute=10), id="eve_of_kiln_check")
 
     # Daily 14:00 UTC (22:00 WITA) — batch update skill progress
     scheduler.add_job(gamification_skill_progress, CronTrigger(hour=14, minute=5), id="gamification_skills")

@@ -116,6 +116,7 @@ def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
     qc_tasks = _collect_qc_tasks(db, factory_id, target_date)
     urgent_alerts = _collect_urgent_alerts(db, factory_id)
     stock_alerts = _collect_stock_alerts(db, factory_id)
+    material_blocked = _collect_material_blocked(db, factory_id, target_date)
     top_performer = _collect_top_performer(db, factory_id, yesterday)
     streak_data = _collect_streak_data(db, factory_id)
     daily_challenge = _collect_daily_challenge(db, factory_id, target_date)
@@ -142,6 +143,7 @@ def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
         "qc_tasks": qc_tasks,
         "urgent_alerts": urgent_alerts,
         "stock_alerts": stock_alerts,
+        "material_blocked": material_blocked,
         "top_performer": top_performer,
         "streak": streak_data,
         "daily_challenge": daily_challenge,
@@ -841,6 +843,41 @@ def _collect_stock_alerts(db: Session, factory_id: UUID) -> list:
 
 
 # ────────────────────────────────────────────────────────────────
+# §4d2  Material-blocked positions needing glazing within 3 days
+# ────────────────────────────────────────────────────────────────
+
+def _collect_material_blocked(db: Session, factory_id: UUID, target_date: date) -> list:
+    """Find positions with INSUFFICIENT_MATERIALS that have glazing within 3 days."""
+    try:
+        horizon = target_date + timedelta(days=3)
+        blocked = (
+            db.query(OrderPosition)
+            .join(ProductionOrder, OrderPosition.order_id == ProductionOrder.id)
+            .filter(
+                OrderPosition.factory_id == factory_id,
+                OrderPosition.status == PositionStatus.INSUFFICIENT_MATERIALS.value,
+                OrderPosition.planned_glazing_date.isnot(None),
+                OrderPosition.planned_glazing_date >= target_date,
+                OrderPosition.planned_glazing_date <= horizon,
+            )
+            .order_by(OrderPosition.planned_glazing_date.asc())
+            .all()
+        )
+        results = []
+        for pos in blocked:
+            results.append({
+                "position_number": pos.position_number or str(pos.id)[:8],
+                "order_number": pos.order.order_number if pos.order else "?",
+                "planned_glazing_date": pos.planned_glazing_date.isoformat() if pos.planned_glazing_date else "",
+                "planned_glazing_display": pos.planned_glazing_date.strftime("%b %d") if pos.planned_glazing_date else "",
+            })
+        return results
+    except Exception as e:
+        logger.warning("Material blocked collection failed: %s", e)
+        return []
+
+
+# ────────────────────────────────────────────────────────────────
 # §4e  Top performer (who processed most positions yesterday)
 # ────────────────────────────────────────────────────────────────
 
@@ -1259,8 +1296,18 @@ def _format_message_en(distribution: dict) -> str:
     # ═══════════════════════════════════════════════════════════
     urgent = distribution.get("urgent_alerts", [])
     stock_alerts = distribution.get("stock_alerts", [])
-    if urgent or stock_alerts:
+    mat_blocked = distribution.get("material_blocked", [])
+    if urgent or stock_alerts or mat_blocked:
         lines.append("\u26a0\ufe0f *ATTENTION:*")
+        if mat_blocked:
+            lines.append("")
+            lines.append("\u26a0\ufe0f *Material Blocked (need within 3 days):*")
+            for mb in mat_blocked:
+                lines.append(
+                    f"  \u2022 Position {mb['position_number']} "
+                    f"(Order #{mb['order_number']}) \u2014 glazing {mb['planned_glazing_display']}"
+                )
+            lines.append("")
         for alert in urgent:
             days = alert.get("days_overdue", 0)
             icon = "\U0001f534" if days > 0 else "\U0001f7e1"
@@ -1433,8 +1480,18 @@ def _format_message_id(distribution: dict) -> str:
     # ═══════════════════════════════════════════════════════════
     urgent = distribution.get("urgent_alerts", [])
     stock_alerts = distribution.get("stock_alerts", [])
-    if urgent or stock_alerts:
+    mat_blocked = distribution.get("material_blocked", [])
+    if urgent or stock_alerts or mat_blocked:
         lines.append("\u26a0\ufe0f *PERHATIAN:*")
+        if mat_blocked:
+            lines.append("")
+            lines.append("\u26a0\ufe0f *Material Terblokir (butuh dalam 3 hari):*")
+            for mb in mat_blocked:
+                lines.append(
+                    f"  \u2022 Posisi {mb['position_number']} "
+                    f"(Pesanan #{mb['order_number']}) \u2014 glasir {mb['planned_glazing_display']}"
+                )
+            lines.append("")
         for alert in urgent:
             days = alert.get("days_overdue", 0)
             icon = "\U0001f534" if days > 0 else "\U0001f7e1"
@@ -1583,8 +1640,18 @@ def _format_message_ru(distribution: dict) -> str:
     # BLOCK 4: Alerts
     urgent = distribution.get("urgent_alerts", [])
     stock_alerts = distribution.get("stock_alerts", [])
-    if urgent or stock_alerts:
+    mat_blocked = distribution.get("material_blocked", [])
+    if urgent or stock_alerts or mat_blocked:
         lines.append("\u26a0\ufe0f *\u0412\u041d\u0418\u041c\u0410\u041d\u0418\u0415:*")
+        if mat_blocked:
+            lines.append("")
+            lines.append("\u26a0\ufe0f *\u0411\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u043a\u0430 \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432 (\u043d\u0443\u0436\u043d\u044b \u0432 \u0442\u0435\u0447\u0435\u043d\u0438\u0435 3 \u0434\u043d\u0435\u0439):*")
+            for mb in mat_blocked:
+                lines.append(
+                    f"  \u2022 \u041f\u043e\u0437\u0438\u0446\u0438\u044f {mb['position_number']} "
+                    f"(\u0417\u0430\u043a\u0430\u0437 #{mb['order_number']}) \u2014 \u0433\u043b\u0430\u0437\u0443\u0440\u043e\u0432\u043a\u0430 {mb['planned_glazing_display']}"
+                )
+            lines.append("")
         for alert in urgent:
             days = alert.get("days_overdue", 0)
             icon = "\U0001f534" if days > 0 else "\U0001f7e1"

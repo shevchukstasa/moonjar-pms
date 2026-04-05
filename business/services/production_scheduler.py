@@ -772,6 +772,101 @@ def find_best_kiln_and_date(
 
 
 # ────────────────────────────────────────────────────────────────
+# Firing Profile Auto-Detection
+# ────────────────────────────────────────────────────────────────
+
+def _check_firing_profile_data(
+    db: Session,
+    position: OrderPosition,
+    factory_id: UUID,
+) -> None:
+    """Check if firing stage speed data exists for this position's typology.
+
+    If no StageTypologySpeed record is found for stage='firing', creates
+    a FIRING_PROFILE_NEEDED task for the PM so the profile can be configured
+    before the position reaches the kiln.
+
+    Deduplicates: skips if a PENDING task already exists for the same position.
+    """
+    try:
+        from api.models import StageTypologySpeed, Task
+        from api.enums import TaskType, TaskStatus, UserRole
+        from business.services.typology_matcher import find_matching_typology
+        import json
+
+        typology = find_matching_typology(db, position)
+
+        # If typology exists, check for firing speed record
+        has_firing_data = False
+        if typology:
+            speed = db.query(StageTypologySpeed).filter(
+                StageTypologySpeed.typology_id == typology.id,
+                StageTypologySpeed.stage == 'firing',
+                StageTypologySpeed.productivity_rate.isnot(None),
+            ).first()
+            has_firing_data = speed is not None
+
+        if has_firing_data:
+            return  # All good — firing profile configured
+
+        # No firing data — check if we already have a pending task
+        existing = db.query(Task).filter(
+            Task.related_position_id == position.id,
+            Task.type == TaskType.FIRING_PROFILE_NEEDED,
+            Task.status == TaskStatus.PENDING,
+        ).first()
+
+        if existing:
+            return  # Task already created — don't spam
+
+        # Build description
+        pos_label = f"#{position.position_number}" + (
+            f".{position.split_index}" if getattr(position, 'split_index', None) else ""
+        )
+        order_num = ""
+        if hasattr(position, 'order') and position.order:
+            order_num = f" (Order {position.order.order_number})"
+        typology_name = typology.name if typology else "unknown"
+
+        task = Task(
+            factory_id=factory_id,
+            type=TaskType.FIRING_PROFILE_NEEDED,
+            status=TaskStatus.PENDING,
+            blocking=False,  # not immediately blocking — escalated by eve-of-kiln check
+            assigned_role=UserRole.PRODUCTION_MANAGER,
+            related_position_id=position.id,
+            related_order_id=position.order_id,
+            priority=7,
+            description=(
+                f"Firing profile needed for position {pos_label}{order_num}. "
+                f"No firing speed data found for typology '{typology_name}'. "
+                f"Configure StageTypologySpeed for 'firing' stage before kiln date."
+            ),
+            due_at=(
+                position.planned_kiln_date - timedelta(days=1)
+                if position.planned_kiln_date else None
+            ),
+            metadata_json=json.dumps({
+                "position_id": str(position.id),
+                "order_id": str(position.order_id) if position.order_id else None,
+                "typology_id": str(typology.id) if typology else None,
+                "typology_name": typology_name,
+                "planned_kiln_date": str(position.planned_kiln_date) if position.planned_kiln_date else None,
+                "reason": "no_stage_typology_speed_for_firing",
+            }),
+        )
+        db.add(task)
+
+        logger.warning(
+            "FIRING_PROFILE_MISSING | position=%s typology=%s | "
+            "created FIRING_PROFILE_NEEDED task (fallback 1-day firing used)",
+            position.id, typology_name,
+        )
+    except Exception as e:
+        logger.debug("_check_firing_profile_data failed: %s", e)
+
+
+# ────────────────────────────────────────────────────────────────
 # §1  Schedule a single position (backward from deadline)
 # ────────────────────────────────────────────────────────────────
 
@@ -800,6 +895,14 @@ def schedule_position(
         - PRE_KILN_CHECK_DAYS             → pre-kiln QC
         - GLAZING_DURATION_DAYS           → planned_glazing_date (rope start)
     """
+    # Guard: skip material-blocked positions — they cannot be scheduled
+    if position.status == PositionStatus.INSUFFICIENT_MATERIALS.value:
+        logger.warning(
+            "SKIP_SCHEDULE | pos=%s | status=INSUFFICIENT_MATERIALS — skipping",
+            position.id,
+        )
+        return
+
     # Calculate position area and quantity for duration estimation
     _pos_sqm = float(position.glazeable_sqm or 0) * float(position.quantity or 1)
     _pos_pcs = int(position.quantity or 0)
@@ -986,6 +1089,9 @@ def schedule_position(
     # Increment schedule version
     position.schedule_version = (position.schedule_version or 0) + 1
 
+    # Check if firing profile data exists — create task if missing
+    _check_firing_profile_data(db, position, _fid)
+
     logger.info(
         "SCHEDULED | position=%s v%d | glazing=%s kiln=%s sorting=%s "
         "completion=%s kiln_id=%s",
@@ -1017,6 +1123,7 @@ def schedule_order(db: Session, order: ProductionOrder) -> int:
     positions = db.query(OrderPosition).filter(
         OrderPosition.order_id == order.id,
         OrderPosition.status != PositionStatus.CANCELLED.value,
+        OrderPosition.status != PositionStatus.INSUFFICIENT_MATERIALS.value,
     ).all()
 
     count = 0

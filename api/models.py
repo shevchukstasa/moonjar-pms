@@ -3058,3 +3058,66 @@ class GamificationSeason(Base):
 
     __table_args__ = (UniqueConstraint('factory_id', 'start_date', name='uq_season_factory_start'),)
     factory = relationship('Factory', foreign_keys=[factory_id])
+
+
+class WorkerStageSkill(Base):
+    """Which production stages a worker is qualified to perform."""
+    __tablename__ = 'worker_stage_skills'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id', ondelete='CASCADE'), nullable=False)
+    stage = Column(sa.String(50), nullable=False)
+    proficiency = Column(sa.String(20), nullable=False, server_default='capable')  # trainee / capable / expert
+    certified_at = Column(sa.Date)
+    certified_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'))
+    notes = Column(sa.Text)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (UniqueConstraint('user_id', 'factory_id', 'stage', name='uq_worker_stage_skill'),)
+
+    user = relationship('User', foreign_keys=[user_id])
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    certifier = relationship('User', foreign_keys=[certified_by])
+
+
+class ShiftDefinition(Base):
+    """Shift templates for a factory (e.g. Morning 06:00-14:00, Afternoon 14:00-22:00)."""
+    __tablename__ = 'shift_definitions'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id', ondelete='CASCADE'), nullable=False)
+    name = Column(sa.String(50), nullable=False)
+    name_id = Column(sa.String(50))  # Indonesian: "Shift Pagi", "Shift Siang"
+    start_time = Column(sa.Time, nullable=False)
+    end_time = Column(sa.Time, nullable=False)
+    is_active = Column(sa.Boolean, nullable=False, server_default='true')
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (UniqueConstraint('factory_id', 'name', name='uq_shift_def_name'),)
+    factory = relationship('Factory', foreign_keys=[factory_id])
+
+
+class ShiftAssignment(Base):
+    """Daily assignment of workers to shifts and stages."""
+    __tablename__ = 'shift_assignments'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id', ondelete='CASCADE'), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    shift_definition_id = Column(UUID(as_uuid=True), ForeignKey('shift_definitions.id', ondelete='CASCADE'), nullable=False)
+    date = Column(sa.Date, nullable=False)
+    stage = Column(sa.String(50), nullable=False)
+    is_lead = Column(sa.Boolean, nullable=False, server_default='false')
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    assigned_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'))
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'date', 'shift_definition_id', name='uq_shift_assignment_user_date_shift'),
+    )
+
+    factory = relationship('Factory', foreign_keys=[factory_id])
+    user = relationship('User', foreign_keys=[user_id])
+    shift_definition = relationship('ShiftDefinition', foreign_keys=[shift_definition_id])
+    assigner = relationship('User', foreign_keys=[assigned_by])

@@ -323,6 +323,58 @@ def _apply_resource_constraint(
     return constraint_days
 
 
+def _get_effective_brigade_size(
+    db: Session,
+    factory_id: UUID,
+    stage: str,
+    static_brigade: int,
+) -> int:
+    """Return actual worker count assigned to a stage at this factory.
+
+    Looks up ShiftAssignment for today.  If today has no assignments, uses
+    the most recent assignment date (workers don't change daily).
+    Falls back to *static_brigade* when no assignment data exists.
+    """
+    from api.models import ShiftAssignment
+    import sqlalchemy as sa
+
+    today = date.today()
+
+    # Find the most recent date with assignments for this factory+stage
+    latest_date = (
+        db.query(sa_func.max(ShiftAssignment.date))
+        .filter(
+            ShiftAssignment.factory_id == factory_id,
+            ShiftAssignment.stage == stage,
+            ShiftAssignment.date <= today,
+        )
+        .scalar()
+    )
+
+    if latest_date is None:
+        return static_brigade
+
+    count = (
+        db.query(sa_func.count(sa.distinct(ShiftAssignment.user_id)))
+        .filter(
+            ShiftAssignment.factory_id == factory_id,
+            ShiftAssignment.stage == stage,
+            ShiftAssignment.date == latest_date,
+        )
+        .scalar()
+    ) or 0
+
+    if count > 0:
+        if count != static_brigade:
+            logger.info(
+                "DYNAMIC_BRIGADE | stage=%s | static=%d actual=%d",
+                stage, static_brigade, count,
+            )
+        return count
+
+    return static_brigade
+
+
 def _get_stage_duration_days(
     db: Session,
     factory_id: UUID,
@@ -364,6 +416,9 @@ def _get_stage_duration_days(
                     rate_basis = speed.rate_basis or 'per_person'
                     if rate_basis == 'fixed_duration':
                         fixed_hours = float(speed.productivity_rate)
+                    dynamic_brigade = _get_effective_brigade_size(
+                        db, factory_id, stage, speed.brigade_size or 1,
+                    )
                     result = _calc_hours_from_speed(
                         rate=float(speed.productivity_rate),
                         rate_unit=speed.rate_unit or 'pcs',
@@ -371,7 +426,7 @@ def _get_stage_duration_days(
                         time_unit=speed.time_unit or 'hour',
                         shift_count=speed.shift_count or 2,
                         shift_duration_hours=float(speed.shift_duration_hours or 8.0),
-                        brigade_size=speed.brigade_size or 1,
+                        brigade_size=dynamic_brigade,
                         total_sqm=total_sqm,
                         total_pcs=total_pcs,
                     )
@@ -409,10 +464,16 @@ def _get_stage_duration_days(
                 hours_per_day = 8.0 * shift_count
                 unit = (step.productivity_unit or '').lower()
 
+                # Scale throughput by actual worker count
+                dynamic_brigade = _get_effective_brigade_size(
+                    db, factory_id, stage, 1,
+                )
+                effective_rate = rate * dynamic_brigade
+
                 if 'sqm' in unit and total_sqm > 0:
-                    hours_needed = total_sqm / rate
+                    hours_needed = total_sqm / effective_rate
                 elif 'pcs' in unit and total_pcs > 0:
-                    hours_needed = total_pcs / rate
+                    hours_needed = total_pcs / effective_rate
                 else:
                     hours_needed = 8.0
 
@@ -919,14 +980,37 @@ def schedule_position(
     glazing_days = _dur('glazing')
     drying_glaze_days = _dur('drying_glaze')
     edge_clean_load_days = _dur('edge_cleaning_loading')
-    # Kiln stages
-    firing_days = _dur('firing')
-    kiln_cool_initial_days = _dur('kiln_cooling_initial')
-    kiln_unloading_days = _dur('kiln_unloading')
+    # Kiln stages (per single firing cycle)
+    firing_days_single = _dur('firing')
+    kiln_cool_initial_single = _dur('kiln_cooling_initial')
+    kiln_unloading_single = _dur('kiln_unloading')
     tile_cooling_days = _dur('tile_cooling')
     # Post-kiln stages
     sorting_days = _dur('sorting')
     packing_days = _dur('packing')
+
+    # ── Multiple kiln loads ──────────────────────────────────
+    # If position total area > kiln capacity, it needs multiple firings.
+    # Each firing cycle = firing + cooling_initial + cooling_full + unloading.
+    # These are sequential (kiln can only do one batch at a time).
+    import math
+    _kiln_cap = _get_factory_daily_kiln_cap(db, _fid)
+    if _kiln_cap > 0 and _pos_sqm > _kiln_cap:
+        _num_loads = math.ceil(_pos_sqm / _kiln_cap)
+    else:
+        _num_loads = 1
+
+    firing_days = firing_days_single * _num_loads
+    kiln_cool_initial_days = kiln_cool_initial_single * _num_loads
+    kiln_unloading_days = kiln_unloading_single * _num_loads
+
+    if _num_loads > 1:
+        logger.info(
+            "MULTI_LOAD | pos=%s | %.2f m² / %.2f m² cap = %d loads | "
+            "firing=%dd cool=%dd unload=%dd",
+            position.id, _pos_sqm, _kiln_cap, _num_loads,
+            firing_days, kiln_cool_initial_days, kiln_unloading_days,
+        )
 
     # Pre-kiln total (everything before kiln loading)
     pre_kiln_total = (unpacking_days + engobe_days + drying_engobe_days

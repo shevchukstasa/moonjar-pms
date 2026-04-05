@@ -80,6 +80,7 @@ from api.routers import pdf_templates
 from api.routers import shipments
 from api.routers import firing_logs
 from api.routers import gamification
+from api.routers import workforce
 
 
 def _ensure_schema():
@@ -2079,6 +2080,7 @@ def setup_routers():
     app.include_router(employees.router, prefix="/api/employees", tags=["employees"])
     app.include_router(mana_shipments.router, prefix="/api/mana-shipments", tags=["mana-shipments"])
     app.include_router(gamification.router, prefix="/api/gamification", tags=["gamification"])
+    app.include_router(workforce.router, prefix="/api/workforce", tags=["workforce"])
     app.include_router(shipments.router, prefix="/api/shipments", tags=["shipments"])
     app.include_router(pdf_templates.router, prefix="/api/pdf/templates", tags=["pdf-templates"])
 

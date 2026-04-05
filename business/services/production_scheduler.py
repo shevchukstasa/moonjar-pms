@@ -495,12 +495,30 @@ def _calc_hours_from_speed(
 
 
 def _get_factory_daily_kiln_cap(db: Session, factory_id: UUID) -> float:
-    """Sum of operational kiln capacities for a factory (sqm/day)."""
+    """Sum of active kiln capacities for a factory (sqm/day).
+
+    Uses ResourceType.KILN and ResourceStatus.ACTIVE from enums.
+    Falls back to checking capacity_sqm > 0 on any active resource
+    if resource_type is NULL (legacy data).
+    """
+    from api.enums import ResourceStatus
+
+    # Primary: typed kilns
     kilns = db.query(Resource).filter(
         Resource.factory_id == factory_id,
-        Resource.resource_type == "kiln",
-        Resource.status == "operational",
+        Resource.resource_type == ResourceType.KILN.value,
+        Resource.status == ResourceStatus.ACTIVE.value,
     ).all()
+
+    # Fallback: resources with capacity_sqm (covers NULL resource_type)
+    if not kilns:
+        kilns = db.query(Resource).filter(
+            Resource.factory_id == factory_id,
+            Resource.status == ResourceStatus.ACTIVE.value,
+            Resource.capacity_sqm.isnot(None),
+            Resource.capacity_sqm > 0,
+        ).all()
+
     cap = sum(float(k.capacity_sqm or 0) for k in kilns)
     return cap if cap > 0 else 10.0  # fallback
 
@@ -1012,6 +1030,7 @@ def schedule_order(db: Session, order: ProductionOrder) -> int:
         except Exception as e:
             logger.error(
                 "Failed to schedule position %s: %s", position.id, e,
+                exc_info=True,
             )
 
     logger.info(
@@ -1164,6 +1183,7 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
         except Exception as e:
             logger.error(
                 "Failed to reschedule order %s: %s", order.order_number, e,
+                exc_info=True,
             )
 
     db.commit()

@@ -1490,8 +1490,9 @@ async def nightly_reschedule_overdue():
         for fid in factory_ids:
             kilns = db.query(Resource).filter(
                 Resource.factory_id == fid,
-                Resource.resource_type == "kiln",
-                Resource.status == "operational",
+                Resource.status == "active",
+                Resource.capacity_sqm.isnot(None),
+                Resource.capacity_sqm > 0,
             ).all()
             cap = sum(float(k.capacity_sqm or 0) for k in kilns)
             factory_daily_cap[fid] = cap if cap > 0 else 10.0  # fallback

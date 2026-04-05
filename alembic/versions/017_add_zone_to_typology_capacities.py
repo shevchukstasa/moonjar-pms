@@ -12,7 +12,7 @@ from alembic import op
 from sqlalchemy import text
 
 revision = "017"
-down_revision = "016_set_kiln_capacity_sqm"
+down_revision = "016"
 branch_labels = None
 depends_on = None
 

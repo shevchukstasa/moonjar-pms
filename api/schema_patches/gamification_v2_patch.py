@@ -135,12 +135,14 @@ STATEMENTS = [
 ]
 
 
-def apply(engine):
-    """Apply gamification v2 schema patch."""
-    with engine.begin() as conn:
-        for stmt in STATEMENTS:
-            try:
-                conn.execute(text(stmt))
-            except Exception as e:
-                logger.warning("Gamification v2 patch statement skipped: %s", e)
+def apply(conn):
+    """Apply gamification v2 schema patch.
+
+    Receives a SQLAlchemy Connection (not engine) from main.py patch runner.
+    """
+    for stmt in STATEMENTS:
+        try:
+            conn.execute(text(stmt))
+        except Exception as e:
+            logger.warning("Gamification v2 patch statement skipped: %s", e)
     logger.info("Gamification v2 schema patch applied (7 tables)")

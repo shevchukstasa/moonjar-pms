@@ -274,6 +274,20 @@ export const tpsDashboardApi = {
     return data;
   },
 
+  toggleStepAutoCalibrate: async (stepId: string): Promise<{ step_id: string; auto_calibrate: boolean }> => {
+    const { data } = await apiClient.patch(`/tps/calibration/toggle/${stepId}`);
+    return data;
+  },
+
+  toggleTypologySpeedAutoCalibrate: async (speedId: string): Promise<{ speed_id: string; auto_calibrate: boolean }> => {
+    const { data } = await apiClient.patch(`/tps/calibration/typology-toggle/${speedId}`);
+    return data;
+  },
+
+  applyCalibrationForStep: async (stepId: string): Promise<void> => {
+    await apiClient.post(`/tps/calibration/apply/${stepId}`);
+  },
+
   // Typologies
   listTypologies: async (factoryId: string): Promise<{ items: TypologyItem[] }> => {
     const { data } = await apiClient.get(`/tps/typologies?factory_id=${factoryId}`);

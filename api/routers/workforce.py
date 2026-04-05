@@ -486,3 +486,32 @@ async def get_daily_capacity(
             for stage, data in sorted(capacity.items())
         },
     }
+
+
+# ── Staffing Optimization ─────────────────────────────────────
+
+
+@router.get("/optimization/{factory_id}")
+async def get_staffing_optimization(
+    factory_id: UUID,
+    horizon_days: int = Query(default=7, ge=1, le=30, description="Analysis horizon in days"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """AI-driven optimal worker distribution suggestions.
+
+    Analyzes actual throughput (TpsShiftMetric), current assignments
+    (ShiftAssignment), and scheduled demand (OrderPosition) to recommend
+    staffing rebalancing across production stages.
+
+    Returns per-stage analysis with utilization %, bottleneck identification,
+    and actionable suggestions (move workers, add workers, overtime).
+    """
+    from business.services.staffing_optimizer import suggest_optimal_staffing
+
+    try:
+        result = suggest_optimal_staffing(db, factory_id, horizon_days)
+        return result
+    except Exception as exc:
+        logger.exception("Staffing optimization failed for factory %s", factory_id)
+        raise HTTPException(500, f"Staffing optimization failed: {str(exc)}")

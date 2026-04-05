@@ -1222,12 +1222,103 @@ def _create_deadline_exceeded_alert(
             related_entity_id=position.id,
         )
 
+        # Notify Sales Manager who created the order
+        _notify_sales_manager_deadline(
+            db=db,
+            position=position,
+            order_num=order_num,
+            pos_label=pos_label,
+            deadline=deadline,
+            planned_completion=planned_completion,
+            overdue_days=overdue_days,
+        )
+
         logger.warning(
             "DEADLINE_EXCEEDED | pos=%s | deadline=%s completion=%s | +%d days late",
             position.id, deadline, planned_completion, overdue_days,
         )
     except Exception as e:
         logger.debug("_create_deadline_exceeded_alert failed: %s", e)
+
+
+def _notify_sales_manager_deadline(
+    db: Session,
+    position: OrderPosition,
+    order_num: str,
+    pos_label: str,
+    deadline: date,
+    planned_completion: date,
+    overdue_days: int,
+) -> None:
+    """Notify the sales manager (by name/contact match) about deadline shift.
+
+    Looks up the order's sales_manager_name / sales_manager_contact to find
+    a matching PMS User.  If found, creates an in-app notification (which also
+    triggers Telegram push when the user has telegram_user_id configured).
+    """
+    try:
+        from api.models import User
+        from business.services.notifications import create_notification, send_telegram_message
+
+        order = position.order if hasattr(position, "order") else None
+        if not order:
+            order = db.query(ProductionOrder).filter(
+                ProductionOrder.id == position.order_id,
+            ).first()
+        if not order:
+            return
+
+        sm_name = order.sales_manager_name
+        sm_contact = order.sales_manager_contact
+        if not sm_name and not sm_contact:
+            logger.debug("No sales_manager info on order %s — skip SM notification", order_num)
+            return
+
+        # Try to find the PMS user: first by contact (email), then by name
+        sales_user = None
+        if sm_contact:
+            sales_user = db.query(User).filter(
+                User.email == sm_contact,
+                User.is_active.is_(True),
+            ).first()
+        if not sales_user and sm_name:
+            sales_user = db.query(User).filter(
+                User.name == sm_name,
+                User.is_active.is_(True),
+            ).first()
+
+        title = f"Order {order_num} deadline shifted: new completion {planned_completion}"
+        message = (
+            f"Position {pos_label} — original deadline: {deadline}, "
+            f"new estimated: {planned_completion} (+{overdue_days} days). "
+            f"Please inform the client."
+        )
+
+        if sales_user:
+            # In-app notification (also pushes Telegram via create_notification)
+            create_notification(
+                db=db,
+                user_id=sales_user.id,
+                type="alert",
+                title=title,
+                message=message,
+                related_entity_type="order",
+                related_entity_id=order.id,
+                factory_id=position.factory_id,
+            )
+            logger.info(
+                "Sales manager notified (user=%s) about deadline shift on order %s",
+                sales_user.id, order_num,
+            )
+        else:
+            # User not in PMS — try direct Telegram if contact looks like a chat id,
+            # otherwise log for visibility so the PM can relay manually.
+            logger.info(
+                "Sales manager '%s' (%s) not found in PMS — cannot send in-app notification for order %s",
+                sm_name, sm_contact, order_num,
+            )
+    except Exception as e:
+        logger.debug("_notify_sales_manager_deadline failed: %s", e)
 
 
 # ────────────────────────────────────────────────────────────────

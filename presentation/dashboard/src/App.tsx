@@ -54,6 +54,7 @@ import AdminSettingsPage from '@/pages/AdminSettingsPage';
 import EmployeesPage from '@/pages/EmployeesPage';
 import CeoEmployeesPage from '@/pages/CeoEmployeesPage';
 import ShipmentPage from '@/pages/ShipmentPage';
+import WorkforceAssignmentPage from '@/pages/WorkforceAssignmentPage';
 import AppLayout from '@/components/layout/AppLayout';
 import { Spinner } from '@/components/ui/Spinner';
 import { ErrorBoundary, PageErrorFallback } from '@/components/ErrorBoundary';
@@ -168,6 +169,7 @@ export default function App() {
             <Route path="/manager/size-resolution/:taskId" element={<SizeResolutionPage />} />
             <Route path="/manager/guide" element={<PMGuidePage />} />
             <Route path="/manager/staff" element={<EmployeesPage />} />
+            <Route path="/manager/workforce" element={<WorkforceAssignmentPage />} />
           </Route>
           <Route element={<RequireRole roles={['owner', 'ceo', 'production_manager']} />}>
             <Route path="/reports" element={<ReportsPage />} />

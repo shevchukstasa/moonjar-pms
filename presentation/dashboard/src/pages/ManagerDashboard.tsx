@@ -48,6 +48,7 @@ import { DefectAlertBanner } from '@/components/dashboard/DefectAlertBanner';
 import { AnomalyAlertBanner } from '@/components/dashboard/AnomalyAlertBanner';
 import { ConsumptionAdjustmentsPanel } from '@/components/materials/ConsumptionAdjustmentsPanel';
 import { OrderProgressRing } from '@/components/orders/OrderProgressRing';
+import { CalibrationPanel } from '@/components/CalibrationPanel';
 import { StreakCard } from '@/components/dashboard/StreakCard';
 import { AchievementGrid } from '@/components/dashboard/AchievementBadge';
 import { useStreaks, useAchievements } from '@/hooks/useAnalytics';
@@ -1330,6 +1331,9 @@ function TpsTabContent({ factoryId }: { factoryId: string | null }) {
           </div>
         )}
       </div>
+
+      {/* Calibration Panel */}
+      {factoryId && <CalibrationPanel factoryId={factoryId} />}
 
       {/* TPS Parameters */}
       <TpsParametersSection factoryId={factoryId} />

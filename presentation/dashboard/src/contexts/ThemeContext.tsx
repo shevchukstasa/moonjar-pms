@@ -17,8 +17,8 @@ function getInitialTheme(): Theme {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === 'light' || stored === 'dark') return stored;
   } catch {}
-  // Default to dark for luxury stone feel
-  return 'dark';
+  // Default to light — production environment with bright lighting
+  return 'light';
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {

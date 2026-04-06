@@ -472,7 +472,7 @@ type ViewState =
 
 export default function OnboardingPage({ role = 'production_manager' }: { role?: string }) {
   const user = useAuthStore((s) => s.user);
-  const lang = getLang(user);
+  const [lang, setLang] = useState<Lang>(getLang(user));
   const roleTitle = ROLE_TITLES[role] || ROLE_TITLES.production_manager;
 
   const { data: progress, isLoading: loadingProgress } = useOnboardingProgress(role);
@@ -653,6 +653,27 @@ export default function OnboardingPage({ role = 'production_manager' }: { role?:
             <p className="text-[var(--text-secondary)] mb-4">
               {t(roleTitle.subtitle, lang)}
             </p>
+            {/* Language toggle */}
+            <div className="flex rounded-lg border border-amber-200 dark:border-amber-800 bg-white/60 dark:bg-stone-900/60 p-0.5 mb-4 w-fit mx-auto md:mx-0">
+              {([
+                { code: 'en' as Lang, label: 'English', flag: '🇬🇧' },
+                { code: 'id' as Lang, label: 'Bahasa', flag: '🇮🇩' },
+                { code: 'ru' as Lang, label: 'Русский', flag: '🇷🇺' },
+              ]).map((l) => (
+                <button
+                  key={l.code}
+                  onClick={() => setLang(l.code)}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                    lang === l.code
+                      ? 'bg-amber-500 text-white shadow-sm'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  <span className="text-sm">{l.flag}</span>
+                  {l.label}
+                </button>
+              ))}
+            </div>
             <div className="flex flex-wrap items-center gap-6 justify-center md:justify-start">
               <div>
                 <div className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-1">{t(MESSAGES.totalXp, lang)}</div>

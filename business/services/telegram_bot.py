@@ -407,6 +407,58 @@ MESSAGES: dict[str, dict[str, str]] = {
         "id": "Gagal menyimpan transaksi penerimaan: {error}\nSilakan coba lagi atau input secara manual.",
         "ru": "Не удалось сохранить транзакции: {error}\nПопробуйте снова или введите вручную.",
     },
+    # ── Unit mismatch ──────────────────────────────────────────────
+    "unit_mismatch_warning": {
+        "en": "\u26a0\ufe0f Unit mismatch: \"{name}\" — photo says {photo_unit}, DB has {db_unit}",
+        "id": "\u26a0\ufe0f Satuan berbeda: \"{name}\" — foto: {photo_unit}, DB: {db_unit}",
+        "ru": "\u26a0\ufe0f Несовпадение единиц: \"{name}\" — фото: {photo_unit}, БД: {db_unit}",
+    },
+    "unit_keep_photo_btn": {
+        "en": "Use {unit} (as photo)",
+        "id": "Pakai {unit} (sesuai foto)",
+        "ru": "Записать {unit} (как на фото)",
+    },
+    "unit_keep_db_btn": {
+        "en": "Use {unit} (as DB)",
+        "id": "Pakai {unit} (sesuai DB)",
+        "ru": "Записать {unit} (как в БД)",
+    },
+    "unit_create_new_btn": {
+        "en": "\u2795 Create \"{name}\" in {unit}",
+        "id": "\u2795 Buat \"{name}\" dalam {unit}",
+        "ru": "\u2795 Создать \"{name}\" в {unit}",
+    },
+    "unit_resolved": {
+        "en": "\u2705 \"{name}\" — will record as {qty} {unit}",
+        "id": "\u2705 \"{name}\" — akan dicatat {qty} {unit}",
+        "ru": "\u2705 \"{name}\" — будет записано {qty} {unit}",
+    },
+    # ── Supplier matching ────────────────────────────────────────
+    "supplier_found_prompt": {
+        "en": "\U0001f50d Supplier \"{name}\" — similar suppliers in DB:",
+        "id": "\U0001f50d Supplier \"{name}\" — supplier serupa di DB:",
+        "ru": "\U0001f50d Поставщик \"{name}\" — похожие в БД:",
+    },
+    "supplier_use_existing_btn": {
+        "en": "{name}",
+        "id": "{name}",
+        "ru": "{name}",
+    },
+    "supplier_create_new_btn": {
+        "en": "\u2795 Create \"{name}\"",
+        "id": "\u2795 Buat \"{name}\"",
+        "ru": "\u2795 Создать \"{name}\"",
+    },
+    "supplier_linked": {
+        "en": "\u2705 Supplier set: {name}",
+        "id": "\u2705 Supplier ditetapkan: {name}",
+        "ru": "\u2705 Поставщик: {name}",
+    },
+    "supplier_created": {
+        "en": "\u2795 New supplier created: {name}",
+        "id": "\u2795 Supplier baru dibuat: {name}",
+        "ru": "\u2795 Новый поставщик создан: {name}",
+    },
     # ── Edit flow ─────────────────────────────────────────────────
     "edit_mode_active": {
         "en": "\u270f\ufe0f Edit mode active — {count} items.\nEdit one by one or press Finish Edit anytime.",
@@ -900,6 +952,24 @@ _pending_deliveries: dict[str, dict] = {}
 #     "matched_items": list,    # [{material_id, material_name, quantity, unit, ...}]
 #     "unmatched_items": list,  # [{index, original_name, quantity, unit}]
 # }
+
+
+def _normalize_unit(unit: str) -> str:
+    """Normalize unit string for comparison (e.g. 'L' == 'liter' == 'liters')."""
+    u = unit.strip().lower().rstrip("s")  # remove trailing 's'
+    aliases = {
+        "l": "l", "liter": "l", "litre": "l", "lt": "l",
+        "kg": "kg", "kilogram": "kg", "kilo": "kg",
+        "g": "g", "gram": "g",
+        "pcs": "pcs", "pc": "pcs", "piece": "pcs", "unit": "pcs",
+        "bag": "bag", "sak": "bag", "sack": "bag",
+        "m": "m", "meter": "m", "metre": "m",
+        "m2": "m2", "sqm": "m2",
+        "roll": "roll", "sheet": "sheet", "box": "box",
+        "ml": "ml", "milliliter": "ml",
+        "ton": "ton", "tonne": "ton",
+    }
+    return aliases.get(u, u)
 
 
 def _cleanup_expired_deliveries() -> None:
@@ -1481,7 +1551,8 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
     if action in (
         "delivery_confirm", "delivery_cancel", "delivery_match", "delivery_new",
         "delivery_edit", "delivery_edit_supplier", "delivery_edit_date",
-        "delivery_edit_ref", "dedit",
+        "delivery_edit_ref", "delivery_unit", "delivery_supplier",
+        "delivery_supplier_new", "dedit",
     ):
         try:
             # Resolve chat_id from the callback_query message
@@ -3272,13 +3343,27 @@ async def _handle_delivery_photo(
                 else:
                     size_label = f" ({item['suggested_size_name']} \u26a0\ufe0f baru)"
 
+            # Look up DB unit for mismatch detection
+            db_unit = unit
+            for dbm in db_materials:
+                if dbm["id"] == item["material_id"]:
+                    db_unit = dbm.get("unit") or unit
+                    break
+
+            # Normalize unit aliases for comparison
+            photo_unit_norm = _normalize_unit(unit)
+            db_unit_norm = _normalize_unit(db_unit)
+            has_unit_mismatch = photo_unit_norm != db_unit_norm
+
             matched_items.append({
                 "index": idx,
                 "original_name": delivery_name,
                 "material_id": item["material_id"],
                 "material_name": item.get("material_name", delivery_name),
                 "quantity": str(quantity),
-                "unit": unit,
+                "unit": unit,          # unit from photo/OCR
+                "db_unit": db_unit,    # unit from DB
+                "unit_mismatch": has_unit_mismatch,
                 "size_label": size_label,
                 "suggested_product_type": item.get("suggested_product_type"),
                 "parsed_base_material": item.get("parsed_base_material"),
@@ -3334,12 +3419,17 @@ async def _handle_delivery_photo(
     ]
 
     item_num = 0
+    unit_mismatch_items = []  # items that need unit resolution
     for mi in matched_items:
         item_num += 1
         size_info = mi.get("size_label", "")
+        unit_warn = ""
+        if mi.get("unit_mismatch"):
+            unit_warn = f" \u26a0\ufe0f [{mi['unit']}\u2260{mi['db_unit']}]"
+            unit_mismatch_items.append(mi)
         lines.append(
             f"{item_num}. \u2705 {mi['original_name']} \u2014 {mi['quantity']} {mi['unit']}"
-            f" (\u2192 {mi['material_name']}{size_info})"
+            f" (\u2192 {mi['material_name']}{size_info}){unit_warn}"
         )
 
     for ui in unmatched_items:
@@ -3434,10 +3524,55 @@ async def _handle_delivery_photo(
 
         await send_message_with_buttons(chat_id, suggestion_text, suggestion_rows, parse_mode="")
 
+    # ── Step 6: Unit mismatch resolution buttons ─────────────────
+    for mi in unit_mismatch_items:
+        mi_idx = mi["index"]
+        photo_unit = mi["unit"]
+        db_unit = mi["db_unit"]
+        warn_text = msg("unit_mismatch_warning", lang,
+                        name=mi["original_name"], photo_unit=photo_unit, db_unit=db_unit)
+        unit_rows = [
+            [
+                {"text": msg("unit_keep_db_btn", lang, unit=db_unit),
+                 "callback_data": f"delivery_unit:{delivery_id}:{mi_idx}:db"},
+                {"text": msg("unit_keep_photo_btn", lang, unit=photo_unit),
+                 "callback_data": f"delivery_unit:{delivery_id}:{mi_idx}:photo"},
+            ],
+            [
+                {"text": msg("unit_create_new_btn", lang, name=mi["material_name"], unit=photo_unit),
+                 "callback_data": f"delivery_unit:{delivery_id}:{mi_idx}:new"},
+            ],
+        ]
+        await send_message_with_buttons(chat_id, warn_text, unit_rows, parse_mode="")
+
+    # ── Step 7: Supplier matching against DB ─────────────────────
+    if supplier_name and supplier_name.strip():
+        from api.models import Supplier
+        _supplier_matches = _search_suppliers(db, supplier_name)
+        if _supplier_matches:
+            # Found similar suppliers — offer choice
+            sup_text = msg("supplier_found_prompt", lang, name=supplier_name)
+            sup_rows = []
+            for sup in _supplier_matches[:5]:
+                sup_rows.append([{
+                    "text": sup.name,
+                    "callback_data": f"delivery_supplier:{delivery_id}:{sup.id}",
+                }])
+            sup_rows.append([{
+                "text": msg("supplier_create_new_btn", lang, name=supplier_name),
+                "callback_data": f"delivery_supplier_new:{delivery_id}",
+            }])
+            await send_message_with_buttons(chat_id, sup_text, sup_rows, parse_mode="")
+        else:
+            # No match at all — auto-create? Or just notify.
+            # Store supplier_name in pending for creation on confirm
+            _pending_deliveries[delivery_id]["create_supplier"] = supplier_name
+
     logger.info(
         "Delivery photo processed via API: delivery_id=%s, "
-        "%d matched, %d unmatched, factory=%s",
-        delivery_id, len(matched_items), len(unmatched_items), factory.name,
+        "%d matched, %d unmatched, %d unit_mismatches, factory=%s",
+        delivery_id, len(matched_items), len(unmatched_items),
+        len(unit_mismatch_items), factory.name,
     )
 
 
@@ -3543,6 +3678,43 @@ def _suggest_materials(db: Session, query: str, limit: int = 5) -> list:
     return db.query(Material).order_by(Material.name).limit(limit).all()
 
 
+def _search_suppliers(db: Session, query: str, limit: int = 5) -> list:
+    """Find suppliers matching query string (fuzzy)."""
+    from api.models import Supplier
+    if not query or not query.strip():
+        return []
+
+    query_lower = query.strip().lower()
+
+    # Exact or contains match
+    results = (
+        db.query(Supplier)
+        .filter(Supplier.name.ilike(f"%{query_lower}%"))
+        .filter(Supplier.is_active == True)
+        .limit(limit)
+        .all()
+    )
+    if results:
+        return results
+
+    # Try individual words (min 3 chars)
+    words = query_lower.split()
+    for word in words:
+        if len(word) < 3:
+            continue
+        results = (
+            db.query(Supplier)
+            .filter(Supplier.name.ilike(f"%{word}%"))
+            .filter(Supplier.is_active == True)
+            .limit(limit)
+            .all()
+        )
+        if results:
+            return results
+
+    return []
+
+
 async def _handle_delivery_callback(
     db: Session,
     callback_data: str,
@@ -3560,6 +3732,9 @@ async def _handle_delivery_callback(
       delivery_cancel:{id}
       delivery_match:{id}:{item_index}:{material_id}
       delivery_new:{id}:{item_index}
+      delivery_unit:{id}:{item_index}:{action}   — unit mismatch resolution
+      delivery_supplier:{id}:{supplier_id}        — link existing supplier
+      delivery_supplier_new:{id}                  — create new supplier
     """
     _cleanup_expired_deliveries()
 
@@ -3806,6 +3981,125 @@ async def _handle_delivery_callback(
             parse_mode="",
         )
         await _send_edit_item_prompt(chat_id, delivery_id, _pending_edits[chat_id])
+        return
+
+    # ── delivery_unit:{id}:{item_index}:{action} — unit mismatch ─
+    if action == "delivery_unit":
+        item_index = int(parts[2]) if len(parts) > 2 else -1
+        unit_action = parts[3] if len(parts) > 3 else ""
+
+        target_item = None
+        for mi in pending["matched_items"]:
+            if mi["index"] == item_index:
+                target_item = mi
+                break
+
+        if not target_item:
+            await answer_callback_query(callback_id, msg("item_not_found", lang))
+            return
+
+        if unit_action == "db":
+            # Use DB unit — just update the item's unit to match DB
+            target_item["unit"] = target_item["db_unit"]
+            target_item["unit_mismatch"] = False
+            await answer_callback_query(callback_id, "OK")
+            await _send_message(chat_id, msg("unit_resolved", lang,
+                name=target_item["material_name"], qty=target_item["quantity"],
+                unit=target_item["db_unit"]), parse_mode="")
+
+        elif unit_action == "photo":
+            # Keep photo unit — record quantity as-is with photo's unit
+            # This means the material's unit in DB differs, but user insists
+            target_item["unit_mismatch"] = False
+            await answer_callback_query(callback_id, "OK")
+            await _send_message(chat_id, msg("unit_resolved", lang,
+                name=target_item["material_name"], qty=target_item["quantity"],
+                unit=target_item["unit"]), parse_mode="")
+
+        elif unit_action == "new":
+            # Create a new material with the photo's unit
+            try:
+                mat_name = target_item["material_name"]
+                photo_unit = target_item["unit"]
+                subgroup_id, material_type = _auto_classify_material(db, mat_name)
+
+                new_material = Material(
+                    name=mat_name,
+                    unit=photo_unit,
+                    material_type=material_type,
+                    subgroup_id=subgroup_id,
+                )
+                db.add(new_material)
+                db.flush()
+
+                # Update matched item to point to new material
+                target_item["material_id"] = str(new_material.id)
+                target_item["material_name"] = new_material.name
+                target_item["db_unit"] = photo_unit
+                target_item["unit_mismatch"] = False
+
+                db.commit()
+
+                await answer_callback_query(callback_id, f"Created: {mat_name} ({photo_unit})")
+                await _send_message(chat_id,
+                    msg("new_material_created", lang, name=f"{mat_name} ({photo_unit})",
+                        original=target_item["original_name"]))
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Failed to create material with new unit: {e}", exc_info=True)
+                await answer_callback_query(callback_id, msg("error_occurred", lang))
+
+        # Remove buttons from this message
+        if message_id:
+            from business.services.notifications import edit_telegram_message_buttons
+            edit_telegram_message_buttons(str(chat_id), message_id)
+        return
+
+    # ── delivery_supplier:{id}:{supplier_id} — link existing supplier
+    if action == "delivery_supplier":
+        supplier_id = parts[2] if len(parts) > 2 else ""
+        from api.models import Supplier
+        try:
+            supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+            if supplier:
+                pending["readings"]["supplier"] = supplier.name
+                pending["supplier_id"] = str(supplier.id)
+                await answer_callback_query(callback_id, supplier.name)
+                await _send_message(chat_id, msg("supplier_linked", lang, name=supplier.name), parse_mode="")
+            else:
+                await answer_callback_query(callback_id, msg("error_occurred", lang))
+        except Exception as e:
+            logger.error(f"Failed to link supplier: {e}", exc_info=True)
+            await answer_callback_query(callback_id, msg("error_occurred", lang))
+
+        if message_id:
+            from business.services.notifications import edit_telegram_message_buttons
+            edit_telegram_message_buttons(str(chat_id), message_id)
+        return
+
+    # ── delivery_supplier_new:{id} — create new supplier ─────────
+    if action == "delivery_supplier_new":
+        from api.models import Supplier
+        supplier_name_raw = pending["readings"].get("supplier", "").strip()
+        if not supplier_name_raw:
+            await answer_callback_query(callback_id, msg("error_occurred", lang))
+            return
+        try:
+            new_supplier = Supplier(name=supplier_name_raw, is_active=True)
+            db.add(new_supplier)
+            db.flush()
+            pending["supplier_id"] = str(new_supplier.id)
+            db.commit()
+            await answer_callback_query(callback_id, f"Created: {supplier_name_raw}")
+            await _send_message(chat_id, msg("supplier_created", lang, name=supplier_name_raw), parse_mode="")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to create supplier: {e}", exc_info=True)
+            await answer_callback_query(callback_id, msg("error_occurred", lang))
+
+        if message_id:
+            from business.services.notifications import edit_telegram_message_buttons
+            edit_telegram_message_buttons(str(chat_id), message_id)
         return
 
     # ── dedit:* — edit session callbacks ──────────────────────────

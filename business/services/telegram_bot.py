@@ -3860,6 +3860,7 @@ async def _vision_classify_photo(image_bytes: bytes) -> str | None:
     Cost: ~$0.001 per call (GPT-4.1-nano).
     """
     import base64
+    import os
     import httpx
 
     api_key = os.environ.get("OPENAI_API_KEY")

@@ -3144,3 +3144,23 @@ class SchedulerConfig(Base):
 
     factory = relationship('Factory', foreign_keys=[factory_id])
     updater = relationship('User', foreign_keys=[updated_by])
+
+
+class OnboardingProgress(Base):
+    """Tracks PM onboarding completion per section with quiz scores."""
+    __tablename__ = 'onboarding_progress'
+    __table_args__ = (
+        UniqueConstraint('user_id', 'section_id', name='uq_onboarding_user_section'),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    section_id = Column(sa.String(50), nullable=False)
+    completed = Column(sa.Boolean, nullable=False, default=False)
+    quiz_score = Column(sa.Integer)  # percent 0-100
+    quiz_attempts = Column(sa.Integer, nullable=False, default=0)
+    xp_earned = Column(sa.Integer, nullable=False, default=0)
+    completed_at = Column(sa.DateTime(timezone=True))
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    user = relationship('User', foreign_keys=[user_id])

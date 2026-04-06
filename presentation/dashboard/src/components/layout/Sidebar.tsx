@@ -49,6 +49,7 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/manager/materials', label: 'Materials (Mgr)', icon: '📦' },
         { to: '/manager/grinding', label: 'Grinding', icon: '⚙️' },
         { to: '/manager/workforce', label: 'Workforce', icon: '🗓️' },
+        { to: '/manager/gamification', label: 'Gamification', icon: '🏆' },
         { to: '/tablo', label: 'Tablo', icon: '📺' },
       ],
     },
@@ -153,6 +154,7 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/ceo', label: 'Dashboard', icon: '📊' },
         { to: '/ceo/employees', label: 'Employees', icon: '👷' },
         { to: '/reports', label: 'Reports', icon: '📈' },
+        { to: '/manager/gamification', label: 'Gamification', icon: '🏆' },
         { to: '/tablo', label: 'Tablo', icon: '📺' },
         { to: '/users', label: 'Users', icon: '👥' },
       ],
@@ -165,6 +167,7 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/manager/schedule', label: 'Schedule', icon: '📅' },
         { to: '/manager/staff', label: 'Staff', icon: '👷' },
         { to: '/manager/workforce', label: 'Workforce', icon: '🗓️' },
+        { to: '/manager/gamification', label: 'Gamification', icon: '🏆' },
         { to: '/tablo', label: 'Tablo', icon: '📺' },
       ],
     },
@@ -204,6 +207,7 @@ const navByRole: Record<string, NavSection[]> = {
     {
       section: 'Help', icon: '📖', items: [
         { to: '/manager/guide', label: 'Guide', icon: '📚' },
+        { to: '/manager/onboarding', label: 'Onboarding', icon: '🎓' },
       ],
     },
   ],

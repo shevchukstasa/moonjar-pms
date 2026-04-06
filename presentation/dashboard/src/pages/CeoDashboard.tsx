@@ -344,20 +344,33 @@ export default function CeoDashboard() {
   const { data: kilnsData, isLoading: loadingKilns } = useKilns(factoryId ? { factory_id: factoryId } : undefined);
   const { data: kilnScheduleData } = useKilnSchedule(factoryId);
 
+  const [exporting, setExporting] = useState(false);
+
   const handleExportDaily = async () => {
+    setExporting(true);
     try {
-      const res = await apiClient.post('/export/ceo-daily', null, {
-        params: { factory_id: factoryId, report_date: new Date().toISOString().split('T')[0] },
+      const params: Record<string, string> = {
+        report_date: new Date().toISOString().split('T')[0],
+      };
+      if (factoryId) params.factory_id = factoryId;
+
+      const res = await apiClient.get('/export/ceo-daily/excel', {
+        params,
+        responseType: 'blob',
       });
-      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+      const blob = new Blob([res.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `ceo-daily-${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `ceo-daily-${new Date().toISOString().split('T')[0]}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
       // Handle silently
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -397,10 +410,11 @@ export default function CeoDashboard() {
           </select>
           <button
             onClick={handleExportDaily}
-            className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+            disabled={exporting}
+            className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Download className="h-4 w-4" />
-            Export Daily
+            {exporting ? <Spinner className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+            {exporting ? 'Exporting...' : 'Export Excel'}
           </button>
         </div>
       </div>

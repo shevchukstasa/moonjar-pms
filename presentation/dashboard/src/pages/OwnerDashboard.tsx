@@ -56,20 +56,28 @@ export default function OwnerDashboard() {
   const { data: defectTrend } = useTrendData('defects', undefined, 6);
   const { data: oeeTrend } = useTrendData('oee', undefined, 6);
 
+  const [exporting, setExporting] = useState(false);
+
   const handleExportMonthly = async () => {
+    setExporting(true);
     try {
-      const res = await apiClient.post('/export/owner-monthly', null, {
+      const res = await apiClient.get('/export/owner-monthly/excel', {
         params: { month: new Date().toISOString().slice(0, 7) },
+        responseType: 'blob',
       });
-      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+      const blob = new Blob([res.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `owner-report-${new Date().toISOString().slice(0, 7)}.json`;
+      a.download = `owner-report-${new Date().toISOString().slice(0, 7)}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
       // Handle silently
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -105,10 +113,11 @@ export default function OwnerDashboard() {
           <PeriodSelector value={period} onChange={setPeriod} />
           <button
             onClick={handleExportMonthly}
-            className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+            disabled={exporting}
+            className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Download className="h-4 w-4" />
-            Export Monthly
+            {exporting ? <Spinner className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+            {exporting ? 'Exporting...' : 'Export Excel'}
           </button>
         </div>
       </div>

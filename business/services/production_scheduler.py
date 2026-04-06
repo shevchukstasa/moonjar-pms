@@ -1461,6 +1461,45 @@ def _auto_create_missing_typology(
         nearest = hints[:3]
         hint_names = [h.name for h in nearest]
 
+        # ── Auto-seed speeds from best-matching typology ──
+        from api.models import StageTypologySpeed
+        if nearest and _score(nearest[0]) >= 2:
+            donor = nearest[0]
+            donor_speeds = (
+                db.query(StageTypologySpeed)
+                .filter(StageTypologySpeed.typology_id == donor.id)
+                .all()
+            )
+            seeded = 0
+            for ds in donor_speeds:
+                new_speed = StageTypologySpeed(
+                    factory_id=position.factory_id,
+                    typology_id=new_typology.id,
+                    stage=ds.stage,
+                    productivity_rate=ds.productivity_rate,
+                    rate_unit=ds.rate_unit,
+                    rate_basis=ds.rate_basis,
+                    time_unit=ds.time_unit,
+                    shift_count=ds.shift_count,
+                    shift_duration_hours=ds.shift_duration_hours,
+                    brigade_size=ds.brigade_size,
+                    auto_calibrate=True,
+                    notes=f"Auto-seeded from '{donor.name}'",
+                )
+                db.add(new_speed)
+                seeded += 1
+            if seeded:
+                new_typology.notes = (
+                    f"Auto-created by scheduler. "
+                    f"{seeded} speeds seeded from '{donor.name}' — "
+                    f"auto-calibration will adjust based on actual data."
+                )
+                db.flush()
+                logger.info(
+                    "TYPOLOGY_SPEEDS_SEEDED | typology='%s' | from='%s' | stages=%d",
+                    typology_name, donor.name, seeded,
+                )
+
         pos_label = f"#{position.position_number}" + (
             f".{position.split_index}" if getattr(position, 'split_index', None) else ""
         )
@@ -1474,6 +1513,26 @@ def _auto_create_missing_typology(
         if existing_task:
             return
 
+        # If speeds were seeded, task is informational; otherwise needs PM action
+        _speeds_seeded = db.query(StageTypologySpeed).filter(
+            StageTypologySpeed.typology_id == new_typology.id
+        ).count()
+        _task_desc = (
+            f"New typology '{typology_name}' auto-created for position {pos_label}. "
+        )
+        if _speeds_seeded:
+            _task_desc += (
+                f"{_speeds_seeded} speeds auto-seeded from nearest typology. "
+                f"Auto-calibration enabled — speeds will adjust from production data. "
+                f"Review if needed."
+            )
+        else:
+            _task_desc += (
+                f"Please configure stage speeds (StageTypologySpeed records). "
+                f"Nearest existing typologies for reference: "
+                f"{', '.join(hint_names) if hint_names else 'none'}."
+            )
+
         task = Task(
             factory_id=position.factory_id,
             type=TaskType.TYPOLOGY_SPEEDS_NEEDED,
@@ -1482,13 +1541,8 @@ def _auto_create_missing_typology(
             related_order_id=position.order_id,
             related_position_id=position.id,
             blocking=False,
-            priority=6,
-            description=(
-                f"New typology '{typology_name}' auto-created for position {pos_label}. "
-                f"Please configure stage speeds (StageTypologySpeed records). "
-                f"Nearest existing typologies for reference: "
-                f"{', '.join(hint_names) if hint_names else 'none'}."
-            ),
+            priority=3 if _speeds_seeded else 6,
+            description=_task_desc,
             metadata_json=json.dumps({
                 "typology_id": str(new_typology.id),
                 "typology_name": typology_name,

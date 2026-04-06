@@ -1,6 +1,6 @@
 # Production Manager (PM) Guide -- Moonjar PMS
 
-> Version: 1.3 | Date: 2026-04-02
+> Version: 1.4 | Date: 2026-04-06
 > Moonjar Production Management System
 
 ---
@@ -41,6 +41,16 @@
 33. [Points System and Recipe Verification](#33-points-system-and-recipe-verification)
 34. [Telegram Bot Commands](#34-telegram-bot-commands)
 35. [Morning Briefing](#35-morning-briefing)
+36. [Kiln Shelves Management](#36-kiln-shelves-management)
+37. [Production Line Resources](#37-production-line-resources)
+38. [Zone-Based Kiln Loading](#38-zone-based-kiln-loading)
+39. [Position Status Machine](#39-position-status-machine)
+40. [Skill Badges System](#40-skill-badges-system)
+41. [Competitions and Challenges](#41-competitions-and-challenges)
+42. [TPS Operations and Master Permissions](#42-tps-operations-and-master-permissions)
+43. [Real-Time Notifications (WebSocket)](#43-real-time-notifications-websocket)
+44. [Delivery Photo Processing](#44-delivery-photo-processing)
+45. [Vision-Based Photo Analysis](#45-vision-based-photo-analysis)
 
 ---
 
@@ -1863,6 +1873,340 @@ The scheduler automatically classifies each position:
 - all_edges, with_back, or tiles >15cm → **Flat zone**
 
 Each zone has its own capacity. Overflow in one zone does **not** spill into the other — they are physically separate areas in the kiln. If the edge zone is full but flat zone has space, edge positions must wait for the next firing day.
+
+---
+
+## 39. Position Status Machine
+
+Every production position follows a strict status flow. The system validates every transition -- you cannot skip stages or move backward arbitrarily.
+
+### 39.1. Status Flow Overview
+
+The normal production flow is:
+
+```
+PLANNED --> ENGOBE_APPLIED --> ENGOBE_CHECK --> GLAZED --> PRE_KILN_CHECK
+  --> LOADED_IN_KILN --> FIRED --> TRANSFERRED_TO_SORTING --> PACKED
+  --> SENT_TO_QUALITY_CHECK --> QUALITY_CHECK_DONE --> READY_FOR_SHIPMENT --> SHIPPED
+```
+
+### 39.2. Blocking Statuses
+
+When a position cannot proceed, it enters one of these blocking statuses:
+
+| Status | Reason | Resolution |
+|--------|--------|------------|
+| `INSUFFICIENT_MATERIALS` | Not enough stock to reserve | Receive materials or force-unblock |
+| `AWAITING_RECIPE` | No recipe assigned for the glaze/engobe | Create or assign a recipe |
+| `AWAITING_STENCIL_SILKSCREEN` | Stencil not available | Order/prepare the stencil |
+| `AWAITING_COLOR_MATCHING` | Color match needed | Complete color matching process |
+| `AWAITING_SIZE_CONFIRMATION` | Size not confirmed | Confirm or create the size definition |
+| `AWAITING_CONSUMPTION_DATA` | Missing spray/brush rate | Measure and enter the rate (see Section 9) |
+| `BLOCKED_BY_QM` | Quality Manager hold | QM must release the hold |
+
+All blocking statuses can return to `PLANNED` once the issue is resolved.
+
+### 39.3. Special Transitions
+
+- **Refire**: After `FIRED`, a position can go to `REFIRE` and then back to `LOADED_IN_KILN` for another firing round.
+- **Reglaze**: From `TRANSFERRED_TO_SORTING`, a position can go to `AWAITING_REGLAZE` then `SENT_TO_GLAZING` for re-glazing.
+- **Merged**: Child positions (split from a parent) can be merged back at `PACKED`, `QUALITY_CHECK_DONE`, or `READY_FOR_SHIPMENT` stages.
+- **Cancelled**: Any position can be cancelled from any status.
+- **Blocked by QM**: Quality Manager can block any position from any status. When unblocked, it returns to its previous status.
+
+### 39.4. Tips
+
+- The system prevents invalid transitions -- if a button is greyed out, the position must complete the current stage first.
+- Each status change is recorded in the Stage History for full traceability.
+- The frontend mirrors the status machine logic locally, so allowed transitions are displayed without extra API calls.
+
+---
+
+## 40. Skill Badges System
+
+The Skill Badges system tracks worker competencies. Workers earn certifications by completing operations with high quality, and PM/CEO can formally certify their skills.
+
+### 40.1. What Are Skill Badges?
+
+Each badge represents a specific factory skill, such as:
+
+| Category | Examples |
+|----------|---------|
+| **Production** | Engobe application, glazing, kiln loading |
+| **Specialized** | Stencil work, silkscreen, raku firing |
+| **Quality** | Pre-kiln inspection, final QC |
+| **Safety** | Kiln safety protocols, chemical handling |
+| **Leadership** | Team coordination, training others |
+
+Each badge has requirements:
+- **Required operations**: Number of times the worker must perform the operation (default: 50)
+- **Zero-defect percentage**: Minimum defect-free rate required (default: 90%)
+- **Mentor approval**: Whether PM/CEO manual approval is needed
+- **Points on earn**: Points awarded when the badge is earned (default: 100)
+
+### 40.2. Skill Learning Flow
+
+1. **Start learning**: Worker or PM initiates skill learning via the system.
+2. **Track progress**: The system counts completed operations and tracks defect-free percentage.
+3. **Certification**: When requirements are met, PM or CEO approves the certification.
+4. **Badge earned**: Worker receives the badge and bonus points.
+
+### 40.3. Managing Skill Badges (PM)
+
+**Seeding default badges**: On first setup, go to the TPS/Gamification section and seed default badges for your factory. This creates a standard set of production skills.
+
+**Viewing worker skills**: Check any worker's skill progress -- see which skills they are learning, their operation count, defect-free percentage, and certification status.
+
+**Certifying skills**: When a worker meets the requirements, review their progress and approve or deny certification.
+
+**Revoking certification**: If a worker's quality drops significantly, you can revoke a certification. The worker will need to re-earn it.
+
+### 40.4. Tips
+
+- Seed default badges when setting up a new factory to get a standard skill matrix.
+- Use skill badges when assigning workers to operations -- prefer certified workers for critical tasks.
+- Review skill progress weekly as part of your TPS dashboard routine.
+
+---
+
+## 41. Competitions and Challenges
+
+Competitions motivate workers through friendly, time-bounded contests with real prizes.
+
+### 41.1. Competition Types
+
+| Type | Description |
+|------|------------|
+| **Individual** | Each worker competes on their own score |
+| **Team** | Workers grouped into teams (e.g., by section), team totals compete |
+
+### 41.2. Scoring Metrics
+
+Competitions can track different metrics:
+
+- **Throughput**: Number of pieces or m2 processed
+- **Quality**: Defect-free percentage
+- **Combined** (default): Throughput x Quality weight -- rewards both speed and quality
+
+The `quality_weight` parameter controls how much quality affects the combined score (default: 1.0). Higher weight makes quality more important.
+
+### 41.3. Competition Lifecycle
+
+| Status | Meaning |
+|--------|---------|
+| `proposed` | Worker proposed a challenge, awaiting PM approval |
+| `upcoming` | Approved, not yet started (start_date in the future) |
+| `active` | Currently running |
+| `completed` | End date passed, final standings calculated |
+
+### 41.4. Creating a Competition (PM)
+
+1. Define the competition: title (EN + Indonesian optional), type (individual or team), metric, quality weight.
+2. Set date range: start and end dates.
+3. Optionally add prize description and budget (IDR).
+4. For team competitions, define teams (e.g., "Glazing Section" vs "Sorting Section").
+
+### 41.5. Worker-Proposed Challenges
+
+Workers can propose challenges via the Telegram bot or the system. Proposed challenges appear with status `proposed` and require PM approval before they become active.
+
+To approve: find the proposed challenge and click **Approve**. It moves to `upcoming` status and becomes active on its start date.
+
+### 41.6. Standings and Leaderboard
+
+View real-time standings for any active competition. Standings show:
+- Rank, participant name, throughput score, quality score, combined score, bonus points
+- For team competitions: team totals and individual contributions
+
+To manually refresh scores: use the **Update Scores** action (useful if automatic scoring needs a nudge).
+
+### 41.7. Prizes
+
+After a competition completes, the system can generate AI-based prize recommendations:
+- Recommendations consider performance, improvement trajectory, and budget
+- CEO/Owner reviews and approves, rejects, or awards prizes
+- Prize statuses: `pending` --> `approved` --> `awarded` (or `rejected`)
+
+### 41.8. Gamification Seasons
+
+Competitions can be grouped into monthly seasons. Each season has:
+- Start and end dates
+- Final standings snapshot
+- Prize award records
+
+View season history to track long-term engagement trends.
+
+### 41.9. Tips
+
+- Keep competitions short (1-2 weeks) for maximum engagement.
+- Use combined scoring to prevent speed-at-the-cost-of-quality behavior.
+- Rotate between individual and team competitions to build both personal excellence and team spirit.
+- Even small prizes (IDR 50,000-100,000) create significant motivation when combined with public recognition.
+
+---
+
+## 42. TPS Operations and Master Permissions
+
+The Toyota Production System (TPS) module tracks production operations and controls which masters can perform which tasks.
+
+### 42.1. Operations
+
+Operations are the atomic units of production work (e.g., "Apply engobe", "Load kiln", "Sort tiles"). Each operation belongs to a factory and has a sort order for display.
+
+**Viewing operations**: Navigate to the TPS section on your dashboard. The operations list shows all defined operations for your factory, sorted by their configured order.
+
+### 42.2. Master Permissions
+
+Master and Senior Master roles require explicit permission to perform specific operations. This ensures:
+- Workers only perform tasks they are trained for
+- Quality accountability is clear per operation
+- Skill progression is tracked per operation
+
+### 42.3. Managing Permissions (PM)
+
+**Check permission**: Quickly verify if a specific master has permission for an operation.
+
+**View all permissions**: See the full list of operations a master is permitted to perform.
+
+**Grant permission**: Assign a new operation permission to a master or senior master.
+- Only `master` and `senior_master` roles can receive permissions.
+- The system prevents duplicate grants.
+
+**Revoke permission**: Remove a permission if a worker should no longer perform that operation (e.g., after quality issues or role change).
+
+### 42.4. How Permissions Are Enforced
+
+When a master logs a production operation through the Tablo or Telegram bot:
+1. The system checks if the master has permission for the operation.
+2. If no permission exists, the operation is rejected with an error message.
+3. If permission exists, the operation is logged with full traceability (who, when, what).
+
+### 42.5. Tips
+
+- Grant permissions incrementally as workers earn skill badges.
+- Review permissions quarterly -- revoke unused ones to keep the matrix clean.
+- Use the permission check endpoint before assigning tasks to avoid rejection at the workstation.
+
+---
+
+## 43. Real-Time Notifications (WebSocket)
+
+The system delivers real-time updates to your browser without requiring page refresh.
+
+### 43.1. How It Works
+
+When you are logged in, the system automatically establishes a WebSocket connection. You will see real-time updates for:
+
+- **New orders** arriving from the Sales webhook
+- **Kiln status changes** (firing started, firing complete, breakdown)
+- **Low stock alerts** when materials drop below minimum balance
+- **Task assignments** and status changes
+- **Blocking events** when positions get blocked
+- **Cancellation and change requests** from Sales
+
+### 43.2. Connection Status
+
+The WebSocket connection indicator appears in the navigation bar:
+- **Connected**: Real-time updates are flowing
+- **Reconnecting**: Temporary disconnection, auto-reconnecting with exponential backoff (up to 30 seconds)
+- **Disconnected**: No connection (check your network)
+
+The system sends periodic heartbeats (every 30 seconds) to keep the connection alive.
+
+### 43.3. Factory-Scoped Notifications
+
+Notifications are scoped to your selected factory. If you switch factories, the WebSocket connection updates to deliver notifications for the new factory only. This prevents notification noise from other factories.
+
+### 43.4. Tips
+
+- Keep your browser tab open to receive real-time alerts -- critical for monitoring kiln firings and material shortages.
+- If notifications stop arriving, refresh the page to re-establish the WebSocket connection.
+- The notification bell in the top bar shows unread count -- click to see the full notification list.
+
+---
+
+## 44. Delivery Photo Processing
+
+When materials arrive at the factory, you can process delivery notes by photo instead of manual data entry.
+
+### 44.1. How to Process a Delivery Photo
+
+**Via Telegram bot:**
+1. Send a photo of the delivery note to the bot.
+2. The bot uses Vision AI (OCR) to read the document.
+3. It extracts: supplier name, date, item list with quantities and units.
+4. The smart material matcher maps delivery items to existing materials in the database.
+5. You review the matched items, confirm, edit, or skip each one.
+
+**Via the web app:**
+1. Go to **Materials** page.
+2. Click **Upload Delivery Photo**.
+3. Upload a photo (JPEG, PNG, or WebP).
+4. Review the OCR results and matched materials.
+5. Confirm to receive the materials into inventory.
+
+### 44.2. Smart Material Matching
+
+The system matches delivery note items to database materials using:
+1. **Token-based matching**: Splits item names into words and compares against material names.
+2. **AI fallback**: If basic matching fails, an AI model suggests the best match.
+
+For each item, you can:
+- **Accept match**: Confirm the suggested material
+- **Change match**: Select a different material from the database
+- **Create new**: Add a new material if it does not exist yet
+- **Skip**: Ignore the item (e.g., service charges, delivery fees)
+
+### 44.3. Image Validation
+
+The system validates uploaded images by checking magic bytes (file signature). Only JPEG, PNG, and WebP files are accepted. This prevents accidental upload of non-image files.
+
+### 44.4. Tips
+
+- Take photos in good lighting with the full delivery note visible.
+- Include both the header (supplier, date) and all line items in the frame.
+- For multi-page delivery notes, process each page as a separate photo.
+- The OCR works best with printed text -- handwritten notes may need manual correction.
+
+---
+
+## 45. Vision-Based Photo Analysis
+
+The system uses AI vision models to analyze production photos for different purposes.
+
+### 45.1. Analysis Types
+
+| Type | AI Model | Purpose |
+|------|----------|---------|
+| **Delivery** | GPT-4.1 Nano (cheap OCR) | Read delivery notes, extract items and quantities |
+| **Scale** | GPT-4.1 Nano (cheap OCR) | Read weight from scale display, identify pigment color |
+| **Packing** | GPT-4.1 Nano (cheap OCR) | Read packing labels -- order number, quantity, size |
+| **Quality** | Claude Sonnet (smart analysis) | Detect defects: cracks, glaze issues, color mismatches, warping |
+| **Defect** | Claude Sonnet (smart analysis) | Deep defect analysis with severity and location |
+
+### 45.2. How Quality Analysis Works
+
+1. Take a photo of the fired product showing the area of concern.
+2. Upload via the app or send to the Telegram bot with context.
+3. The AI analyzes the image and returns:
+   - **Defects found**: Type, severity (low/medium/high), location on the product
+   - **Overall quality**: Pass, fail, or needs_review
+   - **Description**: Brief summary of findings
+
+### 45.3. Cost Optimization
+
+The system automatically selects the cheapest appropriate model:
+- OCR tasks (delivery, scale, packing) use the cheaper GPT-4.1 Nano model (~$0.10 per million tokens)
+- Complex visual analysis (quality, defect) uses Claude Sonnet for higher accuracy (~$2.00 per million tokens)
+
+This means routine delivery processing costs almost nothing, while quality inspection gets the best available AI model.
+
+### 45.4. Tips
+
+- For quality photos: use consistent lighting and include a size reference.
+- Capture defects from multiple angles for the most accurate analysis.
+- The AI is a tool to assist, not replace human judgment -- always verify critical quality decisions.
+- Scale photos work best when the display is clearly visible and not at an extreme angle.
 
 ---
 

@@ -1,6 +1,6 @@
 # Panduan Production Manager (PM) -- Moonjar PMS
 
-> Versi: 1.2 | Tanggal: 2026-03-26
+> Versi: 1.4 | Tanggal: 2026-04-06
 > Moonjar Production Management System
 
 ---
@@ -37,6 +37,20 @@
 29. [Alur Kerja Pengiriman](#29-alur-kerja-pengiriman)
 30. [Pengelolaan Karyawan dan Kehadiran](#30-pengelolaan-karyawan-dan-kehadiran)
 31. [Pencatatan Suhu Pembakaran](#31-pencatatan-suhu-pembakaran)
+32. [Manajemen Rak Kiln](#32-manajemen-rak-kiln)
+33. [Sumber Daya Lini Produksi](#33-sumber-daya-lini-produksi)
+34. [Pemuatan Kiln Berbasis Zona](#34-pemuatan-kiln-berbasis-zona)
+35. [Smart Force Unblock](#35-smart-force-unblock)
+36. [Sistem Poin dan Verifikasi Resep](#36-sistem-poin-dan-verifikasi-resep)
+37. [Perintah Bot Telegram](#37-perintah-bot-telegram)
+38. [Briefing Pagi](#38-briefing-pagi)
+39. [Mesin Status Posisi](#39-mesin-status-posisi)
+40. [Sistem Lencana Keahlian](#40-sistem-lencana-keahlian)
+41. [Kompetisi dan Tantangan](#41-kompetisi-dan-tantangan)
+42. [Operasi TPS dan Izin Master](#42-operasi-tps-dan-izin-master)
+43. [Notifikasi Real-Time (WebSocket)](#43-notifikasi-real-time-websocket)
+44. [Pemrosesan Foto Pengiriman](#44-pemrosesan-foto-pengiriman)
+45. [Analisis Foto Berbasis Vision](#45-analisis-foto-berbasis-vision)
 
 ---
 
@@ -1718,6 +1732,457 @@ Kiln memiliki zona pemuatan berbeda untuk jenis ubin berbeda:
 - **Zona Flat** -- ubin dimuat datar (all edges, with back). Kepadatan lebih rendah, untuk ubin besar
 
 Scheduler otomatis mengklasifikasikan setiap posisi ke zona yang tepat. Overflow di satu zona **tidak** tumpah ke zona lain.
+
+---
+
+## 35. Smart Force Unblock
+
+Ketika posisi terblokir, Anda dapat melakukan force-unblock untuk menjaga produksi tetap berjalan. Sistem menawarkan **3 opsi sesuai konteks** alih-alih tombol generik.
+
+### 35.1. Cara Menggunakan
+
+1. Buka tab **Blocking** di Dashboard Anda.
+2. Temukan posisi yang terblokir.
+3. Klik **"Force Unblock"**.
+4. Dialog muncul dengan 3 opsi spesifik sesuai alasan pemblokiran.
+
+### 35.2. Opsi Berdasarkan Jenis Blokir
+
+| Alasan Blokir | Opsi 1 | Opsi 2 | Opsi 3 |
+|---------------|--------|--------|--------|
+| Kekurangan Material | Lanjutkan dengan stok tersedia | Tunggu pengiriman berikutnya | Substitusi material |
+| Resep Belum Ada | Gunakan resep terdekat | Buat resep sementara | Lewati glazing |
+| Stensil Belum Ada | Lanjutkan tanpa stensil | Gunakan stensil alternatif | Tunda sampai siap |
+| Ketidakcocokan Warna | Terima warna saat ini | Minta pencocokan ulang | Gunakan warna standar |
+| Data Konsumsi Belum Ada | Gunakan tarif default | Ukur sekarang | Salin dari resep serupa |
+
+### 35.3. Notifikasi CEO
+
+Setiap force unblock otomatis mengirim notifikasi Telegram ke CEO dengan detail posisi, alasan pemblokiran, opsi yang dipilih, dan nama Anda.
+
+> **Penting**: Force unblock adalah pilihan terakhir. Selalu coba selesaikan masalah yang mendasarinya terlebih dahulu.
+
+---
+
+## 36. Sistem Poin dan Verifikasi Resep
+
+### 36.1. Sistem Poin
+
+Anda mendapatkan poin untuk persiapan resep yang akurat. Poin terakumulasi sepanjang tahun dan muncul di leaderboard.
+
+**Penilaian:**
+
+| Akurasi (deviasi dari spesifikasi) | Poin |
+|------------------------------------|------|
+| Dalam +/-1% | 10 |
+| Dalam +/-3% | 7 |
+| Dalam +/-5% | 5 |
+| Dalam +/-10% | 3 |
+| Lebih dari +/-10% | 1 |
+| Bonus verifikasi foto | +2 |
+
+Poin direset pada 1 Januari setiap tahun. Cek poin Anda kapan saja dengan `/mystats` atau `/points` di Telegram.
+
+### 36.2. Verifikasi Resep
+
+Untuk memverifikasi persiapan resep:
+
+1. Siapkan resep sesuai spesifikasi.
+2. Ambil foto dari jumlah yang diukur (pembacaan timbangan, gelas ukur, dll.).
+3. Kirim foto ke bot Telegram atau unggah melalui aplikasi.
+4. Sistem menggunakan OCR untuk mengekstrak nilai terukur dan membandingkannya dengan spesifikasi resep.
+5. Poin diberikan berdasarkan akurasi.
+
+Untuk membatalkan verifikasi yang sedang berjalan, gunakan `/cancel_verify` di Telegram.
+
+### 36.3. Tantangan Harian
+
+Setiap briefing pagi menyertakan tantangan harian (misal: "Zero defect hari ini = +20 poin"). Selesaikan tantangan untuk mendapat poin bonus.
+
+---
+
+## 37. Perintah Bot Telegram
+
+Bot Telegram mendukung perintah-perintah berikut untuk production manager:
+
+| Perintah | Fungsi |
+|----------|--------|
+| `/mystats` | Rincian poin pribadi dan statistik Anda |
+| `/leaderboard` | Peringkat pekerja terbaik |
+| `/stock` | Ringkasan material stok rendah |
+| `/challenge` | Detail tantangan harian saat ini |
+| `/achievements` | Lencana dan pencapaian yang sudah diraih |
+| `/points` | Saldo poin saat ini |
+| `/cancel_verify` | Batalkan verifikasi resep yang sedang berjalan |
+
+Anda juga bisa mengirim pesan bahasa natural ke bot untuk bantuan AI tentang pertanyaan produksi.
+
+---
+
+## 38. Briefing Pagi
+
+Setiap pagi pada waktu yang dikonfigurasi (default jam 7:00), bot mengirim briefing ke grup chat produksi.
+
+### 38.1. Struktur Briefing
+
+Briefing berisi 7 blok:
+
+1. **Salam** -- dipersonalisasi dengan suasana berdasarkan hasil kemarin
+2. **Ringkasan Kemarin** -- potongan diproduksi, tingkat defect, utilisasi kiln
+3. **Rencana Hari Ini** -- batch terjadwal, output yang diharapkan, deadline penting
+4. **Masalah Pemblokiran** -- blokir aktif yang membutuhkan perhatian segera
+5. **Pencapaian** -- poin yang diperoleh kemarin, pekerja terbaik, streak
+6. **Tantangan** -- tantangan harian dengan poin bonus
+7. **Tombol Aksi** -- 6 tombol inline untuk aksi cepat
+
+### 38.2. Tombol Inline
+
+Di bawah pesan briefing, Anda akan melihat 6 tombol:
+
+- **Start Day** -- tap untuk konfirmasi kehadiran dan mulai shift
+- **Details** -- lihat jadwal lengkap hari ini
+- **Problem** -- laporkan masalah dengan cepat
+- **Stats** -- lihat statistik pribadi Anda
+- **Leaders** -- lihat leaderboard saat ini
+- **Stock** -- cek material stok rendah
+
+### 38.3. Ringkasan Sore
+
+Pukul 18:00, bot mengirim ringkasan sore dengan hasil hari ini: potongan selesai vs rencana, tingkat defect, poin yang diperoleh, dan preview batch pertama besok.
+
+---
+
+## 39. Mesin Status Posisi
+
+Setiap posisi produksi mengikuti alur status yang ketat. Sistem memvalidasi setiap transisi -- Anda tidak bisa melewati tahapan atau mundur secara sembarangan.
+
+### 39.1. Alur Status Umum
+
+Alur produksi normal:
+
+```
+PLANNED --> ENGOBE_APPLIED --> ENGOBE_CHECK --> GLAZED --> PRE_KILN_CHECK
+  --> LOADED_IN_KILN --> FIRED --> TRANSFERRED_TO_SORTING --> PACKED
+  --> SENT_TO_QUALITY_CHECK --> QUALITY_CHECK_DONE --> READY_FOR_SHIPMENT --> SHIPPED
+```
+
+### 39.2. Status Pemblokiran
+
+Ketika posisi tidak dapat melanjutkan, statusnya berubah menjadi salah satu status pemblokiran:
+
+| Status | Alasan | Penyelesaian |
+|--------|--------|-------------|
+| `INSUFFICIENT_MATERIALS` | Stok tidak cukup untuk reservasi | Terima material atau force-unblock |
+| `AWAITING_RECIPE` | Belum ada resep untuk glaze/engobe | Buat atau tetapkan resep |
+| `AWAITING_STENCIL_SILKSCREEN` | Stensil belum tersedia | Pesan/siapkan stensil |
+| `AWAITING_COLOR_MATCHING` | Perlu pencocokan warna | Selesaikan proses pencocokan warna |
+| `AWAITING_SIZE_CONFIRMATION` | Ukuran belum dikonfirmasi | Konfirmasi atau buat definisi ukuran |
+| `AWAITING_CONSUMPTION_DATA` | Tarif spray/brush belum ada | Ukur dan masukkan tarif (lihat Bagian 9) |
+| `BLOCKED_BY_QM` | Ditahan Quality Manager | QM harus melepas penahanan |
+
+Semua status pemblokiran dapat kembali ke `PLANNED` setelah masalah diselesaikan.
+
+### 39.3. Transisi Khusus
+
+- **Refire**: Setelah `FIRED`, posisi dapat ke `REFIRE` lalu kembali ke `LOADED_IN_KILN` untuk pembakaran ulang.
+- **Reglaze**: Dari `TRANSFERRED_TO_SORTING`, posisi dapat ke `AWAITING_REGLAZE` lalu `SENT_TO_GLAZING` untuk glazur ulang.
+- **Merged**: Posisi anak (pecahan dari induk) dapat digabungkan kembali di tahap `PACKED`, `QUALITY_CHECK_DONE`, atau `READY_FOR_SHIPMENT`.
+- **Cancelled**: Posisi mana pun dapat dibatalkan dari status apa pun.
+- **Blocked by QM**: Quality Manager dapat memblokir posisi dari status apa pun. Saat dilepas, kembali ke status sebelumnya.
+
+### 39.4. Tips
+
+- Sistem mencegah transisi tidak valid -- jika tombol tidak aktif, posisi harus menyelesaikan tahap saat ini terlebih dahulu.
+- Setiap perubahan status dicatat di Stage History untuk telusur penuh.
+- Frontend meniru logika mesin status secara lokal, sehingga transisi yang diizinkan ditampilkan tanpa panggilan API tambahan.
+
+---
+
+## 40. Sistem Lencana Keahlian (Skill Badges)
+
+Sistem Lencana Keahlian melacak kompetensi pekerja. Pekerja mendapatkan sertifikasi dengan menyelesaikan operasi dengan kualitas tinggi, dan PM/CEO dapat secara resmi mensertifikasi keahlian mereka.
+
+### 40.1. Apa Itu Lencana Keahlian?
+
+Setiap lencana mewakili keahlian pabrik tertentu:
+
+| Kategori | Contoh |
+|----------|--------|
+| **Produksi** | Aplikasi engobe, glazur, pemuatan kiln |
+| **Spesialisasi** | Pekerjaan stensil, silkscreen, pembakaran raku |
+| **Kualitas** | Inspeksi pra-kiln, QC akhir |
+| **Keselamatan** | Protokol keselamatan kiln, penanganan bahan kimia |
+| **Kepemimpinan** | Koordinasi tim, melatih orang lain |
+
+Setiap lencana memiliki persyaratan:
+- **Operasi yang diperlukan**: Berapa kali pekerja harus melakukan operasi (default: 50)
+- **Persentase tanpa defect**: Tingkat bebas defect minimum (default: 90%)
+- **Persetujuan mentor**: Apakah persetujuan manual PM/CEO diperlukan
+- **Poin saat diraih**: Poin yang diberikan saat lencana diperoleh (default: 100)
+
+### 40.2. Alur Pembelajaran Keahlian
+
+1. **Mulai belajar**: Pekerja atau PM memulai pembelajaran keahlian melalui sistem.
+2. **Lacak kemajuan**: Sistem menghitung operasi yang diselesaikan dan melacak persentase tanpa defect.
+3. **Sertifikasi**: Ketika persyaratan terpenuhi, PM atau CEO menyetujui sertifikasi.
+4. **Lencana diperoleh**: Pekerja menerima lencana dan poin bonus.
+
+### 40.3. Mengelola Lencana Keahlian (PM)
+
+**Menanam lencana default**: Pada pengaturan awal, buka bagian TPS/Gamifikasi dan tanam lencana default untuk pabrik Anda. Ini membuat set standar keahlian produksi.
+
+**Melihat keahlian pekerja**: Periksa kemajuan keahlian pekerja mana pun -- lihat keahlian yang sedang dipelajari, jumlah operasi, persentase tanpa defect, dan status sertifikasi.
+
+**Mensertifikasi keahlian**: Ketika pekerja memenuhi persyaratan, tinjau kemajuan mereka dan setujui atau tolak sertifikasi.
+
+**Mencabut sertifikasi**: Jika kualitas pekerja menurun signifikan, Anda dapat mencabut sertifikasi. Pekerja perlu mendapatkannya kembali.
+
+### 40.4. Tips
+
+- Tanam lencana default saat menyiapkan pabrik baru untuk mendapatkan matriks keahlian standar.
+- Gunakan lencana keahlian saat menugaskan pekerja ke operasi -- utamakan pekerja bersertifikat untuk tugas kritis.
+- Tinjau kemajuan keahlian mingguan sebagai bagian dari rutinitas dashboard TPS Anda.
+
+---
+
+## 41. Kompetisi dan Tantangan
+
+Kompetisi memotivasi pekerja melalui kontes terbatas waktu yang bersahabat dengan hadiah nyata.
+
+### 41.1. Jenis Kompetisi
+
+| Jenis | Deskripsi |
+|-------|-----------|
+| **Individual** | Setiap pekerja bersaing berdasarkan skor pribadi |
+| **Tim** | Pekerja dikelompokkan dalam tim (misal per bagian), total tim bersaing |
+
+### 41.2. Metrik Penilaian
+
+Kompetisi dapat melacak metrik berbeda:
+
+- **Throughput**: Jumlah potongan atau m2 yang diproses
+- **Kualitas**: Persentase tanpa defect
+- **Kombinasi** (default): Throughput x bobot kualitas -- menghargai kecepatan dan kualitas
+
+Parameter `quality_weight` mengontrol seberapa besar kualitas mempengaruhi skor kombinasi (default: 1.0). Bobot lebih tinggi membuat kualitas lebih penting.
+
+### 41.3. Siklus Hidup Kompetisi
+
+| Status | Arti |
+|--------|------|
+| `proposed` | Pekerja mengusulkan tantangan, menunggu persetujuan PM |
+| `upcoming` | Disetujui, belum dimulai (tanggal mulai di masa depan) |
+| `active` | Sedang berjalan |
+| `completed` | Tanggal akhir lewat, peringkat akhir dihitung |
+
+### 41.4. Membuat Kompetisi (PM)
+
+1. Tentukan kompetisi: judul (EN + Indonesia opsional), jenis (individual atau tim), metrik, bobot kualitas.
+2. Tetapkan rentang tanggal: tanggal mulai dan akhir.
+3. Opsional tambahkan deskripsi hadiah dan anggaran (IDR).
+4. Untuk kompetisi tim, tentukan tim (misal "Bagian Glazur" vs "Bagian Sorting").
+
+### 41.5. Tantangan yang Diusulkan Pekerja
+
+Pekerja dapat mengusulkan tantangan melalui bot Telegram atau sistem. Tantangan yang diusulkan muncul dengan status `proposed` dan membutuhkan persetujuan PM sebelum menjadi aktif.
+
+Untuk menyetujui: temukan tantangan yang diusulkan dan klik **Approve**. Statusnya berubah ke `upcoming` dan menjadi aktif pada tanggal mulainya.
+
+### 41.6. Peringkat dan Leaderboard
+
+Lihat peringkat real-time untuk kompetisi aktif mana pun. Peringkat menampilkan:
+- Peringkat, nama peserta, skor throughput, skor kualitas, skor kombinasi, poin bonus
+- Untuk kompetisi tim: total tim dan kontribusi individual
+
+Untuk memperbarui skor secara manual: gunakan aksi **Update Scores** (berguna jika penilaian otomatis perlu dorongan).
+
+### 41.7. Hadiah
+
+Setelah kompetisi selesai, sistem dapat menghasilkan rekomendasi hadiah berbasis AI:
+- Rekomendasi mempertimbangkan performa, trajectory peningkatan, dan anggaran
+- CEO/Owner meninjau dan menyetujui, menolak, atau memberikan hadiah
+- Status hadiah: `pending` --> `approved` --> `awarded` (atau `rejected`)
+
+### 41.8. Musim Gamifikasi
+
+Kompetisi dapat dikelompokkan ke dalam musim bulanan. Setiap musim memiliki:
+- Tanggal mulai dan akhir
+- Snapshot peringkat akhir
+- Catatan pemberian hadiah
+
+Lihat riwayat musim untuk melacak tren keterlibatan jangka panjang.
+
+### 41.9. Tips
+
+- Jaga kompetisi tetap singkat (1-2 minggu) untuk keterlibatan maksimal.
+- Gunakan penilaian kombinasi untuk mencegah perilaku ngebut-tanpa-kualitas.
+- Rotasi antara kompetisi individual dan tim untuk membangun keunggulan pribadi dan semangat tim.
+- Hadiah kecil sekalipun (IDR 50.000-100.000) menciptakan motivasi signifikan jika dikombinasikan dengan pengakuan publik.
+
+---
+
+## 42. Operasi TPS dan Izin Master
+
+Modul Toyota Production System (TPS) melacak operasi produksi dan mengontrol master mana yang dapat melakukan tugas mana.
+
+### 42.1. Operasi
+
+Operasi adalah unit atom pekerjaan produksi (misal "Aplikasi engobe", "Muat kiln", "Sortir ubin"). Setiap operasi terkait dengan pabrik dan memiliki urutan tampilan.
+
+**Melihat operasi**: Buka bagian TPS di dashboard Anda. Daftar operasi menampilkan semua operasi yang ditentukan untuk pabrik Anda, diurutkan berdasarkan urutan yang dikonfigurasi.
+
+### 42.2. Izin Master
+
+Peran Master dan Senior Master memerlukan izin eksplisit untuk melakukan operasi tertentu. Ini memastikan:
+- Pekerja hanya melakukan tugas yang sudah dilatih
+- Akuntabilitas kualitas jelas per operasi
+- Progres keahlian dilacak per operasi
+
+### 42.3. Mengelola Izin (PM)
+
+**Cek izin**: Verifikasi cepat apakah master tertentu memiliki izin untuk suatu operasi.
+
+**Lihat semua izin**: Lihat daftar lengkap operasi yang diizinkan untuk seorang master.
+
+**Berikan izin**: Tetapkan izin operasi baru ke master atau senior master.
+- Hanya peran `master` dan `senior_master` yang dapat menerima izin.
+- Sistem mencegah pemberian duplikat.
+
+**Cabut izin**: Hapus izin jika pekerja tidak boleh lagi melakukan operasi tersebut (misal setelah masalah kualitas atau perubahan peran).
+
+### 42.4. Bagaimana Izin Ditegakkan
+
+Ketika master mencatat operasi produksi melalui Tablo atau bot Telegram:
+1. Sistem memeriksa apakah master memiliki izin untuk operasi tersebut.
+2. Jika tidak ada izin, operasi ditolak dengan pesan error.
+3. Jika ada izin, operasi dicatat dengan telusur penuh (siapa, kapan, apa).
+
+### 42.5. Tips
+
+- Berikan izin secara bertahap seiring pekerja mendapatkan lencana keahlian.
+- Tinjau izin setiap kuartal -- cabut yang tidak terpakai untuk menjaga matriks tetap bersih.
+- Gunakan pengecekan izin sebelum menugaskan tugas untuk menghindari penolakan di workstation.
+
+---
+
+## 43. Notifikasi Real-Time (WebSocket)
+
+Sistem mengirimkan pembaruan real-time ke browser Anda tanpa memerlukan refresh halaman.
+
+### 43.1. Cara Kerja
+
+Saat Anda login, sistem otomatis membuat koneksi WebSocket. Anda akan menerima pembaruan real-time untuk:
+
+- **Pesanan baru** yang masuk dari webhook Sales
+- **Perubahan status kiln** (pembakaran dimulai, pembakaran selesai, kerusakan)
+- **Peringatan stok rendah** saat material turun di bawah saldo minimum
+- **Penugasan tugas** dan perubahan status
+- **Event pemblokiran** saat posisi terblokir
+- **Permintaan pembatalan dan perubahan** dari Sales
+
+### 43.2. Status Koneksi
+
+Indikator koneksi WebSocket muncul di bilah navigasi:
+- **Connected**: Pembaruan real-time mengalir
+- **Reconnecting**: Putus sementara, auto-reconnect dengan backoff eksponensial (hingga 30 detik)
+- **Disconnected**: Tidak ada koneksi (periksa jaringan Anda)
+
+Sistem mengirim heartbeat periodik (setiap 30 detik) untuk menjaga koneksi tetap hidup.
+
+### 43.3. Notifikasi Lingkup Pabrik
+
+Notifikasi dibatasi pada pabrik yang Anda pilih. Jika Anda beralih pabrik, koneksi WebSocket diperbarui untuk mengirim notifikasi hanya untuk pabrik baru. Ini mencegah noise notifikasi dari pabrik lain.
+
+### 43.4. Tips
+
+- Biarkan tab browser tetap terbuka untuk menerima peringatan real-time -- penting untuk memantau pembakaran kiln dan kekurangan material.
+- Jika notifikasi berhenti, refresh halaman untuk membangun ulang koneksi WebSocket.
+- Lonceng notifikasi di bilah atas menampilkan jumlah yang belum dibaca -- klik untuk melihat daftar notifikasi lengkap.
+
+---
+
+## 44. Pemrosesan Foto Pengiriman
+
+Saat material tiba di pabrik, Anda dapat memproses nota pengiriman melalui foto alih-alih input data manual.
+
+### 44.1. Cara Memproses Foto Pengiriman
+
+**Melalui bot Telegram:**
+1. Kirim foto nota pengiriman ke bot.
+2. Bot menggunakan Vision AI (OCR) untuk membaca dokumen.
+3. Mengekstrak: nama supplier, tanggal, daftar item dengan kuantitas dan satuan.
+4. Smart material matcher memetakan item pengiriman ke material yang ada di database.
+5. Anda meninjau item yang dicocokkan, konfirmasi, edit, atau lewati masing-masing.
+
+**Melalui aplikasi web:**
+1. Buka halaman **Materials**.
+2. Klik **Upload Delivery Photo**.
+3. Unggah foto (JPEG, PNG, atau WebP).
+4. Tinjau hasil OCR dan material yang dicocokkan.
+5. Konfirmasi untuk menerima material ke inventaris.
+
+### 44.2. Pencocokan Material Cerdas
+
+Sistem mencocokkan item nota pengiriman ke material database menggunakan:
+1. **Pencocokan berbasis token**: Memecah nama item menjadi kata-kata dan membandingkan dengan nama material.
+2. **Fallback AI**: Jika pencocokan dasar gagal, model AI menyarankan kecocokan terbaik.
+
+Untuk setiap item, Anda dapat:
+- **Terima kecocokan**: Konfirmasi material yang disarankan
+- **Ubah kecocokan**: Pilih material berbeda dari database
+- **Buat baru**: Tambah material baru jika belum ada
+- **Lewati**: Abaikan item (misal biaya layanan, ongkos kirim)
+
+### 44.3. Validasi Gambar
+
+Sistem memvalidasi gambar yang diunggah dengan memeriksa magic bytes (tanda tangan file). Hanya file JPEG, PNG, dan WebP yang diterima.
+
+### 44.4. Tips
+
+- Ambil foto dengan pencahayaan baik dan nota pengiriman terlihat lengkap.
+- Sertakan header (supplier, tanggal) dan semua baris item dalam bingkai.
+- Untuk nota multi-halaman, proses setiap halaman sebagai foto terpisah.
+- OCR bekerja paling baik dengan teks cetak -- catatan tulisan tangan mungkin perlu koreksi manual.
+
+---
+
+## 45. Analisis Foto Berbasis Vision
+
+Sistem menggunakan model AI vision untuk menganalisis foto produksi untuk berbagai tujuan.
+
+### 45.1. Jenis Analisis
+
+| Jenis | Model AI | Tujuan |
+|-------|----------|--------|
+| **Pengiriman** | GPT-4.1 Nano (OCR murah) | Baca nota pengiriman, ekstrak item dan kuantitas |
+| **Timbangan** | GPT-4.1 Nano (OCR murah) | Baca berat dari tampilan timbangan, identifikasi warna pigmen |
+| **Kemasan** | GPT-4.1 Nano (OCR murah) | Baca label kemasan -- nomor pesanan, kuantitas, ukuran |
+| **Kualitas** | Claude Sonnet (analisis cerdas) | Deteksi defect: retak, masalah glazur, ketidakcocokan warna, melengkung |
+| **Defect** | Claude Sonnet (analisis cerdas) | Analisis defect mendalam dengan tingkat keparahan dan lokasi |
+
+### 45.2. Cara Kerja Analisis Kualitas
+
+1. Ambil foto produk setelah pembakaran yang menunjukkan area yang diperhatikan.
+2. Unggah melalui aplikasi atau kirim ke bot Telegram dengan konteks.
+3. AI menganalisis gambar dan mengembalikan:
+   - **Defect ditemukan**: Jenis, tingkat keparahan (rendah/sedang/tinggi), lokasi pada produk
+   - **Kualitas keseluruhan**: Lolos, gagal, atau perlu tinjauan
+   - **Deskripsi**: Ringkasan singkat temuan
+
+### 45.3. Optimasi Biaya
+
+Sistem otomatis memilih model termurah yang sesuai:
+- Tugas OCR (pengiriman, timbangan, kemasan) menggunakan model GPT-4.1 Nano yang lebih murah (~$0,10 per juta token)
+- Analisis visual kompleks (kualitas, defect) menggunakan Claude Sonnet untuk akurasi lebih tinggi (~$2,00 per juta token)
+
+Ini berarti pemrosesan pengiriman rutin hampir gratis, sementara inspeksi kualitas mendapat model AI terbaik yang tersedia.
+
+### 45.4. Tips
+
+- Untuk foto kualitas: gunakan pencahayaan konsisten dan sertakan referensi ukuran.
+- Tangkap defect dari beberapa sudut untuk analisis paling akurat.
+- AI adalah alat bantu, bukan pengganti penilaian manusia -- selalu verifikasi keputusan kualitas kritis.
+- Foto timbangan bekerja paling baik saat tampilan terlihat jelas dan tidak dari sudut ekstrem.
 
 ---
 

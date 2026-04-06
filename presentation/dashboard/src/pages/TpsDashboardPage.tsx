@@ -1477,6 +1477,7 @@ function TypologySpeedsTab({ factoryId }: { factoryId: string }) {
   const [addingFor, setAddingFor] = useState<{ typology_id: string; stage: string } | null>(null);
   const [newSpeed, setNewSpeed] = useState<Partial<StageSpeedCreate>>({});
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   const { data: typologiesData, isLoading: typLoading } = useQuery({
     queryKey: ['tps-typologies', factoryId],
@@ -1579,6 +1580,40 @@ function TypologySpeedsTab({ factoryId }: { factoryId: string }) {
         </h3>
       </div>
 
+      {/* Info banner: typologies with 0 speeds */}
+      {(() => {
+        const zeroSpeedCount = typologies.filter((t) => (speedsByTypology[t.id] ?? []).length === 0).length;
+        if (zeroSpeedCount === 0 || bannerDismissed) return null;
+        return (
+          <Card className="border-amber-200 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                    {zeroSpeedCount} {zeroSpeedCount === 1 ? 'типология без скоростей' : 'типологий без скоростей'}
+                  </p>
+                  <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
+                    Есть типологии без настроенных скоростей производства. Без скоростей планировщик не может рассчитать сроки.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setBannerDismissed(true)}
+                className="flex-shrink-0 rounded p-1 text-amber-400 transition hover:bg-amber-100 hover:text-amber-600 dark:hover:bg-amber-900/50"
+                title="Dismiss"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </Card>
+        );
+      })()}
+
       {createMut.isError && (
         <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/20">
           <p className="text-sm text-red-600">Create failed: {(createMut.error as Error).message}</p>
@@ -1611,9 +1646,19 @@ function TypologySpeedsTab({ factoryId }: { factoryId: string }) {
                   {typology.priority}
                 </span>
                 <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{typology.name}</h4>
-                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500 dark:bg-stone-700 dark:text-stone-400">
-                  {speeds.length} speed{speeds.length !== 1 ? 's' : ''}
-                </span>
+                {speeds.length === 0 && typology.name.startsWith('Auto:') ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+                    </span>
+                    Настройте скорости
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500 dark:bg-stone-700 dark:text-stone-400">
+                    {speeds.length} speed{speeds.length !== 1 ? 's' : ''}
+                  </span>
+                )}
               </div>
               <svg
                 className={cn('h-5 w-5 text-gray-400 transition-transform', isExpanded && 'rotate-180')}
@@ -1747,8 +1792,18 @@ function TypologySpeedsTab({ factoryId }: { factoryId: string }) {
                                   <td className="px-3 py-2">{speed.shift_count}</td>
                                   <td className="px-3 py-2">{speed.brigade_size}</td>
                                   <td className="px-3 py-2">
-                                    <span className="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                                      {formatSpeedDisplay(speed)}
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <span className="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                                        {formatSpeedDisplay(speed)}
+                                      </span>
+                                      {speed.auto_calibrate && (
+                                        <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-600 ring-1 ring-inset ring-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-700" title="Auto-calibration enabled: system will adjust based on production data">
+                                          <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12a7.5 7.5 0 0015 0m-15 0a7.5 7.5 0 0115 0m-15 0H3m16.5 0H21m-1.5 0H12m-8.457 3.077l1.41-.513m14.095-5.13l1.41-.513M5.106 17.785l1.15-.964m11.49-9.642l1.15-.964M7.501 19.795l.75-1.3m7.5-12.99l.75-1.3m-6.063 16.658l.26-1.477m2.605-14.772l.26-1.477m-.26 17.726a7.5 7.5 0 01-2.605 0" />
+                                          </svg>
+                                          Auto
+                                        </span>
+                                      )}
                                     </span>
                                   </td>
                                   <td className="px-3 py-2 space-x-1">

@@ -221,7 +221,7 @@ function ShipmentRow({
           <span
             className={`inline-block transition-transform ${expanded ? 'rotate-90' : ''}`}
           >
-            {'\u25B6'}
+            {'▶'}
           </span>
         </td>
         <td className="px-4 py-3 font-medium whitespace-nowrap">
@@ -239,13 +239,13 @@ function ShipmentRow({
           </span>
         </td>
         <td className="px-4 py-3 text-gray-500">
-          {s.confirmed_by ? s.confirmed_by.slice(0, 8) + '...' : '\u2014'}
+          {s.confirmed_by ? s.confirmed_by.slice(0, 8) + '...' : '—'}
         </td>
         <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-          {s.shipped_at ? new Date(s.shipped_at).toLocaleDateString() : '\u2014'}
+          {s.shipped_at ? new Date(s.shipped_at).toLocaleDateString() : '—'}
         </td>
         <td className="px-4 py-3 text-gray-500 max-w-[200px] truncate">
-          {s.notes || '\u2014'}
+          {s.notes || '—'}
         </td>
         <td className="px-4 py-3 text-right">
           <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>

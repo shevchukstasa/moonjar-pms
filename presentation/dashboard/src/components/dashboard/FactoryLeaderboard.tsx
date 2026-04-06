@@ -17,7 +17,7 @@ const METRIC_CONFIG: Record<string, { label: string; unit: string; decimals: num
 };
 
 const RANK_COLORS = ['', 'text-amber-500', 'text-gray-400', 'text-orange-600'];
-const RANK_ICONS = ['', '\uD83E\uDD47', '\uD83E\uDD48', '\uD83E\uDD49'];
+const RANK_ICONS = ['', '🥇', '🥈', '🥉'];
 
 function RankBadge({ rank }: { rank: number }) {
   if (rank <= 3) {

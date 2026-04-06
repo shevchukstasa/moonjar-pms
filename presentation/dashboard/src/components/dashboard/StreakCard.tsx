@@ -7,37 +7,37 @@ import type { StreakItem, DailyChallengeItem } from '@/api/analytics';
 const STREAK_CONFIG: Record<string, { label: string; icon: string; color: string }> = {
   on_time_delivery: {
     label: 'On-Time',
-    icon: '\uD83D\uDCE6',
+    icon: '📦',
     color: 'from-amber-400 to-orange-500',
   },
   zero_defects: {
     label: 'Zero Defects',
-    icon: '\u2728',
+    icon: '✨',
     color: 'from-emerald-400 to-green-500',
   },
   daily_login: {
     label: 'Daily Login',
-    icon: '\uD83D\uDCC5',
+    icon: '📅',
     color: 'from-blue-400 to-indigo-500',
   },
   batch_utilization: {
     label: 'Kiln 80%+',
-    icon: '\uD83D\uDD25',
+    icon: '🔥',
     color: 'from-red-400 to-rose-500',
   },
 };
 
 function getFlameLevel(streak: number): string {
-  if (streak >= 30) return '\uD83D\uDD25\uD83D\uDD25\uD83D\uDD25';
-  if (streak >= 14) return '\uD83D\uDD25\uD83D\uDD25';
-  if (streak >= 1) return '\uD83D\uDD25';
-  return '\u26AA';
+  if (streak >= 30) return '🔥🔥🔥';
+  if (streak >= 14) return '🔥🔥';
+  if (streak >= 1) return '🔥';
+  return '⚪';
 }
 
 // ── StreakPill ───────────────────────────────────────────────────
 
 function StreakPill({ streak }: { streak: StreakItem }) {
-  const cfg = STREAK_CONFIG[streak.type] || { label: streak.type, icon: '\uD83C\uDFAF', color: 'from-gray-400 to-gray-500' };
+  const cfg = STREAK_CONFIG[streak.type] || { label: streak.type, icon: '🎯', color: 'from-gray-400 to-gray-500' };
   const isActive = streak.current > 0;
 
   return (
@@ -98,7 +98,7 @@ function ChallengeCard({ challenge }: { challenge: DailyChallengeItem }) {
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-1">
-            <span className="text-sm">{challenge.completed ? '\uD83C\uDFC6' : '\uD83C\uDFAF'}</span>
+            <span className="text-sm">{challenge.completed ? '🏆' : '🎯'}</span>
             <span className="text-[10px] uppercase tracking-wider font-semibold text-amber-600 dark:text-amber-400">
               Daily Challenge
             </span>
@@ -164,7 +164,7 @@ export function StreakCard({ streaks, challenge, className }: StreakCardProps) {
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <span className="text-xl">{longestCurrent >= 7 ? '\uD83D\uDD25' : '\uD83C\uDFAF'}</span>
+            <span className="text-xl">{longestCurrent >= 7 ? '🔥' : '🎯'}</span>
             <div>
               <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Streaks</h3>
               <p className="text-[10px] text-gray-500 dark:text-gray-400">

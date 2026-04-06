@@ -196,7 +196,7 @@ function ReconciliationRow({ reconciliation: r, onDelete }: { reconciliation: Re
       >
         <td className="px-4 py-3 text-gray-400 w-8">
           <span className={`inline-block transition-transform ${expanded ? 'rotate-90' : ''}`}>
-            {'\u25B6'}
+            {'▶'}
           </span>
         </td>
         <td className="px-4 py-3 font-medium whitespace-nowrap">
@@ -211,10 +211,10 @@ function ReconciliationRow({ reconciliation: r, onDelete }: { reconciliation: Re
           </span>
         </td>
         <td className="px-4 py-3 text-gray-500 max-w-[200px] truncate">
-          {r.notes || '\u2014'}
+          {r.notes || '—'}
         </td>
         <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-          {r.completed_at ? new Date(r.completed_at).toLocaleDateString() : '\u2014'}
+          {r.completed_at ? new Date(r.completed_at).toLocaleDateString() : '—'}
         </td>
         <td className="px-4 py-3 text-right">
           {onDelete && (
@@ -336,10 +336,10 @@ function ReconciliationDetail({ reconciliation: r }: { reconciliation: Reconcili
                       {diff.toFixed(2)}
                     </td>
                     <td className="px-4 py-2.5 text-gray-500 text-xs">
-                      {item.reason ? item.reason.replace(/_/g, ' ') : '\u2014'}
+                      {item.reason ? item.reason.replace(/_/g, ' ') : '—'}
                     </td>
                     <td className="px-4 py-2.5 text-gray-500 text-xs max-w-[200px] truncate">
-                      {item.explanation || '\u2014'}
+                      {item.explanation || '—'}
                     </td>
                   </tr>
                 );
@@ -684,7 +684,7 @@ function AddItemsDialog({
                         className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
                         title="Remove row"
                       >
-                        {'\u2715'}
+                        {'✕'}
                       </button>
                     )}
                   </div>

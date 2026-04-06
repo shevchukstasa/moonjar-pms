@@ -33,14 +33,14 @@ const STATUS_LABELS: Record<string, string> = {
 
 /** Milestone statuses that trigger celebration animation + toast. */
 const CELEBRATION_STATUSES: Record<string, string> = {
-  fired: '\uD83D\uDD25 Position fired successfully',
-  quality_check_done: '\u2705 Quality check passed',
-  ready_for_shipment: '\uD83D\uDCE6 Position ready for shipment',
-  shipped: '\uD83D\uDE80 Position shipped — great work!',
+  fired: '🔥 Position fired successfully',
+  quality_check_done: '✅ Quality check passed',
+  ready_for_shipment: '📦 Position ready for shipment',
+  shipped: '🚀 Position shipped — great work!',
 };
 
 export function formatStatus(s: string | undefined | null) {
-  if (!s) return '\u2014';
+  if (!s) return '—';
   return STATUS_LABELS[s] || s.replace(/_/g, ' ');
 }
 

@@ -18,10 +18,10 @@ import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 
 /* ── ingredient group labels (by material_type) ─────────────────────── */
 const INGREDIENT_GROUPS: { type: string; label: string; emoji: string }[] = [
-  { type: 'frit',            label: 'Frits',               emoji: '\uD83D\uDD37' },
-  { type: 'pigment',         label: 'Pigments',            emoji: '\uD83C\uDFA8' },
-  { type: 'oxide_carbonate', label: 'Oxides / Carbonates', emoji: '\u2697\uFE0F' },
-  { type: 'other_bulk',      label: 'Other Dry',           emoji: '\uD83D\uDCE6' },
+  { type: 'frit',            label: 'Frits',               emoji: '🔷' },
+  { type: 'pigment',         label: 'Pigments',            emoji: '🎨' },
+  { type: 'oxide_carbonate', label: 'Oxides / Carbonates', emoji: '⚗️' },
+  { type: 'other_bulk',      label: 'Other Dry',           emoji: '📦' },
 ];
 
 /* ── types ──────────────────────────────────────────────────────────── */
@@ -666,7 +666,7 @@ export default function AdminRecipesPage() {
 
             {/* Water */}
             <div className="mt-3 border-t border-gray-200 pt-3">
-              <div className="mb-1 text-xs font-medium text-gray-500">{'\uD83D\uDCA7'} Water</div>
+              <div className="mb-1 text-xs font-medium text-gray-500">{'💧'} Water</div>
               <div className="flex items-center gap-2">
                 <input type="number" step="0.1" placeholder="grams" value={waterGrams} onChange={(e) => setWaterGrams(e.target.value)} className="w-28 rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
                 <span className="text-xs text-gray-400">g per 100 g frit</span>
@@ -756,7 +756,7 @@ function IngredientRowEditor({ row, materials, allMaterials, onChange, onRemove 
         />
         <span className="text-xs text-gray-400">g</span>
         <button type="button" onClick={() => setShowRates(!showRates)} className="rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-600" title="Per-method rates">
-          {showRates ? '\u25B2' : '\u25BC'}
+          {showRates ? '▲' : '▼'}
         </button>
         <button type="button" onClick={onRemove} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600">
           <Trash2 className="h-3.5 w-3.5" />

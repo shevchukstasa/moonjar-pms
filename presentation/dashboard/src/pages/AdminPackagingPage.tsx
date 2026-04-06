@@ -207,7 +207,7 @@ export default function AdminPackagingPage() {
               <option value="">Select size...</option>
               {sizes.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name} ({s.width_mm}{'\u00D7'}{s.height_mm}mm){s.is_custom ? ' \u2014 custom' : ''}
+                  {s.name} ({s.width_mm}{'\u00D7'}{s.height_mm}mm){s.is_custom ? ' — custom' : ''}
                 </option>
               ))}
             </select>
@@ -229,7 +229,7 @@ export default function AdminPackagingPage() {
           <button
             onClick={() => setRows((prev) => prev.filter((_, i) => i !== idx))}
             className="flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
-          >{'\u2715'}</button>
+          >{'✕'}</button>
         </div>
       ))}
     </div>
@@ -292,7 +292,7 @@ export default function AdminPackagingPage() {
               <button
                 onClick={() => setRows((prev) => prev.filter((_, i) => i !== idx))}
                 className="flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
-              >{'\u2715'}</button>
+              >{'✕'}</button>
             </div>
           ))}
         </>
@@ -367,7 +367,7 @@ export default function AdminPackagingPage() {
 
             <div className="flex gap-2">
               <Button onClick={handleCreateAll} disabled={newSaving}>
-                {newSaving ? 'Saving\u2026' : 'Save Box Type'}
+                {newSaving ? 'Saving…' : 'Save Box Type'}
               </Button>
               <Button variant="secondary" onClick={resetNewForm}>Cancel</Button>
             </div>
@@ -378,7 +378,7 @@ export default function AdminPackagingPage() {
       {/* ── EXISTING BOX TYPES ──────────────────────────── */}
       {isError ? (
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
-          <p className="text-sm font-medium text-red-800">{'\u26A0'} Error loading packaging data</p>
+          <p className="text-sm font-medium text-red-800">{'⚠'} Error loading packaging data</p>
         </div>
       ) : isLoading ? (
         <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>
@@ -408,14 +408,14 @@ export default function AdminPackagingPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <span className={`text-lg transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>
-                        {'\u25B6'}
+                        {'▶'}
                       </span>
                       <div>
                         <p className="font-semibold text-gray-900">
                           {bt.material_name ?? bt.name}
                         </p>
                         <p className="text-xs text-gray-500">
-                          {bt.material_code ?? ''}{bt.notes ? ` \u2014 ${bt.notes}` : ''}
+                          {bt.material_code ?? ''}{bt.notes ? ` — ${bt.notes}` : ''}
                         </p>
                       </div>
                     </div>
@@ -473,7 +473,7 @@ export default function AdminPackagingPage() {
                         Delete Box Type
                       </Button>
                       <Button onClick={saveExisting} disabled={editSaving}>
-                        {editSaving ? 'Saving\u2026' : 'Save Changes'}
+                        {editSaving ? 'Saving…' : 'Save Changes'}
                       </Button>
                     </div>
                   </div>
@@ -499,7 +499,7 @@ export default function AdminPackagingPage() {
               onClick={() => deleteId && deleteMut.mutate(deleteId)}
               disabled={deleteMut.isPending}
             >
-              {deleteMut.isPending ? 'Deleting\u2026' : 'Delete'}
+              {deleteMut.isPending ? 'Deleting…' : 'Delete'}
             </Button>
           </div>
         </div>

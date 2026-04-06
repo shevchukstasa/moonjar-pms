@@ -190,7 +190,7 @@ export default function AdminSizesPage() {
         header: 'Shape',
         render: (s: SizeItem) => {
           const def = s.shape ? getShapeDefinition(s.shape) : null;
-          const label = def ? `${def.icon} ${def.label}` : s.shape || '\u2014';
+          const label = def ? `${def.icon} ${def.label}` : s.shape || '—';
           return <Badge status="active" label={label} />;
         },
       },

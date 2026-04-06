@@ -17,22 +17,22 @@ interface TocEntry {
 }
 
 const LANGUAGES = [
-  { code: 'en', label: 'English', flag: '\uD83C\uDDEC\uD83C\uDDE7' },
-  { code: 'id', label: 'Bahasa Indonesia', flag: '\uD83C\uDDEE\uD83C\uDDE9' },
+  { code: 'en', label: 'English', flag: '🇬🇧' },
+  { code: 'id', label: 'Bahasa Indonesia', flag: '🇮🇩' },
 ] as const;
 
 /** Icons for each top-level section (by index 0-9) */
 const SECTION_ICONS = [
-  '\uD83D\uDE80', // Getting Started
-  '\uD83D\uDCCA', // Dashboard
-  '\uD83E\uDDEA', // Materials
-  '\uD83D\uDCE6', // Orders
-  '\u2705',       // Tasks
-  '\uD83D\uDCD0', // Consumption Rules
-  '\uD83D\uDCC5', // Schedule
-  '\uD83D\uDD25', // Kiln Inspections
-  '\uD83E\uDDEA', // Consumption Measurement Tasks
-  '\uD83D\uDCA1', // Tips
+  '🚀', // Getting Started
+  '📊', // Dashboard
+  '🧪', // Materials
+  '📦', // Orders
+  '✅',       // Tasks
+  '📐', // Consumption Rules
+  '📅', // Schedule
+  '🔥', // Kiln Inspections
+  '🧪', // Consumption Measurement Tasks
+  '💡', // Tips
 ];
 
 /* ────────────────────────────────────────────────────
@@ -132,7 +132,7 @@ function SidebarToc({
         const subs = getSubsections(toc, section.id);
         const isActive = activeId === section.id || subs.some((s) => s.id === activeId);
         const isExpanded = expandedSections.has(section.id) || isActive;
-        const icon = SECTION_ICONS[idx] || '\uD83D\uDCC4';
+        const icon = SECTION_ICONS[idx] || '📄';
 
         return (
           <div key={section.id}>
@@ -152,7 +152,7 @@ function SidebarToc({
               <span className="flex-1 truncate">{section.text.replace(/^\d+\.\s*/, '')}</span>
               {subs.length > 0 && (
                 <span className={`flex-shrink-0 text-[10px] text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
-                  {'\u25B6'}
+                  {'▶'}
                 </span>
               )}
             </button>
@@ -215,14 +215,14 @@ function MobileTocSheet({
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h3 className="font-semibold text-gray-900">Contents</h3>
           <button onClick={onClose} className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
-            {'\u2715'}
+            {'✕'}
           </button>
         </div>
         <div className="p-3 space-y-1">
           {sections.map((section, idx) => {
             const subs = getSubsections(toc, section.id);
             const isActive = activeId === section.id || subs.some((s) => s.id === activeId);
-            const icon = SECTION_ICONS[idx] || '\uD83D\uDCC4';
+            const icon = SECTION_ICONS[idx] || '📄';
 
             return (
               <div key={section.id}>
@@ -430,7 +430,7 @@ export default function PMGuidePage() {
       // Styled blockquote
       blockquote: (props: object) => (
         <div className="my-4 flex gap-3 rounded-lg border border-blue-100 bg-blue-50/60 px-4 py-3">
-          <span className="flex-shrink-0 text-lg">{'\uD83D\uDCA1'}</span>
+          <span className="flex-shrink-0 text-lg">{'💡'}</span>
           <div className="text-sm text-blue-800 [&>p]:m-0" {...props} />
         </div>
       ),
@@ -473,7 +473,7 @@ export default function PMGuidePage() {
         {/* Sidebar header */}
         <div className="border-b px-5 py-4">
           <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-sm">{'\uD83D\uDCD6'}</span>
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-sm">{'📖'}</span>
             <div>
               <h2 className="text-sm font-bold text-gray-900">
                 {lang === 'id' ? 'Panduan PM' : 'PM Guide'}
@@ -527,14 +527,14 @@ export default function PMGuidePage() {
             className="w-full justify-center text-xs"
             onClick={handleDownloadPdf}
           >
-            {'\uD83D\uDCC4'} {lang === 'id' ? 'Unduh PDF' : 'Download PDF'}
+            {'📄'} {lang === 'id' ? 'Unduh PDF' : 'Download PDF'}
           </Button>
           <Button
             variant="ghost"
             className="w-full justify-center text-xs"
             onClick={() => navigate('/manager')}
           >
-            {'\u2190'} {lang === 'id' ? 'Kembali' : 'Back to Dashboard'}
+            {'←'} {lang === 'id' ? 'Kembali' : 'Back to Dashboard'}
           </Button>
         </div>
       </aside>
@@ -592,13 +592,13 @@ export default function PMGuidePage() {
                 onClick={handleDownloadPdf}
                 className="hidden sm:flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
               >
-                {'\uD83D\uDCC4'} PDF
+                {'📄'} PDF
               </button>
               <button
                 onClick={() => navigate('/manager')}
                 className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
               >
-                {'\u2190'} <span className="hidden sm:inline">{lang === 'id' ? 'Kembali' : 'Dashboard'}</span>
+                {'←'} <span className="hidden sm:inline">{lang === 'id' ? 'Kembali' : 'Dashboard'}</span>
               </button>
             </div>
           </div>
@@ -616,7 +616,7 @@ export default function PMGuidePage() {
             </div>
           ) : error ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-6 py-10 text-center">
-              <p className="text-3xl">{'\u26A0\uFE0F'}</p>
+              <p className="text-3xl">{'⚠️'}</p>
               <p className="mt-2 font-medium text-red-800">{error}</p>
               <Button className="mt-4" variant="secondary" onClick={() => setLang(lang)}>
                 {lang === 'id' ? 'Coba lagi' : 'Retry'}
@@ -633,7 +633,7 @@ export default function PMGuidePage() {
 
               {/* End-of-guide footer */}
               <div className="mt-12 rounded-xl border border-gray-200 bg-gradient-to-br from-gray-50 to-blue-50/30 p-6 text-center">
-                <p className="text-2xl">{'\uD83C\uDF1F'}</p>
+                <p className="text-2xl">{'🌟'}</p>
                 <p className="mt-2 text-sm font-medium text-gray-700">
                   {lang === 'id'
                     ? 'Anda telah selesai membaca panduan ini!'
@@ -648,7 +648,7 @@ export default function PMGuidePage() {
                   className="mt-4"
                   onClick={() => navigate('/manager')}
                 >
-                  {'\u2190'} {lang === 'id' ? 'Kembali ke Dashboard' : 'Back to Dashboard'}
+                  {'←'} {lang === 'id' ? 'Kembali ke Dashboard' : 'Back to Dashboard'}
                 </Button>
               </div>
             </article>

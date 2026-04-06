@@ -47,7 +47,7 @@ export default function KilnMaintenancePage() {
         <div className="flex items-center gap-3">
           <FactorySelector />
           <Button variant="secondary" onClick={() => navigate('/manager/kilns')}>
-            {'\u2190'} Kilns
+            {'←'} Kilns
           </Button>
         </div>
       </div>

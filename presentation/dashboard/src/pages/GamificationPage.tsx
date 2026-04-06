@@ -36,12 +36,12 @@ import { cn } from '@/lib/cn';
 // ── Constants ────────────────────────────────────────────────────
 
 const SKILL_CATEGORY_ICONS: Record<string, string> = {
-  production: '\uD83C\uDFED',
-  quality: '\uD83D\uDD2C',
-  kiln: '\uD83D\uDD25',
-  glazing: '\uD83C\uDFA8',
-  leadership: '\u2B50',
-  safety: '\uD83D\uDEE1',
+  production: '🏭',
+  quality: '🔬',
+  kiln: '🔥',
+  glazing: '🎨',
+  leadership: '⭐',
+  safety: '🛡',
 };
 
 const SKILL_STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
@@ -67,9 +67,9 @@ const PRIZE_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 };
 
 const RANK_DECORATIONS = [
-  { emoji: '\uD83E\uDD47', ring: 'ring-amber-400 dark:ring-amber-500', glow: 'shadow-amber-200/60 dark:shadow-amber-500/20' },
-  { emoji: '\uD83E\uDD48', ring: 'ring-gray-400 dark:ring-gray-500', glow: 'shadow-gray-200/60 dark:shadow-gray-500/20' },
-  { emoji: '\uD83E\uDD49', ring: 'ring-orange-400 dark:ring-orange-600', glow: 'shadow-orange-200/60 dark:shadow-orange-600/20' },
+  { emoji: '🥇', ring: 'ring-amber-400 dark:ring-amber-500', glow: 'shadow-amber-200/60 dark:shadow-amber-500/20' },
+  { emoji: '🥈', ring: 'ring-gray-400 dark:ring-gray-500', glow: 'shadow-gray-200/60 dark:shadow-gray-500/20' },
+  { emoji: '🥉', ring: 'ring-orange-400 dark:ring-orange-600', glow: 'shadow-orange-200/60 dark:shadow-orange-600/20' },
 ];
 
 // ── Small helpers ────────────────────────────────────────────────
@@ -208,9 +208,9 @@ function LeaderboardTab({ factoryId }: { factoryId: string }) {
             </p>
           </div>
           <div className="flex gap-3">
-            <StatPill icon="\u23F3" label="Days left" value={daysLeft(selectedCompetition.end_date)} />
+            <StatPill icon="⏳" label="Days left" value={daysLeft(selectedCompetition.end_date)} />
             {selectedCompetition.prize_budget_idr && (
-              <StatPill icon="\uD83C\uDFC6" label="Prize pool" value={formatIDR(selectedCompetition.prize_budget_idr)} />
+              <StatPill icon="🏆" label="Prize pool" value={formatIDR(selectedCompetition.prize_budget_idr)} />
             )}
           </div>
         </Card>
@@ -265,7 +265,7 @@ function LeaderboardRow({ standing, index }: { standing: CompetitionStanding; in
             <span className="text-xs text-gray-500 dark:text-stone-500">Quality: {standing.quality_score}</span>
             <span className="text-xs text-gray-500 dark:text-stone-500">Speed: {standing.speed_score}</span>
             {standing.streak_days > 0 && (
-              <span className="text-xs text-orange-500 dark:text-orange-400">{'\uD83D\uDD25'} {standing.streak_days}d streak</span>
+              <span className="text-xs text-orange-500 dark:text-orange-400">{'🔥'} {standing.streak_days}d streak</span>
             )}
           </div>
         </div>
@@ -337,7 +337,7 @@ function SkillsTab({ factoryId }: { factoryId: string }) {
       {Object.entries(grouped).map(([category, badgeList]) => (
         <div key={category}>
           <h3 className="mb-3 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-gray-500 dark:text-stone-500">
-            <span>{SKILL_CATEGORY_ICONS[category] || '\uD83D\uDCDA'}</span>
+            <span>{SKILL_CATEGORY_ICONS[category] || '📚'}</span>
             {category}
           </h3>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -404,7 +404,7 @@ function SkillCard({
         {/* Header */}
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-2xl">{badge.icon || SKILL_CATEGORY_ICONS[badge.category] || '\uD83D\uDCDA'}</span>
+            <span className="text-2xl">{badge.icon || SKILL_CATEGORY_ICONS[badge.category] || '📚'}</span>
             <div>
               <h4 className="font-semibold text-gray-900 dark:text-stone-100">{badge.name}</h4>
               {badge.description && (
@@ -436,7 +436,7 @@ function SkillCard({
         {/* Certified badge decoration */}
         {isCertified && (
           <div className="mt-3 flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
-            <span className="text-base">{'\u2705'}</span>
+            <span className="text-base">{'✅'}</span>
             <span className="font-medium">Certified</span>
             <span className="text-xs text-gray-400 dark:text-stone-600 ml-auto">+{badge.points_on_earn} pts</span>
           </div>
@@ -535,7 +535,7 @@ function CompetitionsTab({ factoryId }: { factoryId: string }) {
       {active.length > 0 && (
         <div>
           <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-gray-500 dark:text-stone-500">
-            {'\u26A1'} Active & Upcoming
+            {'⚡'} Active & Upcoming
           </h3>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {active.map((c, i) => (
@@ -555,7 +555,7 @@ function CompetitionsTab({ factoryId }: { factoryId: string }) {
       {past.length > 0 && (
         <div>
           <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-gray-500 dark:text-stone-500">
-            {'\uD83D\uDCC5'} Past Competitions
+            {'📅'} Past Competitions
           </h3>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {past.map((c, i) => (
@@ -621,7 +621,7 @@ function CompetitionCard({
         {/* Prize */}
         {competition.prize_description && (
           <div className="mt-3 flex items-center gap-1.5 text-sm">
-            <span>{'\uD83C\uDF81'}</span>
+            <span>{'🎁'}</span>
             <span className="text-gray-600 dark:text-stone-400">{competition.prize_description}</span>
           </div>
         )}
@@ -790,7 +790,7 @@ function PrizesTab({ factoryId }: { factoryId: string }) {
       {/* Pending approval */}
       {pending.length > 0 && (
         <PrizeSection
-          title={`\u23F3 Pending Approval (${pending.length})`}
+          title={`⏳ Pending Approval (${pending.length})`}
           prizes={pending}
           isOwner={!!isOwner}
           onApprove={(id) => approvePrize.mutate(id)}
@@ -801,7 +801,7 @@ function PrizesTab({ factoryId }: { factoryId: string }) {
       {/* Approved, ready to award */}
       {approved.length > 0 && (
         <PrizeSection
-          title={`\u2705 Approved (${approved.length})`}
+          title={`✅ Approved (${approved.length})`}
           prizes={approved}
           isOwner={!!isOwner}
           onAward={(id) => awardPrize.mutate(id)}
@@ -810,12 +810,12 @@ function PrizesTab({ factoryId }: { factoryId: string }) {
 
       {/* Already awarded */}
       {awarded.length > 0 && (
-        <PrizeSection title={`\uD83C\uDFC6 Awarded (${awarded.length})`} prizes={awarded} />
+        <PrizeSection title={`🏆 Awarded (${awarded.length})`} prizes={awarded} />
       )}
 
       {/* Rejected */}
       {rejected.length > 0 && (
-        <PrizeSection title={`\u274C Rejected (${rejected.length})`} prizes={rejected} />
+        <PrizeSection title={`❌ Rejected (${rejected.length})`} prizes={rejected} />
       )}
     </FadeIn>
   );
@@ -890,10 +890,10 @@ function CeoDashTab({ factoryId }: { factoryId: string }) {
     <FadeIn className="space-y-6">
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <KpiCard icon="\u2B50" label="Points This Month" value={dash.total_points_this_month.toLocaleString()} />
-        <KpiCard icon="\uD83D\uDC65" label="Active Users" value={dash.active_users} />
-        <KpiCard icon="\uD83C\uDFC6" label="Active Competitions" value={dash.active_competitions} />
-        <KpiCard icon="\uD83D\uDCAA" label="Skills Certified" value={dash.skills_certified_this_month} />
+        <KpiCard icon="⭐" label="Points This Month" value={dash.total_points_this_month.toLocaleString()} />
+        <KpiCard icon="👥" label="Active Users" value={dash.active_users} />
+        <KpiCard icon="🏆" label="Active Competitions" value={dash.active_competitions} />
+        <KpiCard icon="💪" label="Skills Certified" value={dash.skills_certified_this_month} />
       </div>
 
       {/* Engagement gauge */}
@@ -908,7 +908,7 @@ function CeoDashTab({ factoryId }: { factoryId: string }) {
       {/* Top performers */}
       {dash.top_performers?.length > 0 && (
         <Card>
-          <h3 className="mb-3 text-sm font-bold text-gray-900 dark:text-stone-100">{'\uD83C\uDF1F'} Top Performers</h3>
+          <h3 className="mb-3 text-sm font-bold text-gray-900 dark:text-stone-100">{'🌟'} Top Performers</h3>
           <div className="space-y-2">
             {dash.top_performers.map((p, i) => (
               <div key={p.user_id} className="flex items-center gap-3">
@@ -925,7 +925,7 @@ function CeoDashTab({ factoryId }: { factoryId: string }) {
       {/* Productivity Impact */}
       {!loadingImpact && impact && (
         <Card>
-          <h3 className="mb-3 text-sm font-bold text-gray-900 dark:text-stone-100">{'\uD83D\uDCC8'} Productivity Impact</h3>
+          <h3 className="mb-3 text-sm font-bold text-gray-900 dark:text-stone-100">{'📈'} Productivity Impact</h3>
           <div className="grid grid-cols-3 gap-4 text-center">
             <ImpactMetric
               label="Quality"
@@ -958,7 +958,7 @@ function CeoDashTab({ factoryId }: { factoryId: string }) {
       {/* Monthly Trend */}
       {dash.monthly_trend?.length > 0 && (
         <Card>
-          <h3 className="mb-3 text-sm font-bold text-gray-900 dark:text-stone-100">{'\uD83D\uDCCA'} Monthly Trend</h3>
+          <h3 className="mb-3 text-sm font-bold text-gray-900 dark:text-stone-100">{'📊'} Monthly Trend</h3>
           <div className="flex items-end gap-2 h-32">
             {dash.monthly_trend.map((m) => {
               const maxPts = Math.max(...dash.monthly_trend.map((t) => t.points), 1);
@@ -982,7 +982,7 @@ function CeoDashTab({ factoryId }: { factoryId: string }) {
       {/* Seasons */}
       {seasons && seasons.length > 0 && (
         <Card>
-          <h3 className="mb-3 text-sm font-bold text-gray-900 dark:text-stone-100">{'\uD83C\uDF0D'} Seasons</h3>
+          <h3 className="mb-3 text-sm font-bold text-gray-900 dark:text-stone-100">{'🌍'} Seasons</h3>
           <div className="space-y-2">
             {seasons.map((s) => (
               <div key={s.id} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 dark:bg-stone-800/50">

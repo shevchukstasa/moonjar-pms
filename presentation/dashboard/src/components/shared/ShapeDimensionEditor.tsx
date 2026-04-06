@@ -21,7 +21,7 @@ export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
   {
     value: 'rectangle',
     label: 'Rectangle',
-    icon: '\u25AC',
+    icon: '▬',
     fields: [
       { key: 'width', label: 'Width (cm)', unit: 'cm' },
       { key: 'height', label: 'Height (cm)', unit: 'cm' },
@@ -35,7 +35,7 @@ export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
   {
     value: 'square',
     label: 'Square',
-    icon: '\u2B1C',
+    icon: '⬜',
     fields: [{ key: 'side', label: 'Side (cm)', unit: 'cm' }],
     area: (d) => {
       const s = d.side;
@@ -46,7 +46,7 @@ export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
   {
     value: 'triangle',
     label: 'Triangle',
-    icon: '\uD83D\uDD3A',
+    icon: '🔺',
     fields: [
       { key: 'side_a', label: 'Side A (cm)', unit: 'cm' },
       { key: 'side_b', label: 'Side B (cm)', unit: 'cm' },
@@ -70,7 +70,7 @@ export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
   {
     value: 'circle',
     label: 'Circle',
-    icon: '\u2B55',
+    icon: '⭕',
     fields: [{ key: 'diameter', label: 'Diameter (cm)', unit: 'cm' }],
     area: (d) => {
       const dia = d.diameter;
@@ -81,7 +81,7 @@ export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
   {
     value: 'oval',
     label: 'Oval',
-    icon: '\u2B2D',
+    icon: '⬭',
     fields: [
       { key: 'diameter_1', label: 'Diameter 1 (cm)', unit: 'cm' },
       { key: 'diameter_2', label: 'Diameter 2 (cm)', unit: 'cm' },
@@ -95,7 +95,7 @@ export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
   {
     value: 'octagon',
     label: 'Octagon',
-    icon: '\uD83D\uDED1',
+    icon: '🛑',
     fields: [
       { key: 'width', label: 'Width (cm)', unit: 'cm' },
       { key: 'height', label: 'Height (cm)', unit: 'cm' },
@@ -118,7 +118,7 @@ export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
   {
     value: 'trapezoid',
     label: 'Trapezoid',
-    icon: '\u23E2',
+    icon: '⏢',
     fields: [
       { key: 'side_a', label: 'Side A (cm)', unit: 'cm' },
       { key: 'side_b', label: 'Side B (cm)', unit: 'cm' },
@@ -133,7 +133,7 @@ export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
   {
     value: 'trapezoid_truncated',
     label: 'Truncated Trapezoid',
-    icon: '\u23E2',
+    icon: '⏢',
     fields: [
       { key: 'side_a', label: 'Side A (cm)', unit: 'cm' },
       { key: 'side_b', label: 'Side B (cm)', unit: 'cm' },
@@ -148,7 +148,7 @@ export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
   {
     value: 'rhombus',
     label: 'Rhombus',
-    icon: '\u25C7',
+    icon: '◇',
     fields: [
       { key: 'diagonal_1', label: 'Diagonal 1 (cm)', unit: 'cm' },
       { key: 'diagonal_2', label: 'Diagonal 2 (cm)', unit: 'cm' },
@@ -162,7 +162,7 @@ export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
   {
     value: 'parallelogram',
     label: 'Parallelogram',
-    icon: '\u25B1',
+    icon: '▱',
     fields: [
       { key: 'base', label: 'Base (cm)', unit: 'cm' },
       { key: 'height', label: 'Height (cm)', unit: 'cm' },
@@ -176,7 +176,7 @@ export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
   {
     value: 'semicircle',
     label: 'Semicircle',
-    icon: '\u25D1',
+    icon: '◑',
     fields: [{ key: 'diameter', label: 'Diameter (cm)', unit: 'cm' }],
     area: (d) => {
       const dia = d.diameter;
@@ -187,7 +187,7 @@ export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
   {
     value: 'freeform',
     label: 'Freeform',
-    icon: '\u2B50',
+    icon: '⭐',
     fields: [{ key: 'area', label: 'Area (cm\u00B2)', unit: 'cm\u00B2' }],
     area: (d) => {
       const a = d.area;

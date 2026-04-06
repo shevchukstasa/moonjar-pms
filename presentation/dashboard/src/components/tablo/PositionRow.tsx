@@ -305,14 +305,14 @@ export function PositionRow({ position, index, section, onSplit, onMerge, onView
         })()}
       </td>
       <td className="px-3 py-2 text-sm">
-        {position.application ?? '\u2014'}
+        {position.application ?? '—'}
         {position.application_method && (
           <span className={`ml-1.5 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${METHOD_BADGE_COLORS[position.application_method.toLowerCase()] || 'bg-gray-100 text-gray-600'}`}>
             {position.application_method}
           </span>
         )}
       </td>
-      <td className="px-3 py-2 text-sm">{position.collection ?? '\u2014'}</td>
+      <td className="px-3 py-2 text-sm">{position.collection ?? '—'}</td>
       <td className="px-3 py-2 text-sm text-right">{position.quantity}</td>
       <td className="px-3 py-2">
         <StatusDropdown
@@ -326,7 +326,7 @@ export function PositionRow({ position, index, section, onSplit, onMerge, onView
       </td>
       <td className="px-3 py-2 text-sm">{position.product_type}</td>
       <td className={`px-3 py-2 text-xs text-right ${delay > 72 ? 'font-semibold text-red-600' : delay > 24 ? 'text-yellow-600' : 'text-gray-500'}`}>
-        {delay > 0 ? delayDisplay : '\u2014'}
+        {delay > 0 ? delayDisplay : '—'}
       </td>
       {onSplit && (
         <td className="w-10 px-2 py-2 text-center">

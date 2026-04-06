@@ -374,7 +374,7 @@ export default function ManagerSchedulePage() {
     {
       key: 'priority_order',
       header: 'Priority',
-      render: (item) => item.priority_order != null ? item.priority_order : '\u2014',
+      render: (item) => item.priority_order != null ? item.priority_order : '—',
     },
     // Delete column — only shown when PM cleanup is enabled
     ...(canDeletePositions ? [{
@@ -448,19 +448,19 @@ export default function ManagerSchedulePage() {
       <div className="grid grid-cols-5 gap-4">
         <Card>
           <div className="text-sm text-gray-500">Glazing</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900">{glazingData?.total ?? '\u2014'}</div>
+          <div className="mt-1 text-2xl font-bold text-gray-900">{glazingData?.total ?? '—'}</div>
         </Card>
         <Card>
           <div className="text-sm text-gray-500">Firing</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900">{firingData?.total ?? '\u2014'}</div>
+          <div className="mt-1 text-2xl font-bold text-gray-900">{firingData?.total ?? '—'}</div>
         </Card>
         <Card>
           <div className="text-sm text-gray-500">Sorting</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900">{sortingData?.total ?? '\u2014'}</div>
+          <div className="mt-1 text-2xl font-bold text-gray-900">{sortingData?.total ?? '—'}</div>
         </Card>
         <Card>
           <div className="text-sm text-gray-500">QC</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900">{qcData?.total ?? '\u2014'}</div>
+          <div className="mt-1 text-2xl font-bold text-gray-900">{qcData?.total ?? '—'}</div>
         </Card>
         <Card>
           <div className="text-sm text-gray-500">Kilns</div>
@@ -578,11 +578,11 @@ export default function ManagerSchedulePage() {
                         {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                         {k.batches.map((b: any) => (
                           <tr key={b.id} className="bg-white">
-                            <td className="px-4 py-2">{b.batch_date || '\u2014'}</td>
+                            <td className="px-4 py-2">{b.batch_date || '—'}</td>
                             <td className="px-4 py-2"><Badge status={b.status} /></td>
                             <td className="px-4 py-2">{b.positions_count}</td>
                             <td className="px-4 py-2">{b.total_pcs}</td>
-                            <td className="px-4 py-2 text-xs text-gray-500">{b.notes || '\u2014'}</td>
+                            <td className="px-4 py-2 text-xs text-gray-500">{b.notes || '—'}</td>
                             <td className="px-4 py-2">
                               {b.status === 'in_progress' && (
                                 <button

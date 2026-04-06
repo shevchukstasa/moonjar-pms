@@ -22,7 +22,7 @@ import { OrderProgressRing } from '@/components/orders/OrderProgressRing';
 
 /** Format ISO date string as DD/MM (short, year omitted). */
 function fmtShortDate(iso: string | null | undefined): string {
-  if (!iso) return '\u2014';
+  if (!iso) return '—';
   const d = new Date(iso + 'T00:00:00'); // treat as local date
   const day = String(d.getDate()).padStart(2, '0');
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -189,7 +189,7 @@ export default function OrderDetailPage() {
     {
       key: 'thickness_mm',
       header: 'Thickness',
-      render: (item) => item.thickness_mm ? `${item.thickness_mm} mm` : '\u2014',
+      render: (item) => item.thickness_mm ? `${item.thickness_mm} mm` : '—',
     },
   ];
 
@@ -458,17 +458,17 @@ export default function OrderDetailPage() {
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Card>
               <div className="text-xs text-gray-500">Client</div>
-              <div className="mt-1 font-medium text-gray-900">{order.client || '\u2014'}</div>
+              <div className="mt-1 font-medium text-gray-900">{order.client || '—'}</div>
             </Card>
             <Card>
               <div className="text-xs text-gray-500">Deadline</div>
               <div className="mt-1 font-medium text-gray-900">
-                {order.final_deadline ? formatDate(order.final_deadline) : '\u2014'}
+                {order.final_deadline ? formatDate(order.final_deadline) : '—'}
               </div>
             </Card>
             <Card>
               <div className="text-xs text-gray-500">Factory</div>
-              <div className="mt-1 font-medium text-gray-900">{order.factory_name || order.factory_id || '\u2014'}</div>
+              <div className="mt-1 font-medium text-gray-900">{order.factory_name || order.factory_id || '—'}</div>
             </Card>
             <Card>
               <div className="text-xs text-gray-500">Positions</div>
@@ -578,9 +578,9 @@ export default function OrderDetailPage() {
           });
           setOverrideSuccess(true);
           if (overrideStatus === 'shipped') {
-            toast.success(`\uD83D\uDCE6 Order ${order.order_number} shipped — great work!`);
+            toast.success(`📦 Order ${order.order_number} shipped — great work!`);
           } else if (overrideStatus === 'ready_for_shipment') {
-            toast.success(`\u2705 Order ${order.order_number} ready for shipment`);
+            toast.success(`✅ Order ${order.order_number} ready for shipment`);
           }
         }}
         title="Override Order Status"
@@ -628,7 +628,7 @@ function PositionCard({
   };
 
   const label = posLabel(p);
-  const color = (p.color as string) || '\u2014';
+  const color = (p.color as string) || '—';
   const size = (p.size as string) || '';
   const quantity = p.quantity as number | undefined;
   const thicknessMm = (p.thickness_mm as number) || 10;
@@ -636,11 +636,11 @@ function PositionCard({
   const glazePlace = formatPlaceOfApplication(p.place_of_application as string);
   const edgeRaw = formatEdgeProfile(p.edge_profile as string, p.edge_profile_sides as number);
   const isNonDefaultEdge = p.edge_profile && p.edge_profile !== 'straight';
-  const productType = (p.product_type as string) || '\u2014';
-  const application = (p.application as string) || (p.application_method as string) || '\u2014';
-  const collection = (p.collection as string) || '\u2014';
-  const finishing = (p.finishing as string) || '\u2014';
-  const priority = (p.priority_order as number) ?? '\u2014';
+  const productType = (p.product_type as string) || '—';
+  const application = (p.application as string) || (p.application_method as string) || '—';
+  const collection = (p.collection as string) || '—';
+  const finishing = (p.finishing as string) || '—';
+  const priority = (p.priority_order as number) ?? '—';
 
   const hasPlanningDates = p.planned_glazing_date || p.planned_kiln_date || p.planned_sorting_date || p.estimated_kiln_name;
 
@@ -691,7 +691,7 @@ function PositionCard({
         <div><span className="text-gray-400">Collection:</span> {collection}</div>
         <div><span className="text-gray-400">Type:</span> {productType}</div>
         <div><span className="text-gray-400">Finishing:</span> {finishing}</div>
-        <div><span className="text-gray-400">Priority:</span> {typeof priority === 'number' ? priority : '\u2014'}</div>
+        <div><span className="text-gray-400">Priority:</span> {typeof priority === 'number' ? priority : '—'}</div>
       </div>
 
       {/* Planning row */}
@@ -703,8 +703,8 @@ function PositionCard({
           {p.estimated_kiln_name && (
             <span>Kiln: <b className="text-indigo-600">{p.estimated_kiln_name as string}</b></span>
           )}
-          <span>Batch: {p.batch_id ? <span className="text-gray-500">{(p.batch_id as string).slice(0, 8)}...</span> : '\u2014'}</span>
-          <span>Delay: {p.delay_hours ? <span className="text-orange-600">{p.delay_hours as number}h</span> : '\u2014'}</span>
+          <span>Batch: {p.batch_id ? <span className="text-gray-500">{(p.batch_id as string).slice(0, 8)}...</span> : '—'}</span>
+          <span>Delay: {p.delay_hours ? <span className="text-orange-600">{p.delay_hours as number}h</span> : '—'}</span>
         </div>
       )}
 
@@ -714,7 +714,7 @@ function PositionCard({
           onClick={toggleMaterials}
           className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
         >
-          {materialsOpen ? '\u25BC' : '\u25B6'} Materials
+          {materialsOpen ? '▼' : '▶'} Materials
         </button>
         {materialsOpen && (
           <div className="mt-2">

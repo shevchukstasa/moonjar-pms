@@ -414,7 +414,7 @@ function CatalogTab() {
       <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-48 flex-1">
           <Input
-            placeholder="Search materials\u2026"
+            placeholder="Search materials…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -475,7 +475,7 @@ function CatalogTab() {
                   key={m.id}
                   className="bg-white transition-colors hover:bg-gray-50"
                 >
-                  <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '\u2014'}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '—'}</td>
                   <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
                   <td className="px-4 py-3">
                     <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
@@ -484,7 +484,7 @@ function CatalogTab() {
                   </td>
                   <td className="px-4 py-3 text-gray-500">{m.unit}</td>
                   <td className="px-4 py-3 text-gray-500">
-                    {m.supplier_name ?? <span className="text-gray-300">{'\u2014'}</span>}
+                    {m.supplier_name ?? <span className="text-gray-300">{'—'}</span>}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
@@ -544,7 +544,7 @@ function CatalogTab() {
             <label className="mb-1 block text-sm font-medium text-gray-700">Supplier</label>
             <Select
               options={[
-                { value: '', label: '\u2014 no supplier \u2014' },
+                { value: '', label: '— no supplier —' },
                 ...suppliers.map((s) => ({ value: s.id, label: s.name })),
               ]}
               value={form.supplier_id}
@@ -559,7 +559,7 @@ function CatalogTab() {
               </label>
               <Select
                 options={[
-                  { value: '', label: '\u2014 select size \u2014' },
+                  { value: '', label: '— select size —' },
                   ...sizes.map((s) => ({
                     value: s.id,
                     label: `${s.name}  (${s.width_mm}\u00D7${s.height_mm}${s.thickness_mm ? ` \u00D7 ${s.thickness_mm}` : ''}mm${s.shape && s.shape !== 'rectangle' ? ` ${s.shape}` : ''})`,
@@ -595,7 +595,7 @@ function CatalogTab() {
               Cancel
             </Button>
             <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving\u2026' : editDialog.item ? 'Update' : 'Create'}
+              {saving ? 'Saving…' : editDialog.item ? 'Update' : 'Create'}
             </Button>
           </div>
         </div>
@@ -630,7 +630,7 @@ function CatalogTab() {
                 disabled={deleteMaterial.isPending}
                 className="bg-red-600 hover:bg-red-700 focus:ring-red-500"
               >
-                {deleteMaterial.isPending ? 'Deleting\u2026' : 'Delete'}
+                {deleteMaterial.isPending ? 'Deleting…' : 'Delete'}
               </Button>
             </div>
           </div>
@@ -813,7 +813,7 @@ function StockByFactoryTab() {
         </div>
         <div className="min-w-48 flex-1">
           <Input
-            placeholder="Search materials\u2026"
+            placeholder="Search materials…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -886,7 +886,7 @@ function StockByFactoryTab() {
                       key={`${m.id}-${m.factory_id ?? 'all'}`}
                       className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}
                     >
-                      <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '\u2014'}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '—'}</td>
                       <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
                       <td className="px-4 py-3 text-xs text-gray-500">{typeLabel(m.material_type)}</td>
                       <td
@@ -963,7 +963,7 @@ function StockByFactoryTab() {
             <div className="flex justify-end gap-2 border-t pt-3">
               <Button variant="secondary" onClick={closeStockEdit}>Cancel</Button>
               <Button onClick={handleStockSave} disabled={stockSaving}>
-                {stockSaving ? 'Saving\u2026' : 'Update'}
+                {stockSaving ? 'Saving…' : 'Update'}
               </Button>
             </div>
           </div>
@@ -974,7 +974,7 @@ function StockByFactoryTab() {
       <Dialog
         open={txDialog.open}
         onClose={closeTx}
-        title={txDialog.item ? `Transaction \u2014 ${txDialog.item.name}` : 'Transaction'}
+        title={txDialog.item ? `Transaction — ${txDialog.item.name}` : 'Transaction'}
         className="w-full max-w-sm"
       >
         {txDialog.item && (
@@ -996,7 +996,7 @@ function StockByFactoryTab() {
                       : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                   }`}
                 >
-                  {'\u2191'} Receive
+                  {'↑'} Receive
                 </button>
                 <button
                   onClick={() => setTxForm({ ...txForm, type: 'manual_write_off' })}
@@ -1006,7 +1006,7 @@ function StockByFactoryTab() {
                       : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                   }`}
                 >
-                  {'\u2193'} Write-off
+                  {'↓'} Write-off
                 </button>
                 <button
                   onClick={() => setTxForm({ ...txForm, type: 'inventory' })}
@@ -1016,7 +1016,7 @@ function StockByFactoryTab() {
                       : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                   }`}
                 >
-                  {'\u2261'} Inventory
+                  {'≡'} Inventory
                 </button>
               </div>
             </div>
@@ -1049,12 +1049,12 @@ function StockByFactoryTab() {
                 }
               >
                 {txPending
-                  ? 'Saving\u2026'
+                  ? 'Saving…'
                   : txForm.type === 'receive'
-                    ? '\u2191 Receive'
+                    ? '↑ Receive'
                     : txForm.type === 'inventory'
-                      ? '\u2261 Inventory'
-                      : '\u2193 Write-off'}
+                      ? '≡ Inventory'
+                      : '↓ Write-off'}
               </Button>
             </div>
           </div>
@@ -1328,7 +1328,7 @@ function GroupsSubgroupsTab() {
                     <h3 className="text-base font-semibold text-gray-900">{g.name}</h3>
                     <p className="text-xs text-gray-400">
                       Code: {g.code} &middot; Order: {g.display_order}
-                      {g.description && ` \u2014 ${g.description}`}
+                      {g.description && ` — ${g.description}`}
                     </p>
                   </div>
                   {!g.is_active && (
@@ -1375,12 +1375,12 @@ function GroupsSubgroupsTab() {
                     <tbody className="divide-y divide-gray-50">
                       {g.subgroups.map((sg) => (
                         <tr key={sg.id} className="hover:bg-gray-50">
-                          <td className="px-3 py-2 text-center">{sg.icon || '\u2014'}</td>
+                          <td className="px-3 py-2 text-center">{sg.icon || '—'}</td>
                           <td className="px-3 py-2 font-medium text-gray-900">{sg.name}</td>
                           <td className="px-3 py-2 font-mono text-xs text-gray-500">{sg.code}</td>
                           <td className="px-3 py-2 text-gray-500">{sg.default_unit}</td>
                           <td className="px-3 py-2 text-gray-500">
-                            {sg.default_lead_time_days != null ? `${sg.default_lead_time_days}d` : '\u2014'}
+                            {sg.default_lead_time_days != null ? `${sg.default_lead_time_days}d` : '—'}
                           </td>
                           <td className="px-3 py-2 text-right font-mono text-gray-600">
                             {sg.material_count}
@@ -1469,7 +1469,7 @@ function GroupsSubgroupsTab() {
               Cancel
             </Button>
             <Button onClick={handleSaveGroup} disabled={groupSaving}>
-              {groupSaving ? 'Saving\u2026' : groupDialog.item ? 'Update' : 'Create'}
+              {groupSaving ? 'Saving…' : groupDialog.item ? 'Update' : 'Create'}
             </Button>
           </div>
         </div>
@@ -1549,7 +1549,7 @@ function GroupsSubgroupsTab() {
               Cancel
             </Button>
             <Button onClick={handleSaveSubgroup} disabled={sgSaving}>
-              {sgSaving ? 'Saving\u2026' : sgDialog.item ? 'Update' : 'Create'}
+              {sgSaving ? 'Saving…' : sgDialog.item ? 'Update' : 'Create'}
             </Button>
           </div>
         </div>

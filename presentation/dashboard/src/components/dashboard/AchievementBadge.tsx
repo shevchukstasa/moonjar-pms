@@ -8,11 +8,11 @@ export type { AchievementItem };
 // ── Achievement display config ────────────────────────────────
 
 const ACHIEVEMENT_CONFIG: Record<string, { label: string; icon: string }> = {
-  glazing_master: { label: 'Glazing Master', icon: '\uD83C\uDFA8' },
-  zero_defect_hero: { label: 'Zero Defect Hero', icon: '\u2728' },
-  speed_champion: { label: 'Speed Champion', icon: '\u26A1' },
-  kiln_expert: { label: 'Kiln Expert', icon: '\uD83D\uDD25' },
-  quality_star: { label: 'Quality Star', icon: '\u2B50' },
+  glazing_master: { label: 'Glazing Master', icon: '🎨' },
+  zero_defect_hero: { label: 'Zero Defect Hero', icon: '✨' },
+  speed_champion: { label: 'Speed Champion', icon: '⚡' },
+  kiln_expert: { label: 'Kiln Expert', icon: '🔥' },
+  quality_star: { label: 'Quality Star', icon: '⭐' },
 };
 
 const LEVEL_COLORS: Record<number, { bg: string; border: string; text: string }> = {
@@ -59,7 +59,7 @@ interface AchievementBadgeProps {
 export function AchievementBadge({ achievement, size = 'md', className }: AchievementBadgeProps) {
   const cfg = ACHIEVEMENT_CONFIG[achievement.achievement_type] || {
     label: achievement.achievement_type,
-    icon: '\uD83C\uDFC6',
+    icon: '🏆',
   };
   const colors = LEVEL_COLORS[achievement.level] || LEVEL_COLORS[0];
   const isLocked = achievement.level === 0;

@@ -29,7 +29,7 @@ export function BatchGroup({ batch, positions }: Props) {
         className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
       >
         <div className="flex items-center gap-3">
-          <span className="text-sm">{isExpanded ? '\u25BC' : '\u25B6'}</span>
+          <span className="text-sm">{isExpanded ? '▼' : '▶'}</span>
           <span className="text-sm font-medium text-gray-900">{batch.resource_name}</span>
           <span className="text-xs text-gray-500">{batch.batch_date || 'No date'}</span>
           <Badge status={batch.status} />

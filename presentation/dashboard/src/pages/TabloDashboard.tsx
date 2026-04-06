@@ -117,19 +117,19 @@ export default function TabloDashboard() {
         <Card>
           <div className="text-sm text-gray-500">Glazing</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {glazingData?.total ?? '\u2014'}
+            {glazingData?.total ?? '—'}
           </div>
         </Card>
         <Card>
           <div className="text-sm text-gray-500">Firing</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {firingData?.total ?? '\u2014'}
+            {firingData?.total ?? '—'}
           </div>
         </Card>
         <Card>
           <div className="text-sm text-gray-500">Sorting</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {sortingData?.total ?? '\u2014'}
+            {sortingData?.total ?? '—'}
           </div>
         </Card>
         <Card>

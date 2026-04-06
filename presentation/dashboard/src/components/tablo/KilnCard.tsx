@@ -91,7 +91,7 @@ export function KilnCard({ kiln, batches: rawBatches }: Props) {
                   className="flex w-full items-center justify-between px-4 py-2 text-left hover:bg-gray-50"
                 >
                   <div className="flex items-center gap-3">
-                    <span className="text-xs text-gray-400">{isExpanded ? '\u25BC' : '\u25B6'}</span>
+                    <span className="text-xs text-gray-400">{isExpanded ? '▼' : '▶'}</span>
                     <span className="text-sm text-gray-700">{b.batch_date || 'No date'}</span>
                     <Badge status={b.status} />
                   </div>

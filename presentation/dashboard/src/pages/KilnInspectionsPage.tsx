@@ -51,7 +51,7 @@ export default function KilnInspectionsPage() {
         <div className="flex items-center gap-3">
           <FactorySelector />
           <Button variant="secondary" onClick={() => navigate('/manager/kilns')}>
-            {'\u2190'} Kilns
+            {'←'} Kilns
           </Button>
         </div>
       </div>
@@ -437,7 +437,7 @@ function NewInspectionForm({ factoryId, onDone }: { factoryId: string | null; on
       <div className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-3">
         <span className="text-sm text-gray-500">
           {filledCount === allItemIds.length ? (
-            <span className="font-medium text-green-600">{'\u2705'} All items checked</span>
+            <span className="font-medium text-green-600">{'✅'} All items checked</span>
           ) : (
             `${allItemIds.length - filledCount} items remaining`
           )}

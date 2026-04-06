@@ -54,7 +54,7 @@ export function AnomalyAlertBanner({ factoryId }: AnomalyAlertBannerProps) {
           className="flex items-center gap-2 cursor-pointer flex-1"
           onClick={() => setExpanded(!expanded)}
         >
-          <span className="text-lg">{hasCritical ? '\u26A0\uFE0F' : '\u26A1'}</span>
+          <span className="text-lg">{hasCritical ? '⚠️' : '⚡'}</span>
           <span className="text-sm font-medium">
             {total} anomal{total === 1 ? 'y' : 'ies'} detected
             {criticalCount > 0 && ` (${criticalCount} critical)`}

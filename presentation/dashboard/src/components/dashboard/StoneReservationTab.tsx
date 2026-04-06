@@ -92,7 +92,7 @@ export function StoneReservationTab({ factoryId }: StoneReservationTabProps) {
         <Card className="p-4">
           <div className="text-xs text-gray-500">This Week Waste %</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {weeklyReport?.total_waste_pct != null ? `${weeklyReport.total_waste_pct.toFixed(1)}%` : '\u2014'}
+            {weeklyReport?.total_waste_pct != null ? `${weeklyReport.total_waste_pct.toFixed(1)}%` : '—'}
           </div>
         </Card>
       </div>

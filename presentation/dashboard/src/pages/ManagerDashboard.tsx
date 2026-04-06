@@ -376,7 +376,7 @@ export default function ManagerDashboard() {
       <div className="grid grid-cols-2 gap-2 md:gap-4 sm:grid-cols-3 lg:grid-cols-6">
         <Card variant="glass">
           <div className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400">Active Orders</div>
-          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{orderTab === 'current' ? activeOrders : '\u2014'}</div>
+          <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{orderTab === 'current' ? activeOrders : '—'}</div>
         </Card>
         <Card variant="glass">
           <div className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400">Total Positions</div>
@@ -385,25 +385,25 @@ export default function ManagerDashboard() {
         <Card variant="glass">
           <div className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400">On-Time Rate</div>
           <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {dashboardSummary?.on_time_rate != null ? `${Math.round(dashboardSummary.on_time_rate)}%` : '\u2014'}
+            {dashboardSummary?.on_time_rate != null ? `${Math.round(dashboardSummary.on_time_rate)}%` : '—'}
           </div>
         </Card>
         <Card variant="glass">
           <div className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400">Defect Rate</div>
           <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {dashboardSummary?.defect_rate != null ? `${Number(dashboardSummary.defect_rate).toFixed(1)}%` : '\u2014'}
+            {dashboardSummary?.defect_rate != null ? `${Number(dashboardSummary.defect_rate).toFixed(1)}%` : '—'}
           </div>
         </Card>
         <Card variant="glass">
           <div className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400">Kiln Utilization</div>
           <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {dashboardSummary?.kiln_utilization != null ? `${Math.round(dashboardSummary.kiln_utilization)}%` : '\u2014'}
+            {dashboardSummary?.kiln_utilization != null ? `${Math.round(dashboardSummary.kiln_utilization)}%` : '—'}
           </div>
         </Card>
         <Card variant="glass">
           <div className="text-[10px] md:text-xs text-gray-500 dark:text-gray-400">OEE</div>
           <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {dashboardSummary?.oee != null ? `${Math.round(dashboardSummary.oee)}%` : '\u2014'}
+            {dashboardSummary?.oee != null ? `${Math.round(dashboardSummary.oee)}%` : '—'}
           </div>
         </Card>
       </div>
@@ -818,7 +818,7 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
       key: 'description',
       header: 'Description',
       render: (item) => (
-        <span className="max-w-xs truncate text-sm text-gray-700">{item.description || '\u2014'}</span>
+        <span className="max-w-xs truncate text-sm text-gray-700">{item.description || '—'}</span>
       ),
     },
     {
@@ -847,7 +847,7 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
     {
       key: 'priority',
       header: 'Priority',
-      render: (item) => <span className="text-sm">{item.priority ?? '\u2014'}</span>,
+      render: (item) => <span className="text-sm">{item.priority ?? '—'}</span>,
     },
     {
       key: 'created_at',
@@ -862,7 +862,7 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
     {
       key: 'due_at',
       header: 'Due',
-      render: (item) => item.due_at ? formatDate(item.due_at) : '\u2014',
+      render: (item) => item.due_at ? formatDate(item.due_at) : '—',
     },
     // Delete column — only shown when PM cleanup is enabled
     ...(canDeleteTasks ? [{
@@ -985,7 +985,7 @@ function MaterialsTabContent({ factoryId }: { factoryId: string | null }) {
         return deficit > 0 ? (
           <span className="font-medium text-red-600">-{deficit} {item.unit}</span>
         ) : (
-          <span className="text-gray-400">{'\u2014'}</span>
+          <span className="text-gray-400">{'—'}</span>
         );
       },
     },
@@ -1011,17 +1011,17 @@ function MaterialsTabContent({ factoryId }: { factoryId: string | null }) {
     {
       key: 'source',
       header: 'Source',
-      render: (item) => <span className="text-sm capitalize">{item.source?.replace(/_/g, ' ') || '\u2014'}</span>,
+      render: (item) => <span className="text-sm capitalize">{item.source?.replace(/_/g, ' ') || '—'}</span>,
     },
     {
       key: 'created_at',
       header: 'Created',
-      render: (item) => item.created_at ? formatDate(item.created_at) : '\u2014',
+      render: (item) => item.created_at ? formatDate(item.created_at) : '—',
     },
     {
       key: 'expected_delivery_date',
       header: 'Expected Delivery',
-      render: (item) => item.expected_delivery_date ? formatDate(item.expected_delivery_date) : '\u2014',
+      render: (item) => item.expected_delivery_date ? formatDate(item.expected_delivery_date) : '—',
     },
   ];
 
@@ -1113,7 +1113,7 @@ function DefectsTabContent({ factoryId }: { factoryId: string | null }) {
     {
       key: 'order_number',
       header: 'Order',
-      render: (item) => item.order_number || '\u2014',
+      render: (item) => item.order_number || '—',
     },
     {
       key: 'stage',
@@ -1123,24 +1123,24 @@ function DefectsTabContent({ factoryId }: { factoryId: string | null }) {
     {
       key: 'defect_cause',
       header: 'Cause',
-      render: (item) => item.defect_cause?.description || item.defect_cause?.code || '\u2014',
+      render: (item) => item.defect_cause?.description || item.defect_cause?.code || '—',
     },
     {
       key: 'notes',
       header: 'Notes',
       render: (item) => (
-        <span className="max-w-xs truncate text-sm text-gray-600">{item.notes || '\u2014'}</span>
+        <span className="max-w-xs truncate text-sm text-gray-600">{item.notes || '—'}</span>
       ),
     },
     {
       key: 'checked_by_name',
       header: 'Inspector',
-      render: (item) => item.checked_by_name || '\u2014',
+      render: (item) => item.checked_by_name || '—',
     },
     {
       key: 'created_at',
       header: 'Date',
-      render: (item) => item.created_at ? formatDate(item.created_at) : '\u2014',
+      render: (item) => item.created_at ? formatDate(item.created_at) : '—',
     },
   ];
 
@@ -1150,7 +1150,7 @@ function DefectsTabContent({ factoryId }: { factoryId: string | null }) {
     {
       key: 'location',
       header: 'Location',
-      render: (item) => item.location || '\u2014',
+      render: (item) => item.location || '—',
     },
     {
       key: 'status',
@@ -1160,7 +1160,7 @@ function DefectsTabContent({ factoryId }: { factoryId: string | null }) {
     {
       key: 'created_at',
       header: 'Opened',
-      render: (item) => item.created_at ? formatDate(item.created_at) : '\u2014',
+      render: (item) => item.created_at ? formatDate(item.created_at) : '—',
     },
   ];
 
@@ -1171,25 +1171,25 @@ function DefectsTabContent({ factoryId }: { factoryId: string | null }) {
         <Card>
           <div className="text-xs text-gray-500">Pending QC</div>
           <div className="mt-1 text-2xl font-bold text-yellow-600">
-            {statsLoading ? '\u2014' : qualityStats?.pending_qc ?? 0}
+            {statsLoading ? '—' : qualityStats?.pending_qc ?? 0}
           </div>
         </Card>
         <Card className={qualityStats?.blocked ? 'border-red-200 bg-red-50/50' : ''}>
           <div className="text-xs text-gray-500">Blocked</div>
           <div className={`mt-1 text-2xl font-bold ${(qualityStats?.blocked ?? 0) > 0 ? 'text-red-600' : 'text-gray-900'}`}>
-            {statsLoading ? '\u2014' : qualityStats?.blocked ?? 0}
+            {statsLoading ? '—' : qualityStats?.blocked ?? 0}
           </div>
         </Card>
         <Card>
           <div className="text-xs text-gray-500">Open Problem Cards</div>
           <div className="mt-1 text-2xl font-bold text-orange-600">
-            {statsLoading ? '\u2014' : qualityStats?.open_problem_cards ?? 0}
+            {statsLoading ? '—' : qualityStats?.open_problem_cards ?? 0}
           </div>
         </Card>
         <Card>
           <div className="text-xs text-gray-500">Inspections Today</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {statsLoading ? '\u2014' : qualityStats?.inspections_today ?? 0}
+            {statsLoading ? '—' : qualityStats?.inspections_today ?? 0}
           </div>
         </Card>
       </div>
@@ -1266,19 +1266,19 @@ function TpsTabContent({ factoryId }: { factoryId: string | null }) {
         <Card>
           <div className="text-xs text-gray-500">Output (sqm)</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {dashboardSummary?.output_sqm != null ? Number(dashboardSummary.output_sqm).toFixed(1) : '\u2014'}
+            {dashboardSummary?.output_sqm != null ? Number(dashboardSummary.output_sqm).toFixed(1) : '—'}
           </div>
         </Card>
         <Card>
           <div className="text-[10px] md:text-xs text-gray-500">OEE</div>
           <div className="mt-1 text-xl md:text-2xl font-bold text-gray-900">
-            {dashboardSummary?.oee != null ? `${Math.round(dashboardSummary.oee)}%` : '\u2014'}
+            {dashboardSummary?.oee != null ? `${Math.round(dashboardSummary.oee)}%` : '—'}
           </div>
         </Card>
         <Card>
           <div className="text-xs text-gray-500">Cost per sqm</div>
           <div className="mt-1 text-2xl font-bold text-gray-900">
-            {dashboardSummary?.cost_per_sqm != null ? `$${Number(dashboardSummary.cost_per_sqm).toFixed(2)}` : '\u2014'}
+            {dashboardSummary?.cost_per_sqm != null ? `$${Number(dashboardSummary.cost_per_sqm).toFixed(2)}` : '—'}
           </div>
         </Card>
         <Card>
@@ -1319,7 +1319,7 @@ function TpsTabContent({ factoryId }: { factoryId: string | null }) {
                         <Badge status={signal.severity} />
                       )}
                     </div>
-                    <p className="mt-1 text-sm text-gray-600">{signal.description || signal.message || '\u2014'}</p>
+                    <p className="mt-1 text-sm text-gray-600">{signal.description || signal.message || '—'}</p>
                   </div>
                   <span className="text-xs text-gray-400">
                     {signal.created_at ? new Date(signal.created_at).toLocaleString() : ''}
@@ -1883,7 +1883,7 @@ function TocTabContent({ factoryId }: { factoryId: string | null }) {
                     {item.status && (
                       <Badge status={item.status} className="ml-2" />
                     )}
-                    <p className="mt-1 text-sm text-gray-600">{item.description || item.notes || '\u2014'}</p>
+                    <p className="mt-1 text-sm text-gray-600">{item.description || item.notes || '—'}</p>
                   </div>
                   <span className="text-xs text-gray-400">
                     {item.created_at ? new Date(item.created_at).toLocaleString() : ''}

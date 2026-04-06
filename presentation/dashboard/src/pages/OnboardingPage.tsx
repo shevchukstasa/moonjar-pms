@@ -35,17 +35,17 @@ function getLang(user: { language?: string } | null): Lang {
 }
 
 const SECTION_ICONS: Record<string, string> = {
-  welcome: '\uD83C\uDF0B', navigation: '\uD83E\uDDED', orders: '\uD83D\uDCE6', materials: '\uD83E\uDDF1',
-  schedule: '\uD83D\uDCC5', kilns: '\uD83D\uDD25', quality: '\u2705', tasks: '\uD83D\uDCCB',
-  telegram: '\uD83D\uDCF1', reports: '\uD83D\uDCCA', gamification: '\uD83C\uDFAE', advanced: '\uD83E\uDDEA',
+  welcome: '🌋', navigation: '🧭', orders: '📦', materials: '🧱',
+  schedule: '📅', kilns: '🔥', quality: '✅', tasks: '📋',
+  telegram: '📱', reports: '📊', gamification: '🎮', advanced: '🧪',
 };
 
 const ACHIEVEMENT_THRESHOLDS = [
-  { xp: 150, label: { en: 'Quick Learner', id: 'Pelajar Cepat', ru: '\u0411\u044b\u0441\u0442\u0440\u044b\u0439 \u0443\u0447\u0435\u043d\u0438\u043a' }, icon: '\uD83C\uDF1F' },
-  { xp: 450, label: { en: 'Rising Star', id: 'Bintang Baru', ru: '\u0412\u043e\u0441\u0445\u043e\u0434\u044f\u0449\u0430\u044f \u0437\u0432\u0435\u0437\u0434\u0430' }, icon: '\u2B50' },
-  { xp: 900, label: { en: 'Knowledge Master', id: 'Master Pengetahuan', ru: '\u041c\u0430\u0441\u0442\u0435\u0440 \u0437\u043d\u0430\u043d\u0438\u0439' }, icon: '\uD83C\uDFC6' },
-  { xp: 1200, label: { en: 'Quiz Champion', id: 'Juara Kuis', ru: '\u0427\u0435\u043c\u043f\u0438\u043e\u043d \u0432\u0438\u043a\u0442\u043e\u0440\u0438\u043d' }, icon: '\uD83D\uDC8E' },
-  { xp: 1800, label: { en: 'PM Expert', id: 'Ahli PM', ru: '\u042d\u043a\u0441\u043f\u0435\u0440\u0442 PM' }, icon: '\uD83D\uDC51' },
+  { xp: 150, label: { en: 'Quick Learner', id: 'Pelajar Cepat', ru: '\u0411\u044b\u0441\u0442\u0440\u044b\u0439 \u0443\u0447\u0435\u043d\u0438\u043a' }, icon: '🌟' },
+  { xp: 450, label: { en: 'Rising Star', id: 'Bintang Baru', ru: '\u0412\u043e\u0441\u0445\u043e\u0434\u044f\u0449\u0430\u044f \u0437\u0432\u0435\u0437\u0434\u0430' }, icon: '⭐' },
+  { xp: 900, label: { en: 'Knowledge Master', id: 'Master Pengetahuan', ru: '\u041c\u0430\u0441\u0442\u0435\u0440 \u0437\u043d\u0430\u043d\u0438\u0439' }, icon: '🏆' },
+  { xp: 1200, label: { en: 'Quiz Champion', id: 'Juara Kuis', ru: '\u0427\u0435\u043c\u043f\u0438\u043e\u043d \u0432\u0438\u043a\u0442\u043e\u0440\u0438\u043d' }, icon: '💎' },
+  { xp: 1800, label: { en: 'PM Expert', id: 'Ahli PM', ru: '\u042d\u043a\u0441\u043f\u0435\u0440\u0442 PM' }, icon: '👑' },
 ];
 
 const MESSAGES = {
@@ -184,12 +184,12 @@ function OnboardingCard({
       {/* Section number badge */}
       <div className={`absolute -top-3 -left-2 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold
         ${isDone ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white' : 'bg-stone-200 dark:bg-stone-700 text-stone-600 dark:text-stone-300'}`}>
-        {isDone ? '\u2713' : index + 1}
+        {isDone ? '✓' : index + 1}
       </div>
 
       {/* Lock icon */}
       {!isUnlocked && (
-        <div className="absolute top-3 right-3 text-stone-400 dark:text-stone-600 text-lg">\uD83D\uDD12</div>
+        <div className="absolute top-3 right-3 text-stone-400 dark:text-stone-600 text-lg">🔒</div>
       )}
 
       {/* Icon */}
@@ -322,7 +322,7 @@ function OnboardingQuiz({
             ? 'bg-gradient-to-br from-emerald-50 to-amber-50 dark:from-emerald-950/30 dark:to-amber-950/30 border-emerald-300 dark:border-emerald-700'
             : 'bg-gradient-to-br from-red-50 to-orange-50 dark:from-red-950/30 dark:to-orange-950/30 border-red-300 dark:border-red-700'}`}
         >
-          <div className="text-6xl mb-4">{result.passed ? '\uD83C\uDF89' : '\uD83D\uDCAA'}</div>
+          <div className="text-6xl mb-4">{result.passed ? '🎉' : '💪'}</div>
           <h2 className="text-2xl font-bold mb-2 text-[var(--text-primary)]">
             {result.passed ? t(MESSAGES.quizPassed, lang) : t(MESSAGES.quizFailed, lang)}
           </h2>
@@ -344,7 +344,7 @@ function OnboardingQuiz({
               return (
                 <div key={q.id} className={`p-3 rounded-xl border ${isCorrect ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50/50 dark:bg-emerald-950/20' : 'border-red-300 dark:border-red-700 bg-red-50/50 dark:bg-red-950/20'}`}>
                   <div className="flex items-start gap-2">
-                    <span className="text-lg mt-0.5">{isCorrect ? '\u2705' : '\u274C'}</span>
+                    <span className="text-lg mt-0.5">{isCorrect ? '✅' : '❌'}</span>
                     <div>
                       <p className="font-medium text-sm text-[var(--text-primary)]">{t(q.question, lang)}</p>
                       {!isCorrect && (
@@ -541,7 +541,7 @@ export default function OnboardingPage() {
         <div className="flex items-center gap-3 mb-8">
           <button onClick={handleBackToMenu}
             className="p-2 rounded-xl hover:bg-stone-100 dark:hover:bg-stone-800 transition-all text-[var(--text-secondary)]">
-            \u2190
+            ←
           </button>
           <span className="text-2xl">{sc.icon}</span>
           <h1 className="text-xl font-bold text-[var(--text-primary)]">{t(sc.title, lang)}</h1>
@@ -573,7 +573,7 @@ export default function OnboardingPage() {
         <div className="flex items-center gap-3 mb-8">
           <button onClick={handleBackToMenu}
             className="p-2 rounded-xl hover:bg-stone-100 dark:hover:bg-stone-800 transition-all text-[var(--text-secondary)]">
-            \u2190
+            ←
           </button>
           <span className="text-2xl">{sc.icon}</span>
           <h1 className="text-xl font-bold text-[var(--text-primary)]">{t(sc.title, lang)} - Quiz</h1>
@@ -636,7 +636,7 @@ export default function OnboardingPage() {
         {/* All done banner */}
         {progress.pct_complete === 100 && (
           <div className="mt-6 p-4 rounded-2xl bg-gradient-to-r from-emerald-100 to-amber-100 dark:from-emerald-900/30 dark:to-amber-900/30 border border-emerald-200 dark:border-emerald-800 text-center">
-            <span className="text-2xl mr-2">\uD83D\uDC51</span>
+            <span className="text-2xl mr-2">👑</span>
             <span className="font-bold text-emerald-700 dark:text-emerald-400">{t(MESSAGES.allDone, lang)}</span>
           </div>
         )}

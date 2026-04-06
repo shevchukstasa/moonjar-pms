@@ -185,9 +185,9 @@ export default function AdminSuppliersPage() {
               {items.map((s) => (
                 <tr key={s.id} className="bg-white hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium text-gray-900">{s.name}</td>
-                  <td className="px-4 py-3 text-gray-500">{s.contact_person || <span className="text-gray-300">{'\u2014'}</span>}</td>
-                  <td className="px-4 py-3 text-gray-500">{s.phone || <span className="text-gray-300">{'\u2014'}</span>}</td>
-                  <td className="px-4 py-3 text-gray-500">{s.email || <span className="text-gray-300">{'\u2014'}</span>}</td>
+                  <td className="px-4 py-3 text-gray-500">{s.contact_person || <span className="text-gray-300">{'—'}</span>}</td>
+                  <td className="px-4 py-3 text-gray-500">{s.phone || <span className="text-gray-300">{'—'}</span>}</td>
+                  <td className="px-4 py-3 text-gray-500">{s.email || <span className="text-gray-300">{'—'}</span>}</td>
                   <td className="px-4 py-3 text-gray-500">{s.default_lead_time_days}d</td>
                   <td className="px-4 py-3">
                     {s.subgroup_names && s.subgroup_names.length > 0 ? (
@@ -199,7 +199,7 @@ export default function AdminSuppliersPage() {
                         ))}
                       </div>
                     ) : (
-                      <span className="text-gray-300">{'\u2014'}</span>
+                      <span className="text-gray-300">{'—'}</span>
                     )}
                   </td>
                   <td className="px-4 py-3">
@@ -285,7 +285,7 @@ export default function AdminSuppliersPage() {
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={closeDialog}>Cancel</Button>
             <Button onClick={handleSubmit} disabled={!form.name || saving}>
-              {saving ? 'Saving\u2026' : editItem ? 'Update' : 'Create'}
+              {saving ? 'Saving…' : editItem ? 'Update' : 'Create'}
             </Button>
           </div>
         </div>
@@ -305,7 +305,7 @@ export default function AdminSuppliersPage() {
               onClick={() => deleteId && deleteMutation.mutate(deleteId)}
               disabled={deleteMutation.isPending}
             >
-              {deleteMutation.isPending ? 'Deleting\u2026' : 'Delete'}
+              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
             </Button>
           </div>
         </div>

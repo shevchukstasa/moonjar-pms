@@ -460,13 +460,13 @@ export default function ManagerMaterialsPage() {
             {isPM ? 'Inventory management — receive, audit, and track materials' : 'Inventory of raw materials, packaging, and consumables'}
             {lowStockCount > 0 && (
               <span className="ml-2 inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                {'\u26A0'} {lowStockCount} low stock
+                {'⚠'} {lowStockCount} low stock
               </span>
             )}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => navigate('/manager')}>{'\u2190'} Dashboard</Button>
+          <Button variant="secondary" onClick={() => navigate('/manager')}>{'←'} Dashboard</Button>
           {isPM && (
             <Button
               variant="secondary"
@@ -494,7 +494,7 @@ export default function ManagerMaterialsPage() {
         )}
         <div className="flex-1 min-w-48">
           <Input
-            placeholder="Search materials\u2026"
+            placeholder="Search materials…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -544,7 +544,7 @@ export default function ManagerMaterialsPage() {
       {/* Content */}
       {isError ? (
         <Card>
-          <p className="py-8 text-center text-sm text-red-600">{'\u26A0'} Error loading materials</p>
+          <p className="py-8 text-center text-sm text-red-600">{'⚠'} Error loading materials</p>
         </Card>
       ) : isLoading ? (
         <div className="flex justify-center py-16"><Spinner className="h-8 w-8" /></div>
@@ -665,7 +665,7 @@ export default function ManagerMaterialsPage() {
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">Supplier</label>
             <Select
-              options={[{ value: '', label: '\u2014 no supplier \u2014' }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
+              options={[{ value: '', label: '— no supplier —' }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
               value={form.supplier_id}
               onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
             />
@@ -683,7 +683,7 @@ export default function ManagerMaterialsPage() {
           <div className="flex justify-end gap-2 border-t pt-3">
             <Button variant="secondary" onClick={closeEdit}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving\u2026' : editDialog.item ? 'Update' : 'Create'}
+              {saving ? 'Saving…' : editDialog.item ? 'Update' : 'Create'}
             </Button>
           </div>
         </div>
@@ -695,8 +695,8 @@ export default function ManagerMaterialsPage() {
         onClose={closeTx}
         title={txDialog.item
           ? (txForm.type === 'inventory' && isPM
-            ? `Inventory Audit \u2014 ${isPM ? (txDialog.item.material_code ?? txDialog.item.name) : txDialog.item.name}`
-            : `Transaction \u2014 ${isPM ? (txDialog.item.material_code ?? txDialog.item.name) : txDialog.item.name}`)
+            ? `Inventory Audit — ${isPM ? (txDialog.item.material_code ?? txDialog.item.name) : txDialog.item.name}`
+            : `Transaction — ${isPM ? (txDialog.item.material_code ?? txDialog.item.name) : txDialog.item.name}`)
           : 'Transaction'}
         className="w-full max-w-sm"
       >
@@ -721,7 +721,7 @@ export default function ManagerMaterialsPage() {
                         : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                     }`}
                   >
-                    {'\u2191'} Receive
+                    {'↑'} Receive
                   </button>
                   <button
                     onClick={() => setTxForm({ ...txForm, type: 'inventory', newBalance: String(txDialog.item!.balance) })}
@@ -731,7 +731,7 @@ export default function ManagerMaterialsPage() {
                         : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                     }`}
                   >
-                    {'\u2261'} Inventory Audit
+                    {'≡'} Inventory Audit
                   </button>
                 </div>
               </div>
@@ -748,7 +748,7 @@ export default function ManagerMaterialsPage() {
                         : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                     }`}
                   >
-                    {'\u2191'} Receive
+                    {'↑'} Receive
                   </button>
                   <button
                     onClick={() => setTxForm({ ...txForm, type: 'manual_write_off' })}
@@ -758,7 +758,7 @@ export default function ManagerMaterialsPage() {
                         : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                     }`}
                   >
-                    {'\u2193'} Write-off
+                    {'↓'} Write-off
                   </button>
                   <button
                     onClick={() => setTxForm({ ...txForm, type: 'inventory' })}
@@ -768,7 +768,7 @@ export default function ManagerMaterialsPage() {
                         : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                     }`}
                   >
-                    {'\u2261'} Inventory
+                    {'≡'} Inventory
                   </button>
                 </div>
               </div>
@@ -835,11 +835,11 @@ export default function ManagerMaterialsPage() {
                   txForm.type === 'inventory' ? 'bg-amber-600 hover:bg-amber-700 focus:ring-amber-500' : ''
                 }
               >
-                {txPending ? 'Saving\u2026' :
-                  txForm.type === 'receive' ? '\u2191 Receive' :
-                  txForm.type === 'inventory' && isPM ? '\u2261 Confirm Audit' :
-                  txForm.type === 'inventory' ? '\u2261 Inventory' :
-                  '\u2193 Write-off'}
+                {txPending ? 'Saving…' :
+                  txForm.type === 'receive' ? '↑ Receive' :
+                  txForm.type === 'inventory' && isPM ? '≡ Confirm Audit' :
+                  txForm.type === 'inventory' ? '≡ Inventory' :
+                  '↓ Write-off'}
               </Button>
             </div>
           </div>
@@ -851,7 +851,7 @@ export default function ManagerMaterialsPage() {
         open={historyDialog.open}
         onClose={closeHistory}
         title={historyDialog.item
-          ? `Transaction History \u2014 ${isPM ? (historyDialog.item.material_code ?? historyDialog.item.name) : historyDialog.item.name}`
+          ? `Transaction History — ${isPM ? (historyDialog.item.material_code ?? historyDialog.item.name) : historyDialog.item.name}`
           : 'Transaction History'}
         className="w-full max-w-2xl"
       >
@@ -875,7 +875,7 @@ export default function ManagerMaterialsPage() {
                 {txHistoryItems.map((tx) => (
                   <tr key={tx.id} className="bg-white hover:bg-gray-50">
                     <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">
-                      {tx.created_at ? new Date(tx.created_at).toLocaleString() : '\u2014'}
+                      {tx.created_at ? new Date(tx.created_at).toLocaleString() : '—'}
                     </td>
                     <td className="px-3 py-2">
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -895,9 +895,9 @@ export default function ManagerMaterialsPage() {
                     }`}>
                       {tx.type === 'receive' ? '+' : tx.type === 'consume' || tx.type === 'manual_write_off' ? '-' : ''}{Number(tx.quantity).toFixed(3)}
                     </td>
-                    <td className="px-3 py-2 text-xs text-gray-500">{tx.created_by_name ?? '\u2014'}</td>
+                    <td className="px-3 py-2 text-xs text-gray-500">{tx.created_by_name ?? '—'}</td>
                     <td className="px-3 py-2 text-xs text-gray-500 max-w-48 truncate" title={tx.notes ?? ''}>
-                      {tx.notes ?? '\u2014'}
+                      {tx.notes ?? '—'}
                     </td>
                   </tr>
                 ))}
@@ -1104,7 +1104,7 @@ function MaterialsTable({ items, subgroups, isAggregate, isPM, hideNames, canDel
         <tbody className="divide-y divide-gray-100">
           {items.map((m) => (
             <tr key={`${m.id}-${m.factory_id ?? 'all'}`} className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}>
-              <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '\u2014'}</td>
+              <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '—'}</td>
               {!hideNames && <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>}
               <td className="px-4 py-3">
                 <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
@@ -1125,7 +1125,7 @@ function MaterialsTable({ items, subgroups, isAggregate, isPM, hideNames, canDel
               </td>
               <td className="px-4 py-3 text-gray-500">{m.unit}</td>
               {!hideNames && (
-                <td className="px-4 py-3 text-gray-500">{m.supplier_name ?? <span className="text-gray-300">{'\u2014'}</span>}</td>
+                <td className="px-4 py-3 text-gray-500">{m.supplier_name ?? <span className="text-gray-300">{'—'}</span>}</td>
               )}
               {isAggregate && (
                 <td className="px-4 py-3 text-center">
@@ -1150,10 +1150,10 @@ function MaterialsTable({ items, subgroups, isAggregate, isPM, hideNames, canDel
                     ) : (
                       <>
                         <Button size="sm" variant="ghost" onClick={() => onReceive?.(m)} title="Receive material">
-                          {'\u2191'}
+                          {'↑'}
                         </Button>
                         <Button size="sm" variant="ghost" onClick={() => onInventoryAudit?.(m)} title="Inventory audit">
-                          {'\u2261'}
+                          {'≡'}
                         </Button>
                       </>
                     )

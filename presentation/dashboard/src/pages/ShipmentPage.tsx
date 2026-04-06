@@ -308,11 +308,11 @@ export default function ShipmentPage() {
                       <tbody>
                         {s.items.map((item) => (
                           <tr key={item.id} className="border-b border-gray-100 last:border-0">
-                            <td className="py-1">{item.position_label || '\u2014'}</td>
-                            <td className="py-1">{item.color || '\u2014'}</td>
-                            <td className="py-1">{item.size || '\u2014'}</td>
+                            <td className="py-1">{item.position_label || '—'}</td>
+                            <td className="py-1">{item.color || '—'}</td>
+                            <td className="py-1">{item.size || '—'}</td>
                             <td className="py-1 text-right">{item.quantity_shipped}</td>
-                            <td className="py-1 text-right">{item.box_number ?? '\u2014'}</td>
+                            <td className="py-1 text-right">{item.box_number ?? '—'}</td>
                           </tr>
                         ))}
                       </tbody>

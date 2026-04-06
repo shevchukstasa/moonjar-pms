@@ -541,7 +541,12 @@ async def reschedule_factory_endpoint(
         raise HTTPException(404, "Factory not found")
 
     from business.services.production_scheduler import reschedule_factory
-    count = reschedule_factory(db, factory_id)
+    import traceback as _tb
+    try:
+        count = reschedule_factory(db, factory_id)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Reschedule failed: {str(e)}\n{_tb.format_exc()[-1000:]}")
 
     return {
         "ok": True,

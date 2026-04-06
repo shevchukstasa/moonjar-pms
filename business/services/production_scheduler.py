@@ -1569,6 +1569,7 @@ def schedule_position(
     db: Session,
     position: OrderPosition,
     deadline: date,
+    min_start_date: Optional[date] = None,
 ) -> None:
     """
     Calculate planned dates for a position using backward scheduling
@@ -1745,18 +1746,19 @@ def schedule_position(
             planned_completion, deadline,
         )
 
-    # Guard: planned_glazing must be >= today.
+    # Guard: planned_glazing must be >= today (and >= min_start_date for FIFO).
     # When overdue, find the earliest day with available capacity instead of
     # blindly stuffing everything onto today.
     today = date.today()
-    if planned_glazing < today:
+    _earliest = max(today, min_start_date) if min_start_date else today
+    if planned_glazing < _earliest:
         # Get daily capacity (kiln throughput = the constraint)
         _kiln_cap = _get_factory_daily_kiln_cap(db, _fid)
 
-        # Find first day from today with room
-        planned_glazing = today
+        # Find first day from _earliest with room
+        planned_glazing = _earliest
         for _shift in range(30):
-            candidate = _skip_weekends(today + timedelta(days=_shift))
+            candidate = _skip_weekends(_earliest + timedelta(days=_shift))
             existing_load = float(
                 db.query(sa_func.coalesce(
                     sa_func.sum(OrderPosition.glazeable_sqm * OrderPosition.quantity), 0
@@ -1929,6 +1931,7 @@ def schedule_order(
     db: Session,
     order: ProductionOrder,
     skip_batch_planning: bool = False,
+    min_start_date: Optional[date] = None,
 ) -> int:
     """
     Schedule all positions in an order using backward scheduling.
@@ -1941,6 +1944,7 @@ def schedule_order(
         order: The production order to schedule
         skip_batch_planning: If True, skip batch planning step (useful when
             called from reschedule_factory which does its own batch planning pass)
+        min_start_date: Earliest glazing start date (FIFO constraint from earlier orders)
 
     Returns the number of positions scheduled.
     """
@@ -1960,7 +1964,7 @@ def schedule_order(
     count = 0
     for position in positions:
         try:
-            schedule_position(db, position, deadline)
+            schedule_position(db, position, deadline, min_start_date=min_start_date)
             # Flush so next position's capacity query sees this one's dates
             # (autoflush=False means ORM won't do it automatically)
             db.flush()
@@ -2145,13 +2149,33 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
     db.flush()
 
     total = 0
+    _fifo_min_start: Optional[date] = None  # FIFO: next order can't start before this
+
     for order in active_orders:
         try:
-            count = schedule_order(db, order, skip_batch_planning=True)
+            count = schedule_order(
+                db, order, skip_batch_planning=True,
+                min_start_date=_fifo_min_start,
+            )
             total += count
             # Flush after each order so the next order's capacity queries
             # see the updated planned dates (autoflush is OFF).
             db.flush()
+
+            # Update FIFO min_start: next order can't start glazing before
+            # the EARLIEST glazing date of the current order.
+            # This ensures strict FIFO: earlier orders always come first.
+            order_positions = db.query(OrderPosition).filter(
+                OrderPosition.order_id == order.id,
+                OrderPosition.planned_glazing_date.isnot(None),
+                OrderPosition.status != PositionStatus.CANCELLED.value,
+            ).all()
+            if order_positions:
+                earliest_glazing = min(
+                    p.planned_glazing_date for p in order_positions
+                )
+                if _fifo_min_start is None or earliest_glazing > _fifo_min_start:
+                    _fifo_min_start = earliest_glazing
         except Exception as e:
             logger.error(
                 "Failed to reschedule order %s: %s", order.order_number, e,

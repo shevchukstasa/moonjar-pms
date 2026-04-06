@@ -3148,15 +3148,16 @@ class SchedulerConfig(Base):
 
 
 class OnboardingProgress(Base):
-    """Tracks PM onboarding completion per section with quiz scores."""
+    """Tracks onboarding completion per section per role with quiz scores."""
     __tablename__ = 'onboarding_progress'
     __table_args__ = (
-        UniqueConstraint('user_id', 'section_id', name='uq_onboarding_user_section'),
+        UniqueConstraint('user_id', 'section_id', 'role', name='uq_onboarding_user_section_role'),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     section_id = Column(sa.String(50), nullable=False)
+    role = Column(sa.String(50), nullable=False, server_default='production_manager')
     completed = Column(sa.Boolean, nullable=False, default=False)
     quiz_score = Column(sa.Integer)  # percent 0-100
     quiz_attempts = Column(sa.Integer, nullable=False, default=0)

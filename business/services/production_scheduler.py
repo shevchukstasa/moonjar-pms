@@ -378,33 +378,43 @@ def _apply_resource_constraint(
                 )
 
     elif stage in ('drying_engobe', 'drying_glaze'):
-        # Drying rack constraint: batch sqm / rack capacity → drying cycles
-        # Each cycle takes fixed_hours to dry (from stage speed)
-        rack_sqm = resource_cap.get("total_sqm", 0)
+        # Drying is capacity-limited by rack/board infrastructure:
+        #   tiles_per_cycle = rack_board_slots × tiles_per_board
+        #   cycles = ceil(total_pcs / tiles_per_cycle)
+        #   total_hours = cycles × fixed_hours_per_cycle
+        #
+        # Board-based is PRIMARY (matches real workflow: tiles on boards → boards on racks)
+        # sqm-based is FALLBACK if no board data
         rack_boards = resource_cap.get("total_boards", 0)
+        rack_sqm = resource_cap.get("total_sqm", 0)
+        hours_per_day = 16.0  # 2 shifts × 8h
+        cycle_hours = fixed_hours if fixed_hours > 0 else 3.0  # default 3h per cycle
 
-        if rack_sqm > 0 and total_sqm > 0:
+        if rack_boards > 0 and total_pcs > 0:
+            # PRIMARY: board-based drying capacity
+            # tiles_per_cycle = how many tiles fit on all rack boards at once
+            tiles_per_cycle = rack_boards * tiles_per_board
+            cycles = math.ceil(total_pcs / tiles_per_cycle)
+            total_hours = cycles * cycle_hours
+            constraint_days = max(1, math.ceil(total_hours / hours_per_day))
+            logger.info(
+                "DRYING_CALC | %s | %d boards × %d tiles/board = %d tiles/cycle | "
+                "%d pcs → %d cycles × %.1fh = %.1fh → %d days",
+                stage, rack_boards, tiles_per_board, tiles_per_cycle,
+                total_pcs, cycles, cycle_hours, total_hours, constraint_days,
+            )
+        elif rack_sqm > 0 and total_sqm > 0:
+            # FALLBACK: sqm-based (if only sqm capacity configured)
             cycles = math.ceil(total_sqm / rack_sqm)
-            if cycles > 1:
-                # Multiple drying cycles: each takes fixed_hours
-                total_hours = fixed_hours * cycles if fixed_hours > 0 else cycles * 3.0
-                hours_per_day = 16.0  # 2 shifts × 8h
-                constraint_days = max(constraint_days, math.ceil(total_hours / hours_per_day))
-                if constraint_days > speed_days:
-                    logger.info(
-                        "LINE_CONSTRAINT | %s | rack=%.1f m² batch=%.1f m² "
-                        "→ %d cycles × %.1fh = %d days (was %d)",
-                        stage, rack_sqm, total_sqm,
-                        cycles, fixed_hours, constraint_days, speed_days,
-                    )
-        elif rack_boards > 0 and total_pcs > 0:
-            # Board-based constraint using tiles_per_board from GlazingBoardSpec
-            boards_needed = math.ceil(total_pcs / tiles_per_board)
-            cycles = math.ceil(boards_needed / rack_boards)
-            if cycles > 1:
-                total_hours = fixed_hours * cycles if fixed_hours > 0 else cycles * 3.0
-                hours_per_day = 16.0
-                constraint_days = max(constraint_days, math.ceil(total_hours / hours_per_day))
+            total_hours = cycles * cycle_hours
+            constraint_days = max(1, math.ceil(total_hours / hours_per_day))
+            if constraint_days > speed_days:
+                logger.info(
+                    "DRYING_CALC | %s | rack=%.1f m² batch=%.1f m² "
+                    "→ %d cycles × %.1fh = %d days",
+                    stage, rack_sqm, total_sqm,
+                    cycles, cycle_hours, constraint_days,
+                )
 
     elif stage == 'edge_cleaning_loading':
         # Glazing board constraint: tiles sit on boards during edge cleaning

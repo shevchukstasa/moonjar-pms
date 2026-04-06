@@ -59,7 +59,22 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query("")):
         await websocket.close(code=4001, reason="Authentication required")
         return
 
-    await manager.connect(websocket, user_id)
+    # Resolve user's primary factory for factory-scoped messaging
+    _factory_id = None
+    try:
+        from api.database import SessionLocal
+        from api.models import UserFactory
+        _db = SessionLocal()
+        try:
+            _uf = _db.query(UserFactory).filter(UserFactory.user_id == user_id).first()
+            if _uf:
+                _factory_id = str(_uf.factory_id)
+        finally:
+            _db.close()
+    except Exception:
+        pass
+
+    await manager.connect(websocket, user_id, factory_id=_factory_id)
     try:
         while True:
             data = await websocket.receive_text()

@@ -938,7 +938,6 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
         <DataTable
           columns={taskColumns}
           data={tasks}
-          onRowClick={(item) => navigate(`/manager/tasks/${item.id}`)}
         />
       )}
     </div>

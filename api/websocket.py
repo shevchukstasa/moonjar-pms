@@ -15,13 +15,16 @@ class ConnectionManager:
 
     def __init__(self):
         self.active_connections: Dict[str, List[WebSocket]] = {}
+        self.user_factories: Dict[str, str] = {}  # user_id -> factory_id
 
-    async def connect(self, websocket: WebSocket, user_id: str):
+    async def connect(self, websocket: WebSocket, user_id: str, factory_id: str = None):
         await websocket.accept()
         if user_id not in self.active_connections:
             self.active_connections[user_id] = []
         self.active_connections[user_id].append(websocket)
-        logger.info(f"WebSocket connected: user={user_id}")
+        if factory_id:
+            self.user_factories[user_id] = factory_id
+        logger.info(f"WebSocket connected: user={user_id} factory={factory_id}")
 
     def disconnect(self, websocket: WebSocket, user_id: str):
         if user_id in self.active_connections:
@@ -30,6 +33,7 @@ class ConnectionManager:
             ]
             if not self.active_connections[user_id]:
                 del self.active_connections[user_id]
+                self.user_factories.pop(user_id, None)
         logger.info(f"WebSocket disconnected: user={user_id}")
 
     async def send_to_user(self, user_id: str, message: dict):
@@ -55,10 +59,16 @@ class ConnectionManager:
                     pass
 
     async def send_to_factory(self, factory_id: str, message: dict):
-        """Send message to all users in a factory."""
-        # TODO: Implement factory-scoped broadcasting
-        # Requires mapping user_id -> factory_id
-        await self.broadcast(message)
+        """Send message to all users in a specific factory."""
+        data = json.dumps(message)
+        for user_id, connections in self.active_connections.items():
+            if self.user_factories.get(user_id) != factory_id:
+                continue
+            for ws in connections:
+                try:
+                    await ws.send_text(data)
+                except Exception:
+                    pass
 
     @property
     def connection_count(self) -> int:

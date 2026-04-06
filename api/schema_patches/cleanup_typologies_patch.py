@@ -270,7 +270,7 @@ def run(conn):
         return
     factory_id = str(row[0])
 
-    # Idempotency check: if exactly our 11 typologies exist with speeds, skip
+    # Idempotency check: if exactly our typologies exist with speeds, skip
     existing = conn.execute(text(
         "SELECT name FROM kiln_loading_typologies WHERE factory_id = :fid AND is_active = true"
     ), {"fid": factory_id}).fetchall()
@@ -284,6 +284,10 @@ def run(conn):
             logger.info("cleanup_typologies: already clean (%d typologies, %d speeds)",
                        len(existing_names), speed_count)
             return
+
+    logger.info("cleanup_typologies: need update — existing=%d expected=%d, diff=%s",
+               len(existing_names), len(EXPECTED_NAMES),
+               (EXPECTED_NAMES - existing_names) or "names match but speeds missing")
 
     # ── Cleanup (safe even if already empty) ─────────────────────
     conn.execute(text(

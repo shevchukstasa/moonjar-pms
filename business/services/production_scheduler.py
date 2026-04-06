@@ -48,6 +48,32 @@ logger = logging.getLogger("moonjar.production_scheduler")
 
 
 # ────────────────────────────────────────────────────────────────
+# Savepoint helper — prevents PostgreSQL transaction poisoning
+# ────────────────────────────────────────────────────────────────
+
+def _with_savepoint(db: Session, fn, fallback=None):
+    """Execute fn() inside a SAVEPOINT so that a DB error doesn't poison the
+    whole transaction.  If fn() raises, the savepoint is rolled back and
+    *fallback* is returned.  This is critical because PostgreSQL puts a
+    transaction into 'aborted' state after ANY SQL error, and all subsequent
+    queries will fail with InFailedSqlTransaction until a ROLLBACK is issued.
+    Using begin_nested() creates a SAVEPOINT that can be rolled back
+    independently, keeping the outer transaction healthy.
+    """
+    try:
+        nested = db.begin_nested()
+        result = fn()
+        nested.commit()
+        return result
+    except Exception:
+        try:
+            nested.rollback()
+        except Exception:
+            pass
+        return fallback
+
+
+# ────────────────────────────────────────────────────────────────
 # Standard durations (days) — will be configurable per factory later
 # ────────────────────────────────────────────────────────────────
 
@@ -86,9 +112,13 @@ def _get_scheduler_config(db: Session, factory_id: UUID) -> tuple[int, int]:
 
     try:
         from api.models import SchedulerConfig
-        config = db.query(SchedulerConfig).filter(
-            SchedulerConfig.factory_id == factory_id
-        ).first()
+
+        def _query_config():
+            return db.query(SchedulerConfig).filter(
+                SchedulerConfig.factory_id == factory_id
+            ).first()
+
+        config = _with_savepoint(db, _query_config, fallback=None)
 
         if not config:
             _scheduler_config_cache[fid_str] = (BUFFER_DAYS, BUFFER_DAYS, time.time())
@@ -425,43 +455,58 @@ def _get_effective_brigade_size(
     Looks up ShiftAssignment for today.  If today has no assignments, uses
     the most recent assignment date (workers don't change daily).
     Falls back to *static_brigade* when no assignment data exists.
+
+    Uses a SAVEPOINT so that a missing shift_assignments table
+    does not poison the outer transaction.
     """
-    from api.models import ShiftAssignment
-    import sqlalchemy as sa
+    try:
+        from api.models import ShiftAssignment
+        import sqlalchemy as sa
 
-    today = date.today()
+        today = date.today()
 
-    # Find the most recent date with assignments for this factory+stage
-    latest_date = (
-        db.query(sa_func.max(ShiftAssignment.date))
-        .filter(
-            ShiftAssignment.factory_id == factory_id,
-            ShiftAssignment.stage == stage,
-            ShiftAssignment.date <= today,
-        )
-        .scalar()
-    )
-
-    if latest_date is None:
-        return static_brigade
-
-    count = (
-        db.query(sa_func.count(sa.distinct(ShiftAssignment.user_id)))
-        .filter(
-            ShiftAssignment.factory_id == factory_id,
-            ShiftAssignment.stage == stage,
-            ShiftAssignment.date == latest_date,
-        )
-        .scalar()
-    ) or 0
-
-    if count > 0:
-        if count != static_brigade:
-            logger.info(
-                "DYNAMIC_BRIGADE | stage=%s | static=%d actual=%d",
-                stage, static_brigade, count,
+        # Use nested transaction (SAVEPOINT) to protect the outer transaction
+        # in case the shift_assignments table doesn't exist yet.
+        nested = db.begin_nested()
+        try:
+            latest_date = (
+                db.query(sa_func.max(ShiftAssignment.date))
+                .filter(
+                    ShiftAssignment.factory_id == factory_id,
+                    ShiftAssignment.stage == stage,
+                    ShiftAssignment.date <= today,
+                )
+                .scalar()
             )
-        return count
+
+            if latest_date is None:
+                nested.commit()
+                return static_brigade
+
+            count = (
+                db.query(sa_func.count(sa.distinct(ShiftAssignment.user_id)))
+                .filter(
+                    ShiftAssignment.factory_id == factory_id,
+                    ShiftAssignment.stage == stage,
+                    ShiftAssignment.date == latest_date,
+                )
+                .scalar()
+            ) or 0
+
+            nested.commit()
+
+            if count > 0:
+                if count != static_brigade:
+                    logger.info(
+                        "DYNAMIC_BRIGADE | stage=%s | static=%d actual=%d",
+                        stage, static_brigade, count,
+                    )
+                return count
+        except Exception:
+            nested.rollback()
+            return static_brigade
+    except Exception:
+        pass
 
     return static_brigade
 

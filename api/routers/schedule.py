@@ -512,6 +512,7 @@ async def reschedule_order_debug(
                 "planned_glazing_date": str(pos.planned_glazing_date),
             })
         except Exception as e:
+            db.rollback()  # Prevent transaction poisoning for subsequent positions
             results.append({
                 "position_id": str(pos.id),
                 "position_number": pos.position_number,

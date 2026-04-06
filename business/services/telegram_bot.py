@@ -1266,6 +1266,20 @@ async def handle_photo(db: Session, message: dict) -> None:
     # Determine photo_type from caption keywords
     photo_type = _detect_photo_type(caption)
 
+    # Vision-based fallback: if caption didn't help, ask GPT-4.1-nano to classify
+    if photo_type == "other":
+        try:
+            _classify_bytes = await download_telegram_photo(file_id)
+            if _classify_bytes:
+                photo_type = await _vision_classify_photo(_classify_bytes) or "other"
+                if photo_type != "other":
+                    logger.info(
+                        "VISION_CLASSIFY | chat=%s | caption='%s' -> vision detected '%s'",
+                        chat_id, caption[:50] if caption else "", photo_type,
+                    )
+        except Exception as e:
+            logger.warning("Vision classification failed (non-fatal): %s", e)
+
     # Try to extract position reference from caption (e.g. #123, POS-123)
     position_id = None
     linked_position = None
@@ -3837,6 +3851,59 @@ async def _execute_delivery_transactions(db: Session, pending: dict) -> None:
         _try_link_purchase_request(db, material, factory, quantity)
 
     db.commit()
+
+
+async def _vision_classify_photo(image_bytes: bytes) -> str | None:
+    """Use GPT-4.1-nano vision to classify a photo when caption is missing/unclear.
+
+    Returns one of: delivery, scale, quality, defect, packing, glazing, firing, or None.
+    Cost: ~$0.001 per call (GPT-4.1-nano).
+    """
+    import base64
+    import httpx
+
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    b64 = base64.b64encode(image_bytes).decode()
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "gpt-4.1-nano",
+                    "max_tokens": 20,
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": (
+                                "Classify this photo from a tile/stone production factory. "
+                                "Answer with exactly ONE word:\n"
+                                "- delivery (invoice, receipt, nota, surat jalan, delivery note)\n"
+                                "- scale (weighing scale reading)\n"
+                                "- quality (quality inspection, defects, cracks)\n"
+                                "- packing (packed boxes, labels, shipping)\n"
+                                "- other (anything else)\n"
+                                "Answer:"
+                            )},
+                            {"type": "image_url", "image_url": {
+                                "url": f"data:image/jpeg;base64,{b64}",
+                                "detail": "low",
+                            }},
+                        ],
+                    }],
+                },
+            )
+            if resp.status_code == 200:
+                answer = resp.json()["choices"][0]["message"]["content"].strip().lower()
+                valid_types = {"delivery", "scale", "quality", "defect", "packing", "glazing", "firing"}
+                return answer if answer in valid_types else None
+    except Exception as e:
+        logger.warning("Vision classify failed: %s", e)
+    return None
 
 
 def _detect_photo_type(caption: str) -> str:

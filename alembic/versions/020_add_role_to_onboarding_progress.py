@@ -8,6 +8,7 @@ Revises: 019
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import text
 
 revision = "020"
 down_revision = "019"
@@ -16,19 +17,42 @@ depends_on = None
 
 
 def upgrade():
-    # Add role column with default for existing rows
-    op.add_column(
-        "onboarding_progress",
-        sa.Column("role", sa.String(50), nullable=False, server_default="production_manager"),
-    )
+    conn = op.get_bind()
 
-    # Drop old unique constraint and create new one including role
-    op.drop_constraint("uq_onboarding_user_section", "onboarding_progress", type_="unique")
-    op.create_unique_constraint(
-        "uq_onboarding_user_section_role",
-        "onboarding_progress",
-        ["user_id", "section_id", "role"],
-    )
+    # Add role column if not exists
+    col_exists = conn.execute(text("""
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'onboarding_progress' AND column_name = 'role'
+    """)).scalar()
+
+    if not col_exists:
+        op.add_column(
+            "onboarding_progress",
+            sa.Column("role", sa.String(50), nullable=False, server_default="production_manager"),
+        )
+
+    # Drop old unique constraint if exists, create new one
+    old_exists = conn.execute(text("""
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'uq_onboarding_user_section'
+          AND table_name = 'onboarding_progress'
+    """)).scalar()
+
+    if old_exists:
+        op.drop_constraint("uq_onboarding_user_section", "onboarding_progress", type_="unique")
+
+    new_exists = conn.execute(text("""
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'uq_onboarding_user_section_role'
+          AND table_name = 'onboarding_progress'
+    """)).scalar()
+
+    if not new_exists:
+        op.create_unique_constraint(
+            "uq_onboarding_user_section_role",
+            "onboarding_progress",
+            ["user_id", "section_id", "role"],
+        )
 
 
 def downgrade():

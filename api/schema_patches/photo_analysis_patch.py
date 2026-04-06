@@ -20,12 +20,9 @@ STATEMENTS = [
 ]
 
 
-def run(engine):
-    with engine.connect() as conn:
-        for stmt in STATEMENTS:
-            try:
-                conn.execute(text(stmt))
-                conn.commit()
-            except Exception as e:
-                conn.rollback()
-                logger.warning("photo_analysis_patch statement skipped: %s", e)
+def run(conn):
+    for stmt in STATEMENTS:
+        try:
+            conn.execute(text(stmt))
+        except Exception as e:
+            logger.warning("photo_analysis_patch statement skipped: %s", e)

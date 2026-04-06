@@ -234,7 +234,7 @@ def run(conn):
         return
     factory_id = str(row[0])
 
-    # Idempotency check
+    # Idempotency check: if exactly our 11 typologies exist with speeds, skip
     existing = conn.execute(text(
         "SELECT name FROM kiln_loading_typologies WHERE factory_id = :fid AND is_active = true"
     ), {"fid": factory_id}).fetchall()
@@ -244,23 +244,23 @@ def run(conn):
         speed_count = conn.execute(text(
             "SELECT COUNT(*) FROM stage_typology_speeds WHERE factory_id = :fid"
         ), {"fid": factory_id}).scalar()
-        if speed_count >= len(TYPOLOGIES) * 14:
+        if speed_count >= len(TYPOLOGIES) * 13:
             logger.info("cleanup_typologies: already clean (%d typologies, %d speeds)",
                        len(existing_names), speed_count)
             return
 
-    # ── Cleanup ──────────────────────────────────────────────────
-    d1 = conn.execute(text(
+    # ── Cleanup (safe even if already empty) ─────────────────────
+    conn.execute(text(
         "DELETE FROM stage_typology_speeds WHERE factory_id = :fid"
-    ), {"fid": factory_id}).rowcount
-    d2 = conn.execute(text("""
+    ), {"fid": factory_id})
+    conn.execute(text("""
         DELETE FROM kiln_typology_capacities
         WHERE typology_id IN (SELECT id FROM kiln_loading_typologies WHERE factory_id = :fid)
-    """), {"fid": factory_id}).rowcount
-    d3 = conn.execute(text(
+    """), {"fid": factory_id})
+    conn.execute(text(
         "DELETE FROM kiln_loading_typologies WHERE factory_id = :fid"
-    ), {"fid": factory_id}).rowcount
-    logger.info("cleanup_typologies: deleted %d typologies, %d speeds, %d capacities", d3, d1, d2)
+    ), {"fid": factory_id})
+    logger.info("cleanup_typologies: cleaned old data")
 
     # ── Create ───────────────────────────────────────────────────
     for t in TYPOLOGIES:
@@ -271,9 +271,11 @@ def run(conn):
                 max_short_side_cm, preferred_loading, priority,
                 shift_count, auto_calibrate, is_active
             ) VALUES (
-                :fid, :name, :pt::jsonb, :poa::jsonb,
-                :coll::jsonb, :meth::jsonb, :min_s, :max_s,
-                :max_short, :pref, :prio, 2, false, true
+                CAST(:fid AS uuid), :name,
+                CAST(:pt AS jsonb), CAST(:poa AS jsonb),
+                CAST(:coll AS jsonb), CAST(:meth AS jsonb),
+                :min_s, :max_s, :max_short, :pref, :prio,
+                2, false, true
             )
         """), {
             "fid": factory_id, "name": t["name"],
@@ -299,7 +301,7 @@ def run(conn):
         for stage, (rate, basis) in SPEEDS[key].items():
             conn.execute(text("""
                 INSERT INTO stage_typology_speeds (typology_id, factory_id, stage, productivity_rate, rate_basis)
-                VALUES (:tid, :fid, :stage, :rate, :basis)
+                VALUES (CAST(:tid AS uuid), CAST(:fid AS uuid), :stage, :rate, :basis)
             """), {"tid": str(tid), "fid": factory_id, "stage": stage, "rate": rate, "basis": basis})
             total += 1
 

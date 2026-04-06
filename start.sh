@@ -30,7 +30,9 @@ if [ -d "$FRONTEND_DIR" ]; then
     if command -v node &> /dev/null; then
         cd "$FRONTEND_DIR"
         npm ci --prefer-offline 2>&1 | tail -3
-        VITE_API_URL="" VITE_WS_URL="" npm run build 2>&1
+        VITE_API_URL="" VITE_WS_URL="" \
+        VITE_GOOGLE_CLIENT_ID="${GOOGLE_OAUTH_CLIENT_ID:-}" \
+        npm run build 2>&1
         echo "=== Frontend build complete ==="
         cd ../..
     else

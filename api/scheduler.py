@@ -576,10 +576,14 @@ async def daily_database_backup(backup_type: str = "scheduled"):
         if s3_bucket:
             try:
                 import boto3
-                s3 = boto3.client(
-                    "s3",
-                    region_name=os.getenv("AWS_DEFAULT_REGION", "ap-southeast-1"),
-                )
+                s3_kwargs = {
+                    "region_name": os.getenv("AWS_DEFAULT_REGION", "auto"),
+                }
+                # Support S3-compatible endpoints (Cloudflare R2, MinIO, etc.)
+                s3_endpoint = os.getenv("S3_ENDPOINT_URL", "")
+                if s3_endpoint:
+                    s3_kwargs["endpoint_url"] = s3_endpoint
+                s3 = boto3.client("s3", **s3_kwargs)
                 s3_key = f"moonjar-backups/{datetime.now(timezone.utc).strftime('%Y-%m-%d')}/moonjar_{ts}{s3_ext}"
                 s3.upload_file(upload_file, s3_bucket, s3_key)
                 s3_uploaded = True

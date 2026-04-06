@@ -38,6 +38,7 @@ async def env_check():
         "INTERNAL_API_KEY": _is_set("INTERNAL_API_KEY"),
         "GOOGLE_OAUTH_CLIENT_ID": _is_set("GOOGLE_OAUTH_CLIENT_ID"),
         "S3_BACKUP_BUCKET": _is_set("S3_BACKUP_BUCKET"),
+        "S3_ENDPOINT_URL": _is_set("S3_ENDPOINT_URL"),
     }
 
 

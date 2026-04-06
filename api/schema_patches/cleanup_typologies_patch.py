@@ -1,24 +1,26 @@
-"""Cleanup typologies: 35 → 12 clean typologies with full 14-stage speeds.
+"""Cleanup typologies: create 13 clean typologies with full 14-stage speeds.
 
 Idempotent: checks if cleanup already done by looking for exact typology names.
 
-12 typologies:
+13 typologies:
  Tiles (by size × glaze coverage):
   1. Small Tile topface glaze or +1 edge  (≤15cm, face/1-2 edges)
   2. Small Tile flat (2-4 edge)           (≤15cm, all edges/back)
   3. Large Tile topface glaze or +1 edge  (>15cm, face/1-2 edges)
   4. Large Tile flat (2-4 edge)           (>15cm, all edges/back)
- Specialty tiles:
-  5. Stencil Tile
-  6. Silkscreen Tile
+ Specialty tiles (also split by size):
+  5. Small Stencil Tile   (≤15cm)
+  6. Large Stencil Tile   (>15cm)
+  7. Small Silkscreen Tile (≤15cm)
+  8. Large Silkscreen Tile (>15cm)
  Countertops (by area):
-  7. Countertop Small (≤0.4 m²)
-  8. Countertop Large (>0.4 m²)
+  9. Countertop Small (≤0.4 m²)
+  10. Countertop Large (>0.4 m²)
  Sinks (by glaze coverage):
-  9. Sink topface
-  10. Sink topface + edges
+  11. Sink topface
+  12. Sink topface + edges
  Other:
-  11. 3D Product
+  13. 3D Product
 """
 import json
 import logging
@@ -73,24 +75,47 @@ SPEEDS = {
         "kiln_cooling_full": (4.0, "fixed_duration"), "tile_cooling": (1.5, "fixed_duration"),
         "sorting": (60, "per_person"), "packing": (45, "per_person"),
     },
-    # ── Specialty tiles: slower glazing (stencil/silkscreen application) ──
-    "stencil": {
-        "unpacking_sorting": (30, "per_person"), "engobe": (30, "per_person"),
-        "drying_engobe": (3.0, "fixed_duration"), "glazing": (15, "per_person"),
-        "drying_glaze": (5.0, "fixed_duration"), "edge_cleaning_loading": (20, "per_person"),
-        "pre_kiln_check": (60, "per_person"), "firing": (8.0, "fixed_duration"),
-        "kiln_cooling_initial": (1.5, "fixed_duration"), "kiln_unloading": (40, "per_person"),
+    # ── Stencil tiles: slower glazing due to stencil application ──
+    "small_stencil": {
+        # Small stencil ≤15cm — faster handling than large
+        "unpacking_sorting": (40, "per_person"), "engobe": (35, "per_person"),
+        "drying_engobe": (3.0, "fixed_duration"), "glazing": (18, "per_person"),
+        "drying_glaze": (5.0, "fixed_duration"), "edge_cleaning_loading": (25, "per_person"),
+        "pre_kiln_check": (70, "per_person"), "firing": (8.0, "fixed_duration"),
+        "kiln_cooling_initial": (1.5, "fixed_duration"), "kiln_unloading": (50, "per_person"),
         "kiln_cooling_full": (3.0, "fixed_duration"), "tile_cooling": (1.0, "fixed_duration"),
-        "sorting": (50, "per_person"), "packing": (40, "per_person"),
+        "sorting": (60, "per_person"), "packing": (50, "per_person"),
     },
-    "silkscreen": {
-        "unpacking_sorting": (30, "per_person"), "engobe": (30, "per_person"),
-        "drying_engobe": (3.0, "fixed_duration"), "glazing": (15, "per_person"),
-        "drying_glaze": (5.0, "fixed_duration"), "edge_cleaning_loading": (20, "per_person"),
-        "pre_kiln_check": (60, "per_person"), "firing": (8.0, "fixed_duration"),
-        "kiln_cooling_initial": (1.5, "fixed_duration"), "kiln_unloading": (40, "per_person"),
+    "large_stencil": {
+        # Large stencil >15cm — slower, heavier tiles
+        "unpacking_sorting": (25, "per_person"), "engobe": (25, "per_person"),
+        "drying_engobe": (3.0, "fixed_duration"), "glazing": (12, "per_person"),
+        "drying_glaze": (5.5, "fixed_duration"), "edge_cleaning_loading": (18, "per_person"),
+        "pre_kiln_check": (50, "per_person"), "firing": (9.0, "fixed_duration"),
+        "kiln_cooling_initial": (2.0, "fixed_duration"), "kiln_unloading": (35, "per_person"),
+        "kiln_cooling_full": (3.5, "fixed_duration"), "tile_cooling": (1.5, "fixed_duration"),
+        "sorting": (40, "per_person"), "packing": (35, "per_person"),
+    },
+    # ── Silkscreen tiles: slower glazing due to silkscreen application ──
+    "small_silkscreen": {
+        # Small silkscreen ≤15cm
+        "unpacking_sorting": (40, "per_person"), "engobe": (35, "per_person"),
+        "drying_engobe": (3.0, "fixed_duration"), "glazing": (18, "per_person"),
+        "drying_glaze": (5.0, "fixed_duration"), "edge_cleaning_loading": (25, "per_person"),
+        "pre_kiln_check": (70, "per_person"), "firing": (8.0, "fixed_duration"),
+        "kiln_cooling_initial": (1.5, "fixed_duration"), "kiln_unloading": (50, "per_person"),
         "kiln_cooling_full": (3.0, "fixed_duration"), "tile_cooling": (1.0, "fixed_duration"),
-        "sorting": (50, "per_person"), "packing": (40, "per_person"),
+        "sorting": (60, "per_person"), "packing": (50, "per_person"),
+    },
+    "large_silkscreen": {
+        # Large silkscreen >15cm
+        "unpacking_sorting": (25, "per_person"), "engobe": (25, "per_person"),
+        "drying_engobe": (3.0, "fixed_duration"), "glazing": (12, "per_person"),
+        "drying_glaze": (5.5, "fixed_duration"), "edge_cleaning_loading": (18, "per_person"),
+        "pre_kiln_check": (50, "per_person"), "firing": (9.0, "fixed_duration"),
+        "kiln_cooling_initial": (2.0, "fixed_duration"), "kiln_unloading": (35, "per_person"),
+        "kiln_cooling_full": (3.5, "fixed_duration"), "tile_cooling": (1.5, "fixed_duration"),
+        "sorting": (40, "per_person"), "packing": (35, "per_person"),
     },
     # ── Countertops: sqm-based, heavy, slow ──────────────────────
     "countertop_small": {
@@ -145,17 +170,28 @@ SPEEDS = {
 }
 
 TYPOLOGIES = [
-    # ── Specialty tiles (highest priority — matched first) ───────
-    {"name": "Stencil Tile", "product_types": ["tile"],
+    # ── Stencil tiles (highest priority — matched first, split by size) ──
+    {"name": "Small Stencil Tile", "product_types": ["tile"],
      "place_of_application": [],
      "collections": ["Stencil"], "methods": ["Stencil"],
-     "min_size_cm": None, "max_size_cm": None, "max_short_side_cm": None,
-     "preferred_loading": "edge", "priority": 12, "speed_key": "stencil"},
-    {"name": "Silkscreen Tile", "product_types": ["tile"],
+     "min_size_cm": 3, "max_size_cm": 15, "max_short_side_cm": None,
+     "preferred_loading": "edge", "priority": 12, "speed_key": "small_stencil"},
+    {"name": "Large Stencil Tile", "product_types": ["tile"],
+     "place_of_application": [],
+     "collections": ["Stencil"], "methods": ["Stencil"],
+     "min_size_cm": 15, "max_size_cm": 100, "max_short_side_cm": None,
+     "preferred_loading": "edge", "priority": 12, "speed_key": "large_stencil"},
+    # ── Silkscreen tiles (highest priority, split by size) ────────
+    {"name": "Small Silkscreen Tile", "product_types": ["tile"],
      "place_of_application": [],
      "collections": ["Silkscreen"], "methods": ["Silkscreen"],
-     "min_size_cm": None, "max_size_cm": None, "max_short_side_cm": None,
-     "preferred_loading": "edge", "priority": 12, "speed_key": "silkscreen"},
+     "min_size_cm": 3, "max_size_cm": 15, "max_short_side_cm": None,
+     "preferred_loading": "edge", "priority": 12, "speed_key": "small_silkscreen"},
+    {"name": "Large Silkscreen Tile", "product_types": ["tile"],
+     "place_of_application": [],
+     "collections": ["Silkscreen"], "methods": ["Silkscreen"],
+     "min_size_cm": 15, "max_size_cm": 100, "max_short_side_cm": None,
+     "preferred_loading": "edge", "priority": 12, "speed_key": "large_silkscreen"},
 
     # ── Small tiles (≤15cm) ──────────────────────────────────────
     {"name": "Small Tile topface glaze or +1 edge", "product_types": ["tile"],
@@ -305,5 +341,5 @@ def run(conn):
             """), {"tid": str(tid), "fid": factory_id, "stage": stage, "rate": rate, "basis": basis})
             total += 1
 
-    logger.info("cleanup_typologies: created %d typologies, %d speeds (14 per typology)",
+    logger.info("cleanup_typologies: created %d typologies, %d speeds",
                len(TYPOLOGIES), total)

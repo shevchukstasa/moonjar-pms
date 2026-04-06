@@ -945,6 +945,94 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
 }
 
 // ===========================================================================
+// Purchase Requests — expandable table with material details
+// ===========================================================================
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function PurchaseRequestsTable({ requests }: { requests: any[] }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-gray-200">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-800 text-left text-xs font-semibold uppercase text-white">
+          <tr>
+            <th className="px-4 py-3">Materials</th>
+            <th className="px-4 py-3">Supplier</th>
+            <th className="px-4 py-3">Created</th>
+            <th className="px-4 py-3 text-right">Items</th>
+          </tr>
+        </thead>
+        <tbody>
+          {requests.map((pr) => {
+            const mats = pr.materials_json || [];
+            const isExpanded = expandedId === pr.id;
+            return (
+              <React.Fragment key={pr.id}>
+                <tr
+                  className="cursor-pointer border-b border-gray-100 transition-colors hover:bg-stone-50"
+                  onClick={() => setExpandedId(isExpanded ? null : pr.id)}
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-400">{isExpanded ? '▾' : '▸'}</span>
+                      {mats.length === 1 ? (
+                        <span className="font-medium text-gray-900">{mats[0].name}</span>
+                      ) : (
+                        <span className="font-medium text-gray-900">
+                          {mats[0]?.name || '—'}
+                          <span className="ml-1.5 text-xs text-gray-400">+{mats.length - 1} more</span>
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {pr.supplier_name ? (
+                      <span className="text-gray-700">{pr.supplier_name}</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                        ⚠ No supplier
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-gray-500">{pr.created_at ? formatDate(pr.created_at) : '—'}</td>
+                  <td className="px-4 py-3 text-right">
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                      {mats.length}
+                    </span>
+                  </td>
+                </tr>
+                {isExpanded && (
+                  <tr>
+                    <td colSpan={4} className="border-b border-gray-200 bg-gray-50/80 px-6 py-3">
+                      <div className="space-y-1.5">
+                        {mats.map((m: { name: string; quantity: number; unit: string; material_id?: string }, idx: number) => (
+                          <div key={idx} className="flex items-center justify-between text-sm">
+                            <span className="text-gray-700">{m.name}</span>
+                            <span className="font-mono text-gray-500">
+                              {m.quantity} {m.unit}
+                            </span>
+                          </div>
+                        ))}
+                        <div className="mt-2 flex gap-2 border-t border-gray-200 pt-2">
+                          <span className="text-xs text-gray-400">
+                            Source: {pr.source?.replace(/_/g, ' ') || '—'} · ID: {pr.id.slice(0, 8)}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ===========================================================================
 // TAB 3 — Materials
 // ===========================================================================
 
@@ -993,35 +1081,6 @@ function MaterialsTabContent({ factoryId }: { factoryId: string | null }) {
       key: 'supplier_name',
       header: 'Supplier',
       render: (item) => item.supplier_name || <span className="text-gray-400">N/A</span>,
-    },
-  ];
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const prColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
-    {
-      key: 'supplier_name',
-      header: 'Supplier',
-      render: (item) => item.supplier_name || 'Unknown',
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (item) => <Badge status={item.status} />,
-    },
-    {
-      key: 'source',
-      header: 'Source',
-      render: (item) => <span className="text-sm capitalize">{item.source?.replace(/_/g, ' ') || '—'}</span>,
-    },
-    {
-      key: 'created_at',
-      header: 'Created',
-      render: (item) => item.created_at ? formatDate(item.created_at) : '—',
-    },
-    {
-      key: 'expected_delivery_date',
-      header: 'Expected Delivery',
-      render: (item) => item.expected_delivery_date ? formatDate(item.expected_delivery_date) : '—',
     },
   ];
 
@@ -1077,7 +1136,7 @@ function MaterialsTabContent({ factoryId }: { factoryId: string | null }) {
         ) : pendingRequests.length === 0 ? (
           <EmptyState title="No pending purchase requests" description="All purchase requests have been processed" />
         ) : (
-          <DataTable columns={prColumns} data={pendingRequests} />
+          <PurchaseRequestsTable requests={pendingRequests} />
         )}
       </div>
     </div>

@@ -511,6 +511,29 @@ async def update_position(
     return _serialize_position(p)
 
 
+@router.post("/batch-transitions")
+async def get_batch_transitions(
+    position_ids: list[UUID] = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return allowed transitions for multiple positions in a single request."""
+    from business.services.status_machine import get_allowed_transitions as _get_allowed
+
+    if len(position_ids) > 200:
+        raise HTTPException(400, "Maximum 200 positions per batch")
+
+    positions = db.query(OrderPosition).filter(OrderPosition.id.in_(position_ids)).all()
+    role = getattr(current_user, "role", "")
+    role_str = role.value if hasattr(role, "value") else str(role or "")
+
+    result = {}
+    for p in positions:
+        current = _ev(p.status)
+        result[str(p.id)] = {"current_status": current, "allowed": _get_allowed(current, role=role_str)}
+    return result
+
+
 @router.get("/{position_id}/allowed-transitions")
 async def get_allowed_transitions(
     position_id: UUID,

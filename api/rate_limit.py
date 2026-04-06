@@ -50,7 +50,7 @@ TIERS = {
     "authenticated": {
         "prefix": "/api/",
         "methods": None,  # all methods
-        "max": 100,
+        "max": 300,
         "window": 60,
         "message": "API rate limit exceeded.",
         "keyed_by": "user",  # track per user_id (falls back to IP)

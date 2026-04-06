@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { useChangePositionStatus, useAllowedTransitions } from '@/hooks/usePositions';
+import { useChangePositionStatus } from '@/hooks/usePositions';
+import { useAuthStore } from '@/stores/authStore';
 import { getStatusColor } from '@/lib/statusColors';
 import { CelebrationPulse } from '@/components/ui/Celebration';
+import { getAllowedTransitions } from '@/lib/statusMachine';
 
 const STATUS_LABELS: Record<string, string> = {
   planned: 'Planned',
@@ -50,7 +52,7 @@ interface Props {
 
 export function StatusDropdown({ positionId, currentStatus }: Props) {
   const changeStatus = useChangePositionStatus();
-  const { data: transitions, isLoading } = useAllowedTransitions(positionId);
+  const user = useAuthStore((s) => s.user);
   const [pending, setPending] = useState(false);
   const [celebrate, setCelebrate] = useState(false);
 
@@ -75,9 +77,8 @@ export function StatusDropdown({ positionId, currentStatus }: Props) {
 
   const colorClass = getStatusColor(currentStatus);
 
-  // Build option list: current status + allowed transitions from backend
-  const allowed = transitions?.allowed ?? [];
-  // Ensure current status is always present as first option
+  // Compute allowed transitions client-side (no API call needed)
+  const allowed = getAllowedTransitions(currentStatus, user?.role);
   const options = [currentStatus, ...allowed.filter((s) => s !== currentStatus)];
 
   return (
@@ -86,8 +87,8 @@ export function StatusDropdown({ positionId, currentStatus }: Props) {
       <select
         value={currentStatus}
         onChange={handleChange}
-        disabled={pending || isLoading}
-        className={`rounded-md border border-gray-200 px-2 py-1 text-xs font-medium capitalize ${colorClass} ${pending || isLoading ? 'opacity-50' : ''}`}
+        disabled={pending}
+        className={`rounded-md border border-gray-200 px-2 py-1 text-xs font-medium capitalize ${colorClass} ${pending ? 'opacity-50' : ''}`}
       >
         {options.map((s) => (
           <option key={s} value={s}>

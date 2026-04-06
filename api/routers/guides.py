@@ -16,13 +16,14 @@ GUIDES_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "guides"
 
 # Available guides per role
 GUIDE_MAP = {
-    "production_manager": {
-        "en": "GUIDE_PM_EN.md",
-        "id": "GUIDE_PM_ID.md",
-    },
-    # Future: add guides for other roles
-    # "quality_manager": {"en": "GUIDE_QM_EN.md", ...},
-    # "sorter_packer": {"en": "GUIDE_SP_EN.md", ...},
+    "production_manager": {"en": "GUIDE_PM_EN.md", "id": "GUIDE_PM_ID.md"},
+    "ceo": {"en": "GUIDE_CEO_EN.md", "id": "GUIDE_CEO_ID.md"},
+    "quality_manager": {"en": "GUIDE_QM_EN.md", "id": "GUIDE_QM_ID.md"},
+    "warehouse": {"en": "GUIDE_WH_EN.md", "id": "GUIDE_WH_ID.md"},
+    "sorter_packer": {"en": "GUIDE_SP_EN.md", "id": "GUIDE_SP_ID.md"},
+    "purchaser": {"en": "GUIDE_PURCH_EN.md", "id": "GUIDE_PURCH_ID.md"},
+    "administrator": {"en": "GUIDE_ADMIN_EN.md", "id": "GUIDE_ADMIN_ID.md"},
+    "owner": {"en": "GUIDE_OWNER_EN.md", "id": "GUIDE_OWNER_ID.md"},
 }
 
 

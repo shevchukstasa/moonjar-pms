@@ -295,7 +295,29 @@ function ReadingProgress({ contentRef }: { contentRef: React.RefObject<HTMLDivEl
    Main PMGuidePage Component
    ──────────────────────────────────────────────────── */
 
-export default function PMGuidePage() {
+const ROLE_LABELS: Record<string, { en: string; id: string }> = {
+  production_manager: { en: 'PM Guide', id: 'Panduan PM' },
+  ceo: { en: 'CEO Guide', id: 'Panduan CEO' },
+  quality_manager: { en: 'QM Guide', id: 'Panduan QM' },
+  warehouse: { en: 'Warehouse Guide', id: 'Panduan Gudang' },
+  sorter_packer: { en: 'Packer Guide', id: 'Panduan Packer' },
+  purchaser: { en: 'Purchaser Guide', id: 'Panduan Pembelian' },
+  administrator: { en: 'Admin Guide', id: 'Panduan Admin' },
+  owner: { en: 'Owner Guide', id: 'Panduan Owner' },
+};
+
+const ROLE_BACK_ROUTES: Record<string, string> = {
+  production_manager: '/manager',
+  ceo: '/ceo',
+  quality_manager: '/quality',
+  warehouse: '/warehouse',
+  sorter_packer: '/packing',
+  purchaser: '/purchaser',
+  administrator: '/admin',
+  owner: '/owner',
+};
+
+export default function PMGuidePage({ role = 'production_manager' }: { role?: string }) {
   const navigate = useNavigate();
   const [lang, setLang] = useState<string>('en');
   const [content, setContent] = useState<string>('');
@@ -305,13 +327,15 @@ export default function PMGuidePage() {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [mobileTocOpen, setMobileTocOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+  const guideLabel = ROLE_LABELS[role] || ROLE_LABELS.production_manager;
+  const backRoute = ROLE_BACK_ROUTES[role] || '/';
 
   // Fetch guide content
   useEffect(() => {
     setLoading(true);
     setError('');
     apiClient
-      .get(`/guides/production_manager/${lang}`, { responseType: 'text' })
+      .get(`/guides/${role}/${lang}`, { responseType: 'text' })
       .then((r) => {
         setContent(typeof r.data === 'string' ? r.data : JSON.stringify(r.data));
         setLoading(false);
@@ -321,7 +345,7 @@ export default function PMGuidePage() {
         setError(msg);
         setLoading(false);
       });
-  }, [lang]);
+  }, [lang, role]);
 
   // Parse TOC from content
   const toc = useMemo(() => extractToc(content), [content]);
@@ -387,8 +411,8 @@ export default function PMGuidePage() {
     }
 
     const title = lang === 'id'
-      ? 'Panduan Production Manager - Moonjar PMS'
-      : 'Production Manager Guide - Moonjar PMS';
+      ? `${guideLabel.id} - Moonjar PMS`
+      : `${guideLabel.en} - Moonjar PMS`;
 
     printWindow.document.write(`<!DOCTYPE html><html><head><title>${title}</title>
       <style>
@@ -476,7 +500,7 @@ export default function PMGuidePage() {
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-sm">{'📖'}</span>
             <div>
               <h2 className="text-sm font-bold text-gray-900">
-                {lang === 'id' ? 'Panduan PM' : 'PM Guide'}
+                {lang === 'id' ? guideLabel.id : guideLabel.en}
               </h2>
               <p className="text-[11px] text-gray-400">
                 {sectionCount} {lang === 'id' ? 'bagian' : 'sections'}
@@ -532,7 +556,7 @@ export default function PMGuidePage() {
           <Button
             variant="ghost"
             className="w-full justify-center text-xs"
-            onClick={() => navigate('/manager')}
+            onClick={() => navigate(backRoute)}
           >
             {'←'} {lang === 'id' ? 'Kembali' : 'Back to Dashboard'}
           </Button>
@@ -557,7 +581,7 @@ export default function PMGuidePage() {
               </button>
               <div className="lg:hidden">
                 <h1 className="text-sm font-bold text-gray-900">
-                  {lang === 'id' ? 'Panduan PM' : 'PM Guide'}
+                  {lang === 'id' ? guideLabel.id : guideLabel.en}
                 </h1>
               </div>
               {/* Desktop: language tabs */}
@@ -595,7 +619,7 @@ export default function PMGuidePage() {
                 {'📄'} PDF
               </button>
               <button
-                onClick={() => navigate('/manager')}
+                onClick={() => navigate(backRoute)}
                 className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
               >
                 {'←'} <span className="hidden sm:inline">{lang === 'id' ? 'Kembali' : 'Dashboard'}</span>
@@ -646,7 +670,7 @@ export default function PMGuidePage() {
                 </p>
                 <Button
                   className="mt-4"
-                  onClick={() => navigate('/manager')}
+                  onClick={() => navigate(backRoute)}
                 >
                   {'←'} {lang === 'id' ? 'Kembali ke Dashboard' : 'Back to Dashboard'}
                 </Button>

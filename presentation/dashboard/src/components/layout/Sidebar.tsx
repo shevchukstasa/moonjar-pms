@@ -147,6 +147,12 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/warehouse/reconciliations', label: 'Reconciliations', icon: '🔄' },
       ],
     },
+    {
+      section: 'Help', icon: '📖', items: [
+        { to: '/admin/guide', label: 'Guide', icon: '📚' },
+        { to: '/admin/onboarding', label: 'Onboarding', icon: '🎓' },
+      ],
+    },
   ],
   ceo: [
     {
@@ -157,6 +163,12 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/manager/gamification', label: 'Gamification', icon: '🏆' },
         { to: '/tablo', label: 'Tablo', icon: '📺' },
         { to: '/users', label: 'Users', icon: '👥' },
+      ],
+    },
+    {
+      section: 'Help', icon: '📖', items: [
+        { to: '/ceo/guide', label: 'Guide', icon: '📚' },
+        { to: '/ceo/onboarding', label: 'Onboarding', icon: '🎓' },
       ],
     },
   ],
@@ -217,6 +229,12 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/quality', label: 'Quality Dashboard', icon: '🔬' },
       ],
     },
+    {
+      section: 'Help', icon: '📖', items: [
+        { to: '/quality/guide', label: 'Guide', icon: '📚' },
+        { to: '/quality/onboarding', label: 'Onboarding', icon: '🎓' },
+      ],
+    },
   ],
   warehouse: [
     {
@@ -227,6 +245,12 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/warehouse/mana-shipments', label: 'Mana Shipments', icon: '🚚' },
       ],
     },
+    {
+      section: 'Help', icon: '📖', items: [
+        { to: '/warehouse/guide', label: 'Guide', icon: '📚' },
+        { to: '/warehouse/onboarding', label: 'Onboarding', icon: '🎓' },
+      ],
+    },
   ],
   sorter_packer: [
     {
@@ -234,11 +258,23 @@ const navByRole: Record<string, NavSection[]> = {
         { to: '/packing', label: 'Sorting & Packing', icon: '📦' },
       ],
     },
+    {
+      section: 'Help', icon: '📖', items: [
+        { to: '/packing/guide', label: 'Guide', icon: '📚' },
+        { to: '/packing/onboarding', label: 'Onboarding', icon: '🎓' },
+      ],
+    },
   ],
   purchaser: [
     {
       section: 'Purchasing', icon: '🛒', defaultOpen: true, items: [
         { to: '/purchaser', label: 'Purchasing', icon: '🛒' },
+      ],
+    },
+    {
+      section: 'Help', icon: '📖', items: [
+        { to: '/purchaser/guide', label: 'Guide', icon: '📚' },
+        { to: '/purchaser/onboarding', label: 'Onboarding', icon: '🎓' },
       ],
     },
   ],

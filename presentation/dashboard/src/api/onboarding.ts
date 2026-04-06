@@ -63,14 +63,16 @@ export interface OnboardingContentResponse {
 }
 
 export const onboardingApi = {
-  getProgress: async (): Promise<OnboardingOverview> => {
-    const { data } = await apiClient.get('/onboarding/progress');
+  getProgress: async (role?: string): Promise<OnboardingOverview> => {
+    const params = role ? { role } : {};
+    const { data } = await apiClient.get('/onboarding/progress', { params });
     return data;
   },
 
-  completeSection: async (sectionId: string): Promise<SectionProgress> => {
+  completeSection: async (sectionId: string, role?: string): Promise<SectionProgress> => {
     const { data } = await apiClient.post('/onboarding/complete-section', {
       section_id: sectionId,
+      ...(role ? { role } : {}),
     });
     return data;
   },
@@ -78,16 +80,19 @@ export const onboardingApi = {
   submitQuiz: async (
     sectionId: string,
     answers: Record<string, string>,
+    role?: string,
   ): Promise<QuizResult> => {
     const { data } = await apiClient.post('/onboarding/submit-quiz', {
       section_id: sectionId,
       answers,
+      ...(role ? { role } : {}),
     });
     return data;
   },
 
-  getContent: async (lang: string): Promise<OnboardingContentResponse> => {
-    const { data } = await apiClient.get(`/onboarding/content/${lang}`);
+  getContent: async (lang: string, role?: string): Promise<OnboardingContentResponse> => {
+    const params = role ? { role } : {};
+    const { data } = await apiClient.get(`/onboarding/content/${lang}`, { params });
     return data;
   },
 };

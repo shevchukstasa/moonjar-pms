@@ -45,12 +45,47 @@ const ACHIEVEMENT_THRESHOLDS = [
   { xp: 450, label: { en: 'Rising Star', id: 'Bintang Baru', ru: '\u0412\u043e\u0441\u0445\u043e\u0434\u044f\u0449\u0430\u044f \u0437\u0432\u0435\u0437\u0434\u0430' }, icon: '⭐' },
   { xp: 900, label: { en: 'Knowledge Master', id: 'Master Pengetahuan', ru: '\u041c\u0430\u0441\u0442\u0435\u0440 \u0437\u043d\u0430\u043d\u0438\u0439' }, icon: '🏆' },
   { xp: 1200, label: { en: 'Quiz Champion', id: 'Juara Kuis', ru: '\u0427\u0435\u043c\u043f\u0438\u043e\u043d \u0432\u0438\u043a\u0442\u043e\u0440\u0438\u043d' }, icon: '💎' },
-  { xp: 1800, label: { en: 'PM Expert', id: 'Ahli PM', ru: '\u042d\u043a\u0441\u043f\u0435\u0440\u0442 PM' }, icon: '👑' },
+  { xp: 1800, label: { en: 'Expert', id: 'Ahli', ru: 'Эксперт' }, icon: '👑' },
 ];
 
+const ROLE_TITLES: Record<string, { title: LocaleString; subtitle: LocaleString }> = {
+  production_manager: {
+    title: { en: 'PM Onboarding Academy', id: 'Akademi Onboarding PM', ru: 'Академия онбординга PM' },
+    subtitle: { en: 'Master the Production Management System', id: 'Kuasai Sistem Manajemen Produksi', ru: 'Освойте систему управления производством' },
+  },
+  ceo: {
+    title: { en: 'CEO Onboarding Academy', id: 'Akademi Onboarding CEO', ru: 'Академия онбординга CEO' },
+    subtitle: { en: 'Master Strategic Factory Oversight', id: 'Kuasai Pengawasan Strategis Pabrik', ru: 'Освойте стратегическое управление фабрикой' },
+  },
+  quality_manager: {
+    title: { en: 'QM Onboarding Academy', id: 'Akademi Onboarding QM', ru: 'Академия онбординга QM' },
+    subtitle: { en: 'Master Quality Control & Assurance', id: 'Kuasai Kontrol & Jaminan Kualitas', ru: 'Освойте контроль качества' },
+  },
+  warehouse: {
+    title: { en: 'Warehouse Onboarding Academy', id: 'Akademi Onboarding Gudang', ru: 'Академия онбординга склада' },
+    subtitle: { en: 'Master Stock & Logistics Management', id: 'Kuasai Manajemen Stok & Logistik', ru: 'Освойте управление складом и логистикой' },
+  },
+  sorter_packer: {
+    title: { en: 'Packer Onboarding Academy', id: 'Akademi Onboarding Packer', ru: 'Академия онбординга упаковки' },
+    subtitle: { en: 'Master Sorting & Packing Operations', id: 'Kuasai Operasi Sortir & Packing', ru: 'Освойте сортировку и упаковку' },
+  },
+  purchaser: {
+    title: { en: 'Purchaser Onboarding Academy', id: 'Akademi Onboarding Pembelian', ru: 'Академия онбординга закупок' },
+    subtitle: { en: 'Master Procurement & Supplier Management', id: 'Kuasai Pengadaan & Manajemen Pemasok', ru: 'Освойте закупки и работу с поставщиками' },
+  },
+  administrator: {
+    title: { en: 'Admin Onboarding Academy', id: 'Akademi Onboarding Admin', ru: 'Академия онбординга администратора' },
+    subtitle: { en: 'Master System Configuration & Data Management', id: 'Kuasai Konfigurasi Sistem & Manajemen Data', ru: 'Освойте настройку системы и управление данными' },
+  },
+  owner: {
+    title: { en: 'Owner Onboarding Academy', id: 'Akademi Onboarding Owner', ru: 'Академия онбординга владельца' },
+    subtitle: { en: 'Master Full System Overview & Analytics', id: 'Kuasai Gambaran & Analitik Sistem Lengkap', ru: 'Освойте полный обзор системы и аналитику' },
+  },
+};
+
 const MESSAGES = {
-  title: { en: 'PM Onboarding Academy', id: 'Akademi Onboarding PM', ru: '\u0410\u043a\u0430\u0434\u0435\u043c\u0438\u044f \u043e\u043d\u0431\u043e\u0440\u0434\u0438\u043d\u0433\u0430 PM' } as LocaleString,
-  subtitle: { en: 'Master the Production Management System', id: 'Kuasai Sistem Manajemen Produksi', ru: '\u041e\u0441\u0432\u043e\u0439\u0442\u0435 \u0441\u0438\u0441\u0442\u0435\u043c\u0443 \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u044f \u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u0441\u0442\u0432\u043e\u043c' } as LocaleString,
+  title: { en: 'Onboarding Academy', id: 'Akademi Onboarding', ru: 'Академия онбординга' } as LocaleString,
+  subtitle: { en: 'Master the System', id: 'Kuasai Sistem', ru: 'Освойте систему' } as LocaleString,
   totalXp: { en: 'Total XP', id: 'Total XP', ru: '\u0412\u0441\u0435\u0433\u043e XP' } as LocaleString,
   sections: { en: 'sections', id: 'bagian', ru: '\u0440\u0430\u0437\u0434\u0435\u043b\u043e\u0432' } as LocaleString,
   completed: { en: 'completed', id: 'selesai', ru: '\u043f\u0440\u043e\u0439\u0434\u0435\u043d\u043e' } as LocaleString,
@@ -435,14 +470,15 @@ type ViewState =
   | { mode: 'slides'; sectionId: string; slideIndex: number }
   | { mode: 'quiz'; sectionId: string };
 
-export default function OnboardingPage() {
+export default function OnboardingPage({ role = 'production_manager' }: { role?: string }) {
   const user = useAuthStore((s) => s.user);
   const lang = getLang(user);
+  const roleTitle = ROLE_TITLES[role] || ROLE_TITLES.production_manager;
 
-  const { data: progress, isLoading: loadingProgress } = useOnboardingProgress();
-  const { data: contentData, isLoading: loadingContent } = useOnboardingContent(lang);
-  const completeSection = useCompleteSection();
-  const submitQuiz = useSubmitQuiz();
+  const { data: progress, isLoading: loadingProgress } = useOnboardingProgress(role);
+  const { data: contentData, isLoading: loadingContent } = useOnboardingContent(lang, role);
+  const completeSection = useCompleteSection(role);
+  const submitQuiz = useSubmitQuiz(role);
 
   const [view, setView] = useState<ViewState>({ mode: 'overview' });
   const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
@@ -612,10 +648,10 @@ export default function OnboardingPage() {
           {/* Info */}
           <div className="flex-1 text-center md:text-left">
             <h1 className="text-3xl font-bold text-[var(--text-primary)] mb-2">
-              {t(MESSAGES.title, lang)}
+              {t(roleTitle.title, lang)}
             </h1>
             <p className="text-[var(--text-secondary)] mb-4">
-              {t(MESSAGES.subtitle, lang)}
+              {t(roleTitle.subtitle, lang)}
             </p>
             <div className="flex flex-wrap items-center gap-6 justify-center md:justify-start">
               <div>

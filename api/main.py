@@ -1859,6 +1859,7 @@ async def lifespan(app: FastAPI):
         ("onboarding", "api.schema_patches.onboarding_patch", "apply"),
         ("photo_analysis", "api.schema_patches.photo_analysis_patch", "run"),
         ("seed_demo_users", "api.schema_patches.seed_demo_users_patch", "run"),
+        ("onboarding_role", "api.schema_patches.onboarding_role_patch", "run"),
     ]
 
     # Inline patches (too small for separate files)

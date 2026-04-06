@@ -125,6 +125,8 @@ export default function App() {
           <Route element={<RequireRole roles={['ceo', 'owner', 'administrator']} />}>
             <Route path="/ceo" element={<CeoDashboard />} />
             <Route path="/ceo/employees" element={<CeoEmployeesPage />} />
+            <Route path="/ceo/guide" element={<PMGuidePage role="ceo" />} />
+            <Route path="/ceo/onboarding" element={<OnboardingPage role="ceo" />} />
           </Route>
           <Route element={<RequireRole roles={['owner', 'administrator']} />}>
             <Route path="/admin" element={<AdminPanelPage />} />
@@ -140,6 +142,8 @@ export default function App() {
             <Route path="/admin/dashboard-access" element={<DashboardAccessPage />} />
             <Route path="/admin/settings" element={<AdminSettingsPage />} />
             <Route path="/admin/employees" element={<EmployeesPage />} />
+            <Route path="/admin/guide" element={<PMGuidePage role="administrator" />} />
+            <Route path="/admin/onboarding" element={<OnboardingPage role="administrator" />} />
           </Route>
           <Route element={<RequireRole roles={['owner', 'administrator', 'production_manager']} />}>
             <Route path="/admin/recipes" element={<AdminRecipesPage />} />
@@ -169,8 +173,8 @@ export default function App() {
             <Route path="/manager/grinding" element={<GrindingDecisionsPage />} />
             <Route path="/manager/shortage/:taskId" element={<ShortageDecisionPage />} />
             <Route path="/manager/size-resolution/:taskId" element={<SizeResolutionPage />} />
-            <Route path="/manager/guide" element={<PMGuidePage />} />
-            <Route path="/manager/onboarding" element={<OnboardingPage />} />
+            <Route path="/manager/guide" element={<PMGuidePage role="production_manager" />} />
+            <Route path="/manager/onboarding" element={<OnboardingPage role="production_manager" />} />
             <Route path="/manager/staff" element={<EmployeesPage />} />
             <Route path="/manager/workforce" element={<WorkforceAssignmentPage />} />
           </Route>
@@ -184,18 +188,26 @@ export default function App() {
           <Route path="/tablo" element={<TabloDashboard />} />
           <Route element={<RequireRole roles={['quality_manager', 'owner', 'administrator', 'production_manager']} />}>
             <Route path="/quality" element={<QualityManagerDashboard />} />
+            <Route path="/quality/guide" element={<PMGuidePage role="quality_manager" />} />
+            <Route path="/quality/onboarding" element={<OnboardingPage role="quality_manager" />} />
           </Route>
           <Route element={<RequireRole roles={['warehouse', 'owner', 'administrator', 'production_manager']} />}>
             <Route path="/warehouse" element={<WarehouseDashboard />} />
             <Route path="/warehouse/finished-goods" element={<FinishedGoodsPage />} />
             <Route path="/warehouse/reconciliations" element={<ReconciliationsPage />} />
             <Route path="/warehouse/mana-shipments" element={<ManaShipmentsPage />} />
+            <Route path="/warehouse/guide" element={<PMGuidePage role="warehouse" />} />
+            <Route path="/warehouse/onboarding" element={<OnboardingPage role="warehouse" />} />
           </Route>
           <Route element={<RequireRole roles={['sorter_packer', 'owner', 'administrator', 'production_manager']} />}>
             <Route path="/packing" element={<SorterPackerDashboard />} />
+            <Route path="/packing/guide" element={<PMGuidePage role="sorter_packer" />} />
+            <Route path="/packing/onboarding" element={<OnboardingPage role="sorter_packer" />} />
           </Route>
           <Route element={<RequireRole roles={['purchaser', 'owner', 'administrator', 'production_manager']} />}>
             <Route path="/purchaser" element={<PurchaserDashboard />} />
+            <Route path="/purchaser/guide" element={<PMGuidePage role="purchaser" />} />
+            <Route path="/purchaser/onboarding" element={<OnboardingPage role="purchaser" />} />
           </Route>
         </Route>
         <Route path="*" element={<NotFoundPage />} />

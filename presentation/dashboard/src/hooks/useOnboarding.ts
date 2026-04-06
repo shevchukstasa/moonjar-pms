@@ -8,34 +8,34 @@ import {
 } from '@/api/onboarding';
 
 const KEYS = {
-  progress: ['onboarding', 'progress'],
-  content: (lang: string) => ['onboarding', 'content', lang],
+  progress: (role?: string) => ['onboarding', 'progress', role ?? 'default'],
+  content: (lang: string, role?: string) => ['onboarding', 'content', lang, role ?? 'default'],
 };
 
-export function useOnboardingProgress() {
+export function useOnboardingProgress(role?: string) {
   return useQuery<OnboardingOverview>({
-    queryKey: KEYS.progress,
-    queryFn: onboardingApi.getProgress,
+    queryKey: KEYS.progress(role),
+    queryFn: () => onboardingApi.getProgress(role),
   });
 }
 
-export function useOnboardingContent(lang: string) {
+export function useOnboardingContent(lang: string, role?: string) {
   return useQuery<OnboardingContentResponse>({
-    queryKey: KEYS.content(lang),
-    queryFn: () => onboardingApi.getContent(lang),
+    queryKey: KEYS.content(lang, role),
+    queryFn: () => onboardingApi.getContent(lang, role),
     staleTime: 60 * 60 * 1000, // content rarely changes
   });
 }
 
-export function useCompleteSection() {
+export function useCompleteSection(role?: string) {
   const qc = useQueryClient();
   return useMutation<SectionProgress, Error, string>({
-    mutationFn: (sectionId) => onboardingApi.completeSection(sectionId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.progress }),
+    mutationFn: (sectionId) => onboardingApi.completeSection(sectionId, role),
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.progress(role) }),
   });
 }
 
-export function useSubmitQuiz() {
+export function useSubmitQuiz(role?: string) {
   const qc = useQueryClient();
   return useMutation<
     QuizResult,
@@ -43,7 +43,7 @@ export function useSubmitQuiz() {
     { sectionId: string; answers: Record<string, string> }
   >({
     mutationFn: ({ sectionId, answers }) =>
-      onboardingApi.submitQuiz(sectionId, answers),
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.progress }),
+      onboardingApi.submitQuiz(sectionId, answers, role),
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.progress(role) }),
   });
 }

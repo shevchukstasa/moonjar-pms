@@ -2,7 +2,7 @@
 AI Chat service — LLM integration for RAG-based assistant.
 Uses httpx directly (no SDK dependencies).
 
-Priority: Anthropic Claude → OpenAI → fallback (context-only response).
+Priority: OpenAI GPT-4.1-mini (cheap) → Anthropic Claude (premium fallback).
 """
 
 import os
@@ -137,7 +137,7 @@ async def _call_openai(
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
             json={
-                "model": "gpt-4o-mini",
+                "model": "gpt-4.1-mini",
                 "messages": openai_messages,
                 "max_tokens": 1024,
             },
@@ -172,9 +172,9 @@ async def generate_response(
     """
     Generate AI response using available LLM.
 
-    Priority:
-    1. ANTHROPIC_API_KEY → Claude API
-    2. OPENAI_API_KEY → OpenAI API
+    Priority (cost-optimised):
+    1. OPENAI_API_KEY → GPT-4.1-mini ($0.40/$1.60 per 1M tokens)
+    2. ANTHROPIC_API_KEY → Claude Sonnet (premium fallback, $3/$15)
     3. Fallback → return RAG context as-is with config message
 
     Returns:
@@ -191,17 +191,7 @@ async def generate_response(
     system_prompt = _build_system_prompt(rag_context, factory_names)
     messages = _build_messages(conversation_history, user_message)
 
-    # Try Anthropic first
-    if settings.ANTHROPIC_API_KEY:
-        try:
-            text = await _call_anthropic(
-                system_prompt, messages, settings.ANTHROPIC_API_KEY,
-            )
-            return text, "anthropic"
-        except Exception as e:
-            logger.warning("Anthropic API call failed: %s", e)
-
-    # Try OpenAI
+    # Try OpenAI first (10x cheaper)
     if settings.OPENAI_API_KEY:
         try:
             text = await _call_openai(
@@ -210,6 +200,16 @@ async def generate_response(
             return text, "openai"
         except Exception as e:
             logger.warning("OpenAI API call failed: %s", e)
+
+    # Fallback to Anthropic (premium)
+    if settings.ANTHROPIC_API_KEY:
+        try:
+            text = await _call_anthropic(
+                system_prompt, messages, settings.ANTHROPIC_API_KEY,
+            )
+            return text, "anthropic"
+        except Exception as e:
+            logger.warning("Anthropic API call failed: %s", e)
 
     # Fallback
     return _fallback_response(rag_context), "fallback"

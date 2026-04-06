@@ -132,7 +132,7 @@ async def chat(
     2. Save user message to session history
     3. Search RAG for relevant context
     4. Build prompt with context + conversation history
-    5. Call LLM (Anthropic → OpenAI → fallback)
+    5. Call LLM (OpenAI GPT-4.1-mini → Anthropic Claude → fallback)
     6. Save assistant message
     7. Return response with sources
     """

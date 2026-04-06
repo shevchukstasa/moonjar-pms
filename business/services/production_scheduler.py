@@ -2081,7 +2081,23 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
             OrderStatus.IN_PRODUCTION.value,
             OrderStatus.PARTIALLY_READY.value,
         ]),
-    ).all()
+    ).order_by(ProductionOrder.created_at.asc()).all()  # FIFO: earliest orders first
+
+    # Assign priority_order based on FIFO (order creation date)
+    # This ensures earlier orders always get scheduled into earlier slots
+    _priority_counter = 0
+
+    # First pass: assign FIFO priority_order to all positions
+    # so that capacity-finding logic respects arrival order
+    for order in active_orders:
+        positions = db.query(OrderPosition).filter(
+            OrderPosition.order_id == order.id,
+            OrderPosition.status != PositionStatus.CANCELLED.value,
+        ).order_by(OrderPosition.position_number.asc()).all()
+        for pos in positions:
+            pos.priority_order = _priority_counter
+            _priority_counter += 1
+    db.flush()
 
     total = 0
     for order in active_orders:

@@ -2235,9 +2235,10 @@ class PositionPhoto(Base):
     uploaded_by_telegram_id = Column(sa.BigInteger)
     uploaded_by_user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'))
     batch_id = Column(UUID(as_uuid=True), ForeignKey('batches.id', ondelete='SET NULL'), nullable=True)
-    photo_type = Column(sa.String(30))  # glazing, firing, defect, packing, other
+    photo_type = Column(sa.String(30))  # glazing, firing, defect, packing, other, delivery, scale, quality
     photo_url = Column(sa.String(2048), nullable=True)  # For web-uploaded photos
     caption = Column(sa.Text)
+    analysis_result = Column(sa.JSON, nullable=True)  # Vision API result: OCR readings, confidence, issues
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     position = relationship('OrderPosition', foreign_keys=[position_id])

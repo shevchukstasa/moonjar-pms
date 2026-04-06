@@ -182,7 +182,7 @@ export default function App() {
           </Route>
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/tablo" element={<TabloDashboard />} />
-          <Route element={<RequireRole roles={['quality_manager', 'owner', 'administrator']} />}>
+          <Route element={<RequireRole roles={['quality_manager', 'owner', 'administrator', 'production_manager']} />}>
             <Route path="/quality" element={<QualityManagerDashboard />} />
           </Route>
           <Route element={<RequireRole roles={['warehouse', 'owner', 'administrator', 'production_manager']} />}>

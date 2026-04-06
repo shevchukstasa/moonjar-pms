@@ -1396,6 +1396,14 @@ async def handle_photo(db: Session, message: dict) -> None:
                 )
 
                 if analysis_result:
+                    # Persist analysis result to DB
+                    try:
+                        photo.analysis_result = analysis_result
+                        db.commit()
+                    except Exception as e:
+                        logger.warning("Failed to save analysis_result: %s", e)
+                        db.rollback()
+
                     pos_ref = _format_position_label(linked_position) if linked_position else None
                     analysis_msg = format_analysis_message(analysis_result, pos_ref)
                     await _send_message(chat_id, analysis_msg, parse_mode="")
@@ -3182,6 +3190,14 @@ async def _handle_delivery_photo(
         logger.error("DELIVERY_PHOTO | Vision API returned None — no API key or call failed")
         await _send_message(chat_id, msg("delivery_process_error", lang), parse_mode="")
         return
+
+    # Persist vision result to photo record
+    try:
+        photo.analysis_result = vision_result
+        db.commit()
+    except Exception as e:
+        logger.warning("Failed to save delivery analysis_result: %s", e)
+        db.rollback()
 
     readings = vision_result.get("readings", {})
     supplier_name = caption or readings.get("supplier")

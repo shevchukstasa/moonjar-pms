@@ -22,6 +22,25 @@ async def health_check():
     return {"status": "ok", "service": "moonjar-pms"}
 
 
+@router.get("/health/env-check")
+async def env_check():
+    """Public diagnostic: which integration keys are configured (values hidden)."""
+    def _is_set(key: str) -> bool:
+        val = os.getenv(key, "")
+        return bool(val and len(val) > 3)
+
+    return {
+        "OPENAI_API_KEY": _is_set("OPENAI_API_KEY"),
+        "ANTHROPIC_API_KEY": _is_set("ANTHROPIC_API_KEY"),
+        "TELEGRAM_BOT_TOKEN": _is_set("TELEGRAM_BOT_TOKEN"),
+        "SUPABASE_URL": _is_set("SUPABASE_URL"),
+        "SUPABASE_KEY": _is_set("SUPABASE_KEY"),
+        "INTERNAL_API_KEY": _is_set("INTERNAL_API_KEY"),
+        "GOOGLE_OAUTH_CLIENT_ID": _is_set("GOOGLE_OAUTH_CLIENT_ID"),
+        "S3_BACKUP_BUCKET": _is_set("S3_BACKUP_BUCKET"),
+    }
+
+
 @router.get("/health/seed-status")
 async def seed_status(
     db: Session = Depends(get_db),

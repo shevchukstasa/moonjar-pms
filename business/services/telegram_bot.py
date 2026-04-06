@@ -3167,53 +3167,65 @@ async def _handle_delivery_photo(
     # Cleanup expired pending deliveries on each new photo
     _cleanup_expired_deliveries()
 
-    # ── Step 1: Call server-side delivery processing endpoint ─────
-    base_url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
-    if base_url:
-        # Production: use public domain
-        scheme = "https" if "railway" in base_url else "http"
-        if not base_url.startswith("http"):
-            api_url = f"{scheme}://{base_url}/api/delivery/process-photo"
-        else:
-            api_url = f"{base_url}/api/delivery/process-photo"
-    else:
-        # Local development
-        port = os.getenv("PORT", "8080")
-        api_url = f"http://localhost:{port}/api/delivery/process-photo"
-
-    # Auth: use INTERNAL_API_KEY for server-to-server auth
-    settings = get_settings()
-    api_key = os.getenv("INTERNAL_API_KEY") or settings.OWNER_KEY
-    headers = {}
-    if api_key:
-        headers["X-API-Key"] = api_key
-
-    # Build query params
-    params = {}
-    if caption:
-        params["supplier_hint"] = caption
+    # ── Step 1: Process delivery photo DIRECTLY (no HTTP self-call) ─────
+    from business.services.photo_analysis import analyze_photo
+    from business.services.material_matcher import match_delivery_items
+    from api.models import Material, Size
 
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            files = {"file": ("delivery.jpg", image_bytes, "image/jpeg")}
-            resp = await client.post(
-                api_url, files=files, params=params, headers=headers,
-            )
+        vision_result = await analyze_photo(image_bytes, analysis_type="delivery")
     except Exception as e:
-        logger.error("Failed to call delivery API: %s", e, exc_info=True)
-        await _send_message(chat_id, msg("delivery_server_error", lang), parse_mode="")
-        return
+        logger.error("Vision API failed for delivery photo: %s", e, exc_info=True)
+        vision_result = None
 
-    if resp.status_code != 200:
-        logger.error(
-            "Delivery API returned %d: %s", resp.status_code, resp.text[:500],
-        )
+    if vision_result is None:
+        logger.error("DELIVERY_PHOTO | Vision API returned None — no API key or call failed")
         await _send_message(chat_id, msg("delivery_process_error", lang), parse_mode="")
         return
 
-    result = resp.json()
-    # result = {supplier, delivery_date, reference_number, items, total_items,
-    #           matched_items (count), vision_raw, confidence}
+    readings = vision_result.get("readings", {})
+    supplier_name = caption or readings.get("supplier")
+    items_raw = readings.get("items", [])
+
+    # Match items against DB materials
+    materials = db.query(Material).all()
+    db_materials = [
+        {"id": str(m.id), "name": m.name, "material_type": m.material_type,
+         "unit": m.unit, "product_subtype": m.product_subtype,
+         "size_id": str(m.size_id) if m.size_id else None}
+        for m in materials
+    ]
+    sizes = db.query(Size).all()
+    db_sizes = [
+        {"id": str(s.id), "name": s.name, "width_mm": s.width_mm, "height_mm": s.height_mm}
+        for s in sizes
+    ]
+
+    try:
+        matches = await match_delivery_items(
+            items=[{"name": i.get("material_name", i.get("name", "")),
+                    "quantity": i.get("quantity", 0), "unit": i.get("unit", "pcs")}
+                   for i in items_raw],
+            db_materials=db_materials, supplier_name=supplier_name, db_sizes=db_sizes,
+        )
+    except Exception as e:
+        logger.error("Material matching failed: %s", e, exc_info=True)
+        await _send_message(chat_id, msg("delivery_process_error", lang), parse_mode="")
+        return
+
+    matched_count = sum(1 for m in matches if m.get("matched"))
+    logger.info("DELIVERY_PHOTO | matched %d/%d items | supplier=%s", matched_count, len(matches), supplier_name)
+
+    result = {
+        "supplier": supplier_name,
+        "delivery_date": readings.get("delivery_date"),
+        "reference_number": readings.get("reference_number"),
+        "items": matches,
+        "total_items": len(matches),
+        "matched_items": matched_count,
+        "vision_raw": readings,
+        "confidence": vision_result.get("confidence"),
+    }
 
     api_items = result.get("items", [])
     if not api_items:

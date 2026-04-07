@@ -43,7 +43,7 @@ import { ColorMismatchDecisionDialog } from '@/components/positions/ColorMismatc
 import { BlockingTasksTab } from '@/components/dashboard/BlockingTasksTab';
 import { TOCZonesTab } from '@/components/dashboard/TOCZonesTab';
 import { BottleneckVisualization } from '@/components/dashboard/BottleneckVisualization';
-import { StoneReservationTab } from '@/components/dashboard/StoneReservationTab';
+// StoneReservationTab removed — replaced by AwaitingMaterialsTab inline
 import { DefectAlertBanner } from '@/components/dashboard/DefectAlertBanner';
 import { AnomalyAlertBanner } from '@/components/dashboard/AnomalyAlertBanner';
 import { ConsumptionAdjustmentsPanel } from '@/components/materials/ConsumptionAdjustmentsPanel';
@@ -57,7 +57,7 @@ import { useStreaks, useAchievements } from '@/hooks/useAnalytics';
 // Constants
 // ---------------------------------------------------------------------------
 
-type DashboardTab = 'orders' | 'tasks' | 'materials' | 'defects' | 'tps' | 'toc' | 'stone' | 'kilns' | 'ai_chat' | 'blocking' | 'cancellations' | 'change_requests' | 'mismatch';
+type DashboardTab = 'orders' | 'tasks' | 'materials' | 'defects' | 'tps' | 'toc' | 'awaiting' | 'kilns' | 'ai_chat' | 'blocking' | 'cancellations' | 'change_requests' | 'mismatch';
 
 const DASHBOARD_TABS_BASE: { id: DashboardTab; label: string }[] = [
   { id: 'orders', label: 'Orders' },
@@ -66,7 +66,7 @@ const DASHBOARD_TABS_BASE: { id: DashboardTab; label: string }[] = [
   { id: 'defects', label: 'Defects' },
   { id: 'tps', label: 'TPS' },
   { id: 'toc', label: 'TOC' },
-  { id: 'stone', label: 'Stone' },
+  { id: 'awaiting', label: 'Awaiting Materials' },
   { id: 'kilns', label: 'Kilns' },
   { id: 'ai_chat', label: 'AI Chat' },
 ];
@@ -549,7 +549,7 @@ export default function ManagerDashboard() {
           <TocTabContent factoryId={activeFactoryId} />
         </div>
       )}
-      {activeTab === 'stone' && <StoneReservationTab factoryId={activeFactoryId ?? undefined} />}
+      {activeTab === 'awaiting' && <AwaitingMaterialsTab factoryId={activeFactoryId} />}
       {activeTab === 'kilns' && <KilnsTabContent factoryId={activeFactoryId} navigate={navigate} />}
       {activeTab === 'ai_chat' && <AiChatTabContent factoryId={activeFactoryId} />}
       {activeTab === 'blocking' && <BlockingTasksTab factoryId={activeFactoryId ?? undefined} />}
@@ -957,6 +957,187 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
           columns={taskColumns}
           data={tasks}
         />
+      )}
+    </div>
+  );
+}
+
+// ===========================================================================
+// TAB — Awaiting Materials (positions blocked by missing materials)
+// ===========================================================================
+
+interface AwaitingMaterial {
+  material_name: string;
+  deficit: number;
+  required: number;
+  available: number;
+  order_number: string;
+  position_label: string;
+  color: string;
+  size: string;
+  position_id: string;
+  blocking_since: string | null;
+  has_purchase_request: boolean;
+  purchase_status: string | null;
+}
+
+function AwaitingMaterialsTab({ factoryId }: { factoryId: string | null }) {
+  const params = factoryId ? { factory_id: factoryId } : {};
+
+  // Blocking summary has material_shortages per position
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: blockingData, isLoading: blockingLoading } = useQuery<any>({
+    queryKey: ['blocking-summary', params],
+    queryFn: () => apiClient.get('/positions/blocking-summary', { params }).then(r => r.data),
+    staleTime: 30_000,
+  });
+
+  // Purchase requests to cross-reference
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: purchaseData, isLoading: purchaseLoading } = useQuery<any>({
+    queryKey: ['purchase-requests-awaiting', params],
+    queryFn: () => apiClient.get('/purchaser', { params }).then(r => r.data),
+    staleTime: 30_000,
+  });
+
+  const isLoading = blockingLoading || purchaseLoading;
+
+  const awaitingItems = useMemo<AwaitingMaterial[]>(() => {
+    if (!blockingData?.positions) return [];
+
+    // Build set of material names that have purchase requests
+    const purchaseMap = new Map<string, string>();
+    const prItems = purchaseData?.items || purchaseData || [];
+    if (Array.isArray(prItems)) {
+      for (const pr of prItems) {
+        const materials = pr.materials || pr.items || [];
+        for (const m of materials) {
+          const name = (m.material_name || m.name || '').toLowerCase();
+          if (name) purchaseMap.set(name, pr.status || 'pending');
+        }
+      }
+    }
+
+    const items: AwaitingMaterial[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const pos of blockingData.positions) {
+      if (!pos.material_shortages?.length) continue;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const shortage of pos.material_shortages) {
+        const nameLower = (shortage.name || '').toLowerCase();
+        items.push({
+          material_name: shortage.name,
+          deficit: shortage.deficit,
+          required: shortage.required,
+          available: shortage.available,
+          order_number: pos.order_number,
+          position_label: pos.position_label || '',
+          color: pos.color || '',
+          size: pos.size || '',
+          position_id: pos.id,
+          blocking_since: pos.blocking_since,
+          has_purchase_request: purchaseMap.has(nameLower),
+          purchase_status: purchaseMap.get(nameLower) || null,
+        });
+      }
+    }
+
+    // Sort: no purchase request first (needs action), then by deficit desc
+    items.sort((a, b) => {
+      if (a.has_purchase_request !== b.has_purchase_request) return a.has_purchase_request ? 1 : -1;
+      return b.deficit - a.deficit;
+    });
+
+    return items;
+  }, [blockingData, purchaseData]);
+
+  // Aggregate stats
+  const uniqueMaterials = new Set(awaitingItems.map(i => i.material_name)).size;
+  const positionsBlocked = new Set(awaitingItems.map(i => i.position_id)).size;
+  const noPurchase = awaitingItems.filter(i => !i.has_purchase_request).length;
+
+  if (isLoading) {
+    return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Summary cards */}
+      <div className="grid grid-cols-3 gap-4">
+        <Card className="p-4">
+          <div className="text-xs text-gray-500">Blocked Positions</div>
+          <div className="mt-1 text-2xl font-bold text-gray-900">{positionsBlocked}</div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-xs text-gray-500">Missing Materials</div>
+          <div className="mt-1 text-2xl font-bold text-gray-900">{uniqueMaterials}</div>
+        </Card>
+        <Card className={`p-4 ${noPurchase > 0 ? 'border-red-200 bg-red-50/50' : ''}`}>
+          <div className="text-xs text-gray-500">No Purchase Request</div>
+          <div className={`mt-1 text-2xl font-bold ${noPurchase > 0 ? 'text-red-600' : 'text-green-600'}`}>{noPurchase}</div>
+        </Card>
+      </div>
+
+      {awaitingItems.length === 0 ? (
+        <EmptyState title="All materials available" description="No positions are blocked by missing materials" />
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-800 text-left text-xs font-semibold uppercase text-white">
+                <th className="px-4 py-3">Material</th>
+                <th className="px-4 py-3">Order</th>
+                <th className="px-4 py-3">Position</th>
+                <th className="px-4 py-3 text-right">Required</th>
+                <th className="px-4 py-3 text-right">Available</th>
+                <th className="px-4 py-3 text-right">Deficit</th>
+                <th className="px-4 py-3">Waiting Since</th>
+                <th className="px-4 py-3">Purchase</th>
+              </tr>
+            </thead>
+            <tbody>
+              {awaitingItems.map((item, idx) => {
+                const daysSince = item.blocking_since
+                  ? Math.floor((Date.now() - new Date(item.blocking_since).getTime()) / 86400000)
+                  : null;
+                return (
+                  <tr key={`${item.position_id}-${item.material_name}-${idx}`} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium text-gray-900">{item.material_name}</td>
+                    <td className="px-4 py-3 text-gray-700">{item.order_number}</td>
+                    <td className="px-4 py-3 text-gray-600">
+                      <span className="text-xs">{item.color} {item.size}</span>
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-gray-700">{item.required.toFixed(1)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-gray-700">{item.available.toFixed(1)}</td>
+                    <td className="px-4 py-3 text-right font-mono font-medium text-red-600">{item.deficit.toFixed(1)}</td>
+                    <td className="px-4 py-3 text-gray-600">
+                      {daysSince != null ? (
+                        <span className={daysSince > 3 ? 'text-red-600 font-medium' : ''}>
+                          {daysSince}d ago
+                        </span>
+                      ) : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      {item.has_purchase_request ? (
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                          item.purchase_status === 'approved' ? 'bg-green-100 text-green-800'
+                            : item.purchase_status === 'ordered' ? 'bg-blue-100 text-blue-800'
+                              : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {item.purchase_status || 'pending'}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">
+                          ⚠ Not requested
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

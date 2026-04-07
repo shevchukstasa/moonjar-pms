@@ -92,6 +92,10 @@ def check_repair_sla(db: Session, factory_id: UUID) -> list[dict]:
     )
 
     for pos in positions:
+        # Skip E2E test data
+        if any(kw in (pos.color or '') for kw in ('E2E-', 'E2E_')):
+            continue
+
         repair_type = _STATUS_TO_REPAIR_TYPE.get(pos.status, "refire")
         sla_days = _SLA_DAYS.get(repair_type, 5)
 

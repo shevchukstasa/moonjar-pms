@@ -798,8 +798,21 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
     return p;
   }, [factoryId, taskFilter]);
 
+  const [showCancelled, setShowCancelled] = useState(false);
+
   const { data: tasksData, isLoading } = useTasks(params);
-  const tasks = tasksData?.items || [];
+  const allTasks = tasksData?.items || [];
+
+  // Filter out cancelled and E2E test tasks by default
+  const tasks = useMemo(() => {
+    return allTasks.filter((t) => {
+      // Hide E2E test tasks always
+      if (t.description && /E2E/i.test(t.description)) return false;
+      // Hide cancelled unless toggled on
+      if (!showCancelled && t.status === 'cancelled') return false;
+      return true;
+    });
+  }, [allTasks, showCancelled]);
 
   const pendingCount = tasks.filter((t) => t.status === 'pending').length;
   const inProgressCount = tasks.filter((t) => t.status === 'in_progress').length;
@@ -925,6 +938,15 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
           <option value="in_progress">In Progress</option>
           <option value="completed">Completed</option>
         </select>
+        <label className="flex items-center gap-1.5 text-sm text-gray-500 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={showCancelled}
+            onChange={(e) => setShowCancelled(e.target.checked)}
+            className="rounded border-gray-300"
+          />
+          Show cancelled
+        </label>
         <div className="flex-1" />
         <span className="text-sm text-gray-500">{tasks.length} task{tasks.length !== 1 ? 's' : ''}</span>
       </div>

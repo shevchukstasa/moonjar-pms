@@ -736,7 +736,7 @@ function OrdersTabContent({
 // ===========================================================================
 
 function TasksTabContent({ factoryId }: { factoryId: string | null }) {
-  const [taskFilter, setTaskFilter] = useState<string>('');
+  const [taskFilter, setTaskFilter] = useState<string>('active');
   const [canDeleteTasks, setCanDeleteTasks] = useState(false);
   const [deleteFactoryMap, setDeleteFactoryMap] = useState<Record<string, boolean>>({});
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
@@ -794,25 +794,27 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
   const params = useMemo(() => {
     const p: Record<string, string> = {};
     if (factoryId) p.factory_id = factoryId;
-    if (taskFilter) p.status = taskFilter;
+    // For specific single-status filters, send to server; 'active' and 'all' are client-side
+    if (taskFilter && taskFilter !== 'active' && taskFilter !== 'all') p.status = taskFilter;
     return p;
   }, [factoryId, taskFilter]);
-
-  const [showCancelled, setShowCancelled] = useState(false);
 
   const { data: tasksData, isLoading } = useTasks(params);
   const allTasks = tasksData?.items || [];
 
-  // Filter out cancelled and E2E test tasks by default
+  // Client-side filtering: hide E2E always, apply active/all logic
   const tasks = useMemo(() => {
     return allTasks.filter((t) => {
-      // Hide E2E test tasks always
+      // Always hide E2E test tasks
       if (t.description && /E2E/i.test(t.description)) return false;
-      // Hide cancelled unless toggled on
-      if (!showCancelled && t.status === 'cancelled') return false;
+      // "active" = only pending + in_progress
+      if (taskFilter === 'active') {
+        return t.status === 'pending' || t.status === 'in_progress';
+      }
+      // "all" shows everything except E2E (already filtered above)
       return true;
     });
-  }, [allTasks, showCancelled]);
+  }, [allTasks, taskFilter]);
 
   const pendingCount = tasks.filter((t) => t.status === 'pending').length;
   const inProgressCount = tasks.filter((t) => t.status === 'in_progress').length;
@@ -933,20 +935,14 @@ function TasksTabContent({ factoryId }: { factoryId: string | null }) {
           onChange={(e) => setTaskFilter(e.target.value)}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm"
         >
-          <option value="">All Statuses</option>
+          <option value="active">Active (Pending + In Progress)</option>
           <option value="pending">Pending</option>
           <option value="in_progress">In Progress</option>
+          <option value="done">Done</option>
           <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="all">All Statuses</option>
         </select>
-        <label className="flex items-center gap-1.5 text-sm text-gray-500 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={showCancelled}
-            onChange={(e) => setShowCancelled(e.target.checked)}
-            className="rounded border-gray-300"
-          />
-          Show cancelled
-        </label>
         <div className="flex-1" />
         <span className="text-sm text-gray-500">{tasks.length} task{tasks.length !== 1 ? 's' : ''}</span>
       </div>

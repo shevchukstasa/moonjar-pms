@@ -1462,6 +1462,11 @@ async def create_transaction(
         # Inventory adjustment: qty is the difference (actual − system), can be negative
         stock.balance += qty
     elif data.type == "receive":
+        # Auto-link supplier to material if not yet set
+        if data.supplier_id and not material.supplier_id:
+            material.supplier_id = data.supplier_id
+            db.flush()
+
         # Delegate to warehouse receiving service (handles approval workflow)
         import logging
         _logger = logging.getLogger("moonjar.materials")

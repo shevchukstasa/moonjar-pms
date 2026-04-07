@@ -4125,11 +4125,19 @@ async def _execute_delivery_transactions(db: Session, pending: dict) -> None:
     if not factory:
         raise ValueError(f"Factory {factory_id} not found")
 
+    # Auto-link supplier to materials if supplier was identified
+    delivery_supplier_id = pending.get("supplier_id")
+
     for mi in pending["matched_items"]:
         material = db.query(Material).filter(Material.id == mi["material_id"]).first()
         if not material:
             logger.warning(f"Material {mi['material_id']} not found, skipping")
             continue
+
+        # Auto-link supplier if material has no supplier yet
+        if delivery_supplier_id and not material.supplier_id:
+            material.supplier_id = delivery_supplier_id
+            logger.info("AUTO_SUPPLIER_LINK | material=%s → supplier=%s", material.name, delivery_supplier_id)
 
         quantity = Decimal(mi["quantity"])
 

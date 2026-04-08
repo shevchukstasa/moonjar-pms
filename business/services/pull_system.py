@@ -198,7 +198,7 @@ def _get_daily_capacity(
         kilns = db.query(Resource).filter(
             Resource.factory_id == factory_id,
             Resource.resource_type == "kiln",
-            Resource.status == "operational",
+            Resource.status == "active",
         ).all()
         if kilns:
             return sum(float(k.capacity_sqm or 0) for k in kilns)
@@ -209,7 +209,7 @@ def _get_daily_capacity(
         kilns = db.query(Resource).filter(
             Resource.factory_id == factory_id,
             Resource.resource_type == "kiln",
-            Resource.status == "operational",
+            Resource.status == "active",
         ).all()
         return sum(float(k.capacity_sqm or 0) for k in kilns)
 

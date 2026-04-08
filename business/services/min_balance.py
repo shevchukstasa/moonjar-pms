@@ -22,9 +22,9 @@ from api.enums import (
 
 # Default lead times by material type (days)
 _DEFAULT_LEAD_TIMES: Dict[str, int] = {
-    "stone": 7,
-    "pigment": 14,
-    "frit": 14,
+    "stone": 40,
+    "pigment": 15,
+    "frit": 30,
     "oxide_carbonate": 14,
     "packaging": 3,
     "consumable": 3,

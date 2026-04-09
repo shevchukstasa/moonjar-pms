@@ -741,6 +741,7 @@ class IpAllowlistCreate(BaseModel):
 class FiringProfileCreate(BaseModel):
     name: str
     temperature_group_id: Optional[UUID] = None
+    typology_id: Optional[UUID] = None
     product_type: Optional[str] = None
     collection: Optional[str] = None
     thickness_min_mm: Optional[float] = None
@@ -755,6 +756,7 @@ class FiringProfileCreate(BaseModel):
 class FiringProfileUpdate(BaseModel):
     name: Optional[str] = None
     temperature_group_id: Optional[UUID] = None
+    typology_id: Optional[UUID] = None
     product_type: Optional[str] = None
     collection: Optional[str] = None
     thickness_min_mm: Optional[float] = None
@@ -772,6 +774,8 @@ class FiringProfileResponse(BaseModel):
     name: str
     temperature_group_id: Optional[UUID] = None
     temperature_group_name: Optional[str] = None
+    typology_id: Optional[UUID] = None
+    typology_name: Optional[str] = None
     product_type: Optional[str] = None
     collection: Optional[str] = None
     thickness_min_mm: Optional[float] = None

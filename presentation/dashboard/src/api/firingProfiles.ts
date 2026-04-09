@@ -5,6 +5,8 @@ export interface FiringProfile {
   name: string;
   temperature_group_id: string | null;
   temperature_group_name: string | null;
+  typology_id: string | null;
+  typology_name: string | null;
   target_temperature: number;
   total_duration_hours: number;
   stages: { type: string; start_temp: number; end_temp: number; rate: number }[];
@@ -18,6 +20,7 @@ export interface FiringProfile {
 export interface FiringProfileForm {
   name: string;
   temperature_group_id?: string | null;
+  typology_id?: string | null;
   target_temperature?: number;
   total_duration_hours: number;
   stages?: object[];

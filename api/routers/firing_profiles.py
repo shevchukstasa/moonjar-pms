@@ -20,11 +20,13 @@ router = APIRouter()
 
 
 def _serialize(item: FiringProfile) -> dict:
-    """Convert ORM FiringProfile to response dict with temp group name."""
+    """Convert ORM FiringProfile to response dict with temp group + typology names."""
     resp = FiringProfileResponse.model_validate(item).model_dump(mode="json")
-    # Inject temperature_group_name from relationship
+    # Inject names from relationships
     if item.temperature_group:
         resp["temperature_group_name"] = item.temperature_group.name
+    if item.typology:
+        resp["typology_name"] = item.typology.name
     return resp
 
 
@@ -36,10 +38,14 @@ async def list_firing_profiles(
     collection: str | None = None,
     is_active: bool | None = None,
     temperature_group_id: UUID | None = None,
+    typology_id: UUID | None = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    query = db.query(FiringProfile).options(joinedload(FiringProfile.temperature_group))
+    query = db.query(FiringProfile).options(
+        joinedload(FiringProfile.temperature_group),
+        joinedload(FiringProfile.typology),
+    )
     if product_type is not None:
         query = query.filter(FiringProfile.product_type == product_type)
     if collection is not None:
@@ -48,6 +54,8 @@ async def list_firing_profiles(
         query = query.filter(FiringProfile.is_active == is_active)
     if temperature_group_id is not None:
         query = query.filter(FiringProfile.temperature_group_id == temperature_group_id)
+    if typology_id is not None:
+        query = query.filter(FiringProfile.typology_id == typology_id)
     total = query.count()
     items = query.order_by(FiringProfile.match_priority.desc()).offset(
         (page - 1) * per_page
@@ -67,7 +75,8 @@ async def get_firing_profile(
     current_user=Depends(get_current_user),
 ):
     item = db.query(FiringProfile).options(
-        joinedload(FiringProfile.temperature_group)
+        joinedload(FiringProfile.temperature_group),
+        joinedload(FiringProfile.typology),
     ).filter(FiringProfile.id == item_id).first()
     if not item:
         raise HTTPException(404, "FiringProfile not found")
@@ -84,9 +93,11 @@ async def create_firing_profile(
     db.add(item)
     db.commit()
     db.refresh(item)
-    # Load relationship
-    if item.temperature_group_id:
-        item.temperature_group = db.query(FiringTemperatureGroup).get(item.temperature_group_id)
+    # Reload with relationships
+    item = db.query(FiringProfile).options(
+        joinedload(FiringProfile.temperature_group),
+        joinedload(FiringProfile.typology),
+    ).filter(FiringProfile.id == item.id).first()
     return _serialize(item)
 
 
@@ -98,7 +109,8 @@ async def update_firing_profile(
     current_user=Depends(get_current_user),
 ):
     item = db.query(FiringProfile).options(
-        joinedload(FiringProfile.temperature_group)
+        joinedload(FiringProfile.temperature_group),
+        joinedload(FiringProfile.typology),
     ).filter(FiringProfile.id == item_id).first()
     if not item:
         raise HTTPException(404, "FiringProfile not found")
@@ -106,9 +118,11 @@ async def update_firing_profile(
         setattr(item, k, v)
     db.commit()
     db.refresh(item)
-    # Reload relationship if changed
-    if item.temperature_group_id:
-        item.temperature_group = db.query(FiringTemperatureGroup).get(item.temperature_group_id)
+    # Reload with relationships
+    item = db.query(FiringProfile).options(
+        joinedload(FiringProfile.temperature_group),
+        joinedload(FiringProfile.typology),
+    ).filter(FiringProfile.id == item.id).first()
     return _serialize(item)
 
 

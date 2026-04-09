@@ -19,6 +19,54 @@ from api.models import (
 )
 
 
+def match_firing_profile_by_typology(
+    db: Session,
+    typology_id: UUID,
+    temperature_group_id: Optional[UUID],
+) -> Optional[FiringProfile]:
+    """
+    Layer-3 matcher: firing curve is selected by (typology × temperature group).
+
+    The typology already encodes product_type + size + place_of_application
+    (see KilnLoadingTypology.product_types / min/max_size_cm), so we don't
+    need to re-filter by those. Preference order:
+        1. Exact (typology, temp_group)
+        2. Typology only (any temp_group)
+        3. Default profile
+    """
+    if temperature_group_id is not None:
+        exact = (
+            db.query(FiringProfile)
+            .filter(
+                FiringProfile.is_active.is_(True),
+                FiringProfile.typology_id == typology_id,
+                FiringProfile.temperature_group_id == temperature_group_id,
+            )
+            .order_by(FiringProfile.match_priority.desc())
+            .first()
+        )
+        if exact:
+            return exact
+
+    typology_only = (
+        db.query(FiringProfile)
+        .filter(
+            FiringProfile.is_active.is_(True),
+            FiringProfile.typology_id == typology_id,
+        )
+        .order_by(FiringProfile.match_priority.desc())
+        .first()
+    )
+    if typology_only:
+        return typology_only
+
+    return (
+        db.query(FiringProfile)
+        .filter(FiringProfile.is_active.is_(True), FiringProfile.is_default.is_(True))
+        .first()
+    )
+
+
 def match_firing_profile(
     db: Session,
     product_type: str,

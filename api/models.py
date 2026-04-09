@@ -2142,6 +2142,11 @@ class FiringProfile(Base):
         ForeignKey('firing_temperature_groups.id', ondelete='SET NULL'),
         nullable=True,
     )
+    typology_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('kiln_loading_typologies.id', ondelete='SET NULL'),
+        nullable=True,
+    )  # Layer 3: ramp/hold/cool curve depends on product typology
     product_type = Column(PgEnum(ProductType))                       # nullable = matches all
     collection = Column(sa.String(100))                              # nullable = matches all
     thickness_min_mm = Column(sa.Numeric(8, 2))                      # nullable = no lower bound
@@ -2156,6 +2161,7 @@ class FiringProfile(Base):
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     temperature_group = relationship('FiringTemperatureGroup', foreign_keys=[temperature_group_id])
+    typology = relationship('KilnLoadingTypology', foreign_keys=[typology_id])
 
 
 class RecipeFiringStage(Base):

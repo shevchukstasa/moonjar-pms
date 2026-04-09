@@ -1460,24 +1460,26 @@ def _serialize_typology(t: KilnLoadingTypology, db: Session = None) -> dict:
 
 @router.get("/typologies")
 async def list_typologies(
-    factory_id: UUID = Query(...),
+    factory_id: UUID | None = Query(None),
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
-    """List all active typologies for a factory."""
-    rows = (
+    """List all active typologies. If factory_id omitted — returns cross-factory
+    (used by global admin pages like firing profiles)."""
+    query = (
         db.query(KilnLoadingTypology)
         .options(
             joinedload(KilnLoadingTypology.capacities)
             .joinedload(KilnTypologyCapacity.resource)
         )
-        .filter(
-            KilnLoadingTypology.factory_id == factory_id,
-            KilnLoadingTypology.is_active.is_(True),
-        )
-        .order_by(KilnLoadingTypology.priority.desc(), KilnLoadingTypology.name)
-        .all()
+        .filter(KilnLoadingTypology.is_active.is_(True))
     )
+    if factory_id is not None:
+        query = query.filter(KilnLoadingTypology.factory_id == factory_id)
+    rows = query.order_by(
+        KilnLoadingTypology.priority.desc(),
+        KilnLoadingTypology.name,
+    ).all()
     return {"items": [_serialize_typology(t) for t in rows]}
 
 

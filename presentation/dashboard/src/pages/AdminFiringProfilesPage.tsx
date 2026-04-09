@@ -19,6 +19,16 @@ interface TemperatureGroup {
   is_active: boolean;
 }
 
+interface Typology {
+  id: string;
+  name: string;
+  factory_id?: string | null;
+  factory_name?: string | null;
+  product_types?: string[];
+  min_size_cm?: number | null;
+  max_size_cm?: number | null;
+}
+
 /** One interval in the heating or cooling curve */
 interface TempStage {
   start_temp: number;
@@ -29,6 +39,7 @@ interface TempStage {
 interface ProfileForm {
   name: string;
   temperature_group_id: string;
+  typology_id: string;
   total_duration_hours: string;
   is_active: boolean;
   heating_stages: TempStage[];
@@ -38,6 +49,7 @@ interface ProfileForm {
 const emptyForm: ProfileForm = {
   name: '',
   temperature_group_id: '',
+  typology_id: '',
   total_duration_hours: '',
   is_active: true,
   heating_stages: [{ start_temp: 20, end_temp: 1000, rate: 100 }],
@@ -241,8 +253,14 @@ export default function AdminFiringProfilesPage() {
     }),
   });
 
+  const { data: typologiesRaw } = useQuery<Typology[]>({
+    queryKey: ['tps-typologies-all'],
+    queryFn: () => apiClient.get('/tps/typologies').then((r) => r.data?.items ?? []),
+  });
+
   const items = data?.items ?? [];
   const tempGroups = tempGroupsRaw ?? [];
+  const typologies = typologiesRaw ?? [];
 
   /* ── mutations ───────────────────────────────────────────────────── */
   const extractError = (err: unknown): string => {
@@ -306,6 +324,7 @@ export default function AdminFiringProfilesPage() {
     setForm({
       name: item.name,
       temperature_group_id: item.temperature_group_id ?? '',
+      typology_id: item.typology_id ?? '',
       total_duration_hours:
         item.total_duration_hours != null ? String(item.total_duration_hours) : '',
       is_active: item.is_active,
@@ -327,6 +346,7 @@ export default function AdminFiringProfilesPage() {
     const payload: Record<string, unknown> = {
       name: form.name,
       temperature_group_id: form.temperature_group_id || null,
+      typology_id: form.typology_id || null,
       target_temperature: maxTemp || null,
       total_duration_hours: effectiveDuration,
       stages,
@@ -364,6 +384,18 @@ export default function AdminFiringProfilesPage() {
           render: (r: FiringProfile) =>
             r.temperature_group_name ? (
               <Badge status="active" label={r.temperature_group_name} />
+            ) : (
+              <span className="text-gray-400">&mdash;</span>
+            ),
+        },
+        {
+          key: 'typology',
+          header: 'Typology',
+          render: (r: FiringProfile) =>
+            r.typology_name ? (
+              <span className="rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                {r.typology_name}
+              </span>
             ) : (
               <span className="text-gray-400">&mdash;</span>
             ),
@@ -507,6 +539,33 @@ export default function AdminFiringProfilesPage() {
                     </option>
                   ))}
               </select>
+              <p className="mt-0.5 text-xs text-gray-400">
+                Sets the apex temperature (Layer 1)
+              </p>
+            </div>
+            {/* Typology selector */}
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Typology
+              </label>
+              <select
+                value={form.typology_id}
+                onChange={(e) =>
+                  setForm({ ...form, typology_id: e.target.value })
+                }
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">-- Any typology --</option>
+                {typologies.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                    {t.factory_name ? ` · ${t.factory_name}` : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-0.5 text-xs text-gray-400">
+                Drives ramp/hold/cool rates (Layer 3)
+              </p>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">

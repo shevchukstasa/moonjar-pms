@@ -559,6 +559,74 @@ async def create_recipes_item(
     db.commit()
     db.refresh(item)
 
+    # ── Auto-apply new recipe to all AWAITING_RECIPE positions with matching color ──
+    # When a PM creates a new recipe, any position currently blocked by
+    # "awaiting_recipe" whose color matches the recipe name should be unblocked
+    # in one shot — not one by one.
+    try:
+        from api.models import OrderPosition, Task
+        from api.enums import PositionStatus, TaskStatus, TaskType
+        from sqlalchemy import func
+        from business.services.status_machine import transition_position_status
+        from business.services.production_scheduler import reschedule_position
+        from datetime import datetime, timezone
+        import uuid as uuid_mod
+
+        matching = db.query(OrderPosition).filter(
+            OrderPosition.status == PositionStatus.AWAITING_RECIPE.value,
+            func.lower(func.trim(OrderPosition.color)) == func.lower(item.name.strip()),
+        ).all()
+
+        if matching:
+            now = datetime.now(timezone.utc)
+            unblocked_count = 0
+            for pos in matching:
+                try:
+                    pos.recipe_id = item.id
+
+                    # Close blocking tasks on this position
+                    blocking_tasks = db.query(Task).filter(
+                        Task.related_position_id == pos.id,
+                        Task.blocking.is_(True),
+                        Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+                    ).all()
+                    for t in blocking_tasks:
+                        t.status = TaskStatus.DONE
+                        t.completed_at = now
+                        t.updated_at = now
+
+                    # Transition back to PLANNED
+                    transition_position_status(
+                        db, pos.id, PositionStatus.PLANNED.value,
+                        changed_by=current_user.id,
+                        is_override=True,
+                        notes=f"Auto-unblocked: recipe '{item.name}' created",
+                    )
+
+                    # Reschedule
+                    try:
+                        reschedule_position(db, pos)
+                    except Exception as _e:
+                        logger.warning(
+                            "Failed to reschedule position %s after recipe auto-bind: %s",
+                            pos.id, _e,
+                        )
+                    unblocked_count += 1
+                except Exception as e:
+                    logger.warning(
+                        "Failed to auto-bind recipe %s to position %s: %s",
+                        item.id, pos.id, e,
+                    )
+            if unblocked_count:
+                db.commit()
+                logger.info(
+                    "RECIPE_AUTO_BIND | recipe=%s color=%s unblocked=%d positions",
+                    item.name, item.name, unblocked_count,
+                )
+    except Exception as e:
+        logger.warning("Auto-bind recipe to blocked positions failed: %s", e)
+        db.rollback()
+
     # RAG indexing (best-effort)
     try:
         import os

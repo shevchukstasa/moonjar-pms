@@ -2216,6 +2216,8 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
     _fifo_min_start: Optional[date] = None  # FIFO: next order can't start before this
 
     for order in active_orders:
+        # Savepoint per order so one failure doesn't poison the whole transaction
+        savepoint = db.begin_nested()
         try:
             count = schedule_order(
                 db, order, skip_batch_planning=True,
@@ -2225,6 +2227,7 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
             # Flush after each order so the next order's capacity queries
             # see the updated planned dates (autoflush is OFF).
             db.flush()
+            savepoint.commit()
 
             # Update FIFO min_start: next order can't start glazing before
             # the EARLIEST glazing date of the current order.
@@ -2245,6 +2248,10 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
                 "Failed to reschedule order %s: %s", order.order_number, e,
                 exc_info=True,
             )
+            try:
+                savepoint.rollback()
+            except Exception:
+                pass
 
     # Single batch planning pass after all orders are scheduled.
     # This enables cross-order batching: positions from different orders

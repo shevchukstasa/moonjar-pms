@@ -319,9 +319,11 @@ def recalculate_schedule(db: Session, factory_id: UUID) -> dict:
     try:
         from business.services.schedule_estimation import recalculate_all_estimates
         recalculate_all_estimates(db, factory_id)
+        db.flush()
         logger.info("Estimates recalculated for factory %s", factory_id)
     except Exception as e:
-        logger.error("recalculate_all_estimates failed: %s", e)
+        logger.error("recalculate_all_estimates failed: %s", e, exc_info=True)
+        db.rollback()
         warnings.append(f"Estimate recalculation error: {e}")
 
     # Step 2: Reschedule all positions
@@ -329,9 +331,11 @@ def recalculate_schedule(db: Session, factory_id: UUID) -> dict:
     try:
         from business.services.production_scheduler import reschedule_factory
         positions_rescheduled = reschedule_factory(db, factory_id)
+        db.flush()
         logger.info("Rescheduled %d positions for factory %s", positions_rescheduled, factory_id)
     except Exception as e:
-        logger.error("reschedule_factory failed: %s", e)
+        logger.error("reschedule_factory failed: %s", e, exc_info=True)
+        db.rollback()
         warnings.append(f"Reschedule error: {e}")
 
     # Step 3: Suggest batches for unbatched positions
@@ -340,9 +344,11 @@ def recalculate_schedule(db: Session, factory_id: UUID) -> dict:
         from business.services.batch_formation import suggest_or_create_batches
         batch_results = suggest_or_create_batches(db, factory_id, mode="suggest")
         batches_suggested = len(batch_results)
+        db.flush()
         logger.info("Suggested %d batches for factory %s", batches_suggested, factory_id)
     except Exception as e:
-        logger.error("suggest_or_create_batches failed: %s", e)
+        logger.error("suggest_or_create_batches failed: %s", e, exc_info=True)
+        db.rollback()
         warnings.append(f"Batch suggestion error: {e}")
 
     # Step 4: Utilization summary (short window — last 7 days)
@@ -352,6 +358,10 @@ def recalculate_schedule(db: Session, factory_id: UUID) -> dict:
         utilization = calculate_kiln_utilization(db, factory_id, period_days=7)
     except Exception as e:
         logger.warning("Utilization calculation failed: %s", e)
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
     # Commit all changes
     try:

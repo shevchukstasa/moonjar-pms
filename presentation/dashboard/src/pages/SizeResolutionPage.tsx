@@ -48,6 +48,32 @@ export default function SizeResolutionPage() {
 
   const allSizes = sizesData?.items || [];
 
+  const meta = (task?.metadata_json || {}) as Record<string, unknown>;
+  const reason = (meta.reason as string) || 'unknown';
+  const candidates = (meta.candidates as SizeOption[]) || [];
+  const positionSize = (meta.position_size_string as string) || '';
+  const positionShape = (meta.position_shape as string) || '';
+  const positionThickness = meta.position_thickness_mm as number | null;
+  const positionWidthMm = meta.position_width_mm as number | null;
+  const positionHeightMm = meta.position_height_mm as number | null;
+
+  const isResolved = task?.status === 'done';
+
+  // Filter sizes by search — must be called before any conditional returns
+  const filteredSizes = useMemo(() => {
+    const list = candidates.length > 0 && mode === 'select' && !searchQuery
+      ? candidates
+      : allSizes;
+    if (!searchQuery) return list;
+    const q = searchQuery.toLowerCase();
+    return list.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        `${s.width_mm}x${s.height_mm}`.includes(q) ||
+        `${s.height_mm}x${s.width_mm}`.includes(q),
+    );
+  }, [candidates, allSizes, searchQuery, mode]);
+
   if (isLoading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -65,32 +91,6 @@ export default function SizeResolutionPage() {
       </div>
     );
   }
-
-  const meta = (task.metadata_json || {}) as Record<string, unknown>;
-  const reason = (meta.reason as string) || 'unknown';
-  const candidates = (meta.candidates as SizeOption[]) || [];
-  const positionSize = (meta.position_size_string as string) || '';
-  const positionShape = (meta.position_shape as string) || '';
-  const positionThickness = meta.position_thickness_mm as number | null;
-  const positionWidthMm = meta.position_width_mm as number | null;
-  const positionHeightMm = meta.position_height_mm as number | null;
-
-  const isResolved = task.status === 'done';
-
-  // Filter sizes by search
-  const filteredSizes = useMemo(() => {
-    const list = candidates.length > 0 && mode === 'select' && !searchQuery
-      ? candidates
-      : allSizes;
-    if (!searchQuery) return list;
-    const q = searchQuery.toLowerCase();
-    return list.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        `${s.width_mm}x${s.height_mm}`.includes(q) ||
-        `${s.height_mm}x${s.width_mm}`.includes(q),
-    );
-  }, [candidates, allSizes, searchQuery, mode]);
 
   const reasonLabel: Record<string, string> = {
     no_match: 'No matching size found in reference table',

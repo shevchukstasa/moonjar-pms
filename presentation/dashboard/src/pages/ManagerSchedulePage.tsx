@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Trash2, Thermometer, ClipboardCheck, Calendar, AlertTriangle, RefreshCw } from 'lucide-react';
@@ -280,12 +280,29 @@ export default function ManagerSchedulePage() {
     return count;
   }, [groupedByDate]);
 
-  const handleRescheduleOverdue = useCallback(async () => {
-    if (!activeFactoryId) {
-      alert('Please select a specific factory first.');
-      return;
+  // Auto-reschedule overdue positions when detected
+  const autoRescheduleTriggered = useRef(false);
+  useEffect(() => {
+    if (overdueCount > 0 && activeFactoryId && !autoRescheduleTriggered.current && !rescheduling) {
+      autoRescheduleTriggered.current = true;
+      setRescheduling(true);
+      setRescheduleResult(null);
+      apiClient.post(`/schedule/factory/${activeFactoryId}/reschedule`)
+        .then((res) => {
+          const count = res.data?.positions_rescheduled ?? 0;
+          setRescheduleResult(`Auto-rescheduled ${count} position(s).`);
+          queryClient.invalidateQueries({ queryKey: ['schedule'] });
+        })
+        .catch((e: unknown) => {
+          const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Reschedule failed';
+          setRescheduleResult(`Error: ${msg}`);
+        })
+        .finally(() => setRescheduling(false));
     }
-    if (!window.confirm(`Reschedule ${overdueCount} overdue position(s) forward from today?`)) return;
+  }, [overdueCount, activeFactoryId, rescheduling, queryClient]);
+
+  const handleRescheduleOverdue = useCallback(async () => {
+    if (!activeFactoryId) return;
     setRescheduling(true);
     setRescheduleResult(null);
     try {
@@ -299,7 +316,7 @@ export default function ManagerSchedulePage() {
     } finally {
       setRescheduling(false);
     }
-  }, [activeFactoryId, overdueCount, queryClient]);
+  }, [activeFactoryId, queryClient]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const positionColumns: { key: string; header: string; render?: (item: any) => React.ReactNode }[] = [
@@ -468,34 +485,33 @@ export default function ManagerSchedulePage() {
         </Card>
       </div>
 
-      {/* Overdue banner */}
-      {overdueCount > 0 && (
-        <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+      {/* Overdue banner — auto-reschedules on load, manual retry available */}
+      {(overdueCount > 0 || rescheduling || rescheduleResult) && (
+        <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-red-500" />
-            <span className="text-sm font-medium text-red-800">
-              {overdueCount} position{overdueCount !== 1 ? 's' : ''} with past scheduled dates
-            </span>
-            <span className="text-xs text-red-600">
-              (auto-reschedule runs nightly at 08:05 Bali time)
+            {rescheduling ? (
+              <RefreshCw className="h-5 w-5 text-blue-500 animate-spin" />
+            ) : (
+              <AlertTriangle className="h-5 w-5 text-blue-500" />
+            )}
+            <span className="text-sm font-medium text-blue-800">
+              {rescheduling
+                ? 'Rescheduling overdue positions...'
+                : rescheduleResult
+                  ? rescheduleResult
+                  : `${overdueCount} position${overdueCount !== 1 ? 's' : ''} with past dates — rescheduling...`}
             </span>
           </div>
-          <div className="flex items-center gap-3">
-            {rescheduleResult && (
-              <span className={`text-xs ${rescheduleResult.startsWith('Error') ? 'text-red-700' : 'text-green-700'}`}>
-                {rescheduleResult}
-              </span>
-            )}
+          {!rescheduling && overdueCount > 0 && (
             <Button
               size="sm"
               onClick={handleRescheduleOverdue}
-              disabled={rescheduling || !activeFactoryId}
-              className="bg-red-600 text-white hover:bg-red-700"
+              className="bg-blue-600 text-white hover:bg-blue-700"
             >
-              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${rescheduling ? 'animate-spin' : ''}`} />
-              {rescheduling ? 'Rescheduling...' : 'Reschedule Now'}
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              Retry
             </Button>
-          </div>
+          )}
         </div>
       )}
 

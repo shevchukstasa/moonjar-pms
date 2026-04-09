@@ -265,6 +265,7 @@ export function BlockingTasksTab({ factoryId }: BlockingTasksTabProps) {
 
 function RecipeAssignDialog({ position, onClose }: { position: BlockedPositionInfo; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -348,8 +349,26 @@ function RecipeAssignDialog({ position, onClose }: { position: BlockedPositionIn
           {recipesLoading ? (
             <div className="flex justify-center py-6"><Spinner /></div>
           ) : filtered.length === 0 ? (
-            <div className="py-6 text-center text-sm text-gray-400">
-              {search ? 'No recipes match your search' : 'No active recipes found'}
+            <div className="py-6 text-center space-y-3">
+              <div className="text-sm text-gray-400">
+                {search ? 'No recipes match your search' : 'No active recipes found'}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const params = new URLSearchParams({
+                    create: 'true',
+                    name: `${position.color || ''} ${position.collection || ''}`.trim(),
+                    collection: position.collection || '',
+                    position_id: position.id,
+                  });
+                  onClose();
+                  navigate(`/admin/recipes?${params.toString()}`);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+              >
+                + Create New Recipe
+              </button>
             </div>
           ) : (
             <div className="divide-y divide-gray-100">

@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
@@ -101,6 +102,7 @@ export function ForceUnblockDialog({
   onClose,
 }: ForceUnblockDialogProps) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const forceUnblock = useForceUnblock();
   const updatePosition = useUpdatePosition();
 
@@ -317,8 +319,26 @@ export function ForceUnblockDialog({
                   <Spinner />
                 </div>
               ) : filtered.length === 0 ? (
-                <div className="py-6 text-center text-sm text-gray-400 dark:text-stone-500">
-                  {search ? 'No recipes match your search' : 'No active recipes found'}
+                <div className="py-6 text-center space-y-3">
+                  <div className="text-sm text-gray-400 dark:text-stone-500">
+                    {search ? 'No recipes match your search' : 'No active recipes found'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const params = new URLSearchParams({
+                        create: 'true',
+                        name: `${color || ''} ${collection || ''}`.trim(),
+                        collection: collection || '',
+                        position_id: positionId,
+                      });
+                      onClose();
+                      navigate(`/admin/recipes?${params.toString()}`);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+                  >
+                    + Create New Recipe
+                  </button>
                 </div>
               ) : (
                 <div className="divide-y divide-gray-100 dark:divide-stone-700">

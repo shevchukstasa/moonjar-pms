@@ -1656,7 +1656,7 @@ async def nightly_reschedule_overdue():
                 for uid in pm_ids:
                     db.add(Notification(
                         user_id=uid,
-                        type=NotificationType.SYSTEM.value,
+                        type=NotificationType.ALERT.value,
                         title="Jadwal diperbarui otomatis",
                         message=(
                             f"{rescheduled} posisi terlambat dijadwalkan ulang "

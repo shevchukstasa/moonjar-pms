@@ -306,7 +306,7 @@ def _notify_pm_about_pull(
     for uid in pm_ids:
         db.add(Notification(
             user_id=uid,
-            type=NotificationType.SYSTEM.value,
+            type=NotificationType.ALERT.value,
             title=f"{stage_name}: {len(pulled)} position(s) pulled forward",
             message=f"Capacity available — auto-pulled to today: {details}",
             data={"event": "pull_forward", "stage": date_field, "positions": pulled},

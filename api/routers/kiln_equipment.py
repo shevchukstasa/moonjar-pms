@@ -1,0 +1,328 @@
+"""Kiln equipment configs — Layer 1 of the firing model.
+
+Tracks a time-stamped history of what thermocouple / controller / cable /
+typology is installed on each kiln. Exactly one config per kiln may be
+"current" (effective_to IS NULL) at any time.
+
+Endpoints:
+    GET    /kilns/{kiln_id}/equipment           — full history
+    GET    /kilns/{kiln_id}/equipment/current   — only the currently-installed config
+    POST   /kilns/{kiln_id}/equipment           — install new config (closes previous)
+    PATCH  /kilns/{kiln_id}/equipment/{id}      — edit fields (notes, specs) on existing config
+    DELETE /kilns/{kiln_id}/equipment/{id}      — delete (allowed only if not referenced by downstream layers; for now always allowed)
+"""
+
+import logging
+from datetime import datetime, timezone
+from typing import List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from api.auth import get_current_user
+from api.database import get_db
+from api.models import KilnEquipmentConfig, Resource, User
+from api.roles import require_management
+
+logger = logging.getLogger("moonjar.kiln_equipment")
+
+router = APIRouter()
+
+
+# ── Pydantic schemas ────────────────────────────────────────────────────────
+
+class KilnEquipmentConfigBase(BaseModel):
+    typology: Optional[str] = Field(None, description="horizontal | vertical | raku")
+
+    thermocouple_brand: Optional[str] = None
+    thermocouple_model: Optional[str] = None
+    thermocouple_length_cm: Optional[int] = None
+    thermocouple_position: Optional[str] = None
+
+    controller_brand: Optional[str] = None
+    controller_model: Optional[str] = None
+
+    cable_brand: Optional[str] = None
+    cable_length_cm: Optional[int] = None
+    cable_type: Optional[str] = None
+
+    notes: Optional[str] = None
+    extras: Optional[dict] = None
+    reason: Optional[str] = None
+
+
+class KilnEquipmentConfigCreate(KilnEquipmentConfigBase):
+    """Payload for installing a new config.
+
+    The API closes the previous current config (effective_to=now) and
+    creates a fresh row with effective_from=now.
+    """
+    pass
+
+
+class KilnEquipmentConfigUpdate(KilnEquipmentConfigBase):
+    """Patch existing fields on a config without creating a new version.
+
+    Use this for typo fixes / adding notes. For a real equipment change,
+    POST a new config instead.
+    """
+    pass
+
+
+class KilnEquipmentConfigResponse(KilnEquipmentConfigBase):
+    id: str
+    kiln_id: str
+    effective_from: datetime
+    effective_to: Optional[datetime] = None
+    installed_by: Optional[str] = None
+    installed_by_name: Optional[str] = None
+    is_current: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────
+
+def _serialize(db: Session, cfg: KilnEquipmentConfig) -> dict:
+    user_name = None
+    if cfg.installed_by:
+        u = db.query(User).filter(User.id == cfg.installed_by).first()
+        if u:
+            user_name = getattr(u, "full_name", None) or u.email
+    return {
+        "id": str(cfg.id),
+        "kiln_id": str(cfg.kiln_id),
+        "typology": cfg.typology,
+        "thermocouple_brand": cfg.thermocouple_brand,
+        "thermocouple_model": cfg.thermocouple_model,
+        "thermocouple_length_cm": cfg.thermocouple_length_cm,
+        "thermocouple_position": cfg.thermocouple_position,
+        "controller_brand": cfg.controller_brand,
+        "controller_model": cfg.controller_model,
+        "cable_brand": cfg.cable_brand,
+        "cable_length_cm": cfg.cable_length_cm,
+        "cable_type": cfg.cable_type,
+        "notes": cfg.notes,
+        "extras": cfg.extras,
+        "reason": cfg.reason,
+        "effective_from": cfg.effective_from,
+        "effective_to": cfg.effective_to,
+        "installed_by": str(cfg.installed_by) if cfg.installed_by else None,
+        "installed_by_name": user_name,
+        "is_current": cfg.effective_to is None,
+        "created_at": cfg.created_at,
+        "updated_at": cfg.updated_at,
+    }
+
+
+def _ensure_kiln(db: Session, kiln_id: UUID) -> Resource:
+    kiln = db.query(Resource).filter(Resource.id == kiln_id).first()
+    if not kiln:
+        raise HTTPException(404, f"Kiln {kiln_id} not found")
+    if getattr(kiln, "resource_type", None) and str(kiln.resource_type).lower().endswith("kiln") is False and "kiln" not in str(kiln.resource_type).lower():
+        # Defensive: resources table has multiple types. Only kilns get equipment.
+        raise HTTPException(400, f"Resource {kiln_id} is not a kiln")
+    return kiln
+
+
+# ── Endpoints ───────────────────────────────────────────────────────────────
+
+@router.get("/kilns/{kiln_id}/equipment", response_model=List[KilnEquipmentConfigResponse])
+async def list_kiln_equipment_history(
+    kiln_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Full history of equipment configurations for a kiln (newest first)."""
+    _ensure_kiln(db, kiln_id)
+    configs = (
+        db.query(KilnEquipmentConfig)
+        .filter(KilnEquipmentConfig.kiln_id == kiln_id)
+        .order_by(KilnEquipmentConfig.effective_from.desc())
+        .all()
+    )
+    return [_serialize(db, c) for c in configs]
+
+
+@router.get("/kilns/{kiln_id}/equipment/current", response_model=Optional[KilnEquipmentConfigResponse])
+async def get_current_kiln_equipment(
+    kiln_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Currently installed equipment config (the one with effective_to IS NULL)."""
+    _ensure_kiln(db, kiln_id)
+    cfg = (
+        db.query(KilnEquipmentConfig)
+        .filter(
+            KilnEquipmentConfig.kiln_id == kiln_id,
+            KilnEquipmentConfig.effective_to.is_(None),
+        )
+        .first()
+    )
+    if not cfg:
+        return None
+    return _serialize(db, cfg)
+
+
+@router.post("/kilns/{kiln_id}/equipment", response_model=KilnEquipmentConfigResponse, status_code=201)
+async def install_kiln_equipment(
+    kiln_id: UUID,
+    data: KilnEquipmentConfigCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Install a new equipment config.
+
+    Closes the currently-active config (effective_to=now) and creates a
+    fresh row with effective_from=now. This is what the PM calls when
+    equipment is physically swapped on the kiln.
+    """
+    _ensure_kiln(db, kiln_id)
+    now = datetime.now(timezone.utc)
+
+    # Close current config if any
+    current = (
+        db.query(KilnEquipmentConfig)
+        .filter(
+            KilnEquipmentConfig.kiln_id == kiln_id,
+            KilnEquipmentConfig.effective_to.is_(None),
+        )
+        .first()
+    )
+    if current:
+        current.effective_to = now
+        current.updated_at = now
+
+    new_cfg = KilnEquipmentConfig(
+        kiln_id=kiln_id,
+        typology=data.typology,
+        thermocouple_brand=data.thermocouple_brand,
+        thermocouple_model=data.thermocouple_model,
+        thermocouple_length_cm=data.thermocouple_length_cm,
+        thermocouple_position=data.thermocouple_position,
+        controller_brand=data.controller_brand,
+        controller_model=data.controller_model,
+        cable_brand=data.cable_brand,
+        cable_length_cm=data.cable_length_cm,
+        cable_type=data.cable_type,
+        notes=data.notes,
+        extras=data.extras,
+        reason=data.reason,
+        effective_from=now,
+        installed_by=current_user.id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(new_cfg)
+    db.commit()
+    db.refresh(new_cfg)
+
+    logger.info(
+        "KILN_EQUIPMENT_INSTALL | kiln=%s user=%s reason=%s",
+        kiln_id, current_user.id, data.reason or "n/a",
+    )
+
+    # TODO (Stage 6): mark downstream set-points & capabilities as
+    # needs_requalification. Will be added when Layer 2 & Layer 4 exist.
+
+    return _serialize(db, new_cfg)
+
+
+@router.patch("/kilns/{kiln_id}/equipment/{config_id}", response_model=KilnEquipmentConfigResponse)
+async def update_kiln_equipment(
+    kiln_id: UUID,
+    config_id: UUID,
+    data: KilnEquipmentConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Patch fields on an existing config.
+
+    Use this for typo fixes or adding notes to an already-installed config.
+    For an actual equipment swap, POST a new config instead — this endpoint
+    does NOT create a new version.
+    """
+    _ensure_kiln(db, kiln_id)
+    cfg = (
+        db.query(KilnEquipmentConfig)
+        .filter(
+            KilnEquipmentConfig.id == config_id,
+            KilnEquipmentConfig.kiln_id == kiln_id,
+        )
+        .first()
+    )
+    if not cfg:
+        raise HTTPException(404, "Equipment config not found")
+
+    patch = data.model_dump(exclude_unset=True)
+    for k, v in patch.items():
+        setattr(cfg, k, v)
+    cfg.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(cfg)
+    return _serialize(db, cfg)
+
+
+@router.delete("/kilns/{kiln_id}/equipment/{config_id}", status_code=204)
+async def delete_kiln_equipment(
+    kiln_id: UUID,
+    config_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Delete an equipment config.
+
+    Refuses to delete the current config if it's the only one (the kiln
+    would be left with no config). In Stage 4+ this will also refuse if
+    any firing profile or set-point references it.
+    """
+    _ensure_kiln(db, kiln_id)
+    cfg = (
+        db.query(KilnEquipmentConfig)
+        .filter(
+            KilnEquipmentConfig.id == config_id,
+            KilnEquipmentConfig.kiln_id == kiln_id,
+        )
+        .first()
+    )
+    if not cfg:
+        raise HTTPException(404, "Equipment config not found")
+
+    # If this is the only config on the kiln, refuse
+    total = (
+        db.query(KilnEquipmentConfig)
+        .filter(KilnEquipmentConfig.kiln_id == kiln_id)
+        .count()
+    )
+    if total <= 1:
+        raise HTTPException(
+            400,
+            "Cannot delete the only equipment config for this kiln. "
+            "Install a new config first.",
+        )
+
+    # If deleting the current one, promote the most recent historical
+    # one back to current (effective_to = NULL).
+    was_current = cfg.effective_to is None
+    db.delete(cfg)
+    db.flush()
+
+    if was_current:
+        latest = (
+            db.query(KilnEquipmentConfig)
+            .filter(KilnEquipmentConfig.kiln_id == kiln_id)
+            .order_by(KilnEquipmentConfig.effective_from.desc())
+            .first()
+        )
+        if latest:
+            latest.effective_to = None
+            latest.updated_at = datetime.now(timezone.utc)
+
+    db.commit()

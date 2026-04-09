@@ -32,6 +32,7 @@ from api.routers import integration
 from api.routers import users
 from api.routers import factories
 from api.routers import kilns
+from api.routers import kiln_equipment
 from api.routers import kiln_maintenance
 from api.routers import kiln_constants
 from api.routers import reference
@@ -2040,6 +2041,7 @@ def setup_routers():
     app.include_router(users.router, prefix="/api/users", tags=["users"])
     app.include_router(factories.router, prefix="/api/factories", tags=["factories"])
     app.include_router(kilns.router, prefix="/api/kilns", tags=["kilns"])
+    app.include_router(kiln_equipment.router, prefix="/api", tags=["kiln-equipment"])
     app.include_router(kiln_maintenance.router, prefix="/api/kiln-maintenance", tags=["kiln-maintenance"])
     from api.routers import kiln_inspections
     app.include_router(kiln_inspections.router, prefix="/api/kiln-inspections", tags=["kiln-inspections"])

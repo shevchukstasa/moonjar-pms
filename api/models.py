@@ -562,6 +562,66 @@ class Resource(Base):
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     factory = relationship('Factory', foreign_keys=[factory_id])
+    equipment_configs = relationship(
+        'KilnEquipmentConfig',
+        back_populates='kiln',
+        cascade='all, delete-orphan',
+        order_by='desc(KilnEquipmentConfig.effective_from)',
+    )
+
+
+class KilnEquipmentConfig(Base):
+    """History of equipment installed on a kiln.
+
+    Each row is a snapshot of what thermocouple / controller / cable /
+    typology was physically on the kiln during a time window. Exactly
+    one row per kiln has effective_to=NULL (the "current" config).
+
+    Downstream layers — temperature set-points, firing profiles, recipe
+    capability — reference a specific config id. When equipment is
+    swapped, the current row is closed (effective_to=now) and a fresh
+    one is created; all dependent records are flagged for requalification.
+    """
+    __tablename__ = 'kiln_equipment_configs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kiln_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('resources.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+
+    typology = Column(sa.String(30))  # horizontal | vertical | raku
+
+    thermocouple_brand = Column(sa.String(100))
+    thermocouple_model = Column(sa.String(100))
+    thermocouple_length_cm = Column(sa.Integer)
+    thermocouple_position = Column(sa.String(100))
+
+    controller_brand = Column(sa.String(100))
+    controller_model = Column(sa.String(100))
+
+    cable_brand = Column(sa.String(100))
+    cable_length_cm = Column(sa.Integer)
+    cable_type = Column(sa.String(100))
+
+    notes = Column(sa.Text)
+    extras = Column(JSONB)
+
+    effective_from = Column(
+        sa.DateTime(timezone=True),
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    effective_to = Column(sa.DateTime(timezone=True))
+
+    installed_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'))
+    reason = Column(sa.String(200))
+
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    kiln = relationship('Resource', back_populates='equipment_configs')
 
 
 class Batch(Base):

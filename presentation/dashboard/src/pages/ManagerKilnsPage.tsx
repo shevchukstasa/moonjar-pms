@@ -13,6 +13,7 @@ import { KilnEditDialog } from '@/components/kilns/KilnEditDialog';
 import { LoadingRulesDialog } from '@/components/kilns/LoadingRulesDialog';
 import { KilnConstantsTable } from '@/components/kilns/KilnConstantsTable';
 import { KilnBreakdownDialog, KilnRestoreDialog } from '@/components/kilns/KilnBreakdownDialog';
+import { KilnEquipmentDialog } from '@/components/kilns/KilnEquipmentDialog';
 import { KilnShelvesSection } from '@/components/kilns/KilnShelvesSection';
 import apiClient from '@/api/client';
 
@@ -59,6 +60,7 @@ export default function ManagerKilnsPage() {
   const [rulesKiln, setRulesKiln] = useState<KilnItem | null>(null);
   const [breakdownKiln, setBreakdownKiln] = useState<KilnItem | null>(null);
   const [restoreKiln, setRestoreKiln] = useState<KilnItem | null>(null);
+  const [equipmentKiln, setEquipmentKiln] = useState<KilnItem | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   // Delete mutation (owner/admin only)
@@ -132,6 +134,7 @@ export default function ManagerKilnsPage() {
               canDelete={canDelete}
               onEdit={() => setEditKiln(kiln)}
               onRules={() => setRulesKiln(kiln)}
+              onEquipment={() => setEquipmentKiln(kiln)}
               onBreakdown={() => setBreakdownKiln(kiln)}
               onRestore={() => setRestoreKiln(kiln)}
               onDelete={() => setDeleteId(kiln.id)}
@@ -177,6 +180,11 @@ export default function ManagerKilnsPage() {
         onClose={() => setRestoreKiln(null)}
         kiln={restoreKiln}
       />
+      <KilnEquipmentDialog
+        open={!!equipmentKiln}
+        onClose={() => setEquipmentKiln(null)}
+        kiln={equipmentKiln}
+      />
       <ConfirmDialog
         open={!!deleteId}
         onClose={() => setDeleteId(null)}
@@ -196,6 +204,7 @@ function KilnCard({
   canDelete,
   onEdit,
   onRules,
+  onEquipment,
   onBreakdown,
   onRestore,
   onDelete,
@@ -205,6 +214,7 @@ function KilnCard({
   canDelete?: boolean;
   onEdit: () => void;
   onRules: () => void;
+  onEquipment: () => void;
   onBreakdown: () => void;
   onRestore: () => void;
   onDelete?: () => void;
@@ -303,6 +313,9 @@ function KilnCard({
         </Button>
         <Button size="sm" variant="ghost" onClick={onRules}>
           Rules
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onEquipment}>
+          Equipment
         </Button>
         {canDelete && onDelete && (
           <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700" onClick={onDelete}>

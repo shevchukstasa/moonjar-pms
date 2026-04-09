@@ -25,7 +25,7 @@ const TRANSITIONS: Record<string, string[]> = {
   transferred_to_sorting: ['packed', 'sent_to_glazing', 'awaiting_reglaze'],
   awaiting_reglaze: ['sent_to_glazing'],
   refire: ['loaded_in_kiln'],
-  packed: ['sent_to_quality_check', 'ready_for_shipment', 'merged'],
+  packed: ['sent_to_quality_check', 'ready_for_shipment', 'shipped', 'merged'],
   sent_to_quality_check: ['quality_check_done'],
   quality_check_done: ['ready_for_shipment', 'merged'],
   ready_for_shipment: ['shipped', 'merged'],

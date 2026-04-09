@@ -91,6 +91,7 @@ _TRANSITIONS: dict[PositionStatus, set[PositionStatus]] = {
     PositionStatus.PACKED: {
         PositionStatus.SENT_TO_QUALITY_CHECK,
         PositionStatus.READY_FOR_SHIPMENT,
+        PositionStatus.SHIPPED,             # direct ship (already dispatched)
         PositionStatus.MERGED,              # child merged back into parent
     },
     PositionStatus.SENT_TO_QUALITY_CHECK: {

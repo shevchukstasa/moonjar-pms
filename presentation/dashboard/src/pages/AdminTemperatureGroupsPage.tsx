@@ -209,6 +209,8 @@ export default function AdminTemperatureGroupsPage() {
                     </Button>
                   )}
                 </div>
+
+                <SetpointsTable groupId={group.id} targetC={group.temperature} />
               </div>
             ) : (
               /* View mode */
@@ -284,6 +286,244 @@ export default function AdminTemperatureGroupsPage() {
           </Button>
         </div>
       </Dialog>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Layer 2: Kiln calibration table inside the temperature group edit form.
+
+   For each kiln (factory-wide) shows:
+   - name + current equipment summary
+   - target °C (from group, same for all)
+   - editable set-point °C (what the PM dials into the controller)
+   - calibration metadata
+
+   Empty cells = uncalibrated. "needs_recalibration" flag (from Stage 6)
+   renders an orange warning.
+   ──────────────────────────────────────────────────────────────────── */
+
+interface SetpointRow {
+  kiln_id: string;
+  kiln_name: string;
+  factory_id: string | null;
+  factory_name: string | null;
+  kiln_equipment_config_id: string | null;
+  equipment_summary: string | null;
+  setpoint_id: string | null;
+  setpoint_c: number | null;
+  target_c: number;
+  needs_recalibration: boolean;
+  calibrated_at: string | null;
+  calibrated_by_name: string | null;
+  notes: string | null;
+}
+
+function SetpointsTable({ groupId, targetC }: { groupId: string; targetC: number }) {
+  const qc = useQueryClient();
+  const { data: rows, isLoading } = useQuery<SetpointRow[]>({
+    queryKey: ['temperature-group-setpoints', groupId],
+    queryFn: () =>
+      apiClient.get(`/temperature-groups/${groupId}/setpoints`).then((r) => r.data),
+  });
+
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [draftNotes, setDraftNotes] = useState<Record<string, string>>({});
+  const [rowError, setRowError] = useState<Record<string, string>>({});
+
+  const upsertMut = useMutation({
+    mutationFn: (payload: { kiln_id: string; setpoint_c: number; notes?: string }) =>
+      apiClient
+        .put(`/temperature-groups/${groupId}/setpoints`, payload)
+        .then((r) => r.data),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['temperature-group-setpoints', groupId] });
+      setDrafts((d) => {
+        const { [vars.kiln_id]: _, ...rest } = d;
+        return rest;
+      });
+      setDraftNotes((d) => {
+        const { [vars.kiln_id]: _, ...rest } = d;
+        return rest;
+      });
+      setRowError((e) => ({ ...e, [vars.kiln_id]: '' }));
+    },
+    onError: (err: unknown, vars) => {
+      const msg =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        'Failed to save';
+      setRowError((e) => ({ ...e, [vars.kiln_id]: msg }));
+    },
+  });
+
+  const clearMut = useMutation({
+    mutationFn: (setpointId: string) =>
+      apiClient
+        .delete(`/temperature-groups/${groupId}/setpoints/${setpointId}`)
+        .then((r) => r.data),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['temperature-group-setpoints', groupId] }),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="mt-6 flex justify-center">
+        <Spinner className="h-5 w-5" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6">
+      <div className="mb-2 flex items-baseline justify-between">
+        <h4 className="text-sm font-semibold text-gray-700">Kiln Calibration</h4>
+        <span className="text-xs text-gray-400">
+          Target: <span className="font-mono font-semibold">{targetC} °C</span>
+        </span>
+      </div>
+      <p className="mb-3 text-xs text-gray-500">
+        For each kiln, enter the controller set-point that physically achieves
+        the target temperature on this kiln&apos;s current equipment.
+      </p>
+
+      <div className="overflow-x-auto rounded border border-gray-200">
+        <table className="min-w-full divide-y divide-gray-200 text-xs">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-2 py-1.5 text-left font-medium text-gray-600">Kiln</th>
+              <th className="px-2 py-1.5 text-left font-medium text-gray-600">Equipment</th>
+              <th className="px-2 py-1.5 text-left font-medium text-gray-600">Set-point °C</th>
+              <th className="px-2 py-1.5 text-left font-medium text-gray-600">Notes</th>
+              <th className="px-2 py-1.5 text-left font-medium text-gray-600">Calibrated</th>
+              <th className="px-2 py-1.5"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {(rows || []).map((r) => {
+              const draftVal = drafts[r.kiln_id];
+              const draftNote = draftNotes[r.kiln_id];
+              const currentVal = draftVal !== undefined ? draftVal : (r.setpoint_c ?? '');
+              const currentNote = draftNote !== undefined ? draftNote : (r.notes ?? '');
+              const hasConfig = !!r.kiln_equipment_config_id;
+              const isDirty =
+                draftVal !== undefined ||
+                (draftNote !== undefined && (r.notes ?? '') !== draftNote);
+              return (
+                <tr
+                  key={r.kiln_id}
+                  className={r.needs_recalibration ? 'bg-orange-50' : ''}
+                >
+                  <td className="px-2 py-1.5 whitespace-nowrap">
+                    <div className="font-medium text-gray-900">{r.kiln_name}</div>
+                    {r.factory_name && (
+                      <div className="text-gray-400">{r.factory_name}</div>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-gray-600">
+                    {r.equipment_summary || '—'}
+                    {r.needs_recalibration && (
+                      <div className="mt-0.5 text-[10px] font-medium text-orange-700">
+                        ⚠ needs recalibration
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <input
+                      type="number"
+                      className="w-20 rounded border border-gray-300 px-2 py-1 text-xs font-mono focus:border-blue-500 focus:outline-none disabled:bg-gray-100"
+                      value={currentVal}
+                      disabled={!hasConfig}
+                      onChange={(e) =>
+                        setDrafts((d) => ({ ...d, [r.kiln_id]: e.target.value }))
+                      }
+                      placeholder={hasConfig ? '—' : 'n/a'}
+                    />
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <input
+                      type="text"
+                      className="w-full min-w-[120px] rounded border border-gray-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none disabled:bg-gray-100"
+                      value={currentNote}
+                      disabled={!hasConfig}
+                      onChange={(e) =>
+                        setDraftNotes((d) => ({ ...d, [r.kiln_id]: e.target.value }))
+                      }
+                      placeholder="calibration notes…"
+                    />
+                    {rowError[r.kiln_id] && (
+                      <div className="text-[10px] text-red-600">{rowError[r.kiln_id]}</div>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-gray-500">
+                    {r.calibrated_at ? (
+                      <>
+                        <div>{new Date(r.calibrated_at).toLocaleDateString()}</div>
+                        {r.calibrated_by_name && (
+                          <div className="text-gray-400">{r.calibrated_by_name}</div>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 whitespace-nowrap">
+                    {!hasConfig ? (
+                      <span className="text-[10px] text-red-500">
+                        no equipment config
+                      </span>
+                    ) : (
+                      <>
+                        <Button
+                          size="sm"
+                          disabled={!isDirty || upsertMut.isPending}
+                          onClick={() => {
+                            const n = Number(currentVal);
+                            if (!Number.isFinite(n) || n <= 0) {
+                              setRowError((e) => ({
+                                ...e,
+                                [r.kiln_id]: 'Enter a valid °C',
+                              }));
+                              return;
+                            }
+                            upsertMut.mutate({
+                              kiln_id: r.kiln_id,
+                              setpoint_c: n,
+                              notes: currentNote || undefined,
+                            });
+                          }}
+                        >
+                          Save
+                        </Button>
+                        {r.setpoint_id && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="ml-1 text-red-600"
+                            onClick={() => {
+                              if (confirm('Clear this set-point?')) {
+                                clearMut.mutate(r.setpoint_id!);
+                              }
+                            }}
+                          >
+                            Clear
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {(!rows || rows.length === 0) && (
+              <tr>
+                <td colSpan={6} className="px-2 py-4 text-center text-gray-400">
+                  No kilns found.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

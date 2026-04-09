@@ -23,7 +23,13 @@ from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from api.database import get_db
-from api.models import KilnEquipmentConfig, Resource, User
+from api.models import (
+    FiringTemperatureGroup,
+    KilnEquipmentConfig,
+    KilnTemperatureSetpoint,
+    Resource,
+    User,
+)
 from api.roles import require_management
 
 logger = logging.getLogger("moonjar.kiln_equipment")
@@ -325,4 +331,256 @@ async def delete_kiln_equipment(
             latest.effective_to = None
             latest.updated_at = datetime.now(timezone.utc)
 
+    db.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Layer 2 — Temperature set-points per (temperature_group × current kiln config)
+# ══════════════════════════════════════════════════════════════════════════
+
+class SetpointRow(BaseModel):
+    """One row in the calibration table shown inside a temperature group.
+
+    If setpoint_id is None, this kiln is NOT yet calibrated for this group —
+    the row exists so the PM can fill it in. `target_c` is the abstract
+    target of the group (same for everyone); `setpoint_c` is what the PM
+    dials into the controller for this specific kiln+config.
+    """
+    kiln_id: str
+    kiln_name: str
+    factory_id: Optional[str] = None
+    factory_name: Optional[str] = None
+    kiln_equipment_config_id: Optional[str] = None
+    equipment_summary: Optional[str] = None
+    setpoint_id: Optional[str] = None
+    setpoint_c: Optional[int] = None
+    target_c: int
+    needs_recalibration: bool = False
+    calibrated_at: Optional[datetime] = None
+    calibrated_by_name: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class SetpointUpsert(BaseModel):
+    kiln_id: str
+    setpoint_c: int = Field(..., ge=0, le=2000)
+    notes: Optional[str] = None
+
+
+def _equipment_summary(cfg: KilnEquipmentConfig) -> str:
+    parts = []
+    if cfg.typology:
+        parts.append(cfg.typology)
+    tc = "/".join(filter(None, [cfg.thermocouple_brand, cfg.thermocouple_model]))
+    if tc:
+        parts.append(f"TC:{tc}")
+    ctrl = "/".join(filter(None, [cfg.controller_brand, cfg.controller_model]))
+    if ctrl:
+        parts.append(f"Ctrl:{ctrl}")
+    return " · ".join(parts) if parts else "no equipment recorded"
+
+
+@router.get("/temperature-groups/{group_id}/setpoints", response_model=List[SetpointRow])
+async def list_setpoints_for_group(
+    group_id: UUID,
+    factory_id: Optional[UUID] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return a calibration row for every kiln, optionally scoped to a factory.
+
+    Rows include kilns that have NO set-point yet (setpoint_id=None) so the
+    PM can see the full matrix and fill in the blanks.
+    """
+    group = db.query(FiringTemperatureGroup).filter(FiringTemperatureGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(404, "Temperature group not found")
+
+    # All kilns (optionally factory-scoped) with their CURRENT equipment config
+    kilns_q = db.query(Resource).filter(Resource.resource_type == 'kiln')
+    if factory_id:
+        kilns_q = kilns_q.filter(Resource.factory_id == factory_id)
+    kilns = kilns_q.order_by(Resource.name).all()
+
+    # Preload current configs in one query
+    kiln_ids = [k.id for k in kilns]
+    current_configs: dict[str, KilnEquipmentConfig] = {}
+    if kiln_ids:
+        cfgs = (
+            db.query(KilnEquipmentConfig)
+            .filter(
+                KilnEquipmentConfig.kiln_id.in_(kiln_ids),
+                KilnEquipmentConfig.effective_to.is_(None),
+            )
+            .all()
+        )
+        current_configs = {str(c.kiln_id): c for c in cfgs}
+
+    # Preload existing set-points for this group + those configs
+    config_ids = [c.id for c in current_configs.values()]
+    existing_setpoints: dict[str, KilnTemperatureSetpoint] = {}
+    if config_ids:
+        sps = (
+            db.query(KilnTemperatureSetpoint)
+            .filter(
+                KilnTemperatureSetpoint.temperature_group_id == group_id,
+                KilnTemperatureSetpoint.kiln_equipment_config_id.in_(config_ids),
+            )
+            .all()
+        )
+        existing_setpoints = {str(sp.kiln_equipment_config_id): sp for sp in sps}
+
+    # Preload factory names + user names
+    factory_names: dict[str, str] = {}
+    try:
+        from api.models import Factory
+        for f in db.query(Factory).all():
+            factory_names[str(f.id)] = f.name
+    except Exception:
+        pass
+
+    user_names: dict[str, str] = {}
+    user_ids = [sp.calibrated_by for sp in existing_setpoints.values() if sp.calibrated_by]
+    if user_ids:
+        for u in db.query(User).filter(User.id.in_(user_ids)).all():
+            user_names[str(u.id)] = getattr(u, "full_name", None) or u.email
+
+    rows: List[SetpointRow] = []
+    for k in kilns:
+        cfg = current_configs.get(str(k.id))
+        sp = existing_setpoints.get(str(cfg.id)) if cfg else None
+        rows.append(SetpointRow(
+            kiln_id=str(k.id),
+            kiln_name=k.name,
+            factory_id=str(k.factory_id) if k.factory_id else None,
+            factory_name=factory_names.get(str(k.factory_id)),
+            kiln_equipment_config_id=str(cfg.id) if cfg else None,
+            equipment_summary=_equipment_summary(cfg) if cfg else "NO equipment config",
+            setpoint_id=str(sp.id) if sp else None,
+            setpoint_c=sp.setpoint_c if sp else None,
+            target_c=group.temperature,
+            needs_recalibration=sp.needs_recalibration if sp else False,
+            calibrated_at=sp.calibrated_at if sp else None,
+            calibrated_by_name=user_names.get(str(sp.calibrated_by)) if sp and sp.calibrated_by else None,
+            notes=sp.notes if sp else None,
+        ))
+    return rows
+
+
+@router.put("/temperature-groups/{group_id}/setpoints", response_model=SetpointRow)
+async def upsert_setpoint(
+    group_id: UUID,
+    data: SetpointUpsert,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Create or update the set-point for (temperature_group × current config of kiln).
+
+    Always targets the CURRENT equipment config of the given kiln. If the
+    kiln has no current config, returns 400 — PM should set up equipment
+    first (Stage 1).
+    """
+    group = db.query(FiringTemperatureGroup).filter(FiringTemperatureGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(404, "Temperature group not found")
+
+    kiln_uuid = UUID(data.kiln_id)
+    kiln = db.query(Resource).filter(Resource.id == kiln_uuid).first()
+    if not kiln:
+        raise HTTPException(404, "Kiln not found")
+
+    current_cfg = (
+        db.query(KilnEquipmentConfig)
+        .filter(
+            KilnEquipmentConfig.kiln_id == kiln_uuid,
+            KilnEquipmentConfig.effective_to.is_(None),
+        )
+        .first()
+    )
+    if not current_cfg:
+        raise HTTPException(
+            400,
+            "This kiln has no current equipment config. Install one first via "
+            "the Equipment dialog on the Kilns page.",
+        )
+
+    now = datetime.now(timezone.utc)
+    sp = (
+        db.query(KilnTemperatureSetpoint)
+        .filter(
+            KilnTemperatureSetpoint.temperature_group_id == group_id,
+            KilnTemperatureSetpoint.kiln_equipment_config_id == current_cfg.id,
+        )
+        .first()
+    )
+    if sp:
+        sp.setpoint_c = data.setpoint_c
+        sp.notes = data.notes
+        sp.calibrated_at = now
+        sp.calibrated_by = current_user.id
+        sp.needs_recalibration = False
+        sp.updated_at = now
+    else:
+        sp = KilnTemperatureSetpoint(
+            temperature_group_id=group_id,
+            kiln_equipment_config_id=current_cfg.id,
+            setpoint_c=data.setpoint_c,
+            notes=data.notes,
+            calibrated_at=now,
+            calibrated_by=current_user.id,
+            needs_recalibration=False,
+        )
+        db.add(sp)
+
+    db.commit()
+    db.refresh(sp)
+
+    user_name = None
+    u = db.query(User).filter(User.id == current_user.id).first()
+    if u:
+        user_name = getattr(u, "full_name", None) or u.email
+
+    factory = None
+    try:
+        from api.models import Factory
+        factory = db.query(Factory).filter(Factory.id == kiln.factory_id).first()
+    except Exception:
+        pass
+
+    return SetpointRow(
+        kiln_id=str(kiln.id),
+        kiln_name=kiln.name,
+        factory_id=str(kiln.factory_id) if kiln.factory_id else None,
+        factory_name=factory.name if factory else None,
+        kiln_equipment_config_id=str(current_cfg.id),
+        equipment_summary=_equipment_summary(current_cfg),
+        setpoint_id=str(sp.id),
+        setpoint_c=sp.setpoint_c,
+        target_c=group.temperature,
+        needs_recalibration=sp.needs_recalibration,
+        calibrated_at=sp.calibrated_at,
+        calibrated_by_name=user_name,
+        notes=sp.notes,
+    )
+
+
+@router.delete("/temperature-groups/{group_id}/setpoints/{setpoint_id}", status_code=204)
+async def delete_setpoint(
+    group_id: UUID,
+    setpoint_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Clear a set-point (e.g. if it was entered by mistake)."""
+    sp = (
+        db.query(KilnTemperatureSetpoint)
+        .filter(
+            KilnTemperatureSetpoint.id == setpoint_id,
+            KilnTemperatureSetpoint.temperature_group_id == group_id,
+        )
+        .first()
+    )
+    if not sp:
+        raise HTTPException(404, "Set-point not found")
+    db.delete(sp)
     db.commit()

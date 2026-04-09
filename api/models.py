@@ -624,6 +624,47 @@ class KilnEquipmentConfig(Base):
     kiln = relationship('Resource', back_populates='equipment_configs')
 
 
+class KilnTemperatureSetpoint(Base):
+    """Layer 2: actual controller set-point for a temperature group on a
+    specific kiln equipment configuration.
+
+    The abstract target (group.temperature) is what we want on the tile;
+    setpoint_c is what we dial into the controller to achieve it, given
+    the thermocouple/controller/cable combination installed on the kiln.
+    """
+    __tablename__ = 'kiln_temperature_setpoints'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temperature_group_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('firing_temperature_groups.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    kiln_equipment_config_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('kiln_equipment_configs.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    setpoint_c = Column(sa.Integer, nullable=False)
+    notes = Column(sa.Text)
+    calibrated_at = Column(sa.DateTime(timezone=True))
+    calibrated_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'))
+    needs_recalibration = Column(sa.Boolean, nullable=False, default=False)
+
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    temperature_group = relationship('FiringTemperatureGroup')
+    equipment_config = relationship('KilnEquipmentConfig')
+
+    __table_args__ = (
+        UniqueConstraint(
+            'temperature_group_id', 'kiln_equipment_config_id',
+            name='uq_setpoint_group_config',
+        ),
+    )
+
+
 class Batch(Base):
     __tablename__ = 'batches'
 

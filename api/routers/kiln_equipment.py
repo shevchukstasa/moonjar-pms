@@ -27,6 +27,7 @@ from api.models import (
     FiringTemperatureGroup,
     KilnEquipmentConfig,
     KilnTemperatureSetpoint,
+    RecipeKilnCapability,
     Resource,
     User,
 )
@@ -234,8 +235,48 @@ async def install_kiln_equipment(
         kiln_id, current_user.id, data.reason or "n/a",
     )
 
-    # TODO (Stage 6): mark downstream set-points & capabilities as
-    # needs_requalification. Will be added when Layer 2 & Layer 4 exist.
+    # Stage 6: equipment change cascades to Layer 2 & Layer 4.
+    # Anything previously calibrated/qualified against the old config
+    # is now suspect and must be re-verified before the scheduler
+    # should trust it. We don't hard-delete — we just raise a flag
+    # that the UI surfaces (orange row in the set-point table, amber
+    # warning in the capability matrix).
+    setpoints_flagged = 0
+    capabilities_flagged = 0
+    if current is not None:
+        setpoints_flagged = (
+            db.query(KilnTemperatureSetpoint)
+            .filter(
+                KilnTemperatureSetpoint.kiln_equipment_config_id == current.id,
+                KilnTemperatureSetpoint.needs_recalibration.is_(False),
+            )
+            .update(
+                {"needs_recalibration": True},
+                synchronize_session=False,
+            )
+        )
+
+    # Capability rows are keyed by (recipe, kiln) — we flip all rows
+    # for this kiln regardless of which config was baseline, because
+    # the physical equipment has been swapped.
+    capabilities_flagged = (
+        db.query(RecipeKilnCapability)
+        .filter(
+            RecipeKilnCapability.kiln_id == kiln_id,
+            RecipeKilnCapability.needs_requalification.is_(False),
+        )
+        .update(
+            {"needs_requalification": True},
+            synchronize_session=False,
+        )
+    )
+    if setpoints_flagged or capabilities_flagged:
+        db.commit()
+        logger.info(
+            "KILN_EQUIPMENT_INSTALL_CASCADE | kiln=%s | "
+            "setpoints_flagged=%d capabilities_flagged=%d",
+            kiln_id, setpoints_flagged, capabilities_flagged,
+        )
 
     return _serialize(db, new_cfg)
 

@@ -743,6 +743,42 @@ def _is_gold_firing(
     return False
 
 
+def _filter_kilns_by_recipe_capability(
+    db: Session,
+    kilns: list[Resource],
+    recipe_id: Optional[UUID],
+) -> list[Resource]:
+    """Layer-4 filter: restrict candidate kilns to those qualified for the recipe.
+
+    Policy:
+    - No recipe_id → return kilns unchanged
+    - Recipe has zero capability rows → open policy, return kilns unchanged
+    - Recipe has rows → only keep kilns where is_qualified=true
+      (a kiln flagged needs_requalification is still considered qualified —
+       it's a warning, not a hard block — so we can keep producing while
+       the requalification test is scheduled)
+    """
+    if recipe_id is None:
+        return kilns
+    from api.models import RecipeKilnCapability  # local import to avoid cycles
+    rows = (
+        db.query(RecipeKilnCapability)
+        .filter(RecipeKilnCapability.recipe_id == recipe_id)
+        .all()
+    )
+    if not rows:
+        return kilns  # open policy
+    qualified_ids = {r.kiln_id for r in rows if r.is_qualified}
+    if not qualified_ids:
+        logger.warning(
+            "CAPABILITY_BLOCK | recipe=%s | no qualified kilns "
+            "(all rows disabled) — falling back to open policy",
+            recipe_id,
+        )
+        return kilns
+    return [k for k in kilns if k.id in qualified_ids]
+
+
 def _find_best_kiln_for_batch(
     db: Session,
     available_kilns: list[Resource],
@@ -756,6 +792,8 @@ def _find_best_kiln_for_batch(
     Find the best kiln for a batch.
 
     Strategy:
+    0. Layer-4 capability filter: if position.recipe_id has capability
+       rows, restrict to qualified kilns only (e.g. Lagoon Spark → New Kiln)
     1. If position has an estimated_kiln_id and it's available, prefer it
     2. Rotation rules: skip kilns where proposed glaze is non-compliant
     3. Raku-specific rules:
@@ -766,6 +804,20 @@ def _find_best_kiln_for_batch(
     5. Among equally loaded kilns, prefer the one with smallest excess capacity
        (tightest fit) to save larger kilns for bigger batches
     """
+    # Layer-4: narrow the candidate set by recipe capability
+    if position is not None and getattr(position, "recipe_id", None):
+        filtered = _filter_kilns_by_recipe_capability(
+            db, available_kilns, position.recipe_id
+        )
+        if not filtered:
+            logger.warning(
+                "CAPABILITY_BLOCK | position=%s | recipe=%s | "
+                "no kilns qualified — batch cannot be formed",
+                position.id, position.recipe_id,
+            )
+            return None
+        available_kilns = filtered
+
     # If a specific kiln is pre-assigned, check if it's in the available list
     if position and position.estimated_kiln_id:
         for kiln in available_kilns:

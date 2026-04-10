@@ -884,6 +884,32 @@ def find_best_kiln_and_date(
     if not kilns:
         return None
 
+    # Layer-4 capability filter — recipe-specific kiln routing
+    if position.recipe_id is not None:
+        from api.models import RecipeKilnCapability
+        cap_rows = (
+            db.query(RecipeKilnCapability)
+            .filter(RecipeKilnCapability.recipe_id == position.recipe_id)
+            .all()
+        )
+        if cap_rows:
+            qualified_ids = {r.kiln_id for r in cap_rows if r.is_qualified}
+            if qualified_ids:
+                kilns = [k for k in kilns if k.id in qualified_ids]
+                if not kilns:
+                    logger.warning(
+                        "CAPABILITY_BLOCK | position=%s | recipe=%s | "
+                        "no qualified kiln available in factory",
+                        position.id, position.recipe_id,
+                    )
+                    return None
+            else:
+                logger.warning(
+                    "CAPABILITY_OPEN_FALLBACK | recipe=%s | rows exist but "
+                    "none qualified — using open policy",
+                    position.recipe_id,
+                )
+
     # Area this position needs
     pos_area = 0.0
     if position.glazeable_sqm and position.quantity:

@@ -1,7 +1,8 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, FlaskConical, Copy } from 'lucide-react';
+import { Plus, Trash2, FlaskConical, Copy, Flame } from 'lucide-react';
+import RecipeKilnCapabilityDialog from '@/components/recipes/RecipeKilnCapabilityDialog';
 import { recipesApi, type RecipeItem, type RecipeMaterialItem, type RecipeMaterialBulkItem, type TemperatureGroupInfo } from '@/api/recipes';
 import { Thermometer } from 'lucide-react';
 import { materialsApi, type MaterialItem } from '@/api/materials';
@@ -89,6 +90,7 @@ export default function AdminRecipesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [returnPositionId, setReturnPositionId] = useState<string | null>(null);
+  const [kilnCapFor, setKilnCapFor] = useState<RecipeItem | null>(null);
 
   // Auto-open create dialog from URL params (e.g. from Force Unblock)
   useEffect(() => {
@@ -455,6 +457,15 @@ export default function AdminRecipesPage() {
       { key: 'actions', header: '', render: (r: RecipeItem) => (
         <div className="flex gap-1">
           <Button variant="ghost" size="sm" onClick={() => openEdit(r)}>Edit</Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-orange-600"
+            onClick={() => setKilnCapFor(r)}
+            title="Kiln capability matrix"
+          >
+            <Flame className="mr-1 h-3.5 w-3.5" /> Kilns
+          </Button>
           <Button variant="ghost" size="sm" className="text-blue-600" onClick={() => openClone(r)} title="Clone recipe">
             <Copy className="mr-1 h-3.5 w-3.5" /> Clone
           </Button>
@@ -721,6 +732,14 @@ export default function AdminRecipesPage() {
           </Button>
         </div>
       </Dialog>
+
+      {/* ── Kiln Capability Matrix ───────────────────────────────────── */}
+      <RecipeKilnCapabilityDialog
+        open={!!kilnCapFor}
+        onClose={() => setKilnCapFor(null)}
+        recipeId={kilnCapFor?.id ?? null}
+        recipeName={kilnCapFor?.name}
+      />
     </div>
   );
 }

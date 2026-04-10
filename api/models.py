@@ -665,6 +665,56 @@ class KilnTemperatureSetpoint(Base):
     )
 
 
+class RecipeKilnCapability(Base):
+    """Layer 4: recipe × kiln qualification matrix.
+
+    Answers "can this recipe be fired on this kiln?" The scheduler uses
+    this to route orders: a recipe with rows only for specific kilns
+    can ONLY land on those kilns. When kiln equipment changes, all
+    capabilities for that kiln get needs_requalification=true until
+    production runs a test batch and confirms the result.
+    """
+    __tablename__ = 'recipe_kiln_capabilities'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    recipe_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('recipes.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    kiln_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('resources.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    is_qualified = Column(sa.Boolean, nullable=False, default=False)
+    quality_rating = Column(sa.Integer, nullable=True)  # 1-5
+    success_count = Column(sa.Integer, nullable=False, default=0)
+    failure_count = Column(sa.Integer, nullable=False, default=0)
+    last_fired_at = Column(sa.DateTime(timezone=True), nullable=True)
+    last_qualified_equipment_config_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('kiln_equipment_configs.id', ondelete='SET NULL'),
+        nullable=True,
+    )
+    needs_requalification = Column(sa.Boolean, nullable=False, default=False)
+    notes = Column(sa.Text, nullable=True)
+    qualified_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'))
+
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    recipe = relationship('Recipe', foreign_keys=[recipe_id])
+    kiln = relationship('Resource', foreign_keys=[kiln_id])
+    last_qualified_equipment_config = relationship(
+        'KilnEquipmentConfig', foreign_keys=[last_qualified_equipment_config_id]
+    )
+
+    __table_args__ = (
+        UniqueConstraint('recipe_id', 'kiln_id', name='uq_recipe_kiln_capability'),
+    )
+
+
 class Batch(Base):
     __tablename__ = 'batches'
 

@@ -453,7 +453,8 @@ export const PRODUCT_TYPES = [
   { value: 'tile', label: 'Tile' },
   { value: 'countertop', label: 'Countertop' },
   { value: 'sink', label: 'Sink' },
-  { value: '_3d', label: '3D Product' },
+  { value: '3d', label: '3D Product' },
+  { value: 'custom', label: 'Custom' },
 ];
 
 export const LOADING_METHODS = [

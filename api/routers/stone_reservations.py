@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import case
 
 from api.database import get_db
+from api.enums import ProductType
 from api.models import StoneReservation, StoneReservationAdjustment, StoneDefectRate
 from api.roles import require_management
 from business.services.stone_reservation import (
@@ -246,7 +247,7 @@ def update_defect_rate(
             detail=f"size_category must be one of {sorted(valid_size_categories)}",
         )
 
-    valid_product_types = {"tile", "countertop", "sink", "3d"}
+    valid_product_types = {e.value for e in ProductType}
     if product_type not in valid_product_types:
         raise HTTPException(
             status_code=400,

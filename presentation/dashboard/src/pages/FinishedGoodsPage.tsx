@@ -25,8 +25,9 @@ const PER_PAGE = 50;
 const PRODUCT_TYPE_TABS = [
   { value: '', label: 'All' },
   { value: 'tile', label: 'Tiles' },
-  { value: 'sink', label: 'Sinks' },
   { value: 'countertop', label: 'Countertop' },
+  { value: 'sink', label: 'Sinks' },
+  { value: '3d', label: '3D Product' },
   { value: 'custom', label: 'Custom' },
 ] as const;
 

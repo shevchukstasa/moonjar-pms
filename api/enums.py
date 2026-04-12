@@ -197,11 +197,11 @@ class DefectOutcome(str, Enum):
 
 class ProductType(str, Enum):
     TILE = 'tile'
-    TABLE_TOP = 'table_top'
+    COUNTERTOP = 'countertop'
     SINK = 'sink'
-    COUNTERTOP = 'countertop'  # legacy alias for table_top
     _3D = '3d'
     CUSTOM = 'custom'
+    # NOTE: 'table_top' is normalized to 'countertop' on import (orders.py, integration.py)
 
 class ShapeType(str, Enum):
     RECTANGLE = 'rectangle'

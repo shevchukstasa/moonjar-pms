@@ -9,7 +9,7 @@ import {
   type KilnItem,
 } from '@/hooks/useKilns';
 
-const PRODUCT_TYPES = ['tile', 'countertop', 'sink', '3d'];
+const PRODUCT_TYPES = ['tile', 'countertop', 'sink', '3d', 'custom'];
 
 // Default constants (match business/kiln/constants.py + kiln_constants table)
 const DEFAULTS = {

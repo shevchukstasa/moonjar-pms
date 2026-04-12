@@ -208,6 +208,7 @@ export const ProductType = {
   COUNTERTOP: 'countertop',
   SINK: 'sink',
   _3D: '3d',
+  CUSTOM: 'custom',
 } as const;
 export type ProductTypeType = (typeof ProductType)[keyof typeof ProductType];
 

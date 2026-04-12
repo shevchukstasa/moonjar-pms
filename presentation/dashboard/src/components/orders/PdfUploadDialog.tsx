@@ -22,7 +22,8 @@ const PRODUCT_TYPES = [
   { value: 'tile', label: 'Tile' },
   { value: 'countertop', label: 'Countertop' },
   { value: 'sink', label: 'Sink' },
-  { value: '3d', label: '3D' },
+  { value: '3d', label: '3D Product' },
+  { value: 'custom', label: 'Custom' },
 ];
 
 /** Returns a Tailwind ring class based on field confidence value */

@@ -23,7 +23,6 @@ const SHAPE_OPTIONS = ['rectangle', 'square', 'round', 'freeform', 'triangle', '
 const PRODUCT_TYPE_OPTIONS = [
   { value: 'tile', label: 'Tile' },
   { value: 'countertop', label: 'Countertop' },
-  { value: 'table_top', label: 'Table Top' },
   { value: 'sink', label: 'Sink' },
   { value: '3d', label: '3D Product' },
   { value: 'custom', label: 'Custom' },

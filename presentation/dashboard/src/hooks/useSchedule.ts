@@ -85,6 +85,14 @@ export function useAssignBatchPositions() {
   });
 }
 
+export function useProductionSchedule(factoryId?: string | null, days = 7) {
+  return useQuery({
+    queryKey: ['schedule', 'production', factoryId, days],
+    queryFn: () => scheduleApi.productionSchedule({ factory_id: factoryId!, days }),
+    enabled: !!factoryId,
+  });
+}
+
 export function useAutoFormBatches() {
   const qc = useQueryClient();
   return useMutation({

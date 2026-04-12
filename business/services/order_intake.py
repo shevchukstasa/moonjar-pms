@@ -412,6 +412,19 @@ def process_incoming_order(
     except Exception as e:
         logger.warning(f"Failed to notify PM: {e}")
 
+    # 12. Auto-reorder check: detect low stock after reservation and create purchase requests
+    try:
+        from business.services.auto_reorder import check_and_create_reorders
+        reorder_result = check_and_create_reorders(db, factory_id)
+        if reorder_result.get("created", 0) > 0:
+            db.commit()
+            logger.info(
+                "Auto-reorder after order %s: %d purchase requests created",
+                order.order_number, reorder_result["created"],
+            )
+    except Exception as e:
+        logger.warning("Auto-reorder check failed after order %s: %s", order.order_number, e)
+
     result = {
         "status": "created",
         "order_id": str(order.id),

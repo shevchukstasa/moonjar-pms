@@ -16,8 +16,10 @@ import { FactorySelector } from '@/components/layout/FactorySelector';
 import apiClient from '@/api/client';
 import { formatEdgeProfile, formatShape } from '@/components/tablo/PositionRow';
 import { QualityCheckDialog } from '@/components/quality/QualityCheckDialog';
+import DailyProductionView from '@/components/schedule/DailyProductionView';
 
 const SECTION_TABS = [
+  { id: 'daily', label: '📅 Daily Plan' },
   { id: 'glazing', label: 'Glazing' },
   { id: 'firing', label: 'Firing' },
   { id: 'sorting', label: 'Sorting' },
@@ -30,7 +32,7 @@ export default function ManagerSchedulePage() {
   const queryClient = useQueryClient();
   const activeFactoryId = useUiStore((s) => s.activeFactoryId);
   const currentUser = useCurrentUser();
-  const [tab, setTab] = useState('glazing');
+  const [tab, setTab] = useState('daily');
   const [canDeletePositions, setCanDeletePositions] = useState(false);
   // Map factory_id → whether cleanup is allowed (used when "All Factories" selected)
   const [deleteFactoryMap, setDeleteFactoryMap] = useState<Record<string, boolean>>({});
@@ -553,7 +555,9 @@ export default function ManagerSchedulePage() {
       )}
 
       {/* Content */}
-      {isLoading ? (
+      {tab === 'daily' ? (
+        <DailyProductionView factoryId={activeFactoryId} />
+      ) : isLoading ? (
         <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>
       ) : tab === 'kilns' ? (
         /* Kilns tab */

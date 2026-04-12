@@ -40,4 +40,7 @@ export const scheduleApi = {
 
   autoFormBatches: (data: { factory_id: string; target_date?: string; mode?: string }) =>
     apiClient.post('/batches/auto-form', data).then((r) => r.data),
+
+  productionSchedule: (params: { factory_id: string; days?: number }) =>
+    apiClient.get('/schedule/production-schedule', { params }).then((r) => r.data),
 };

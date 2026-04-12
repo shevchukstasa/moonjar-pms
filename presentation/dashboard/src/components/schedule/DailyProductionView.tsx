@@ -54,17 +54,17 @@ interface DayData {
 }
 
 const SECTION_CONFIG = [
-  { key: 'glazing' as const, label: 'Глазуровка', color: 'bg-blue-500', lightBg: 'bg-blue-50', border: 'border-blue-200' },
-  { key: 'kiln_loading' as const, label: 'Загрузка печи', color: 'bg-orange-500', lightBg: 'bg-orange-50', border: 'border-orange-200' },
-  { key: 'firing' as const, label: 'Обжиг', color: 'bg-red-500', lightBg: 'bg-red-50', border: 'border-red-200' },
-  { key: 'cooling' as const, label: 'Охлаждение', color: 'bg-amber-500', lightBg: 'bg-amber-50', border: 'border-amber-200' },
-  { key: 'sorting' as const, label: 'Сортировка', color: 'bg-green-500', lightBg: 'bg-green-50', border: 'border-green-200' },
+  { key: 'glazing' as const, label: 'Glazing', color: 'bg-blue-500', lightBg: 'bg-blue-50', border: 'border-blue-200' },
+  { key: 'kiln_loading' as const, label: 'Kiln Loading', color: 'bg-orange-500', lightBg: 'bg-orange-50', border: 'border-orange-200' },
+  { key: 'firing' as const, label: 'Firing', color: 'bg-red-500', lightBg: 'bg-red-50', border: 'border-red-200' },
+  { key: 'cooling' as const, label: 'Cooling', color: 'bg-amber-500', lightBg: 'bg-amber-50', border: 'border-amber-200' },
+  { key: 'sorting' as const, label: 'Sorting', color: 'bg-green-500', lightBg: 'bg-green-50', border: 'border-green-200' },
   { key: 'qc' as const, label: 'QC', color: 'bg-purple-500', lightBg: 'bg-purple-50', border: 'border-purple-200' },
 ];
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
 }
 
 function isToday(dateStr: string): boolean {
@@ -121,7 +121,7 @@ function BatchCard({ item }: { item: BatchItem }) {
     <div className="flex items-center gap-2 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs shadow-sm">
       <div className="min-w-0 flex-1">
         <span className="font-semibold text-gray-900">{item.kiln_name || 'Kiln'}</span>
-        <div className="text-[10px] text-gray-500">{item.positions_count || 0} позиций</div>
+        <div className="text-[10px] text-gray-500">{item.positions_count || 0} positions</div>
       </div>
       <div className="text-right shrink-0">
         {item.total_sqm ? (
@@ -157,7 +157,7 @@ function DayColumn({ day }: { day: DayData }) {
           </div>
           {today && (
             <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold">
-              СЕГОДНЯ
+              TODAY
             </span>
           )}
           {day.holiday_name && (
@@ -168,7 +168,7 @@ function DayColumn({ day }: { day: DayData }) {
         </div>
         {!empty && (
           <div className={`text-[10px] mt-0.5 ${today ? 'text-blue-100' : 'text-gray-400'}`}>
-            {day.metrics.total_positions} поз. · {day.metrics.total_sqm} m² · {day.metrics.batches_count} обжиг.
+            {day.metrics.total_positions} pos. · {day.metrics.total_sqm} m² · {day.metrics.batches_count} firings
           </div>
         )}
       </div>
@@ -177,7 +177,7 @@ function DayColumn({ day }: { day: DayData }) {
       <div className="p-2 space-y-2 max-h-[600px] overflow-y-auto">
         {empty ? (
           <div className="py-8 text-center text-xs text-gray-400">
-            {day.is_working_day ? 'Нет запланированных работ' : 'Выходной'}
+            {day.is_working_day ? 'No scheduled work' : 'Day off'}
           </div>
         ) : (
           SECTION_CONFIG.map((sec) => {
@@ -232,7 +232,7 @@ export default function DailyProductionView({ factoryId }: Props) {
   if (!factoryId) {
     return (
       <div className="py-12 text-center text-sm text-gray-500">
-        Выберите фабрику для отображения графика производства
+        Select a factory to view the production schedule
       </div>
     );
   }
@@ -248,7 +248,7 @@ export default function DailyProductionView({ factoryId }: Props) {
   if (isError) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center text-sm text-red-700">
-        Ошибка загрузки графика производства
+        Error loading production schedule
       </div>
     );
   }
@@ -272,7 +272,7 @@ export default function DailyProductionView({ factoryId }: Props) {
       {/* Controls */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-gray-700">Горизонт:</h3>
+          <h3 className="text-sm font-semibold text-gray-700">Horizon:</h3>
           {[3, 7, 14].map((d) => (
             <button
               key={d}
@@ -283,15 +283,15 @@ export default function DailyProductionView({ factoryId }: Props) {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              {d} дней
+              {d} days
             </button>
           ))}
         </div>
         {summary && (
           <div className="flex items-center gap-4 text-xs text-gray-500">
-            <span>{summary.total_positions_scheduled} позиций запланировано</span>
-            <span>{summary.total_batches} обжигов</span>
-            <span>{summary.days_with_work} рабочих дней</span>
+            <span>{summary.total_positions_scheduled} positions scheduled</span>
+            <span>{summary.total_batches} firings</span>
+            <span>{summary.days_with_work} working days</span>
           </div>
         )}
       </div>
@@ -299,13 +299,13 @@ export default function DailyProductionView({ factoryId }: Props) {
       {/* Warnings */}
       {warnings.length > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-          <div className="text-xs font-semibold text-amber-800 mb-1">⚠ Предупреждения</div>
+          <div className="text-xs font-semibold text-amber-800 mb-1">⚠ Warnings</div>
           <div className="space-y-0.5">
             {warnings.slice(0, 5).map((w, i) => (
               <div key={i} className="text-xs text-amber-700">{w}</div>
             ))}
             {warnings.length > 5 && (
-              <div className="text-xs text-amber-500">... ещё {warnings.length - 5}</div>
+              <div className="text-xs text-amber-500">... and {warnings.length - 5} more</div>
             )}
           </div>
         </div>

@@ -2,6 +2,7 @@ import apiClient from './client';
 
 export interface FiringProfile {
   id: string;
+  factory_id: string;
   name: string;
   temperature_group_id: string | null;
   temperature_group_name: string | null;
@@ -19,6 +20,7 @@ export interface FiringProfile {
 
 export interface FiringProfileForm {
   name: string;
+  factory_id: string;
   temperature_group_id?: string | null;
   typology_id?: string | null;
   target_temperature?: number;

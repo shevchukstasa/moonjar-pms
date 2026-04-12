@@ -740,6 +740,7 @@ class IpAllowlistCreate(BaseModel):
 
 class FiringProfileCreate(BaseModel):
     name: str
+    factory_id: UUID  # required — profiles are factory-scoped
     temperature_group_id: Optional[UUID] = None
     typology_id: Optional[UUID] = None
     product_type: Optional[str] = None
@@ -755,6 +756,7 @@ class FiringProfileCreate(BaseModel):
 
 class FiringProfileUpdate(BaseModel):
     name: Optional[str] = None
+    factory_id: Optional[UUID] = None
     temperature_group_id: Optional[UUID] = None
     typology_id: Optional[UUID] = None
     product_type: Optional[str] = None
@@ -771,6 +773,7 @@ class FiringProfileUpdate(BaseModel):
 
 class FiringProfileResponse(BaseModel):
     id: UUID
+    factory_id: UUID
     name: str
     temperature_group_id: Optional[UUID] = None
     temperature_group_name: Optional[str] = None

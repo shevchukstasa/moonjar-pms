@@ -36,8 +36,14 @@ interface TempStage {
   rate: number; // °C/h
 }
 
+interface Factory {
+  id: string;
+  name: string;
+}
+
 interface ProfileForm {
   name: string;
+  factory_id: string;
   temperature_group_id: string;
   typology_id: string;
   total_duration_hours: string;
@@ -48,6 +54,7 @@ interface ProfileForm {
 
 const emptyForm: ProfileForm = {
   name: '',
+  factory_id: '',
   temperature_group_id: '',
   typology_id: '',
   total_duration_hours: '',
@@ -253,12 +260,21 @@ export default function AdminFiringProfilesPage() {
     }),
   });
 
+  const { data: factoriesRaw } = useQuery<Factory[]>({
+    queryKey: ['factories'],
+    queryFn: () => apiClient.get('/factories').then((r) => {
+      const d = r.data;
+      return Array.isArray(d) ? d : (d?.items ?? []);
+    }),
+  });
+
   const { data: typologiesRaw } = useQuery<Typology[]>({
     queryKey: ['tps-typologies-all'],
     queryFn: () => apiClient.get('/tps/typologies').then((r) => r.data?.items ?? []),
   });
 
   const items = data?.items ?? [];
+  const factories = factoriesRaw ?? [];
   const tempGroups = tempGroupsRaw ?? [];
   const typologies = typologiesRaw ?? [];
 
@@ -323,6 +339,7 @@ export default function AdminFiringProfilesPage() {
     setEditItem(item);
     setForm({
       name: item.name,
+      factory_id: item.factory_id ?? '',
       temperature_group_id: item.temperature_group_id ?? '',
       typology_id: item.typology_id ?? '',
       total_duration_hours:
@@ -345,6 +362,7 @@ export default function AdminFiringProfilesPage() {
       : (form.total_duration_hours ? parseFloat(form.total_duration_hours) : null);
     const payload: Record<string, unknown> = {
       name: form.name,
+      factory_id: form.factory_id || null,
       temperature_group_id: form.temperature_group_id || null,
       typology_id: form.typology_id || null,
       target_temperature: maxTemp || null,
@@ -510,12 +528,30 @@ export default function AdminFiringProfilesPage() {
         className="w-full max-w-2xl"
       >
         <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
-          <Input
-            label="Name"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-            required
-          />
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Name"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              required
+            />
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Factory
+              </label>
+              <select
+                value={form.factory_id}
+                onChange={(e) => setForm({ ...form, factory_id: e.target.value })}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                required
+              >
+                <option value="">-- Select factory --</option>
+                {factories.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
 
           <div className="grid grid-cols-2 gap-4">
             {/* Temperature Group selector */}
@@ -658,7 +694,7 @@ export default function AdminFiringProfilesPage() {
             <Button variant="secondary" onClick={closeDialog}>
               Cancel
             </Button>
-            <Button onClick={handleSubmit} disabled={!form.name || saving}>
+            <Button onClick={handleSubmit} disabled={!form.name || !form.factory_id || saving}>
               {saving ? 'Saving...' : editItem ? 'Update' : 'Create'}
             </Button>
           </div>

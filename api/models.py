@@ -2186,6 +2186,11 @@ class FiringProfile(Base):
     __tablename__ = 'firing_profiles'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('factories.id', ondelete='CASCADE'),
+        nullable=False,
+    )
     name = Column(sa.String(200), nullable=False)
     temperature_group_id = Column(
         UUID(as_uuid=True),
@@ -2210,6 +2215,7 @@ class FiringProfile(Base):
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
+    factory = relationship('Factory', foreign_keys=[factory_id])
     temperature_group = relationship('FiringTemperatureGroup', foreign_keys=[temperature_group_id])
     typology = relationship('KilnLoadingTypology', foreign_keys=[typology_id])
 

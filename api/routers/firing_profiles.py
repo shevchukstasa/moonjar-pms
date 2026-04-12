@@ -37,6 +37,7 @@ async def list_firing_profiles(
     product_type: str | None = None,
     collection: str | None = None,
     is_active: bool | None = None,
+    factory_id: UUID | None = None,
     temperature_group_id: UUID | None = None,
     typology_id: UUID | None = None,
     db: Session = Depends(get_db),
@@ -46,6 +47,8 @@ async def list_firing_profiles(
         joinedload(FiringProfile.temperature_group),
         joinedload(FiringProfile.typology),
     )
+    if factory_id is not None:
+        query = query.filter(FiringProfile.factory_id == factory_id)
     if product_type is not None:
         query = query.filter(FiringProfile.product_type == product_type)
     if collection is not None:

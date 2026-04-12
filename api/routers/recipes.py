@@ -572,10 +572,24 @@ async def create_recipes_item(
         from datetime import datetime, timezone
         import uuid as uuid_mod
 
-        matching = db.query(OrderPosition).filter(
-            OrderPosition.status == PositionStatus.AWAITING_RECIPE.value,
-            func.lower(func.trim(OrderPosition.color)) == func.lower(item.name.strip()),
-        ).all()
+        # Match by exact name OR by custom code (e.g. recipe "Custom K6 Red Terracotta"
+        # should match positions with color "Custom K6", "Custom K6 Exclusive", etc.)
+        import re as _re
+        _recipe_name_lower = item.name.strip().lower()
+        _custom_code_match = _re.match(r'^custom\s+([a-z]\d+)', _recipe_name_lower, _re.IGNORECASE)
+
+        if _custom_code_match:
+            _code = _custom_code_match.group(1).lower()  # e.g. "k6"
+            # Match positions whose color starts with "Custom {code}" (case-insensitive)
+            matching = db.query(OrderPosition).filter(
+                OrderPosition.status == PositionStatus.AWAITING_RECIPE.value,
+                func.lower(func.trim(OrderPosition.color)).like(f"custom {_code}%"),
+            ).all()
+        else:
+            matching = db.query(OrderPosition).filter(
+                OrderPosition.status == PositionStatus.AWAITING_RECIPE.value,
+                func.lower(func.trim(OrderPosition.color)) == _recipe_name_lower,
+            ).all()
 
         if matching:
             now = datetime.now(timezone.utc)

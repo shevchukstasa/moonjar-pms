@@ -1380,6 +1380,36 @@ def _find_recipe(db: Session, item: ProductionOrderItem) -> Optional[Recipe]:
             )
             return recipe
 
+    # ── Custom code matching: "Custom K6 Exclusive" → matches "Custom K6 Red Terracotta" ──
+    # Extract pattern: "custom" + alphanumeric code (K6, F13, B2, etc.)
+    custom_match = re.match(
+        r'^custom\s+([A-Za-z]\d+)',
+        color_stripped,
+        re.IGNORECASE,
+    )
+    if custom_match:
+        custom_code = custom_match.group(1).upper()  # e.g. "K6"
+        # Find recipes whose name starts with "Custom {code}"
+        pattern = f"custom {custom_code.lower()}"
+        candidates = db.query(Recipe).filter(
+            Recipe.is_active.is_(True),
+            func.lower(Recipe.name).like(f"{pattern}%"),
+        ).all()
+        if len(candidates) == 1:
+            log.info(
+                "Recipe matched (custom code): '%s' → '%s' (code=%s, id=%s)",
+                color_stripped, candidates[0].name, custom_code, candidates[0].id,
+            )
+            return candidates[0]
+        if len(candidates) > 1:
+            # Multiple recipes with same custom code — pick first (usually only one)
+            log.info(
+                "Recipe matched (custom code, first of %d): '%s' → '%s' (code=%s)",
+                len(candidates), color_stripped, candidates[0].name, custom_code,
+            )
+            return candidates[0]
+        log.debug("No custom code recipe match for code=%s", custom_code)
+
     # ── Also try if recipe name contains the color (partial match) ──
     recipe = db.query(Recipe).filter(
         Recipe.is_active.is_(True),
@@ -1391,6 +1421,18 @@ def _find_recipe(db: Session, item: ProductionOrderItem) -> Optional[Recipe]:
             color_stripped, recipe.name, recipe.id,
         )
         return recipe
+
+    # ── Reverse partial: color contains recipe name ──
+    # e.g. color="Custom K6 Exclusive Green" contains recipe "Custom K6"
+    all_recipes = db.query(Recipe).filter(Recipe.is_active.is_(True)).all()
+    for r in all_recipes:
+        rname = r.name.strip().lower()
+        if rname and len(rname) >= 3 and rname in color_stripped.lower():
+            log.info(
+                "Recipe matched (reverse contains): '%s' → '%s' (id=%s)",
+                color_stripped, r.name, r.id,
+            )
+            return r
 
     log.warning(
         "No recipe found for item color='%s' (collection='%s')",

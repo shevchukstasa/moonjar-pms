@@ -114,17 +114,20 @@ export default function SizeResolutionPage() {
           data: { size_id: selectedSizeId },
         });
       } else {
-        if (!newName || !newWidth || !newHeight) {
-          setError('Name, width and height are required');
+        const isRound = newShape === 'round';
+        if (!newName || !newWidth || (!isRound && !newHeight)) {
+          setError(isRound ? 'Name and diameter are required' : 'Name, width and height are required');
           return;
         }
+        const w = parseInt(newWidth, 10);
+        const h = isRound ? w : parseInt(newHeight, 10);
         result = await resolveMutation.mutateAsync({
           id: taskId,
           data: {
             create_new_size: true,
             new_size_name: newName,
-            new_size_width_mm: parseInt(newWidth, 10),
-            new_size_height_mm: parseInt(newHeight, 10),
+            new_size_width_mm: w,
+            new_size_height_mm: h,
             new_size_thickness_mm: newThickness ? parseInt(newThickness, 10) : undefined,
             new_size_shape: newShape,
           },
@@ -356,29 +359,6 @@ export default function SizeResolutionPage() {
                     required
                   />
                 </div>
-                <Input
-                  label="Width (mm)"
-                  type="number"
-                  value={newWidth}
-                  onChange={(e) => setNewWidth(e.target.value)}
-                  placeholder="e.g. 300"
-                  required
-                />
-                <Input
-                  label="Height (mm)"
-                  type="number"
-                  value={newHeight}
-                  onChange={(e) => setNewHeight(e.target.value)}
-                  placeholder="e.g. 600"
-                  required
-                />
-                <Input
-                  label="Thickness (mm)"
-                  type="number"
-                  value={newThickness}
-                  onChange={(e) => setNewThickness(e.target.value)}
-                  placeholder="e.g. 11"
-                />
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700">Shape</label>
                   <select
@@ -393,6 +373,55 @@ export default function SizeResolutionPage() {
                     ))}
                   </select>
                 </div>
+                <Input
+                  label="Thickness (mm)"
+                  type="number"
+                  value={newThickness}
+                  onChange={(e) => setNewThickness(e.target.value)}
+                  placeholder="e.g. 11"
+                />
+                {newShape === 'round' ? (
+                  <div className="col-span-2">
+                    <Input
+                      label="Diameter (mm)"
+                      type="number"
+                      value={newWidth}
+                      onChange={(e) => { setNewWidth(e.target.value); setNewHeight(e.target.value); }}
+                      placeholder="e.g. 292"
+                      required
+                    />
+                  </div>
+                ) : newShape === 'square' ? (
+                  <div className="col-span-2">
+                    <Input
+                      label="Side (mm)"
+                      type="number"
+                      value={newWidth}
+                      onChange={(e) => { setNewWidth(e.target.value); setNewHeight(e.target.value); }}
+                      placeholder="e.g. 200"
+                      required
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <Input
+                      label="Width (mm)"
+                      type="number"
+                      value={newWidth}
+                      onChange={(e) => setNewWidth(e.target.value)}
+                      placeholder="e.g. 300"
+                      required
+                    />
+                    <Input
+                      label="Height (mm)"
+                      type="number"
+                      value={newHeight}
+                      onChange={(e) => setNewHeight(e.target.value)}
+                      placeholder="e.g. 600"
+                      required
+                    />
+                  </>
+                )}
               </div>
             </Card>
           )}

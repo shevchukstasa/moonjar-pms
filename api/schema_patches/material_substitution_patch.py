@@ -43,10 +43,10 @@ STATEMENTS = [
 ]
 
 
-def run(engine):
-    with engine.begin() as conn:
-        for stmt in STATEMENTS:
-            try:
-                conn.execute(text(stmt))
-            except Exception as e:
-                logger.warning("material_substitution_patch: %s — %s", stmt[:60], e)
+def run(conn):
+    """Apply schema patch using the provided connection."""
+    for stmt in STATEMENTS:
+        try:
+            conn.execute(text(stmt))
+        except Exception as e:
+            logger.warning("material_substitution_patch: %s — %s", stmt[:60], e)

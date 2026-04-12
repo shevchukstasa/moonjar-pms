@@ -46,7 +46,7 @@ def find_substitutes(db: Session, material_id: UUID) -> list[dict]:
         .all()
     )
     for row in rows_a:
-        mat = db.query(Material).get(row.material_b_id)
+        mat = db.query(Material).filter(Material.id == row.material_b_id).first()
         if mat:
             results.append({
                 "substitute_id": row.material_b_id,
@@ -65,7 +65,7 @@ def find_substitutes(db: Session, material_id: UUID) -> list[dict]:
         .all()
     )
     for row in rows_b:
-        mat = db.query(Material).get(row.material_a_id)
+        mat = db.query(Material).filter(Material.id == row.material_a_id).first()
         if mat:
             # Reverse ratio: 1 unit B → (1/ratio) units A
             inverse = (Decimal("1") / Decimal(str(row.ratio))).quantize(Decimal("0.0001"))

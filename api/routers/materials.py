@@ -1095,8 +1095,8 @@ def list_substitutions(
     )
     results = []
     for r in rows:
-        mat_a = db.query(Material).get(r.material_a_id)
-        mat_b = db.query(Material).get(r.material_b_id)
+        mat_a = db.query(Material).filter(Material.id == r.material_a_id).first()
+        mat_b = db.query(Material).filter(Material.id == r.material_b_id).first()
         results.append({
             "id": str(r.id),
             "material_a_id": str(r.material_a_id),

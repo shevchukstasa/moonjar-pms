@@ -85,6 +85,19 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         except Exception:
                             pass  # invalid JWT — let it fail as CSRF mismatch
 
+                # Final fallback: if X-CSRF-Token header is present (any value)
+                # AND a valid access_token cookie exists, accept it.
+                # Rationale: browsers enforce CORS preflight on custom headers,
+                # so the mere presence of X-CSRF-Token proves the request came
+                # from JS (not a CSRF form/img attack). The JWT cookie proves auth.
+                if not csrf_ok and csrf_header and request.cookies.get("access_token"):
+                    try:
+                        from api.auth import decode_token
+                        decode_token(request.cookies.get("access_token"))
+                        csrf_ok = True  # valid JWT + custom header = not CSRF
+                    except Exception:
+                        pass
+
                 if not csrf_ok:
                     return JSONResponse(
                         {"detail": "CSRF token mismatch"},

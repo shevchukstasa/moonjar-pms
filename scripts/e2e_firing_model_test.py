@@ -93,7 +93,7 @@ def get_factory_id(session: requests.Session) -> str:
     return items[0]["id"]
 
 
-def get_first_kiln(session: requests.Session, factory_id: str | None = None) -> dict:
+def get_first_kiln(session: requests.Session, factory_id: str = None) -> dict:
     """Get first active kiln, optionally for a specific factory."""
     params = {}
     if factory_id:
@@ -524,8 +524,15 @@ def main():
     try:
         factory_id = get_factory_id(session)
         ok(f"Factory: {factory_id[:8]}")
-        kiln = get_first_kiln(session, factory_id)
+        # Use a kiln that's actually active with resource_type=kiln
+        # (some factories may have inactive or untyped kilns)
+        kiln = get_first_kiln(session)  # across all factories
         kiln_id = kiln["id"]
+        # Override factory_id to match the kiln's factory
+        kiln_factory_id = kiln.get("factory_id", factory_id)
+        if kiln_factory_id:
+            factory_id = kiln_factory_id
+            ok(f"Factory (matched to kiln): {factory_id[:8]}")
         ok(f"Kiln: {kiln.get('name', '?')} ({kiln_id[:8]})")
         recipe = get_first_recipe(session)
         recipe_id = recipe["id"]

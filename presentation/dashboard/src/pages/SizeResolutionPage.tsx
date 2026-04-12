@@ -20,6 +20,38 @@ interface SizeOption {
 
 const SHAPE_OPTIONS = ['rectangle', 'square', 'round', 'freeform', 'triangle', 'octagon'];
 
+const PRODUCT_TYPE_OPTIONS = [
+  { value: 'tile', label: 'Tile' },
+  { value: 'countertop', label: 'Countertop' },
+  { value: 'table_top', label: 'Table Top' },
+  { value: 'sink', label: 'Sink' },
+  { value: '3d', label: '3D Product' },
+  { value: 'custom', label: 'Custom' },
+];
+
+/** Auto-generate a human-readable size name from parts */
+function generateSizeName(
+  productType: string,
+  shape: string,
+  widthMm: string,
+  heightMm: string,
+): string {
+  const typeLabel = PRODUCT_TYPE_OPTIONS.find((t) => t.value === productType)?.label || productType;
+  const w = parseInt(widthMm, 10);
+  const h = parseInt(heightMm, 10);
+
+  let dims = '';
+  if (shape === 'round' && w) {
+    dims = `D${(w / 10).toFixed(1).replace(/\.0$/, '')}`;
+  } else if (shape === 'square' && w) {
+    dims = `${(w / 10).toFixed(1).replace(/\.0$/, '')}x${(w / 10).toFixed(1).replace(/\.0$/, '')}`;
+  } else if (w && h) {
+    dims = `${(w / 10).toFixed(1).replace(/\.0$/, '')}x${(h / 10).toFixed(1).replace(/\.0$/, '')}`;
+  }
+
+  return `Lavastone ${typeLabel}${dims ? ' ' + dims : ''}`.trim();
+}
+
 export default function SizeResolutionPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
@@ -34,11 +66,17 @@ export default function SizeResolutionPage() {
   const [glazingBoard, setGlazingBoard] = useState<GlazingBoardInfo & { task_created?: boolean } | null>(null);
 
   // New size form
-  const [newName, setNewName] = useState('');
+  const [newProductType, setNewProductType] = useState('tile');
   const [newWidth, setNewWidth] = useState('');
   const [newHeight, setNewHeight] = useState('');
   const [newThickness, setNewThickness] = useState('');
   const [newShape, setNewShape] = useState('rectangle');
+  const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
+
+  // Auto-generated name (user can override)
+  const autoName = generateSizeName(newProductType, newShape, newWidth, newHeight);
+  const [manualName, setManualName] = useState('');
+  const newName = nameManuallyEdited ? manualName : autoName;
 
   // Fetch all sizes for the list
   const { data: sizesData } = useQuery<{ items: SizeOption[]; total: number }>({
@@ -350,20 +388,27 @@ export default function SizeResolutionPage() {
                 Create New Size
               </h2>
               <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <Input
-                    label="Name"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    placeholder="e.g. 30x60"
-                    required
-                  />
+                {/* Product Type */}
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Product Type</label>
+                  <select
+                    value={newProductType}
+                    onChange={(e) => { setNewProductType(e.target.value); setNameManuallyEdited(false); }}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  >
+                    {PRODUCT_TYPE_OPTIONS.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
+                {/* Shape */}
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700">Shape</label>
                   <select
                     value={newShape}
-                    onChange={(e) => setNewShape(e.target.value)}
+                    onChange={(e) => { setNewShape(e.target.value); setNameManuallyEdited(false); }}
                     className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
                   >
                     {SHAPE_OPTIONS.map((s) => (
@@ -386,7 +431,7 @@ export default function SizeResolutionPage() {
                       label="Diameter (mm)"
                       type="number"
                       value={newWidth}
-                      onChange={(e) => { setNewWidth(e.target.value); setNewHeight(e.target.value); }}
+                      onChange={(e) => { setNewWidth(e.target.value); setNewHeight(e.target.value); setNameManuallyEdited(false); }}
                       placeholder="e.g. 292"
                       required
                     />
@@ -397,7 +442,7 @@ export default function SizeResolutionPage() {
                       label="Side (mm)"
                       type="number"
                       value={newWidth}
-                      onChange={(e) => { setNewWidth(e.target.value); setNewHeight(e.target.value); }}
+                      onChange={(e) => { setNewWidth(e.target.value); setNewHeight(e.target.value); setNameManuallyEdited(false); }}
                       placeholder="e.g. 200"
                       required
                     />
@@ -408,7 +453,7 @@ export default function SizeResolutionPage() {
                       label="Width (mm)"
                       type="number"
                       value={newWidth}
-                      onChange={(e) => setNewWidth(e.target.value)}
+                      onChange={(e) => { setNewWidth(e.target.value); setNameManuallyEdited(false); }}
                       placeholder="e.g. 300"
                       required
                     />
@@ -416,12 +461,24 @@ export default function SizeResolutionPage() {
                       label="Height (mm)"
                       type="number"
                       value={newHeight}
-                      onChange={(e) => setNewHeight(e.target.value)}
+                      onChange={(e) => { setNewHeight(e.target.value); setNameManuallyEdited(false); }}
                       placeholder="e.g. 600"
                       required
                     />
                   </>
                 )}
+                {/* Auto-generated name (editable) */}
+                <div className="col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-gray-700">
+                    Name <span className="text-xs text-gray-400">(auto-generated, editable)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => { setManualName(e.target.value); setNameManuallyEdited(true); }}
+                    className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-800 focus:border-blue-500 focus:bg-white focus:outline-none"
+                  />
+                </div>
               </div>
             </Card>
           )}

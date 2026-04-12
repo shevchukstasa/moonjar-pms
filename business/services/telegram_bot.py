@@ -1106,6 +1106,12 @@ async def handle_update(db: Session, update_data: dict) -> None:
                 await _handle_recipe_verification_manual(db, msg_chat_id, text, rv_session)
                 return
 
+        # Check if this is a rejection reason for a pending auto-reorder
+        if text:
+            handled = await _check_reorder_reject_reply(db, message)
+            if handled:
+                return
+
         # Plain text in private chat — could be email for linking flow
         chat_type = message.get("chat", {}).get("type", "")
         if chat_type == "private" and text:
@@ -1581,6 +1587,15 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
         except Exception as e:
             logger.error("Recipe verify callback error for data=%s: %s", data, e, exc_info=True)
             await answer_callback_query(callback_id, msg("error_occurred", _cb_lang))
+        return
+
+    # Auto-reorder callbacks: "reorder:approve:<pr_id>", "reorder:reject:<pr_id>", "reorder:edit:<pr_id>"
+    if action == "reorder" and len(parts) >= 3:
+        try:
+            await _handle_reorder_callback(db, parts, callback_id, callback_query, telegram_user_id)
+        except Exception as e:
+            logger.error("Reorder callback error for data=%s: %s", data, e, exc_info=True)
+            await answer_callback_query(callback_id, "Ошибка обработки")
         return
 
     if action == "link_confirm":
@@ -4984,6 +4999,118 @@ _SCALE_WEIGHT_PROMPT = (
     '{"weight_grams": <number>, "confidence": "high"|"medium"|"low", "notes": "<any observations>"}\n\n'
     "If you cannot read the weight, return: {\"weight_grams\": null, \"confidence\": \"low\", \"notes\": \"reason\"}"
 )
+
+
+async def _handle_reorder_callback(
+    db: Session,
+    parts: list[str],
+    callback_id: str,
+    callback_query: dict,
+    telegram_user_id: int,
+) -> None:
+    """Handle auto-reorder PM actions from Telegram buttons.
+
+    Callback data formats:
+      reorder:approve:<pr_id>
+      reorder:reject:<pr_id>
+      reorder:edit:<pr_id>
+    """
+    from uuid import UUID as _UUID
+    from business.services.auto_reorder import (
+        approve_purchase_request,
+        reject_purchase_request,
+    )
+
+    sub_action = parts[1]  # approve / reject / edit
+    pr_id_str = parts[2]
+
+    user = _find_user_by_telegram(db, telegram_user_id)
+    if not user:
+        await answer_callback_query(callback_id, "Аккаунт не привязан")
+        return
+
+    pr_id = _UUID(pr_id_str)
+    cb_chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
+
+    if sub_action == "approve":
+        try:
+            approve_purchase_request(db, pr_id, user.id)
+            db.commit()
+            await answer_callback_query(callback_id, "✅ Заказ подтверждён")
+            if cb_chat_id:
+                await _send_message(
+                    cb_chat_id,
+                    "✅ *Заказ подтверждён* и отправлен в закупку.\n"
+                    "Закупщик получит уведомление.",
+                )
+        except ValueError as e:
+            await answer_callback_query(callback_id, str(e))
+
+    elif sub_action == "reject":
+        # Ask for reason — set a state for the next text message
+        await answer_callback_query(callback_id, "Введите причину отклонения")
+        if cb_chat_id:
+            # Store pending reject state in user session
+            if not hasattr(_handle_reorder_callback, '_pending_rejects'):
+                _handle_reorder_callback._pending_rejects = {}
+            _handle_reorder_callback._pending_rejects[telegram_user_id] = pr_id_str
+            await _send_message(
+                cb_chat_id,
+                "❌ Напишите причину отклонения заказа следующим сообщением:"
+            )
+
+    elif sub_action == "edit":
+        await answer_callback_query(callback_id, "Откройте заказ в системе для редактирования")
+        if cb_chat_id:
+            await _send_message(
+                cb_chat_id,
+                "✏️ Для изменения количеств откройте заявку в веб-интерфейсе:\n"
+                f"Заявка ID: `{pr_id_str[:8]}...`\n\n"
+                "Раздел: Материалы → Заявки на закупку",
+            )
+
+
+async def _check_reorder_reject_reply(db: Session, message: dict) -> bool:
+    """Check if this message is a rejection reason for a pending reorder.
+
+    Returns True if handled (caller should skip other processing).
+    """
+    from_user = message.get("from", {})
+    telegram_user_id = from_user.get("id")
+    chat_id = message["chat"]["id"]
+
+    if not hasattr(_handle_reorder_callback, '_pending_rejects'):
+        return False
+
+    pending = _handle_reorder_callback._pending_rejects.get(telegram_user_id)
+    if not pending:
+        return False
+
+    # This message is the rejection reason
+    reason = (message.get("text") or "").strip()
+    if not reason:
+        return False
+
+    from uuid import UUID as _UUID
+    from business.services.auto_reorder import reject_purchase_request
+
+    del _handle_reorder_callback._pending_rejects[telegram_user_id]
+
+    user = _find_user_by_telegram(db, telegram_user_id)
+    if not user:
+        return False
+
+    try:
+        reject_purchase_request(db, _UUID(pending), user.id, reason)
+        db.commit()
+        await _send_message(
+            chat_id,
+            f"❌ *Заказ отклонён*\nПричина: _{reason}_\n\nCEO уведомлён.",
+        )
+    except ValueError as e:
+        await _send_message(chat_id, f"Ошибка: {e}")
+
+    return True
 
 
 async def _handle_recipe_verify_callback(

@@ -1638,6 +1638,69 @@ async def create_purchase_request(
     }
 
 
+# ── Auto-Reorder PM Actions ──────────────────────────────────────────────
+
+class ReorderEditInput(BaseModel):
+    materials_json: list[dict]
+    notes: Optional[str] = None
+
+
+class ReorderRejectInput(BaseModel):
+    reason: str
+
+
+@router.post("/purchase-requests/{pr_id}/approve")
+async def approve_reorder(
+    pr_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """PM approves auto-reorder purchase request."""
+    from business.services.auto_reorder import approve_purchase_request
+    try:
+        result = approve_purchase_request(db, pr_id, current_user.id)
+        db.commit()
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/purchase-requests/{pr_id}/edit-approve")
+async def edit_and_approve_reorder(
+    pr_id: UUID,
+    data: ReorderEditInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """PM edits quantities and approves. CEO gets notification about changes."""
+    from business.services.auto_reorder import edit_purchase_request
+    try:
+        result = edit_purchase_request(
+            db, pr_id, current_user.id, data.materials_json, data.notes,
+        )
+        db.commit()
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/purchase-requests/{pr_id}/reject")
+async def reject_reorder(
+    pr_id: UUID,
+    data: ReorderRejectInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """PM rejects auto-reorder with reason. CEO gets notification."""
+    from business.services.auto_reorder import reject_purchase_request
+    try:
+        result = reject_purchase_request(db, pr_id, current_user.id, data.reason)
+        db.commit()
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 # ── Partial Delivery ────────────────────────────────────────────────────
 
 class PartialDeliveryItem(BaseModel):

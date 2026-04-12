@@ -162,13 +162,15 @@ async def daily_material_balance():
 
 
 async def daily_low_stock_alerts():
-    """Generate alerts for materials below min_balance."""
-    logger.info("Running low stock alert generation")
+    """Generate alerts for materials below min_balance and create auto-reorder requests."""
+    logger.info("Running low stock alert generation + auto-reorder")
     db = _get_db_session()
     try:
         from api.models import Material, MaterialStock, Notification, User, UserFactory
         from api.enums import NotificationType, UserRole
+        from business.services.auto_reorder import check_and_create_reorders
 
+        # 1. Create notifications (legacy behavior)
         low_stock = db.query(MaterialStock, Material).join(
             Material, MaterialStock.material_id == Material.id
         ).filter(
@@ -194,8 +196,21 @@ async def daily_low_stock_alerts():
                 )
                 db.add(notif)
 
+        # 2. Auto-reorder: create purchase requests + PM tasks
+        factory_ids = _get_all_factory_ids(db)
+        total_created = 0
+        for fid in factory_ids:
+            try:
+                result = check_and_create_reorders(db, fid)
+                total_created += result.get("created", 0)
+            except Exception as e:
+                logger.error("Auto-reorder failed for factory %s: %s", fid, e)
+
         db.commit()
-        logger.info("Low stock alerts: %d stocks flagged", len(low_stock))
+        logger.info(
+            "Low stock alerts: %d stocks flagged, %d auto-reorder PRs created",
+            len(low_stock), total_created,
+        )
     except Exception as e:
         logger.error("Low stock alerts failed: %s", e)
         db.rollback()

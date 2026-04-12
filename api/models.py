@@ -2582,6 +2582,35 @@ class MaterialDefectThreshold(Base):
     material = relationship('Material', foreign_keys=[material_id])
 
 
+class MaterialSubstitution(Base):
+    """Interchangeable material pairs with conversion ratio.
+
+    Example: 0.2g CMC = 1g Bentonite  →  ratio = 5.0
+    meaning: 1 unit of material_a = ratio units of material_b.
+
+    Used for:
+    - Auto-suggesting substitution when one material is out of stock
+    - Adjusted reservation/consumption calculations
+    - Cost comparison between alternatives
+    """
+    __tablename__ = 'material_substitutions'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    material_a_id = Column(UUID(as_uuid=True), ForeignKey('materials.id', ondelete='CASCADE'), nullable=False)
+    material_b_id = Column(UUID(as_uuid=True), ForeignKey('materials.id', ondelete='CASCADE'), nullable=False)
+    ratio = Column(sa.Numeric(10, 4), nullable=False)  # 1 unit of A = ratio units of B
+    notes = Column(sa.Text)
+    is_active = Column(sa.Boolean, nullable=False, default=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    __table_args__ = (
+        UniqueConstraint('material_a_id', 'material_b_id', name='uq_material_substitution_pair'),
+    )
+
+    material_a = relationship('Material', foreign_keys=[material_a_id])
+    material_b = relationship('Material', foreign_keys=[material_b_id])
+
+
 class EdgeHeightRule(Base):
     __tablename__ = 'edge_height_rules'
 

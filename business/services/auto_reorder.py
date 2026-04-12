@@ -73,13 +73,32 @@ def check_and_create_reorders(db: Session, factory_id: UUID) -> dict:
             if mid:
                 existing_pr_material_ids.add(mid)
 
-    # Group by supplier
+    # Group by supplier (skip materials covered by substitutes)
+    from business.services.material_substitution import check_substitution_available
+
     by_supplier: dict[str, list[tuple]] = {}
     skipped = 0
+    substitution_notes = []
     for stock, mat in low_stocks:
         if str(mat.id) in existing_pr_material_ids:
             skipped += 1
             continue
+
+        # Check if a substitute material covers the deficit
+        deficit = stock.min_balance - stock.balance
+        sub_info = check_substitution_available(db, mat.id, factory_id, deficit)
+        if sub_info and sub_info["sufficient"]:
+            skipped += 1
+            substitution_notes.append(
+                f"{mat.name} deficit covered by {sub_info['substitute_name']} "
+                f"(need {sub_info['substitute_needed_qty']:.1f}, have {sub_info['substitute_available']:.1f})"
+            )
+            logger.info(
+                "AUTO_REORDER | skipping %s — substitute %s has sufficient stock",
+                mat.name, sub_info["substitute_name"],
+            )
+            continue
+
         key = str(mat.supplier_id) if mat.supplier_id else "no_supplier"
         by_supplier.setdefault(key, []).append((stock, mat))
 
@@ -97,6 +116,16 @@ def check_and_create_reorders(db: Session, factory_id: UUID) -> dict:
                 if stock.avg_monthly_consumption:
                     quantity = max(deficit, float(stock.avg_monthly_consumption))
 
+            # Check for partial substitution info to show PM
+            sub_note = None
+            sub_info = check_substitution_available(db, mat.id, factory_id, stock.min_balance - stock.balance)
+            if sub_info and not sub_info["sufficient"]:
+                sub_note = (
+                    f"Partial substitute: {sub_info['substitute_name']} "
+                    f"(have {float(sub_info['substitute_available']):.1f}, "
+                    f"need {float(sub_info['substitute_needed_qty']):.1f})"
+                )
+
             materials_json.append({
                 "material_id": str(mat.id),
                 "name": mat.name,
@@ -104,6 +133,7 @@ def check_and_create_reorders(db: Session, factory_id: UUID) -> dict:
                 "unit": mat.unit or "pcs",
                 "current_balance": float(stock.balance),
                 "min_balance": float(stock.min_balance),
+                **({"substitution_note": sub_note} if sub_note else {}),
             })
 
         supplier_name = None
@@ -212,6 +242,13 @@ def _notify_pm_telegram(db: Session, factory_id: UUID, pr_info: dict) -> None:
         )
     if len(materials) > 5:
         lines.append(f"... ещё {len(materials) - 5}")
+
+    # Show substitution notes if any
+    sub_notes = [m.get("substitution_note") for m in materials if m.get("substitution_note")]
+    if sub_notes:
+        lines.append("\n🔄 *Возможные замены:*")
+        for note in sub_notes[:3]:
+            lines.append(f"  ↳ {note}")
 
     lines.append("\n⚡ *Действие обязательно:*")
 

@@ -21,7 +21,7 @@ from api.auth import get_current_user, apply_factory_filter
 from api.roles import require_management, require_admin
 from api.models import (
     Material, MaterialStock, MaterialTransaction,
-    MaterialPurchaseRequest, Supplier, User,
+    MaterialPurchaseRequest, MaterialSubstitution, Supplier, User,
     ConsumptionAdjustment, ShapeConsumptionCoefficient,
     OrderPosition, RecipeMaterial, KilnMaintenanceMaterial,
     InventoryReconciliationItem,
@@ -1778,3 +1778,124 @@ async def resolve_partial_delivery_deficit(
         raise HTTPException(400, str(e))
     except Exception as e:
         raise HTTPException(500, f"Failed to resolve partial delivery: {e}")
+
+
+# ──────────────────────────────────────────────────────────────
+# Material Substitutions
+# ──────────────────────────────────────────────────────────────
+
+
+class SubstitutionCreate(BaseModel):
+    material_a_id: str
+    material_b_id: str
+    ratio: float = Field(..., gt=0, description="1 unit of A = ratio units of B")
+    notes: str | None = None
+
+
+@router.get("/substitutions")
+def list_substitutions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all active material substitution pairs."""
+    from api.models import MaterialSubstitution
+    rows = (
+        db.query(MaterialSubstitution)
+        .filter(MaterialSubstitution.is_active.is_(True))
+        .all()
+    )
+    results = []
+    for r in rows:
+        mat_a = db.query(Material).get(r.material_a_id)
+        mat_b = db.query(Material).get(r.material_b_id)
+        results.append({
+            "id": str(r.id),
+            "material_a_id": str(r.material_a_id),
+            "material_a_name": mat_a.name if mat_a else None,
+            "material_b_id": str(r.material_b_id),
+            "material_b_name": mat_b.name if mat_b else None,
+            "ratio": float(r.ratio),
+            "notes": r.notes,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return results
+
+
+@router.post("/substitutions")
+def create_substitution(
+    data: SubstitutionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_management),
+):
+    """Create a new material substitution pair."""
+    from api.models import MaterialSubstitution
+    import uuid as _uuid
+
+    existing = (
+        db.query(MaterialSubstitution)
+        .filter(
+            MaterialSubstitution.material_a_id == data.material_a_id,
+            MaterialSubstitution.material_b_id == data.material_b_id,
+        )
+        .first()
+    )
+    if existing:
+        # Reactivate if deactivated
+        existing.is_active = True
+        existing.ratio = data.ratio
+        existing.notes = data.notes
+        db.commit()
+        return {"id": str(existing.id), "status": "reactivated"}
+
+    sub = MaterialSubstitution(
+        material_a_id=data.material_a_id,
+        material_b_id=data.material_b_id,
+        ratio=data.ratio,
+        notes=data.notes,
+    )
+    db.add(sub)
+    db.commit()
+    return {"id": str(sub.id), "status": "created"}
+
+
+@router.delete("/substitutions/{sub_id}")
+def delete_substitution(
+    sub_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_management),
+):
+    """Soft-delete a substitution pair."""
+    from api.models import MaterialSubstitution
+    sub = db.query(MaterialSubstitution).filter(MaterialSubstitution.id == sub_id).first()
+    if not sub:
+        raise HTTPException(404, "Substitution not found")
+    sub.is_active = False
+    db.commit()
+    return {"status": "deleted"}
+
+
+@router.get("/substitutions/check/{material_id}")
+def check_material_substitutes(
+    material_id: str,
+    factory_id: str = Query(...),
+    needed_qty: float = Query(0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Check available substitutes for a material at a factory."""
+    from business.services.material_substitution import get_combined_availability
+    result = get_combined_availability(db, material_id, factory_id)
+    return {
+        "material_balance": float(result["material_balance"]),
+        "substitutes": [
+            {
+                "id": str(s["id"]),
+                "name": s["name"],
+                "balance": float(s["balance"]),
+                "equivalent_in_original": float(s["equivalent"]),
+                "ratio": float(s["ratio"]),
+            }
+            for s in result["substitutes"]
+        ],
+        "total_equivalent": float(result["total_equivalent"]),
+    }

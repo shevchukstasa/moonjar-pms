@@ -1375,14 +1375,23 @@ async def update_material(
 
     mat.updated_at = datetime.now(timezone.utc)
 
-    # Update stock if factory_id provided and stock fields present
+    # Update stock if stock fields present
     stock = None
     stock_updates = {k: v for k, v in updates.items() if k in stock_fields}
     if stock_updates:
-        if factory_id:
+        # Resolve factory_id: explicit param → user's assigned factory → any stock
+        resolved_fid = factory_id
+        if not resolved_fid:
+            user_fids = [
+                uf.factory_id for uf in getattr(current_user, "user_factories", [])
+            ]
+            if user_fids:
+                resolved_fid = user_fids[0]
+
+        if resolved_fid:
             stock = db.query(MaterialStock).filter(
                 MaterialStock.material_id == material_id,
-                MaterialStock.factory_id == factory_id,
+                MaterialStock.factory_id == resolved_fid,
             ).first()
         else:
             stock = db.query(MaterialStock).filter(

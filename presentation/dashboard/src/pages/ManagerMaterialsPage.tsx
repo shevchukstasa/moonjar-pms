@@ -296,7 +296,7 @@ export default function ManagerMaterialsPage() {
         warehouse_section: form.warehouse_section || 'raw_materials',
       };
       try {
-        await updateMaterial.mutateAsync({ id: editDialog.item!.id, data: payload });
+        await updateMaterial.mutateAsync({ id: editDialog.item!.id, data: payload, factoryId: effectiveFactoryId || undefined });
         closeEdit();
       } catch (err: unknown) {
         const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -320,7 +320,7 @@ export default function ManagerMaterialsPage() {
       }
       try {
         if (isEditing) {
-          await updateMaterial.mutateAsync({ id: editDialog.item!.id, data: payload });
+          await updateMaterial.mutateAsync({ id: editDialog.item!.id, data: payload, factoryId: effectiveFactoryId || undefined });
         } else {
           await createMaterial.mutateAsync(payload);
         }

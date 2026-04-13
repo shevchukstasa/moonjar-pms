@@ -437,10 +437,20 @@ async def list_setpoints_for_group(
     if not group:
         raise HTTPException(404, "Temperature group not found")
 
-    # All kilns (optionally factory-scoped) with their CURRENT equipment config
+    # All kilns scoped to factory: explicit param → user's assigned factories → all
     kilns_q = db.query(Resource).filter(Resource.resource_type == 'kiln')
     if factory_id:
         kilns_q = kilns_q.filter(Resource.factory_id == factory_id)
+    else:
+        role_val = getattr(current_user, 'role', None)
+        if hasattr(role_val, 'value'):
+            role_val = role_val.value
+        if role_val not in ('owner', 'ceo', 'administrator'):
+            user_fids = [
+                uf.factory_id for uf in getattr(current_user, 'user_factories', [])
+            ]
+            if user_fids:
+                kilns_q = kilns_q.filter(Resource.factory_id.in_(user_fids))
     kilns = kilns_q.order_by(Resource.name).all()
 
     # Preload current configs in one query

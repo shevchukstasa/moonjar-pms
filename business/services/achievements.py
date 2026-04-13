@@ -226,9 +226,11 @@ def _measure_glazing_master(db: Session, user_id: UUID) -> int:
 
 
 def _measure_zero_defect_hero(db: Session, user_id: UUID) -> int:
-    """Count consecutive zero-defect days for user's factory.
+    """Count consecutive zero-defect PRODUCTION days for user's factory.
 
-    Uses the user's primary factory and counts backwards from today.
+    A day counts only if there WAS production (OperationLog entries exist)
+    AND zero defects were recorded. Days with no production data are skipped
+    (not counted as zero-defect — absence of data ≠ zero defects).
     """
     uf = db.query(UserFactory).filter(UserFactory.user_id == user_id).first()
     if not uf:
@@ -239,6 +241,18 @@ def _measure_zero_defect_hero(db: Session, user_id: UUID) -> int:
 
     for i in range(365):  # max 1 year lookback
         day = today - timedelta(days=i)
+
+        # Check if there was any production activity this day
+        production_count = db.query(sa_func.count(OperationLog.id)).filter(
+            OperationLog.factory_id == uf.factory_id,
+            OperationLog.shift_date == day,
+        ).scalar() or 0
+
+        if production_count == 0:
+            # No production data — skip this day (weekend, holiday, etc.)
+            continue
+
+        # Production happened — check for defects
         defect_count = db.query(sa_func.count(DefectRecord.id)).filter(
             DefectRecord.factory_id == uf.factory_id,
             DefectRecord.date == day,

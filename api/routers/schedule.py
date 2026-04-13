@@ -556,6 +556,69 @@ async def reschedule_factory_endpoint(
     }
 
 
+@router.post("/factory/{factory_id}/reschedule-overdue")
+async def reschedule_overdue_endpoint(
+    factory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Move all overdue positions forward to today or next available day."""
+    from datetime import date as _date, timedelta
+    from api.models import OrderPosition, ProductionOrder
+    from api.enums import OrderStatus
+
+    today = _date.today()
+
+    terminal = ['completed', 'shipped', 'cancelled', 'delivered', 'ready_for_shipment', 'packed']
+
+    overdue = db.query(OrderPosition).join(ProductionOrder).filter(
+        ProductionOrder.factory_id == factory_id,
+        ProductionOrder.status.in_([
+            OrderStatus.NEW.value,
+            OrderStatus.IN_PRODUCTION.value,
+            OrderStatus.PARTIALLY_READY.value,
+        ]),
+        OrderPosition.status.notin_(terminal),
+        (OrderPosition.planned_glazing_date < today) |
+        (OrderPosition.planned_kiln_date < today) |
+        (OrderPosition.planned_sorting_date < today),
+    ).all()
+
+    if not overdue:
+        return {"ok": True, "positions_rescheduled": 0}
+
+    def _skip_sun(d):
+        return d + timedelta(days=1) if d.weekday() == 6 else d
+
+    rescheduled = 0
+    for pos in overdue:
+        old_glazing = pos.planned_glazing_date
+        delta = (today - old_glazing).days if old_glazing and old_glazing < today else 0
+
+        if pos.planned_glazing_date and pos.planned_glazing_date < today:
+            pos.planned_glazing_date = _skip_sun(today)
+        if pos.planned_kiln_date and pos.planned_kiln_date < today:
+            pos.planned_kiln_date = _skip_sun(
+                pos.planned_kiln_date + timedelta(days=delta) if delta > 0
+                else today + timedelta(days=1)
+            )
+        if pos.planned_sorting_date and pos.planned_sorting_date < today:
+            pos.planned_sorting_date = _skip_sun(
+                pos.planned_sorting_date + timedelta(days=delta) if delta > 0
+                else (pos.planned_kiln_date or today) + timedelta(days=2)
+            )
+        if pos.planned_completion_date and pos.planned_completion_date < today:
+            pos.planned_completion_date = _skip_sun(
+                pos.planned_completion_date + timedelta(days=delta) if delta > 0
+                else (pos.planned_sorting_date or today) + timedelta(days=1)
+            )
+        pos.schedule_version = (pos.schedule_version or 0) + 1
+        rescheduled += 1
+
+    db.commit()
+    return {"ok": True, "positions_rescheduled": rescheduled}
+
+
 @router.get("/positions/{position_id}/schedule")
 async def get_position_schedule_endpoint(
     position_id: UUID,

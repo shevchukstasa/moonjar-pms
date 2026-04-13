@@ -289,7 +289,7 @@ export default function ManagerSchedulePage() {
       autoRescheduleTriggered.current = true;
       setRescheduling(true);
       setRescheduleResult(null);
-      apiClient.post(`/schedule/factory/${activeFactoryId}/reschedule`)
+      apiClient.post(`/schedule/factory/${activeFactoryId}/reschedule-overdue`)
         .then((res) => {
           const count = res.data?.positions_rescheduled ?? 0;
           setRescheduleResult(`Auto-rescheduled ${count} position(s).`);
@@ -308,7 +308,7 @@ export default function ManagerSchedulePage() {
     setRescheduling(true);
     setRescheduleResult(null);
     try {
-      const res = await apiClient.post(`/schedule/factory/${activeFactoryId}/reschedule`);
+      const res = await apiClient.post(`/schedule/factory/${activeFactoryId}/reschedule-overdue`);
       const count = res.data?.positions_rescheduled ?? 0;
       setRescheduleResult(`${count} position(s) rescheduled successfully.`);
       queryClient.invalidateQueries({ queryKey: ['schedule'] });

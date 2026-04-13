@@ -7,6 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from api.database import get_db
@@ -563,26 +564,30 @@ async def reschedule_overdue_endpoint(
     current_user=Depends(require_management),
 ):
     """Move all overdue positions forward to today or next available day."""
+    import logging
     from datetime import date as _date, timedelta
-    from api.models import OrderPosition, ProductionOrder
-    from api.enums import OrderStatus
 
+    logger = logging.getLogger("moonjar.schedule")
     today = _date.today()
 
     terminal = ['completed', 'shipped', 'cancelled', 'delivered', 'ready_for_shipment', 'packed']
 
-    overdue = db.query(OrderPosition).join(ProductionOrder).filter(
-        ProductionOrder.factory_id == factory_id,
-        ProductionOrder.status.in_([
-            OrderStatus.NEW.value,
-            OrderStatus.IN_PRODUCTION.value,
-            OrderStatus.PARTIALLY_READY.value,
-        ]),
-        OrderPosition.status.notin_(terminal),
-        (OrderPosition.planned_glazing_date < today) |
-        (OrderPosition.planned_kiln_date < today) |
-        (OrderPosition.planned_sorting_date < today),
-    ).all()
+    try:
+        overdue = db.query(OrderPosition).join(
+            ProductionOrder, OrderPosition.order_id == ProductionOrder.id
+        ).filter(
+            ProductionOrder.factory_id == factory_id,
+            ProductionOrder.status.in_(['new', 'in_production', 'partially_ready']),
+            OrderPosition.status.notin_(terminal),
+            sa.or_(
+                OrderPosition.planned_glazing_date < today,
+                OrderPosition.planned_kiln_date < today,
+                OrderPosition.planned_sorting_date < today,
+            ),
+        ).all()
+    except Exception as e:
+        logger.error("RESCHEDULE_OVERDUE query failed: %s", e)
+        raise HTTPException(500, f"Query failed: {e}")
 
     if not overdue:
         return {"ok": True, "positions_rescheduled": 0}
@@ -616,6 +621,7 @@ async def reschedule_overdue_endpoint(
         rescheduled += 1
 
     db.commit()
+    logger.info("RESCHEDULE_OVERDUE | factory=%s | moved %d positions", factory_id, rescheduled)
     return {"ok": True, "positions_rescheduled": rescheduled}
 
 

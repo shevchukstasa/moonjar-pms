@@ -256,7 +256,7 @@ async def create_inspection(
     if not resource:
         raise HTTPException(404, "Kiln not found")
 
-    # Check duplicate
+    # Upsert: merge into existing inspection for same kiln+date
     existing = (
         db.query(KilnInspection)
         .filter(
@@ -265,29 +265,45 @@ async def create_inspection(
         )
         .first()
     )
+
     if existing:
-        raise HTTPException(409, f"Inspection already exists for this kiln on {data.inspection_date}")
-
-    insp = KilnInspection(
-        resource_id=UUID(data.resource_id),
-        factory_id=UUID(data.factory_id),
-        inspection_date=data.inspection_date,
-        inspected_by_id=current_user.id,
-        notes=data.notes,
-    )
-    db.add(insp)
-    db.flush()
-
-    for r in data.results:
-        result = KilnInspectionResult(
-            inspection_id=insp.id,
-            item_id=UUID(r.item_id),
-            result=r.result,
-            notes=r.notes,
+        insp = existing
+        insp.inspected_by_id = current_user.id
+        insp.notes = data.notes or insp.notes
+        # Merge results: update existing items, add new ones
+        existing_results = {str(r.item_id): r for r in insp.results or []}
+        for r in data.results:
+            item_id = UUID(r.item_id)
+            if str(item_id) in existing_results:
+                existing_results[str(item_id)].result = r.result
+                existing_results[str(item_id)].notes = r.notes
+            else:
+                db.add(KilnInspectionResult(
+                    inspection_id=insp.id, item_id=item_id,
+                    result=r.result, notes=r.notes,
+                ))
+    else:
+        insp = KilnInspection(
+            resource_id=UUID(data.resource_id),
+            factory_id=UUID(data.factory_id),
+            inspection_date=data.inspection_date,
+            inspected_by_id=current_user.id,
+            notes=data.notes,
         )
-        db.add(result)
+        db.add(insp)
+        db.flush()
+        for r in data.results:
+            db.add(KilnInspectionResult(
+                inspection_id=insp.id, item_id=UUID(r.item_id),
+                result=r.result, notes=r.notes,
+            ))
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error("INSPECTION_SAVE_FAILED | kiln=%s date=%s | %s", data.resource_id, data.inspection_date, e)
+        raise HTTPException(400, f"Failed to save: {e}")
     db.refresh(insp)
 
     # Reload with relationships

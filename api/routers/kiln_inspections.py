@@ -171,28 +171,32 @@ async def list_inspections(
     current_user=Depends(get_current_user),
 ):
     """List inspections with optional filters."""
-    query = (
-        db.query(KilnInspection)
-        .options(
-            joinedload(KilnInspection.resource),
-            joinedload(KilnInspection.inspected_by),
-            joinedload(KilnInspection.results).joinedload(KilnInspectionResult.item),
+    try:
+        query = (
+            db.query(KilnInspection)
+            .options(
+                joinedload(KilnInspection.resource),
+                joinedload(KilnInspection.inspected_by),
+                joinedload(KilnInspection.results).joinedload(KilnInspectionResult.item),
+            )
         )
-    )
-    query = apply_factory_filter(query, current_user, factory_id, KilnInspection)
+        query = apply_factory_filter(query, current_user, factory_id, KilnInspection)
 
-    if resource_id:
-        query = query.filter(KilnInspection.resource_id == resource_id)
-    if date_from:
-        query = query.filter(KilnInspection.inspection_date >= date_from)
-    if date_to:
-        query = query.filter(KilnInspection.inspection_date <= date_to)
+        if resource_id:
+            query = query.filter(KilnInspection.resource_id == resource_id)
+        if date_from:
+            query = query.filter(KilnInspection.inspection_date >= date_from)
+        if date_to:
+            query = query.filter(KilnInspection.inspection_date <= date_to)
 
-    inspections = query.order_by(KilnInspection.inspection_date.desc()).limit(200).all()
-    return {
-        "items": [_serialize_inspection(i) for i in inspections],
-        "total": len(inspections),
-    }
+        inspections = query.order_by(KilnInspection.inspection_date.desc()).limit(200).all()
+        return {
+            "items": [_serialize_inspection(i) for i in inspections],
+            "total": len(inspections),
+        }
+    except Exception as e:
+        logger.error("LIST_INSPECTIONS_FAILED | %s", e, exc_info=True)
+        raise HTTPException(500, f"Failed to list inspections: {e}")
 
 
 @router.get("/{inspection_id}")

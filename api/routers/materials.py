@@ -105,6 +105,7 @@ def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session,
         "material_code": mat.material_code,
         "stock_id": str(stock.id) if stock else None,
         "name": mat.name,
+        "full_name": getattr(mat, 'full_name', None),
         "factory_id": str(stock.factory_id) if stock else None,
         "balance": balance,
         "reserved_qty": round(reserved_qty, 3),
@@ -215,6 +216,7 @@ def _serialize_transaction(t, db) -> dict:
 
 class MaterialCreateInput(BaseModel):
     name: str
+    full_name: Optional[str] = None  # Full scientific/official name
     factory_id: Optional[UUID] = None  # None → auto-create stock for ALL active factories
     material_type: str = ""
     subgroup_id: Optional[UUID] = None
@@ -229,6 +231,7 @@ class MaterialCreateInput(BaseModel):
 
 class MaterialUpdateInput(BaseModel):
     name: Optional[str] = None
+    full_name: Optional[str] = None
     subgroup_id: Optional[UUID] = None
     balance: Optional[float] = None
     min_balance: Optional[float] = None
@@ -295,7 +298,12 @@ async def list_materials(
                 MaterialSubgroup, Material.subgroup_id == MaterialSubgroup.id
             ).filter(MaterialSubgroup.group_id == group_id)
         if search:
-            query = query.filter(Material.name.ilike(f"%{search}%"))
+            query = query.filter(
+                sa.or_(
+                    Material.name.ilike(f"%{search}%"),
+                    Material.full_name.ilike(f"%{search}%"),
+                )
+            )
 
         # For low_stock / warehouse_section filters we still need stock join
         if low_stock or warehouse_section:
@@ -361,7 +369,12 @@ async def list_materials(
     if warehouse_section:
         query = query.filter(MaterialStock.warehouse_section == warehouse_section)
     if search:
-        query = query.filter(Material.name.ilike(f"%{search}%"))
+        query = query.filter(
+                sa.or_(
+                    Material.name.ilike(f"%{search}%"),
+                    Material.full_name.ilike(f"%{search}%"),
+                )
+            )
     if low_stock:
         query = query.filter(
             MaterialStock.balance < MaterialStock.min_balance,
@@ -1238,6 +1251,7 @@ async def create_material(
     if not mat:
         mat = Material(
             name=data.name,
+            full_name=getattr(data, 'full_name', None),
             material_code=_next_material_code(db),
             material_type=material_type,
             unit=data.unit,
@@ -1350,7 +1364,7 @@ async def update_material(
         mat.size_id = updates.pop('size_id')
 
     # Catalog-level fields
-    catalog_fields = {'name', 'unit', 'supplier_id'}
+    catalog_fields = {'name', 'full_name', 'unit', 'supplier_id'}
     # Stock-level fields
     stock_fields = {'balance', 'min_balance', 'min_balance_auto', 'warehouse_section'}
 

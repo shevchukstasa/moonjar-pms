@@ -46,6 +46,7 @@ function flatSubgroups(hierarchy: MaterialGroup[] | undefined) {
 
 interface MaterialForm {
   name: string;
+  full_name: string;
   factory_id: string;
   subgroup_id: string;
   material_type: string;
@@ -58,6 +59,7 @@ interface MaterialForm {
 
 const emptyForm: MaterialForm = {
   name: '',
+  full_name: '',
   factory_id: '',
   subgroup_id: '',
   material_type: '',
@@ -255,6 +257,7 @@ export default function ManagerMaterialsPage() {
   const openEdit = useCallback((item: MaterialItem) => {
     setForm({
       name: item.name,
+      full_name: item.full_name ?? '',
       factory_id: item.factory_id ?? '',
       subgroup_id: item.subgroup_id ?? '',
       material_type: item.material_type ?? '',
@@ -303,6 +306,7 @@ export default function ManagerMaterialsPage() {
       // Full save (create or non-PM edit)
       const payload: Record<string, unknown> = {
         name: form.name.trim(),
+        full_name: form.full_name.trim() || null,
         material_type: form.material_type,
         subgroup_id: form.subgroup_id || null,
         unit: form.unit,
@@ -586,12 +590,20 @@ export default function ManagerMaterialsPage() {
         <div className="space-y-4">
           {/* Name — hidden for PM on edit, visible for create */}
           {(!isPM || !editDialog.item) && (
-            <Input
-              label="Name *"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="e.g. Zinc Oxide ZnO"
-            />
+            <>
+              <Input
+                label="Name (short) *"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="e.g. Zircosil"
+              />
+              <Input
+                label="Full name"
+                value={form.full_name}
+                onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+                placeholder="e.g. Zirconium Silicate Micronized"
+              />
+            </>
           )}
 
           <div className="grid grid-cols-2 gap-4">
@@ -1105,7 +1117,12 @@ function MaterialsTable({ items, subgroups, isAggregate, isPM, hideNames, canDel
           {items.map((m) => (
             <tr key={`${m.id}-${m.factory_id ?? 'all'}`} className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}>
               <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '—'}</td>
-              {!hideNames && <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>}
+              {!hideNames && (
+                <td className="px-4 py-3">
+                  <div className="font-medium text-gray-900">{m.name}</div>
+                  {m.full_name && <div className="text-xs text-gray-400">{m.full_name}</div>}
+                </td>
+              )}
               <td className="px-4 py-3">
                 <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
                   {typeIcon(m.material_type)} {typeLabel(m.material_type)}

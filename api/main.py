@@ -1865,6 +1865,7 @@ async def lifespan(app: FastAPI):
         ("cleanup_typologies", "api.schema_patches.cleanup_typologies_patch", "run"),
         ("drying_logic", "api.schema_patches.drying_logic_patch", "apply"),
         ("material_substitution", "api.schema_patches.material_substitution_patch", "run"),
+        ("material_full_name", "api.schema_patches.material_full_name_patch", "run"),
     ]
 
     # Inline patches (too small for separate files)

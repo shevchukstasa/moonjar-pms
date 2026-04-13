@@ -459,6 +459,7 @@ class Material(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     material_code = Column(sa.String(20), unique=True)  # auto-generated, e.g. "M-0001"
     name = Column(sa.String(300), unique=True, nullable=False)
+    full_name = Column(sa.String(500), nullable=True)  # e.g. "Zirconium Silicate Micronized" when name = "Zircosil"
     unit = Column(sa.String(20), nullable=False, default='pcs')
     material_type = Column(sa.String(50), nullable=False)
     product_subtype = Column(sa.String(30), nullable=True)  # tiles/sinks/table_top/custom — for stone & ready stock

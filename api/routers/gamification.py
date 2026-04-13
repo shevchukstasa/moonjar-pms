@@ -161,7 +161,7 @@ async def list_competitions(
 ):
     """List competitions for a factory."""
     from business.services.competitions import get_active_competitions
-    return get_active_competitions(db, factory_id, status)
+    return get_active_competitions(db, factory_id)
 
 
 @router.get("/competitions/{competition_id}/standings")

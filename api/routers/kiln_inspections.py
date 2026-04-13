@@ -85,7 +85,7 @@ def _serialize_inspection(insp: KilnInspection) -> dict:
         "factory_id": str(insp.factory_id),
         "inspection_date": str(insp.inspection_date),
         "inspected_by_id": str(insp.inspected_by_id),
-        "inspected_by_name": insp.inspected_by.full_name if insp.inspected_by else None,
+        "inspected_by_name": insp.inspected_by.name if insp.inspected_by else None,
         "notes": insp.notes,
         "created_at": insp.created_at.isoformat() if insp.created_at else None,
         "results": [
@@ -119,7 +119,7 @@ def _serialize_repair(rep: KilnRepairLog) -> dict:
         "factory_id": str(rep.factory_id),
         "date_reported": str(rep.date_reported) if rep.date_reported else None,
         "reported_by_id": str(rep.reported_by_id),
-        "reported_by_name": rep.reported_by.full_name if rep.reported_by else None,
+        "reported_by_name": rep.reported_by.name if rep.reported_by else None,
         "issue_description": rep.issue_description,
         "diagnosis": rep.diagnosis,
         "repair_actions": rep.repair_actions,
@@ -241,7 +241,7 @@ async def delete_inspection(
 
     logger.info(
         "DELETE_INSPECTION | id=%s kiln=%s date=%s by=%s",
-        inspection_id, insp.resource_id, insp.inspection_date, current_user.full_name,
+        inspection_id, insp.resource_id, insp.inspection_date, current_user.name,
     )
     db.delete(insp)
     db.commit()
@@ -324,7 +324,7 @@ async def create_inspection(
 
     logger.info(
         "INSPECTION | kiln=%s date=%s by=%s | %d items",
-        resource.name, data.inspection_date, current_user.full_name, len(data.results),
+        resource.name, data.inspection_date, current_user.name, len(data.results),
     )
     return _serialize_inspection(insp)
 

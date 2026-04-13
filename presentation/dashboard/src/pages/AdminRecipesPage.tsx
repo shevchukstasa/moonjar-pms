@@ -193,7 +193,9 @@ export default function AdminRecipesPage() {
       setMutationError('');
       // Save ingredients + temp group — errors should NOT block dialog close
       try { await saveIngredients(newRecipe.id); } catch (e) { console.error('saveIngredients failed:', e); }
-      try { await saveTempGroupAssignment(newRecipe.id, []); } catch (e) { console.error('saveTempGroup failed:', e); }
+      if (form.recipe_type !== 'engobe') {
+        try { await saveTempGroupAssignment(newRecipe.id, []); } catch (e) { console.error('saveTempGroup failed:', e); }
+      }
 
       // If came from Force Unblock — bind recipe to position + unblock
       if (returnPositionId) {
@@ -229,7 +231,9 @@ export default function AdminRecipesPage() {
       setMutationError('');
       if (editItem) {
         try { await saveIngredients(editItem.id); } catch (e) { console.error('saveIngredients failed:', e); }
-        try { await saveTempGroupAssignment(editItem.id, editItem.temperature_groups || []); } catch (e) { console.error('saveTempGroup failed:', e); }
+        if (form.recipe_type !== 'engobe') {
+          try { await saveTempGroupAssignment(editItem.id, editItem.temperature_groups || []); } catch (e) { console.error('saveTempGroup failed:', e); }
+        }
       }
       queryClient.invalidateQueries({ queryKey: ['admin-recipes'] });
       closeDialog();
@@ -435,6 +439,7 @@ export default function AdminRecipesPage() {
       { key: 'consumption_spray', header: 'Spray ml/m²', render: (r: RecipeItem) => r.consumption_spray_ml_per_sqm != null ? <span className="font-mono text-sm">{r.consumption_spray_ml_per_sqm}</span> : <span className="text-gray-400">&mdash;</span> },
       { key: 'consumption_brush', header: 'Brush ml/m²', render: (r: RecipeItem) => r.consumption_brush_ml_per_sqm != null ? <span className="font-mono text-sm">{r.consumption_brush_ml_per_sqm}</span> : <span className="text-gray-400">&mdash;</span> },
       { key: 'temperature_groups', header: 'Temp Group', render: (r: RecipeItem) => {
+        if (r.recipe_type === 'engobe') return <span className="text-xs text-amber-600">Universal</span>;
         const groups = r.temperature_groups ?? [];
         if (groups.length === 0) return <span className="text-gray-400">&mdash;</span>;
         return (
@@ -593,24 +598,31 @@ export default function AdminRecipesPage() {
             </label>
           </div>
 
-          {/* ── Temperature Group Selector ──────────────────────────────── */}
-          <div>
-            <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-gray-700">
-              <Thermometer className="h-4 w-4 text-orange-500" /> Temperature Group
-            </label>
-            <select
-              value={selectedTempGroupId}
-              onChange={(e) => setSelectedTempGroupId(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-            >
-              <option value="">-- Not assigned --</option>
-              {(tempGroups || []).map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name} ({g.temperature}°C)
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* ── Temperature Group Selector (hidden for engobe — universal temp) ── */}
+          {form.recipe_type !== 'engobe' ? (
+            <div>
+              <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                <Thermometer className="h-4 w-4 text-orange-500" /> Temperature Group
+              </label>
+              <select
+                value={selectedTempGroupId}
+                onChange={(e) => setSelectedTempGroupId(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">-- Not assigned --</option>
+                {(tempGroups || []).map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name} ({g.temperature}°C)
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+              <Thermometer className="mr-1 inline h-4 w-4" />
+              Engobe is fired together with glaze — no separate temperature group needed.
+            </div>
+          )}
 
           {/* ── Ingredients ────────────────────────────────────────────── */}
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">

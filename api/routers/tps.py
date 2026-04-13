@@ -955,6 +955,24 @@ async def get_achievements(
     }
 
 
+@router.post("/achievements/{user_id}/recalculate")
+async def recalculate_achievements(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Force recalculate all achievements for a user."""
+    from business.services.achievements import update_achievements_for_user
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    updated = update_achievements_for_user(db, user_id)
+    db.commit()
+    return {"recalculated": True, "newly_unlocked": updated}
+
+
 # ── Process Steps ──────────────────────────────────────────────────────
 
 

@@ -30,10 +30,10 @@ SECTION_STATUSES = {
         PositionStatus.PLANNED, PositionStatus.INSUFFICIENT_MATERIALS,
         PositionStatus.AWAITING_RECIPE, PositionStatus.AWAITING_STENCIL_SILKSCREEN,
         PositionStatus.AWAITING_COLOR_MATCHING, PositionStatus.ENGOBE_APPLIED,
-        PositionStatus.ENGOBE_CHECK, PositionStatus.GLAZED,
-        PositionStatus.PRE_KILN_CHECK, PositionStatus.SENT_TO_GLAZING,
+        PositionStatus.ENGOBE_CHECK, PositionStatus.SENT_TO_GLAZING,
     ],
     "firing": [
+        PositionStatus.GLAZED, PositionStatus.PRE_KILN_CHECK,
         PositionStatus.LOADED_IN_KILN, PositionStatus.FIRED,
         PositionStatus.REFIRE, PositionStatus.AWAITING_REGLAZE,
     ],

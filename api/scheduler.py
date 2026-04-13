@@ -1655,22 +1655,39 @@ async def nightly_reschedule_overdue():
             len(overdue), rescheduled, errors,
         )
 
-        # Notify PMs
+        # Notify PMs + CEO via in-app + Telegram
         if rescheduled > 0:
             from api.models import Notification, User, UserFactory
             from api.enums import NotificationType, UserRole
 
             for fid in factory_ids:
-                pm_ids = [
-                    uf.user_id for uf in db.query(UserFactory).join(User).filter(
-                        UserFactory.factory_id == fid,
-                        User.role.in_([UserRole.PRODUCTION_MANAGER.value, UserRole.CEO.value]),
-                        User.is_active.is_(True),
-                    ).all()
-                ]
-                for uid in pm_ids:
+                managers = db.query(User).join(UserFactory).filter(
+                    UserFactory.factory_id == fid,
+                    User.role.in_([UserRole.PRODUCTION_MANAGER.value, UserRole.CEO.value, UserRole.OWNER.value]),
+                    User.is_active.is_(True),
+                ).all()
+
+                # Build overdue summary for Telegram
+                fid_overdue = [p for p in overdue if (p.factory_id or (p.order.factory_id if p.order else None)) == fid]
+                overdue_orders = {}
+                for p in fid_overdue:
+                    onum = p.order.order_number if p.order else "?"
+                    if onum not in overdue_orders:
+                        overdue_orders[onum] = []
+                    overdue_orders[onum].append(p)
+
+                tg_lines = [f"⚠️ <b>Jadwal terlambat — {rescheduled} posisi dijadwalkan ulang</b>\n"]
+                for onum, positions in list(overdue_orders.items())[:10]:
+                    tg_lines.append(f"📦 <b>{onum}</b>: {len(positions)} pos.")
+                if len(overdue_orders) > 10:
+                    tg_lines.append(f"... dan {len(overdue_orders) - 10} pesanan lagi")
+
+                tg_text = "\n".join(tg_lines)
+
+                for user in managers:
+                    # In-app notification
                     db.add(Notification(
-                        user_id=uid,
+                        user_id=user.id,
                         type=NotificationType.ALERT.value,
                         title="Jadwal diperbarui otomatis",
                         message=(
@@ -1679,6 +1696,14 @@ async def nightly_reschedule_overdue():
                         ),
                         data={"event": "nightly_reschedule", "count": rescheduled},
                     ))
+                    # Telegram notification
+                    if user.telegram_user_id:
+                        try:
+                            from business.services.notifications import send_telegram_message
+                            send_telegram_message(user.telegram_user_id, tg_text)
+                        except Exception as tg_err:
+                            logger.warning("Telegram notify failed for %s: %s", user.id, tg_err)
+
             db.commit()
 
     except Exception as e:

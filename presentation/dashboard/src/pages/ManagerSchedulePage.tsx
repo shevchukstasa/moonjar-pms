@@ -332,7 +332,20 @@ export default function ManagerSchedulePage() {
         </span>
       ),
     },
-    { key: 'color', header: 'Color' },
+    {
+      key: 'color',
+      header: 'Color',
+      render: (item) => (
+        <span className="inline-flex items-center gap-1">
+          {item.has_blocking_tasks && (
+            <span title="Blocking task pending (e.g. stone procurement)" className="inline-flex items-center rounded bg-red-100 px-1 py-0.5 text-[10px] font-bold text-red-700">
+              ⛔
+            </span>
+          )}
+          {item.color ?? '—'}
+        </span>
+      ),
+    },
     { key: 'size', header: 'Size' },
     {
       key: 'thickness_mm',

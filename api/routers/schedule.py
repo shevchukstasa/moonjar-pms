@@ -154,7 +154,32 @@ def _serialize_position_brief(p) -> dict:
         "schedule_version": getattr(p, "schedule_version", None),
         # Material tracking
         "material_status": _compute_material_status(p),
+        # Blocking tasks (stone procurement, recipe, etc.)
+        "has_blocking_tasks": getattr(p, "_has_blocking_tasks", False),
     }
+
+
+def _annotate_blocking_tasks(db: Session, positions: list) -> list:
+    """Annotate positions with blocking task status (batch query)."""
+    if not positions:
+        return positions
+    from api.models import Task
+    from api.enums import TaskStatus
+    pos_ids = [p.id for p in positions]
+    blocked_pos_ids = set(
+        row[0] for row in
+        db.query(Task.related_position_id)
+        .filter(
+            Task.related_position_id.in_(pos_ids),
+            Task.blocking.is_(True),
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+        )
+        .distinct()
+        .all()
+    )
+    for p in positions:
+        p._has_blocking_tasks = p.id in blocked_pos_ids
+    return positions
 
 
 class BatchCreateInput(BaseModel):
@@ -305,6 +330,7 @@ async def get_glazing_schedule(
     )
     query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
     positions = _apply_schedule_order(query).all()
+    _annotate_blocking_tasks(db, positions)
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
 
@@ -319,6 +345,7 @@ async def get_firing_schedule(
     )
     query = apply_factory_filter(query, current_user, factory_id, OrderPosition)
     positions = _apply_schedule_order(query).all()
+    _annotate_blocking_tasks(db, positions)
     return {"items": [_serialize_position_brief(p) for p in positions], "total": len(positions)}
 
 
@@ -599,8 +626,29 @@ async def reschedule_overdue_endpoint(
     def _skip_sun(d):
         return d + timedelta(days=1) if d.weekday() == 6 else d
 
+    # Check which overdue positions have blocking tasks — skip them
+    from api.models import Task
+    from api.enums import TaskStatus as _TS
+    blocked_pos_ids = set(
+        row[0] for row in
+        db.query(Task.related_position_id)
+        .filter(
+            Task.related_position_id.in_([p.id for p in overdue]),
+            Task.blocking.is_(True),
+            Task.status.in_([_TS.PENDING, _TS.IN_PROGRESS]),
+        )
+        .distinct()
+        .all()
+    )
+
     rescheduled = 0
+    skipped_blocked = 0
     for pos in overdue:
+        # Don't reschedule positions with unresolved blocking tasks (no stone, etc.)
+        if pos.id in blocked_pos_ids:
+            skipped_blocked += 1
+            continue
+
         old_glazing = pos.planned_glazing_date
         delta = (today - old_glazing).days if old_glazing and old_glazing < today else 0
 
@@ -625,8 +673,15 @@ async def reschedule_overdue_endpoint(
         rescheduled += 1
 
     db.commit()
-    logger.info("RESCHEDULE_OVERDUE | factory=%s | moved %d positions", factory_id, rescheduled)
-    return {"ok": True, "positions_rescheduled": rescheduled}
+    logger.info(
+        "RESCHEDULE_OVERDUE | factory=%s | moved %d positions | skipped %d (blocked)",
+        factory_id, rescheduled, skipped_blocked,
+    )
+    return {
+        "ok": True,
+        "positions_rescheduled": rescheduled,
+        "skipped_blocked": skipped_blocked,
+    }
 
 
 @router.get("/positions/{position_id}/schedule")

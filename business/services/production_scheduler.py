@@ -1106,6 +1106,57 @@ def _check_firing_profile_data(
 DEFAULT_MATERIAL_FALLBACK_DAYS = 14  # ultimate fallback if no supplier lead time
 
 
+def _get_blocking_task_ready_date(
+    db: Session,
+    position: OrderPosition,
+) -> Optional[date]:
+    """Check if position has unresolved blocking tasks (stone, recipe, etc.).
+
+    If blocking tasks exist with status PENDING or IN_PROGRESS,
+    the position should not be scheduled for glazing yet.
+
+    Returns:
+        None    — no blocking tasks, position can proceed normally
+        date    — earliest date when position might be ready (today + lead time)
+    """
+    from api.models import Task
+    from api.enums import TaskType, TaskStatus
+
+    blocking_tasks = (
+        db.query(Task)
+        .filter(
+            Task.related_position_id == position.id,
+            Task.blocking.is_(True),
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+        )
+        .all()
+    )
+
+    if not blocking_tasks:
+        return None
+
+    # Log which blocking tasks are still open
+    task_types = [t.type.value if hasattr(t.type, 'value') else str(t.type) for t in blocking_tasks]
+    logger.info(
+        "BLOCKING_TASKS_FOUND | pos=%s | types=%s | count=%d",
+        position.id, task_types, len(blocking_tasks),
+    )
+
+    today = date.today()
+
+    # Use due_at if set on any blocking task; otherwise estimate
+    due_dates = [t.due_at.date() if t.due_at else None for t in blocking_tasks]
+    real_dates = [d for d in due_dates if d and d > today]
+
+    if real_dates:
+        # Latest due_at across blocking tasks (all must be resolved)
+        return max(real_dates)
+
+    # No due_at set — can't schedule; push far enough to avoid scheduling today.
+    # Use DEFAULT_MATERIAL_FALLBACK_DAYS as a reasonable estimate.
+    return today + timedelta(days=DEFAULT_MATERIAL_FALLBACK_DAYS)
+
+
 def _get_material_ready_date(
     db: Session,
     position: OrderPosition,
@@ -1690,6 +1741,10 @@ def schedule_position(
             position.id, _material_ready_date,
         )
 
+    # ── Blocking task check (stone procurement, etc.) ─────────────
+    # If position has unresolved blocking tasks, don't schedule before today.
+    _blocking_ready_date = _get_blocking_task_ready_date(db, position)
+
     # Calculate position area and quantity for duration estimation
     _pos_sqm = float(position.glazeable_sqm or 0) * float(position.quantity or 1)
     _pos_pcs = int(position.quantity or 0)
@@ -1834,6 +1889,29 @@ def schedule_position(
             "completion=%s (deadline=%s)",
             position.id, planned_glazing, _material_ready_date,
             planned_completion, deadline,
+        )
+
+    # ── Blocking task constraint ────────────────────────────────────
+    # If position has blocking tasks (stone procurement, recipe config, etc.)
+    # that are still open, don't schedule glazing until they're resolved.
+    # _blocking_ready_date is None when all tasks are done, or a future date.
+    if _blocking_ready_date and planned_glazing < _blocking_ready_date:
+        planned_glazing = _skip_weekends(_blocking_ready_date)
+        planned_kiln = _skip_weekends(
+            planned_glazing + timedelta(days=pre_kiln_total + _pre_buffer)
+        )
+        planned_sorting = _skip_weekends(
+            planned_kiln + timedelta(
+                days=firing_days + kiln_cool_initial_days + kiln_unloading_days
+                + tile_cooling_days + _post_buffer
+            )
+        )
+        planned_completion = _skip_weekends(
+            planned_sorting + timedelta(days=sorting_days + packing_days)
+        )
+        logger.info(
+            "BLOCKING_TASK_SHIFT | pos=%s | glazing pushed to %s (blocking tasks pending)",
+            position.id, planned_glazing,
         )
 
     # Guard: planned_glazing must be >= today (and >= min_start_date for FIFO).

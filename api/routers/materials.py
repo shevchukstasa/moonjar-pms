@@ -161,6 +161,7 @@ def _serialize_material_aggregate(mat: Material, stocks: list[MaterialStock], db
         "material_code": mat.material_code,
         "stock_id": None,
         "name": mat.name,
+        "full_name": getattr(mat, 'full_name', None),
         "factory_id": None,  # aggregate mode
         "balance": total_balance,
         "reserved_qty": round(reserved_qty, 3),

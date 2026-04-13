@@ -570,7 +570,11 @@ async def reschedule_overdue_endpoint(
     logger = logging.getLogger("moonjar.schedule")
     today = _date.today()
 
-    terminal = ['completed', 'shipped', 'cancelled', 'delivered', 'ready_for_shipment', 'packed']
+    terminal = [
+        PositionStatus.SHIPPED, PositionStatus.CANCELLED,
+        PositionStatus.READY_FOR_SHIPMENT, PositionStatus.PACKED,
+        PositionStatus.MERGED,
+    ]
 
     try:
         overdue = db.query(OrderPosition).join(

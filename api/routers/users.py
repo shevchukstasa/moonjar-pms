@@ -11,7 +11,7 @@ from sqlalchemy import or_
 
 from api.database import get_db
 from api.auth import hash_password, log_security_event
-from api.roles import require_admin
+from api.roles import require_admin, require_management
 from api.models import User, UserFactory, Factory, ActiveSession
 from api.enums import UserRole, LanguagePreference
 
@@ -73,7 +73,7 @@ async def list_users(
     search: str | None = None,
     factory_id: str | None = None,
     db: Session = Depends(get_db),
-    current_user=Depends(require_admin),
+    current_user=Depends(require_management),
 ):
     query = db.query(User)
 

@@ -217,6 +217,9 @@ export const employeesApi = {
   updateAttendance: (attendanceId: string, data: AttendanceUpdatePayload): Promise<AttendanceRecord> =>
     apiClient.patch(`/employees/attendance/${attendanceId}`, data).then((r) => r.data),
 
+  deleteAttendance: (attendanceId: string): Promise<{ status: string; id: string }> =>
+    apiClient.delete(`/employees/attendance/${attendanceId}`).then((r) => r.data),
+
   // Payroll
   payrollSummary: (params: {
     factory_id?: string;

@@ -260,6 +260,20 @@ export default function EmployeesPage() {
     },
   });
 
+  const deleteAttendanceMutation = useMutation({
+    mutationFn: (attendanceId: string) => employeesApi.deleteAttendance(attendanceId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['attendance-grid'] });
+      queryClient.invalidateQueries({ queryKey: ['payroll-summary'] });
+      setAttDialogOpen(false);
+      setAttExistingId(null);
+    },
+    onError: (err: unknown) => {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setFormError(detail ?? 'Failed to delete attendance');
+    },
+  });
+
   // ── Handlers ────────────────────────────────────────────────
 
   const closeDialog = useCallback(() => {
@@ -784,14 +798,30 @@ export default function EmployeesPage() {
             onChange={(e) => setAttNotes(e.target.value)}
           />
           {formError && <p className="text-sm text-red-600">{formError}</p>}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setAttDialogOpen(false)}>Cancel</Button>
-            <Button
-              onClick={handleAttendanceSubmit}
-              disabled={attendanceMutation.isPending}
-            >
-              {attendanceMutation.isPending ? 'Saving...' : 'Save'}
-            </Button>
+          <div className="flex justify-between pt-2">
+            {attExistingId ? (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (attExistingId && confirm('Delete this attendance record? The cell will become empty.')) {
+                    deleteAttendanceMutation.mutate(attExistingId);
+                  }
+                }}
+                disabled={deleteAttendanceMutation.isPending}
+                className="text-red-600 hover:bg-red-50 hover:text-red-700"
+              >
+                {deleteAttendanceMutation.isPending ? 'Deleting...' : 'Reset (delete)'}
+              </Button>
+            ) : <div />}
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setAttDialogOpen(false)}>Cancel</Button>
+              <Button
+                onClick={handleAttendanceSubmit}
+                disabled={attendanceMutation.isPending}
+              >
+                {attendanceMutation.isPending ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
           </div>
         </div>
       </Dialog>
@@ -1040,10 +1070,13 @@ function AttendanceTab({
                     // Calendar-aware styling for empty cells
                     const dateObj = new Date(year, month - 1, d);
                     const isSunday = dateObj.getDay() === 0;
+                    const isSaturday = dateObj.getDay() === 6;
                     const calEntry = calendarMap.get(dateStr);
+                    // For 5-day schedule employees, Saturday is also non-working
+                    const isFiveDaySatOff = isSaturday && emp.work_schedule === 'five_day';
                     const isNonWorking = calEntry
                       ? !calEntry.is_working_day
-                      : isSunday;
+                      : (isSunday || isFiveDaySatOff);
 
                     // Empty cell style: working days show light bg, non-working show striped/dim
                     const emptyCellClass = isNonWorking

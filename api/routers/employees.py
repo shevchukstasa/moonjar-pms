@@ -879,3 +879,19 @@ async def update_attendance(
     db.commit()
     db.refresh(att)
     return _serialize_attendance(att, db)
+
+
+@router.delete("/attendance/{attendance_id}")
+async def delete_attendance(
+    attendance_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Delete (reset) an attendance record for a specific day."""
+    att = db.query(Attendance).filter(Attendance.id == attendance_id).first()
+    if not att:
+        raise HTTPException(404, "Attendance record not found")
+
+    db.delete(att)
+    db.commit()
+    return {"status": "deleted", "id": str(attendance_id)}

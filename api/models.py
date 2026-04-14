@@ -2814,6 +2814,7 @@ class Employee(Base):
 
     # Employment
     hire_date = Column(sa.Date, nullable=True)
+    termination_date = Column(sa.Date, nullable=True)  # Last working day — triggers leave compensation in payroll
     is_active = Column(sa.Boolean, nullable=False, server_default='true')
     employment_type = Column(sa.String(50), nullable=False, server_default="'full_time'")  # full_time, part_time, contract
     department = Column(sa.String(50), nullable=False, server_default="'production'")  # production, sales, administration

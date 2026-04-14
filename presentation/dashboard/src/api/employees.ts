@@ -10,6 +10,7 @@ export interface Employee {
   position: string;
   phone: string | null;
   hire_date: string | null;
+  termination_date: string | null;
   is_active: boolean;
   employment_type: string;
   department: string;
@@ -42,6 +43,7 @@ export interface EmployeeCreatePayload {
   position: string;
   phone?: string | null;
   hire_date?: string | null;
+  termination_date?: string | null;
   is_active?: boolean;
   employment_type?: string;
   department?: string;
@@ -64,6 +66,7 @@ export interface EmployeeUpdatePayload {
   position?: string;
   phone?: string | null;
   hire_date?: string | null;
+  termination_date?: string | null;
   is_active?: boolean;
   employment_type?: string;
   department?: string;

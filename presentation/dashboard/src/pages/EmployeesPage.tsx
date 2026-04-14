@@ -340,6 +340,7 @@ export default function EmployeesPage() {
       birth_date: emp.birth_date ?? '',
       has_own_bpjs: emp.has_own_bpjs ?? false,
       hire_date: emp.hire_date ?? '',
+      termination_date: (emp as any).termination_date ?? '',
       employment_type: emp.employment_type,
       department: emp.department || 'production',
       work_schedule: emp.work_schedule || 'six_day',
@@ -585,6 +586,12 @@ export default function EmployeesPage() {
               type="date"
               value={formData.hire_date ?? ''}
               onChange={(e) => setFormData({ ...formData, hire_date: e.target.value })}
+            />
+            <Input
+              label="Termination Date (last day)"
+              type="date"
+              value={(formData as any).termination_date ?? ''}
+              onChange={(e) => setFormData({ ...formData, termination_date: e.target.value } as any)}
             />
             <div className="flex items-center gap-2 pt-5">
               <input
@@ -1260,8 +1267,15 @@ function PayrollTab({
           </thead>
           <tbody className="divide-y divide-gray-100">
             {data.map((row: any) => (
-              <tr key={row.employee_id} className="bg-white">
-                <td className="px-3 py-2 font-medium text-gray-900">{row.full_name}</td>
+              <tr key={row.employee_id} className={`${row.is_termination_month ? 'bg-red-50' : 'bg-white'}`}>
+                <td className="px-3 py-2 font-medium text-gray-900">
+                  {row.full_name}
+                  {row.is_termination_month && (
+                    <span className="ml-1.5 inline-flex items-center rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                      TERMINATION
+                    </span>
+                  )}
+                </td>
                 <td className="px-3 py-2 text-gray-600">{row.position}</td>
                 <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(row.prorated_salary ?? row.base_salary)}</td>
                 <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(row.prorated_allowances ?? row.total_allowances)}</td>
@@ -1271,7 +1285,14 @@ function PayrollTab({
                 <td className="px-3 py-2 text-center text-red-600">{row.absent_days || '-'}</td>
                 <td className="px-3 py-2 text-center text-gray-600">{row.overtime_hours || '-'}</td>
                 <td className="px-3 py-2 text-right font-mono text-gray-700">{(row.overtime_pay ?? 0) > 0 ? formatIDR(row.overtime_pay) : '-'}</td>
-                <td className="px-3 py-2 text-right font-mono font-medium text-gray-800">{formatIDR(getGross(row))}</td>
+                <td className="px-3 py-2 text-right font-mono font-medium text-gray-800">
+                  {formatIDR(getGross(row))}
+                  {(row.leave_compensation ?? 0) > 0 && (
+                    <div className="text-[10px] text-orange-600 mt-0.5">
+                      incl. leave comp. {formatIDR(row.leave_compensation)} ({row.leave_days_entitled}d)
+                    </div>
+                  )}
+                </td>
                 <td className="px-3 py-2 text-right font-mono text-red-600">{(row.total_deductions ?? 0) > 0 ? formatIDR(row.total_deductions) : '-'}</td>
                 <td className="px-3 py-2 text-right font-mono font-bold text-green-700">{formatIDR(getNet(row))}</td>
                 <td className="px-3 py-2 text-center">

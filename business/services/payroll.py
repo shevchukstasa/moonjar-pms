@@ -621,7 +621,7 @@ def calculate_monthly_payroll(
 
     # ── Gross salary ─────────────────────────────────────────────────────
     prorated_allowances = _round(total_allowances * proration_factor)
-    gross_salary = prorated_salary + prorated_allowances + overtime_pay + commission
+    gross_salary = prorated_salary + prorated_allowances + overtime_pay + commission + leave_compensation
 
     # ── BPJS + PPh21 ─────────────────────────────────────────────────────
     bpjs_employee_total = ZERO
@@ -661,6 +661,43 @@ def calculate_monthly_payroll(
 
     # ── Absence deduction ────────────────────────────────────────────────
     absence_deduction = Decimal('0')
+
+    # ── Leave compensation on termination ────────────────────────────────
+    # Indonesian law (UU 13/2003 art. 79, PP 35/2021 art. 15):
+    # - Annual leave (cuti tahunan): 12 days/year, earned ONLY after 12 months continuous service
+    # - On probation or < 12 months service: NO leave compensation
+    # - Daily rate for compensation: monthly salary / 30 (calendar days, not working days)
+    # - Only unused days from current leave period are compensated
+    leave_compensation = ZERO
+    leave_days_entitled = Decimal("0")
+    is_termination_month = False
+    termination_date_val = getattr(employee, 'termination_date', None)
+
+    if termination_date_val and payroll_year and payroll_month:
+        from datetime import date as _date
+        term_year = termination_date_val.year
+        term_month = termination_date_val.month
+        if term_year == payroll_year and term_month == payroll_month:
+            is_termination_month = True
+
+            # Check eligibility: must have completed 12+ months AND not on probation
+            if hire_date and not is_on_probation:
+                months_of_service = (term_year - hire_date.year) * 12 + (term_month - hire_date.month)
+                if months_of_service >= 12:
+                    # Proportional leave for current year period
+                    # Leave period starts on hire anniversary month each year
+                    anniversary_month = hire_date.month
+                    if term_month >= anniversary_month:
+                        months_in_period = term_month - anniversary_month
+                    else:
+                        months_in_period = 12 - anniversary_month + term_month
+                    leave_days_entitled = _round(Decimal(str(months_in_period)) / Decimal("12") * Decimal("12"))
+                    # Subtract leave days already taken this period (from attendance)
+                    leave_taken = Decimal(str(leave_days))
+                    unused_leave = max(leave_days_entitled - leave_taken, ZERO)
+                    # PP 35/2021: daily rate = salary / 30 (calendar days)
+                    leave_daily_rate = _round(base_salary / Decimal("30"))
+                    leave_compensation = _round(unused_leave * leave_daily_rate)
 
     # ── Deductions from employee (take-home perspective) ─────────────────
     # Formal: company pays PPh21 + BPJS employee → only absence reduces net
@@ -726,6 +763,11 @@ def calculate_monthly_payroll(
         # Commission
         "commission_rate": float(commission_rate),
         "commission": float(commission),
+
+        # Leave compensation (termination only)
+        "is_termination_month": is_termination_month,
+        "leave_days_entitled": float(leave_days_entitled),
+        "leave_compensation": float(leave_compensation),
 
         # Gross
         "gross_salary": float(gross_salary),

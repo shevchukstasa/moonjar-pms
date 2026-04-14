@@ -59,6 +59,9 @@ EMPLOYEE_SQL = [
 
     # Attendance: hours_worked for partial-day tracking (NULL = full day)
     "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS hours_worked NUMERIC(4,1)",
+
+    # Termination date — triggers leave compensation in final payroll
+    "ALTER TABLE employees ADD COLUMN IF NOT EXISTS termination_date DATE",
 ]
 
 

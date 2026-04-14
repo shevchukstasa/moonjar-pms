@@ -60,6 +60,7 @@ class EmployeeCreateInput(BaseModel):
     birth_date: Optional[str] = None
     has_own_bpjs: bool = False
     hire_date: Optional[str] = None
+    termination_date: Optional[str] = None
     is_active: bool = True
     employment_type: str = "full_time"
     department: str = "production"
@@ -86,6 +87,7 @@ class EmployeeUpdateInput(BaseModel):
     birth_date: Optional[str] = None
     has_own_bpjs: Optional[bool] = None
     hire_date: Optional[str] = None
+    termination_date: Optional[str] = None
     is_active: Optional[bool] = None
     employment_type: Optional[str] = None
     department: Optional[str] = None
@@ -219,6 +221,7 @@ def _serialize_employee(emp: Employee, db: Session) -> dict:
         "birth_date": str(emp.birth_date) if emp.birth_date else None,
         "has_own_bpjs": bool(emp.has_own_bpjs) if hasattr(emp, 'has_own_bpjs') else False,
         "hire_date": str(emp.hire_date) if emp.hire_date else None,
+        "termination_date": str(emp.termination_date) if emp.termination_date else None,
         "is_active": emp.is_active,
         "employment_type": emp.employment_type or "full_time",
         "department": emp.department or "production",
@@ -711,6 +714,7 @@ async def create_employee(
         birth_date=date.fromisoformat(data.birth_date) if data.birth_date else None,
         has_own_bpjs=data.has_own_bpjs,
         hire_date=date.fromisoformat(data.hire_date) if data.hire_date else None,
+        termination_date=date.fromisoformat(data.termination_date) if data.termination_date else None,
         is_active=data.is_active,
         employment_type=data.employment_type,
         department=data.department,
@@ -747,7 +751,7 @@ async def update_employee(
 
     update_data = data.model_dump(exclude_unset=True)
     # Convert date strings to date objects, empty strings to None
-    for date_field in ("hire_date", "birth_date"):
+    for date_field in ("hire_date", "birth_date", "termination_date"):
         if date_field in update_data:
             val = update_data[date_field]
             if val and isinstance(val, str):

@@ -660,7 +660,7 @@ def calculate_monthly_payroll(
         contractor_tax = _round(gross_salary * CONTRACTOR_TAX_RATE)
 
     # ── Absence deduction ────────────────────────────────────────────────
-    absence_deduction = _round(daily_rate * Decimal(str(absent_days)))
+    absence_deduction = Decimal('0')
 
     # ── Deductions from employee (take-home perspective) ─────────────────
     # Formal: company pays PPh21 + BPJS employee → only absence reduces net

@@ -152,7 +152,7 @@ def resolve_size_for_position(
     if pos_thickness and candidates:
         thickness_filtered = [
             s for s in candidates
-            if s.thickness_mm is not None and abs(s.thickness_mm - pos_thickness) < 2.0
+            if s.thickness_mm is not None and abs(s.thickness_mm - pos_thickness) <= 1.0
         ]
         if thickness_filtered:
             candidates = thickness_filtered

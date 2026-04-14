@@ -1481,8 +1481,11 @@ async def nightly_reschedule_overdue():
         today = date.today()
 
         terminal_statuses = [
-            'COMPLETED', 'SHIPPED', 'CANCELLED', 'DELIVERED',
-            'READY_FOR_SHIPMENT', 'PACKED',
+            PositionStatus.SHIPPED,
+            PositionStatus.CANCELLED,
+            PositionStatus.READY_FOR_SHIPMENT,
+            PositionStatus.PACKED,
+            PositionStatus.MERGED,
         ]
 
         # Find positions with any planned date in the past
@@ -1550,8 +1553,39 @@ async def nightly_reschedule_overdue():
                 return d + timedelta(days=1)
             return d
 
+        # ── Check blocking tasks for all overdue positions ──
+        from api.models import Task
+        from api.enums import TaskType, TaskStatus as _TS
+
+        blocked_pos_ids = set(
+            row[0] for row in
+            db.query(Task.related_position_id)
+            .filter(
+                Task.related_position_id.in_([p.id for p in overdue]),
+                Task.blocking.is_(True),
+                Task.status.in_([_TS.PENDING, _TS.IN_PROGRESS]),
+            )
+            .distinct()
+            .all()
+            if row[0]
+        )
+
+        # Get blocking task descriptions for Telegram
+        blocked_task_info = {}
+        if blocked_pos_ids:
+            for row in db.query(Task.related_position_id, Task.type, Task.description).filter(
+                Task.related_position_id.in_(blocked_pos_ids),
+                Task.blocking.is_(True),
+                Task.status.in_([_TS.PENDING, _TS.IN_PROGRESS]),
+            ).all():
+                if row[0] not in blocked_task_info:
+                    blocked_task_info[row[0]] = []
+                t_val = row[1].value if hasattr(row[1], 'value') else str(row[1])
+                blocked_task_info[row[0]].append(t_val)
+
         # ── Distribute overdue positions across days ──
         rescheduled = 0
+        blocked_shifted = 0
         errors = 0
 
         for pos in overdue:
@@ -1629,16 +1663,22 @@ async def nightly_reschedule_overdue():
                 day_loads[load_key] = day_loads.get(load_key, _get_load(fid, target_day)) + pos_area
 
                 pos.schedule_version = (pos.schedule_version or 0) + 1
-                rescheduled += 1
+
+                is_blocked = pos.id in blocked_pos_ids
+                if is_blocked:
+                    blocked_shifted += 1
+                else:
+                    rescheduled += 1
 
                 logger.info(
                     "NIGHTLY_RESCHEDULE | pos=%s order=%s | glazing=%s kiln=%s "
-                    "sorting=%s | day_load=%.1f/%.1f sqm",
+                    "sorting=%s | day_load=%.1f/%.1f sqm | blocked=%s",
                     pos.id,
                     pos.order.order_number if pos.order else "?",
                     pos.planned_glazing_date, pos.planned_kiln_date,
                     pos.planned_sorting_date,
                     day_loads.get(load_key, 0), daily_cap,
+                    is_blocked,
                 )
 
             except Exception as e:
@@ -1676,11 +1716,23 @@ async def nightly_reschedule_overdue():
                         overdue_orders[onum] = []
                     overdue_orders[onum].append(p)
 
-                tg_lines = [f"⚠️ <b>Jadwal terlambat — {rescheduled} posisi dijadwalkan ulang</b>\n"]
+                tg_lines = [f"⚠️ <b>Jadwal terlambat — {rescheduled + blocked_shifted} posisi dijadwalkan ulang</b>\n"]
                 for onum, positions in list(overdue_orders.items())[:10]:
                     tg_lines.append(f"📦 <b>{onum}</b>: {len(positions)} pos.")
                 if len(overdue_orders) > 10:
                     tg_lines.append(f"... dan {len(overdue_orders) - 10} pesanan lagi")
+
+                # Add blocked positions alert
+                fid_blocked = [p for p in fid_overdue if p.id in blocked_pos_ids]
+                if fid_blocked:
+                    tg_lines.append(f"\n🚫 <b>BLOCKED — {len(fid_blocked)} posisi menunggu:</b>")
+                    for p in fid_blocked[:8]:
+                        onum = p.order.order_number if p.order else "?"
+                        tasks = blocked_task_info.get(p.id, [])
+                        task_str = ", ".join(set(tasks))
+                        tg_lines.append(f"  • {onum} — {p.color or ''} {p.size or ''} [{task_str}]")
+                    if len(fid_blocked) > 8:
+                        tg_lines.append(f"  ... dan {len(fid_blocked) - 8} lagi")
 
                 tg_text = "\n".join(tg_lines)
 

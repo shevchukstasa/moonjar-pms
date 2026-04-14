@@ -931,3 +931,179 @@ async def update_scheduler_config(
         updated_at=config.updated_at.isoformat() if config.updated_at else None,
         updated_by=str(config.updated_by) if config.updated_by else None,
     )
+
+
+# ────────────────────────────────────────────────────────────────
+# Batch readiness check — verify ALL materials, stone, recipes,
+# consumption rules for ALL active positions in a factory.
+# Creates blocking tasks for anything missing.
+# ────────────────────────────────────────────────────────────────
+
+@router.post("/factory/{factory_id}/check-readiness")
+async def batch_check_readiness(
+    factory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Re-check readiness for ALL active positions: stone, materials,
+    recipe, consumption rules. Creates blocking tasks for missing items."""
+    from api.models import Task, Recipe, RecipeMaterial, MaterialStock, Material
+    from api.enums import TaskType, TaskStatus, UserRole
+    from business.services.stone_reservation import reserve_stone_for_position
+    from business.services.order_intake import _check_stone_stock
+    from sqlalchemy import func as sa_func
+
+    terminal = [
+        PositionStatus.SHIPPED, PositionStatus.CANCELLED,
+        PositionStatus.READY_FOR_SHIPMENT, PositionStatus.PACKED,
+        PositionStatus.MERGED,
+    ]
+
+    positions = (
+        db.query(OrderPosition)
+        .join(ProductionOrder, OrderPosition.order_id == ProductionOrder.id)
+        .filter(
+            ProductionOrder.factory_id == factory_id,
+            ProductionOrder.status.in_(['new', 'in_production', 'partially_ready']),
+            OrderPosition.status.notin_(terminal),
+        )
+        .all()
+    )
+
+    # Existing blocking tasks by (position_id, type) to avoid duplicates
+    existing_tasks = set()
+    for row in db.query(Task.related_position_id, Task.type).filter(
+        Task.blocking.is_(True),
+        Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+    ).all():
+        if row[0]:
+            t_val = row[1].value if hasattr(row[1], 'value') else str(row[1])
+            existing_tasks.add((row[0], t_val))
+
+    results = {
+        "positions_checked": 0,
+        "stone_tasks_created": 0,
+        "recipe_tasks_created": 0,
+        "material_tasks_created": 0,
+        "consumption_tasks_created": 0,
+        "already_blocked": 0,
+        "all_ok": 0,
+    }
+
+    for pos in positions:
+        results["positions_checked"] += 1
+        pos_ok = True
+
+        # 1. Stone check
+        if (pos.id, 'stone_procurement') not in existing_tasks:
+            try:
+                stone_result = reserve_stone_for_position(db, pos, auto_commit=False)
+                if stone_result:
+                    available = _check_stone_stock(db, pos, factory_id, stone_result)
+                    if not available:
+                        db.add(Task(
+                            factory_id=factory_id,
+                            type=TaskType.STONE_PROCUREMENT,
+                            status=TaskStatus.PENDING,
+                            assigned_role=UserRole.PURCHASER,
+                            related_order_id=pos.order_id,
+                            related_position_id=pos.id,
+                            blocking=True,
+                            description=f"Stone needed: {pos.color or ''} {pos.size or ''} — {stone_result['reserved_sqm']:.2f} m² ({stone_result['reserved_qty']} pcs)",
+                        ))
+                        results["stone_tasks_created"] += 1
+                        pos_ok = False
+            except Exception as e:
+                logger.warning("READINESS stone check failed pos=%s: %s", pos.id, e)
+        else:
+            results["already_blocked"] += 1
+            pos_ok = False
+
+        # 2. Recipe check — does position have a recipe?
+        if (pos.id, 'recipe_configuration') not in existing_tasks:
+            if not pos.recipe_id:
+                db.add(Task(
+                    factory_id=factory_id,
+                    type=TaskType.RECIPE_CONFIGURATION,
+                    status=TaskStatus.PENDING,
+                    assigned_role=UserRole.PRODUCTION_MANAGER,
+                    related_order_id=pos.order_id,
+                    related_position_id=pos.id,
+                    blocking=True,
+                    description=f"Configure recipe for: {pos.collection or ''} / {pos.color or ''} / {pos.size or ''}",
+                ))
+                results["recipe_tasks_created"] += 1
+                pos_ok = False
+            else:
+                # 3. Material check — are recipe materials available?
+                recipe_mats = db.query(RecipeMaterial).filter(
+                    RecipeMaterial.recipe_id == pos.recipe_id
+                ).all()
+
+                if not recipe_mats:
+                    # Recipe exists but has no materials defined
+                    db.add(Task(
+                        factory_id=factory_id,
+                        type=TaskType.RECIPE_CONFIGURATION,
+                        status=TaskStatus.PENDING,
+                        assigned_role=UserRole.PRODUCTION_MANAGER,
+                        related_order_id=pos.order_id,
+                        related_position_id=pos.id,
+                        blocking=True,
+                        description=f"Recipe has no materials: {pos.color or ''} / {pos.size or ''}",
+                    ))
+                    results["recipe_tasks_created"] += 1
+                    pos_ok = False
+
+                for rm in recipe_mats:
+                    # Check if material stock exists and has balance
+                    stock = db.query(MaterialStock).filter(
+                        MaterialStock.material_id == rm.material_id,
+                        MaterialStock.factory_id == factory_id,
+                    ).first()
+
+                    required = float(rm.quantity_per_unit or 0) * float(pos.quantity or 1)
+                    available = float(stock.balance) if stock else 0
+
+                    if available < required and required > 0:
+                        mat = db.query(Material).filter(Material.id == rm.material_id).first()
+                        mat_name = mat.name if mat else str(rm.material_id)[:8]
+                        # Check if material shortage task already exists
+                        if (pos.id, 'stock_shortage') not in existing_tasks:
+                            # Don't create blocking task for materials — position status
+                            # should be set to insufficient_materials instead
+                            if pos.status != PositionStatus.INSUFFICIENT_MATERIALS:
+                                pos.status = PositionStatus.INSUFFICIENT_MATERIALS
+                                results["material_tasks_created"] += 1
+                                pos_ok = False
+
+                # 4. Consumption rules check — for non-standard shapes
+                shape_val = pos.shape.value if hasattr(pos.shape, 'value') else str(pos.shape) if pos.shape else 'rectangle'
+                if shape_val not in ('rectangle', 'square') and (pos.id, 'consumption_measurement') not in existing_tasks:
+                    # Non-standard shape — check if consumption rules exist
+                    from api.models import ConsumptionRule
+                    rule = db.query(ConsumptionRule).filter(
+                        ConsumptionRule.is_active.is_(True),
+                        ConsumptionRule.shape == shape_val,
+                    ).first()
+                    if not rule:
+                        method = getattr(pos, 'application_method_code', 'SS') or 'SS'
+                        db.add(Task(
+                            factory_id=factory_id,
+                            type=TaskType.CONSUMPTION_MEASUREMENT,
+                            status=TaskStatus.PENDING,
+                            assigned_role=UserRole.PRODUCTION_MANAGER,
+                            related_order_id=pos.order_id,
+                            related_position_id=pos.id,
+                            blocking=True,
+                            description=f"Measure consumption for {shape_val} shape: {pos.color or ''} {pos.size or ''} (method: {method})",
+                        ))
+                        results["consumption_tasks_created"] += 1
+                        pos_ok = False
+
+        if pos_ok:
+            results["all_ok"] += 1
+
+    db.commit()
+    logger.info("BATCH_READINESS_CHECK | factory=%s | results=%s", factory_id, results)
+    return {"ok": True, **results}

@@ -147,16 +147,21 @@ def resolve_size_for_position(
             candidates = shape_filtered
         # If no match with shape filter, keep all (shape might be unset in sizes)
 
-    # Filter by thickness if position has one and it's not the default 11
+    # Filter by thickness if position has one
     pos_thickness = float(position.thickness_mm) if position.thickness_mm else None
     if pos_thickness and candidates:
         thickness_filtered = [
             s for s in candidates
-            if s.thickness_mm is not None and abs(s.thickness_mm - pos_thickness) < 0.5
+            if s.thickness_mm is not None and abs(s.thickness_mm - pos_thickness) < 2.0
         ]
         if thickness_filtered:
             candidates = thickness_filtered
-        # If no thickness matches, keep all (thickness might be unset in sizes)
+
+    # Prefer standard (is_custom=False) over custom when multiple candidates match
+    if len(candidates) > 1:
+        standard = [s for s in candidates if not getattr(s, 'is_custom', False)]
+        if standard:
+            candidates = standard
 
     # Format candidates for metadata
     candidate_dicts = [

@@ -250,7 +250,15 @@ export default function ManagerSchedulePage() {
     qc: 'planned_completion_date',
   };
 
-  // Group positions by their planned date for the active section
+  // Local "today" (YYYY-MM-DD) — avoid UTC drift that pushed WITA users a day off
+  const todayLocal = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+
+  // Group positions by their planned date for the active section.
+  // All past-date positions collapse into a single virtual "Overdue" bucket
+  // so the schedule never shows stale per-date cards like "13 Apr — 2 days overdue".
   const groupedByDate = useMemo(() => {
     const items = (sectionItems[tab] || []) as Record<string, unknown>[];
     const dateField = DATE_FIELD_MAP[tab];
@@ -258,28 +266,27 @@ export default function ManagerSchedulePage() {
 
     const groups = new Map<string, Record<string, unknown>[]>();
     for (const item of items) {
-      const dateVal = (item[dateField] as string) || 'Unscheduled';
-      if (!groups.has(dateVal)) groups.set(dateVal, []);
-      groups.get(dateVal)!.push(item);
+      const raw = (item[dateField] as string) || 'Unscheduled';
+      const bucket = raw === 'Unscheduled' ? 'Unscheduled' : raw < todayLocal ? 'Overdue' : raw;
+      if (!groups.has(bucket)) groups.set(bucket, []);
+      groups.get(bucket)!.push(item);
     }
-    // Sort groups: real dates first (ascending), "Unscheduled" last
+    // Sort groups: Overdue first, then real dates ascending, Unscheduled last
     return Array.from(groups.entries()).sort(([a], [b]) => {
+      if (a === 'Overdue') return -1;
+      if (b === 'Overdue') return 1;
       if (a === 'Unscheduled') return 1;
       if (b === 'Unscheduled') return -1;
       return a.localeCompare(b);
     });
-  }, [tab, sectionItems]);
+  }, [tab, sectionItems, todayLocal]);
 
   // Count overdue positions across all sections
   const overdueCount = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    let count = 0;
     for (const [dateKey, positions] of groupedByDate) {
-      if (dateKey !== 'Unscheduled' && dateKey < today) {
-        count += positions.length;
-      }
+      if (dateKey === 'Overdue') return positions.length;
     }
-    return count;
+    return 0;
   }, [groupedByDate]);
 
   // Auto-reschedule overdue positions when detected
@@ -314,6 +321,26 @@ export default function ManagerSchedulePage() {
       queryClient.invalidateQueries({ queryKey: ['schedule'] });
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Reschedule failed';
+      setRescheduleResult(`Error: ${msg}`);
+    } finally {
+      setRescheduling(false);
+    }
+  }, [activeFactoryId, queryClient]);
+
+  const handleRecalculateAll = useCallback(async () => {
+    if (!activeFactoryId) return;
+    setRescheduling(true);
+    setRescheduleResult(null);
+    try {
+      const res = await apiClient.post(`/schedule/recalculate`, null, {
+        params: { factory_id: activeFactoryId },
+      });
+      const count = res.data?.positions_rescheduled ?? res.data?.count ?? 0;
+      setRescheduleResult(`Full recalc: ${count} position(s) updated.`);
+      queryClient.invalidateQueries({ queryKey: ['schedule'] });
+      queryClient.invalidateQueries({ queryKey: ['positions'] });
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Recalculate failed';
       setRescheduleResult(`Error: ${msg}`);
     } finally {
       setRescheduling(false);
@@ -473,7 +500,19 @@ export default function ManagerSchedulePage() {
             <p className="mt-1 text-sm text-gray-500">Section schedules and kiln batches</p>
           </div>
         </div>
-        <FactorySelector />
+        <div className="flex items-center gap-3">
+          <Button
+            size="sm"
+            onClick={handleRecalculateAll}
+            disabled={rescheduling || !activeFactoryId}
+            className="bg-indigo-600 text-white hover:bg-indigo-700"
+            title="Recompute every active position using current priority order"
+          >
+            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${rescheduling ? 'animate-spin' : ''}`} />
+            Recalculate
+          </Button>
+          <FactorySelector />
+        </div>
       </div>
 
       {/* KPI */}
@@ -648,35 +687,34 @@ export default function ManagerSchedulePage() {
           <div className="space-y-4">
             {groupedByDate.map(([dateKey, positions]) => {
               const isUnscheduled = dateKey === 'Unscheduled';
+              const isOverdue = dateKey === 'Overdue';
+              const isToday = !isUnscheduled && !isOverdue && dateKey === todayLocal;
               const dateLabel = isUnscheduled
                 ? 'Unscheduled'
+                : isOverdue
+                ? 'Overdue'
                 : new Date(dateKey + 'T00:00:00').toLocaleDateString('en-GB', {
                     weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
                   });
-              const isToday = !isUnscheduled && dateKey === new Date().toISOString().slice(0, 10);
-              const isPast = !isUnscheduled && dateKey < new Date().toISOString().slice(0, 10);
               const blockedCount = positions.filter((p) => p.has_blocking_tasks).length;
 
               return (
                 <div key={dateKey}>
                   <div className={`flex items-center gap-2 rounded-t-lg border-b px-4 py-2 ${
+                    isOverdue ? 'bg-red-50 border-red-200' :
                     isToday ? 'bg-orange-50 border-orange-200' :
-                    isPast ? 'bg-red-50 border-red-200' :
                     isUnscheduled ? 'bg-gray-50 border-gray-200' :
                     'bg-blue-50 border-blue-200'
                   }`}>
                     <Calendar className={`h-4 w-4 ${
-                      isToday ? 'text-orange-500' : isPast ? 'text-red-400' : isUnscheduled ? 'text-gray-400' : 'text-blue-500'
+                      isOverdue ? 'text-red-400' : isToday ? 'text-orange-500' : isUnscheduled ? 'text-gray-400' : 'text-blue-500'
                     }`} />
                     <span className={`text-sm font-semibold ${
-                      isToday ? 'text-orange-700' : isPast ? 'text-red-600' : isUnscheduled ? 'text-gray-500' : 'text-blue-700'
+                      isOverdue ? 'text-red-600' : isToday ? 'text-orange-700' : isUnscheduled ? 'text-gray-500' : 'text-blue-700'
                     }`}>
                       {dateLabel}
                       {isToday && ' (Today)'}
-                      {isPast && (() => {
-                        const diff = Math.floor((Date.now() - new Date(dateKey + 'T00:00:00').getTime()) / 86400000);
-                        return ` — ${diff} day${diff !== 1 ? 's' : ''} overdue`;
-                      })()}
+                      {isOverdue && ' — needs rescheduling'}
                     </span>
                     <span className="ml-auto flex items-center gap-2 text-xs text-gray-500">
                       {blockedCount > 0 && (

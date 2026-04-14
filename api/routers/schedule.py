@@ -414,23 +414,34 @@ async def reorder_positions(
     current_user=Depends(require_management),
 ):
     """Bulk reorder positions — assigns sequential priority_order values.
-    Also triggers reschedule for affected positions."""
-    reordered = []
+    Triggers a factory-wide reschedule so new priorities actually move dates
+    (per-position reschedule is not enough because each position recomputes
+    from its own deadline and ignores sibling priorities)."""
+    reordered: list[OrderPosition] = []
+    factory_ids: set[UUID] = set()
+    # Use low numeric values so these positions take precedence over
+    # any FIFO-assigned priority_order (which starts at 0 but grows with
+    # the number of existing positions in the factory).
     for idx, pid in enumerate(data.position_ids):
         pos = db.query(OrderPosition).filter(OrderPosition.id == UUID(pid)).first()
         if pos:
             pos.priority_order = idx
             reordered.append(pos)
+            if pos.order and pos.order.factory_id:
+                factory_ids.add(pos.order.factory_id)
     db.commit()
 
-    # Reschedule reordered positions (best-effort)
+    # Reschedule each affected factory so the new priority_order actually
+    # changes planned dates. reschedule_factory now preserves existing
+    # priority_order values, so the manual order is respected.
     try:
-        from business.services.production_scheduler import reschedule_position
-        for pos in reordered:
-            reschedule_position(db, pos)
+        from business.services.production_scheduler import reschedule_factory
+        for fid in factory_ids:
+            reschedule_factory(db, fid)
         db.commit()
     except Exception as e:
-        logger.warning("Failed to reschedule reordered positions: %s", e)
+        logger.warning("Failed to reschedule factory after reorder: %s", e)
+        db.rollback()
 
     return {"ok": True, "count": len(data.position_ids)}
 
@@ -626,29 +637,15 @@ async def reschedule_overdue_endpoint(
     def _skip_sun(d):
         return d + timedelta(days=1) if d.weekday() == 6 else d
 
-    # Check which overdue positions have blocking tasks — skip them
-    from api.models import Task
-    from api.enums import TaskStatus as _TS
-    blocked_pos_ids = set(
-        row[0] for row in
-        db.query(Task.related_position_id)
-        .filter(
-            Task.related_position_id.in_([p.id for p in overdue]),
-            Task.blocking.is_(True),
-            Task.status.in_([_TS.PENDING, _TS.IN_PROGRESS]),
-        )
-        .distinct()
-        .all()
-    )
-
+    # NOTE: Blocked positions (unresolved stone/recipe/material tasks) used to
+    # be skipped here, which caused them to pile up under past-date cards in
+    # the schedule view — the user would see "13 Apr — 2 days overdue" with
+    # blocked positions on it long after today passed. Now we move ALL
+    # overdue positions forward; the blocked status stays on the position
+    # and is shown via the "blocked" badge on the new date card.
     rescheduled = 0
     skipped_blocked = 0
     for pos in overdue:
-        # Don't reschedule positions with unresolved blocking tasks (no stone, etc.)
-        if pos.id in blocked_pos_ids:
-            skipped_blocked += 1
-            continue
-
         old_glazing = pos.planned_glazing_date
         delta = (today - old_glazing).days if old_glazing and old_glazing < today else 0
 

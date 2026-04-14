@@ -2300,20 +2300,24 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
         ]),
     ).order_by(ProductionOrder.created_at.asc()).all()  # FIFO: earliest orders first
 
-    # Assign priority_order based on FIFO (order creation date)
-    # This ensures earlier orders always get scheduled into earlier slots
-    _priority_counter = 0
+    # Assign priority_order based on FIFO (order creation date) ONLY for
+    # positions that don't already have a manually-set priority_order.
+    # Manual Tablo drag-drop writes priority_order directly — we must NOT
+    # overwrite it on a factory reschedule, otherwise PM's reordering is lost.
+    existing_max = db.query(OrderPosition.priority_order).filter(
+        OrderPosition.priority_order.isnot(None),
+    ).order_by(OrderPosition.priority_order.desc()).first()
+    _priority_counter = (existing_max[0] + 1) if existing_max and existing_max[0] is not None else 0
 
-    # First pass: assign FIFO priority_order to all positions
-    # so that capacity-finding logic respects arrival order
     for order in active_orders:
         positions = db.query(OrderPosition).filter(
             OrderPosition.order_id == order.id,
             OrderPosition.status != PositionStatus.CANCELLED.value,
         ).order_by(OrderPosition.position_number.asc()).all()
         for pos in positions:
-            pos.priority_order = _priority_counter
-            _priority_counter += 1
+            if pos.priority_order is None:
+                pos.priority_order = _priority_counter
+                _priority_counter += 1
     db.flush()
 
     total = 0

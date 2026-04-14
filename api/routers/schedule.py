@@ -601,9 +601,22 @@ async def reschedule_overdue_endpoint(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
-    """Move all overdue positions forward to today or next available day."""
+    """Replan all overdue positions using the full scheduling engine.
+
+    Each overdue position goes through reschedule_position() which does:
+    - backward scheduling from order deadline (or smart fallback if deadline
+      itself is in the past)
+    - OVERDUE_SPREAD: when planned_glazing lands before today, find the
+      earliest day with kiln capacity (typology-aware, zone-aware)
+    - kiln assignment via find_best_kiln_and_date
+    - blocking-task & material-wait constraints
+
+    This replaces the old naive "shift dates by N days" logic which ignored
+    capacity and left positions stacked on the same day.
+    """
     import logging
-    from datetime import date as _date, timedelta
+    from datetime import date as _date
+    from business.services.production_scheduler import reschedule_position
 
     logger = logging.getLogger("moonjar.schedule")
     today = _date.today()
@@ -626,6 +639,11 @@ async def reschedule_overdue_endpoint(
                 OrderPosition.planned_kiln_date < today,
                 OrderPosition.planned_sorting_date < today,
             ),
+        ).order_by(
+            # Replan in priority_order so manually-ordered positions get
+            # the earliest available slots.
+            OrderPosition.priority_order.asc().nullslast(),
+            OrderPosition.position_number.asc(),
         ).all()
     except Exception as e:
         logger.error("RESCHEDULE_OVERDUE query failed: %s", e)
@@ -634,50 +652,31 @@ async def reschedule_overdue_endpoint(
     if not overdue:
         return {"ok": True, "positions_rescheduled": 0}
 
-    def _skip_sun(d):
-        return d + timedelta(days=1) if d.weekday() == 6 else d
-
-    # NOTE: Blocked positions (unresolved stone/recipe/material tasks) used to
-    # be skipped here, which caused them to pile up under past-date cards in
-    # the schedule view — the user would see "13 Apr — 2 days overdue" with
-    # blocked positions on it long after today passed. Now we move ALL
-    # overdue positions forward; the blocked status stays on the position
-    # and is shown via the "blocked" badge on the new date card.
     rescheduled = 0
-    skipped_blocked = 0
+    failed = 0
     for pos in overdue:
-        old_glazing = pos.planned_glazing_date
-        delta = (today - old_glazing).days if old_glazing and old_glazing < today else 0
-
-        if pos.planned_glazing_date and pos.planned_glazing_date < today:
-            pos.planned_glazing_date = _skip_sun(today)
-        if pos.planned_kiln_date and pos.planned_kiln_date < today:
-            pos.planned_kiln_date = _skip_sun(
-                pos.planned_kiln_date + timedelta(days=delta) if delta > 0
-                else today + timedelta(days=1)
+        savepoint = db.begin_nested()
+        try:
+            reschedule_position(db, pos)
+            db.flush()
+            savepoint.commit()
+            rescheduled += 1
+        except Exception as e:
+            savepoint.rollback()
+            failed += 1
+            logger.warning(
+                "RESCHEDULE_OVERDUE | failed pos=%s: %s", pos.id, e,
             )
-        if pos.planned_sorting_date and pos.planned_sorting_date < today:
-            pos.planned_sorting_date = _skip_sun(
-                pos.planned_sorting_date + timedelta(days=delta) if delta > 0
-                else (pos.planned_kiln_date or today) + timedelta(days=2)
-            )
-        if pos.planned_completion_date and pos.planned_completion_date < today:
-            pos.planned_completion_date = _skip_sun(
-                pos.planned_completion_date + timedelta(days=delta) if delta > 0
-                else (pos.planned_sorting_date or today) + timedelta(days=1)
-            )
-        pos.schedule_version = (pos.schedule_version or 0) + 1
-        rescheduled += 1
 
     db.commit()
     logger.info(
-        "RESCHEDULE_OVERDUE | factory=%s | moved %d positions | skipped %d (blocked)",
-        factory_id, rescheduled, skipped_blocked,
+        "RESCHEDULE_OVERDUE | factory=%s | replanned=%d failed=%d",
+        factory_id, rescheduled, failed,
     )
     return {
         "ok": True,
         "positions_rescheduled": rescheduled,
-        "skipped_blocked": skipped_blocked,
+        "failed": failed,
     }
 
 

@@ -350,7 +350,17 @@ async def payroll_summary(
     import calendar
     from datetime import date as _date
 
-    query = db.query(Employee).filter(Employee.is_active == True)
+    # Include active employees + terminated employees whose termination_date falls in this month
+    from sqlalchemy import or_
+    query = db.query(Employee).filter(
+        or_(
+            Employee.is_active == True,
+            # Include terminated employees for their final payroll month
+            (Employee.termination_date.isnot(None))
+            & (extract("year", Employee.termination_date) == year)
+            & (extract("month", Employee.termination_date) == month),
+        )
+    )
     if factory_id:
         fid = UUID(factory_id)
         query = query.filter(Employee.factory_id == fid)

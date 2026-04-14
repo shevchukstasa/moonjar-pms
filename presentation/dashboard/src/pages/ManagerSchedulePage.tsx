@@ -251,6 +251,7 @@ export default function ManagerSchedulePage() {
   };
 
   // Group positions by their planned date for the active section
+  // Blocked positions (has_blocking_tasks) go to a separate "Blocked" group
   const groupedByDate = useMemo(() => {
     const items = (sectionItems[tab] || []) as Record<string, unknown>[];
     const dateField = DATE_FIELD_MAP[tab];
@@ -258,24 +259,29 @@ export default function ManagerSchedulePage() {
 
     const groups = new Map<string, Record<string, unknown>[]>();
     for (const item of items) {
-      const dateVal = (item[dateField] as string) || 'Unscheduled';
-      if (!groups.has(dateVal)) groups.set(dateVal, []);
-      groups.get(dateVal)!.push(item);
+      // Blocked positions go to "Blocked" group regardless of planned date
+      const groupKey = item.has_blocking_tasks
+        ? 'Blocked'
+        : (item[dateField] as string) || 'Unscheduled';
+      if (!groups.has(groupKey)) groups.set(groupKey, []);
+      groups.get(groupKey)!.push(item);
     }
-    // Sort groups: real dates first (ascending), "Unscheduled" last
+    // Sort: real dates first (ascending), then "Unscheduled", then "Blocked" last
     return Array.from(groups.entries()).sort(([a], [b]) => {
+      if (a === 'Blocked') return 1;
+      if (b === 'Blocked') return -1;
       if (a === 'Unscheduled') return 1;
       if (b === 'Unscheduled') return -1;
       return a.localeCompare(b);
     });
   }, [tab, sectionItems]);
 
-  // Count overdue positions across all sections
+  // Count overdue positions across all sections (exclude blocked)
   const overdueCount = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     let count = 0;
     for (const [dateKey, positions] of groupedByDate) {
-      if (dateKey !== 'Unscheduled' && dateKey < today) {
+      if (dateKey !== 'Unscheduled' && dateKey !== 'Blocked' && dateKey < today) {
         count += positions.length;
       }
     }
@@ -647,27 +653,37 @@ export default function ManagerSchedulePage() {
         ) : (
           <div className="space-y-4">
             {groupedByDate.map(([dateKey, positions]) => {
+              const isBlocked = dateKey === 'Blocked';
               const isUnscheduled = dateKey === 'Unscheduled';
-              const dateLabel = isUnscheduled
-                ? 'Unscheduled'
-                : new Date(dateKey + 'T00:00:00').toLocaleDateString('en-GB', {
-                    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-                  });
-              const isToday = !isUnscheduled && dateKey === new Date().toISOString().slice(0, 10);
-              const isPast = !isUnscheduled && dateKey < new Date().toISOString().slice(0, 10);
+              const isSpecial = isBlocked || isUnscheduled;
+              const dateLabel = isBlocked
+                ? 'Blocked — waiting for materials / recipe / stone'
+                : isUnscheduled
+                  ? 'Unscheduled'
+                  : new Date(dateKey + 'T00:00:00').toLocaleDateString('en-GB', {
+                      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+                    });
+              const isToday = !isSpecial && dateKey === new Date().toISOString().slice(0, 10);
+              const isPast = !isSpecial && dateKey < new Date().toISOString().slice(0, 10);
 
               return (
                 <div key={dateKey}>
                   <div className={`flex items-center gap-2 rounded-t-lg border-b px-4 py-2 ${
+                    isBlocked ? 'bg-red-100 border-red-300' :
                     isToday ? 'bg-orange-50 border-orange-200' :
                     isPast ? 'bg-red-50 border-red-200' :
                     isUnscheduled ? 'bg-gray-50 border-gray-200' :
                     'bg-blue-50 border-blue-200'
                   }`}>
-                    <Calendar className={`h-4 w-4 ${
-                      isToday ? 'text-orange-500' : isPast ? 'text-red-400' : isUnscheduled ? 'text-gray-400' : 'text-blue-500'
-                    }`} />
+                    {isBlocked ? (
+                      <AlertTriangle className="h-4 w-4 text-red-600" />
+                    ) : (
+                      <Calendar className={`h-4 w-4 ${
+                        isToday ? 'text-orange-500' : isPast ? 'text-red-400' : isUnscheduled ? 'text-gray-400' : 'text-blue-500'
+                      }`} />
+                    )}
                     <span className={`text-sm font-semibold ${
+                      isBlocked ? 'text-red-700' :
                       isToday ? 'text-orange-700' : isPast ? 'text-red-600' : isUnscheduled ? 'text-gray-500' : 'text-blue-700'
                     }`}>
                       {dateLabel}

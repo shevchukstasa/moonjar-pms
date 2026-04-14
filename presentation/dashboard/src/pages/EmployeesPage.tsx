@@ -98,6 +98,11 @@ export default function EmployeesPage() {
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [formError, setFormError] = useState('');
 
+  // Termination dialog
+  const [terminateDialogOpen, setTerminateDialogOpen] = useState(false);
+  const [terminateEmployee, setTerminateEmployee] = useState<Employee | null>(null);
+  const [terminateDate, setTerminateDate] = useState('');
+
   // Attendance dialog
   const [attDialogOpen, setAttDialogOpen] = useState(false);
   const [attEmployee, setAttEmployee] = useState<Employee | null>(null);
@@ -238,8 +243,20 @@ export default function EmployeesPage() {
     },
   });
 
-  const deactivateMutation = useMutation({
-    mutationFn: (id: string) => employeesApi.deactivate(id),
+  const terminateMutation = useMutation({
+    mutationFn: ({ id, termination_date }: { id: string; termination_date: string }) =>
+      employeesApi.update(id, { termination_date, is_active: false }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      setTerminateDialogOpen(false);
+      setTerminateEmployee(null);
+      setTerminateDate('');
+    },
+  });
+
+  const reinstateMutation = useMutation({
+    mutationFn: (id: string) =>
+      employeesApi.update(id, { termination_date: '', is_active: true } as any),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['employees'] }),
   });
 
@@ -510,7 +527,12 @@ export default function EmployeesPage() {
           showInactive={showInactive}
           onToggleInactive={() => setShowInactive(!showInactive)}
           onEdit={openEdit}
-          onDeactivate={(emp) => deactivateMutation.mutate(emp.id)}
+          onTerminate={(emp) => {
+            setTerminateEmployee(emp);
+            setTerminateDate(new Date().toISOString().split('T')[0]);
+            setTerminateDialogOpen(true);
+          }}
+          onReinstate={(emp) => reinstateMutation.mutate(emp.id)}
         />
       )}
 
@@ -832,6 +854,47 @@ export default function EmployeesPage() {
           </div>
         </div>
       </Dialog>
+
+      {/* ── Terminate Dialog ── */}
+      <Dialog
+        open={terminateDialogOpen}
+        onClose={() => { setTerminateDialogOpen(false); setTerminateEmployee(null); }}
+        title={`Terminate ${terminateEmployee?.full_name ?? ''}`}
+      >
+        <div className="space-y-4 p-4">
+          <p className="text-sm text-gray-600">
+            This will mark the employee as terminated and calculate leave compensation in their final payroll.
+          </p>
+          <Input
+            label="Last working day"
+            type="date"
+            value={terminateDate}
+            onChange={(e) => setTerminateDate(e.target.value)}
+          />
+          {terminateEmployee?.hire_date && (
+            <p className="text-xs text-gray-400">
+              Hired: {terminateEmployee.hire_date}
+            </p>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={() => { setTerminateDialogOpen(false); setTerminateEmployee(null); }}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              className="bg-red-600 hover:bg-red-700"
+              disabled={!terminateDate || terminateMutation.isPending}
+              onClick={() => {
+                if (terminateEmployee && terminateDate) {
+                  terminateMutation.mutate({ id: terminateEmployee.id, termination_date: terminateDate });
+                }
+              }}
+            >
+              {terminateMutation.isPending ? 'Processing...' : 'Confirm Termination'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }
@@ -844,14 +907,16 @@ function EmployeeListTab({
   showInactive,
   onToggleInactive,
   onEdit,
-  onDeactivate,
+  onTerminate,
+  onReinstate,
 }: {
   employees: Employee[];
   loading: boolean;
   showInactive: boolean;
   onToggleInactive: () => void;
   onEdit: (emp: Employee) => void;
-  onDeactivate: (emp: Employee) => void;
+  onTerminate: (emp: Employee) => void;
+  onReinstate: (emp: Employee) => void;
 }) {
   if (loading) {
     return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
@@ -902,19 +967,31 @@ function EmployeeListTab({
                   <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(emp.base_salary)}</td>
                   <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(totalAllow)}</td>
                   <td className="px-3 py-2 text-center">
-                    <Badge status={emp.is_active ? 'active' : 'inactive'} label={emp.is_active ? 'Active' : 'Inactive'} />
+                    <Badge status={emp.is_active ? 'active' : 'inactive'} label={emp.is_active ? 'Active' : 'Terminated'} />
+                    {(emp as any).termination_date && (
+                      <div className="text-[10px] text-gray-400 mt-0.5">{(emp as any).termination_date}</div>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <div className="flex justify-end gap-1">
                       <Button variant="secondary" size="sm" onClick={() => onEdit(emp)}>Edit</Button>
-                      {emp.is_active && (
+                      {emp.is_active ? (
                         <Button
                           variant="secondary"
                           size="sm"
                           className="text-red-600 hover:text-red-700"
-                          onClick={() => onDeactivate(emp)}
+                          onClick={() => onTerminate(emp)}
                         >
-                          Deactivate
+                          Terminate
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="text-green-600 hover:text-green-700"
+                          onClick={() => onReinstate(emp)}
+                        >
+                          Reinstate
                         </Button>
                       )}
                     </div>

@@ -68,7 +68,11 @@ function formatDate(dateStr: string): string {
 }
 
 function isToday(dateStr: string): boolean {
-  return dateStr === new Date().toISOString().slice(0, 10);
+  // Use local date — toISOString() returns UTC and drifts a day off
+  // for users in UTC+7/+8 (WITA/WIB) past midnight.
+  const d = new Date();
+  const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return dateStr === local;
 }
 
 function StatusBadge({ status }: { status?: string }) {

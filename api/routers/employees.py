@@ -11,7 +11,7 @@ from sqlalchemy import extract
 
 from api.database import get_db
 from api.auth import get_current_user
-from api.roles import require_management
+from api.roles import require_management, require_finance
 from api.models import Employee, Attendance, Factory, UserFactory
 
 router = APIRouter()
@@ -521,6 +521,272 @@ async def payroll_summary(
         "factory_id": factory_id,
         "year": year,
         "month": month,
+    }
+
+
+@router.get("/hr-costs/yearly")
+async def hr_costs_yearly(
+    year: int = Query(..., description="Calendar year"),
+    factory_id: Optional[str] = Query(None, description="Factory UUID (omit for all factories)"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_finance),
+):
+    """Yearly HR costs breakdown by month — for owner/ceo visibility.
+
+    Returns 12 months of payroll totals including terminated employees,
+    leave compensation, BPJS, PPh21, and total cost to company.
+    """
+    from datetime import date as _date
+
+    months_data = []
+    year_totals = {
+        "total_employees": 0,  # max across months
+        "total_gross": 0.0,
+        "total_bpjs_employer": 0.0,
+        "total_company_bpjs_for_employee": 0.0,
+        "total_pph21": 0.0,
+        "total_contractor_tax": 0.0,
+        "total_net": 0.0,
+        "total_cost": 0.0,
+        "total_overtime_pay": 0.0,
+        "total_commission": 0.0,
+        "total_leave_compensation": 0.0,
+        "terminations_count": 0,
+    }
+    year_by_department: dict[str, dict] = {}
+
+    # Only iterate through months up to current month (no future data)
+    today = _date.today()
+    max_month = 12
+    if year == today.year:
+        max_month = today.month
+    elif year > today.year:
+        max_month = 0
+
+    for m in range(1, max_month + 1):
+        try:
+            summary = await payroll_summary(
+                factory_id=factory_id,
+                year=year,
+                month=m,
+                db=db,
+                current_user=current_user,
+            )
+        except Exception as e:
+            # Skip months that fail to compute
+            months_data.append({
+                "month": m,
+                "error": str(e),
+                "total_employees": 0,
+                "total_gross": 0,
+                "total_cost": 0,
+            })
+            continue
+
+        totals = summary.get("totals", {})
+        items = summary.get("items", [])
+
+        # Count leave compensation + terminations for this month
+        leave_comp_total = sum(item.get("leave_compensation", 0) or 0 for item in items)
+        terminations = sum(1 for item in items if item.get("is_termination_month"))
+
+        # Breakdown by department (production / sales / administration / ...)
+        by_department: dict[str, dict] = {}
+        for item in items:
+            dept = (item.get("department") or "production").lower()
+            bucket = by_department.setdefault(dept, {
+                "department": dept,
+                "employees": 0,
+                "total_gross": 0.0,
+                "total_bpjs_employer": 0.0,
+                "total_pph21": 0.0,
+                "total_contractor_tax": 0.0,
+                "total_net": 0.0,
+                "total_cost": 0.0,
+                "total_overtime_pay": 0.0,
+                "total_commission": 0.0,
+                "leave_compensation": 0.0,
+            })
+            bucket["employees"] += 1
+            bucket["total_gross"] += float(item.get("gross_salary", 0) or 0)
+            bucket["total_bpjs_employer"] += float(item.get("bpjs_employer", 0) or 0)
+            bucket["total_pph21"] += float(item.get("pph21", 0) or 0)
+            bucket["total_contractor_tax"] += float(item.get("contractor_tax", 0) or 0)
+            bucket["total_net"] += float(item.get("net_salary", 0) or 0)
+            bucket["total_cost"] += float(item.get("total_cost_to_company", 0) or 0)
+            bucket["total_overtime_pay"] += float(item.get("overtime_pay", 0) or 0)
+            bucket["total_commission"] += float(item.get("commission", 0) or 0)
+            bucket["leave_compensation"] += float(item.get("leave_compensation", 0) or 0)
+
+        month_entry = {
+            "month": m,
+            "month_name": _date(year, m, 1).strftime("%B"),
+            "total_employees": totals.get("total_employees", 0),
+            "formal_count": totals.get("formal_count", 0),
+            "contractor_count": totals.get("contractor_count", 0),
+            "total_gross": totals.get("total_gross", 0),
+            "total_bpjs_employer": totals.get("total_bpjs_employer", 0),
+            "total_company_bpjs_for_employee": totals.get("total_company_bpjs_for_employee", 0),
+            "total_pph21": totals.get("total_pph21", 0),
+            "total_pph21_borne_by_company": totals.get("total_pph21_borne_by_company", 0),
+            "total_contractor_tax": totals.get("total_contractor_tax", 0),
+            "total_net": totals.get("total_net", 0),
+            "total_cost": totals.get("total_cost", 0),
+            "total_overtime_pay": totals.get("total_overtime_pay", 0),
+            "total_commission": totals.get("total_commission", 0),
+            "leave_compensation": leave_comp_total,
+            "terminations": terminations,
+            "by_department": list(by_department.values()),
+        }
+        months_data.append(month_entry)
+
+        # Accumulate year totals
+        year_totals["total_employees"] = max(year_totals["total_employees"], month_entry["total_employees"])
+        year_totals["total_gross"] += month_entry["total_gross"]
+        year_totals["total_bpjs_employer"] += month_entry["total_bpjs_employer"]
+        year_totals["total_company_bpjs_for_employee"] += month_entry["total_company_bpjs_for_employee"]
+        year_totals["total_pph21"] += month_entry["total_pph21"]
+        year_totals["total_contractor_tax"] += month_entry["total_contractor_tax"]
+        year_totals["total_net"] += month_entry["total_net"]
+        year_totals["total_cost"] += month_entry["total_cost"]
+        year_totals["total_overtime_pay"] += month_entry["total_overtime_pay"]
+        year_totals["total_commission"] += month_entry["total_commission"]
+        year_totals["total_leave_compensation"] += leave_comp_total
+        year_totals["terminations_count"] += terminations
+
+        # Accumulate by-department year totals
+        for dept_entry in by_department.values():
+            d = dept_entry["department"]
+            ybucket = year_by_department.setdefault(d, {
+                "department": d,
+                "peak_employees": 0,
+                "total_gross": 0.0,
+                "total_bpjs_employer": 0.0,
+                "total_pph21": 0.0,
+                "total_contractor_tax": 0.0,
+                "total_net": 0.0,
+                "total_cost": 0.0,
+                "total_overtime_pay": 0.0,
+                "total_commission": 0.0,
+                "leave_compensation": 0.0,
+            })
+            ybucket["peak_employees"] = max(ybucket["peak_employees"], dept_entry["employees"])
+            ybucket["total_gross"] += dept_entry["total_gross"]
+            ybucket["total_bpjs_employer"] += dept_entry["total_bpjs_employer"]
+            ybucket["total_pph21"] += dept_entry["total_pph21"]
+            ybucket["total_contractor_tax"] += dept_entry["total_contractor_tax"]
+            ybucket["total_net"] += dept_entry["total_net"]
+            ybucket["total_cost"] += dept_entry["total_cost"]
+            ybucket["total_overtime_pay"] += dept_entry["total_overtime_pay"]
+            ybucket["total_commission"] += dept_entry["total_commission"]
+            ybucket["leave_compensation"] += dept_entry["leave_compensation"]
+
+    return {
+        "year": year,
+        "factory_id": factory_id,
+        "months": months_data,
+        "year_totals": year_totals,
+        "by_department": list(year_by_department.values()),
+    }
+
+
+@router.get("/hr-costs/employee/{employee_id}/history")
+async def hr_costs_employee_history(
+    employee_id: UUID,
+    year: int = Query(..., description="Calendar year"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_finance),
+):
+    """Per-employee monthly payroll history for a year — for owner/ceo drill-down."""
+    from business.services.payroll import calculate_monthly_payroll
+    from api.models import FactoryCalendar
+    import calendar as _cal
+    from datetime import date as _date
+
+    emp = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    ws = getattr(emp, 'work_schedule', 'six_day') or 'six_day'
+    emp_fid = str(emp.factory_id) if emp.factory_id else ""
+
+    # Limit to months when employee was employed
+    hire_month = 1
+    if emp.hire_date and emp.hire_date.year == year:
+        hire_month = emp.hire_date.month
+    elif emp.hire_date and emp.hire_date.year > year:
+        return {"employee_id": str(emp.id), "full_name": emp.full_name, "year": year, "months": []}
+
+    term_month = 12
+    if emp.termination_date and emp.termination_date.year == year:
+        term_month = emp.termination_date.month
+    elif emp.termination_date and emp.termination_date.year < year:
+        return {"employee_id": str(emp.id), "full_name": emp.full_name, "year": year, "months": []}
+
+    today = _date.today()
+    if year == today.year:
+        term_month = min(term_month, today.month)
+    elif year > today.year:
+        return {"employee_id": str(emp.id), "full_name": emp.full_name, "year": year, "months": []}
+
+    months_data = []
+    for m in range(hire_month, term_month + 1):
+        attendance_records = (
+            db.query(Attendance)
+            .filter(
+                Attendance.employee_id == emp.id,
+                extract("year", Attendance.date) == year,
+                extract("month", Attendance.date) == m,
+            )
+            .all()
+        )
+
+        # Working days in month
+        cal = _cal.Calendar()
+        month_days = list(cal.itermonthdays2(year, m))
+        if ws == 'six_day':
+            working_days = sum(1 for _, wd in month_days if 0 <= wd <= 5)
+        else:
+            working_days = sum(1 for _, wd in month_days if 0 <= wd <= 4)
+
+        # Holidays for this factory
+        holiday_rows = db.query(FactoryCalendar.date).filter(
+            FactoryCalendar.factory_id == emp.factory_id,
+            FactoryCalendar.is_working_day == False,
+            extract("year", FactoryCalendar.date) == year,
+            extract("month", FactoryCalendar.date) == m,
+        ).all()
+        emp_holidays = {row.date for row in holiday_rows}
+        working_days = max(working_days - len(emp_holidays), 1)
+
+        payroll = calculate_monthly_payroll(
+            employee=emp,
+            attendance_records=attendance_records,
+            working_days_in_month=working_days,
+            payroll_year=year,
+            payroll_month=m,
+            holiday_dates=emp_holidays,
+        )
+
+        months_data.append({
+            "month": m,
+            "month_name": _date(year, m, 1).strftime("%B"),
+            **{k: payroll.get(k) for k in [
+                "present_days", "absent_days", "sick_days", "leave_days",
+                "gross_salary", "net_salary", "total_cost_to_company",
+                "bpjs_employer", "pph21", "overtime_pay", "commission",
+                "leave_compensation", "is_termination_month",
+            ]},
+        })
+
+    return {
+        "employee_id": str(emp.id),
+        "full_name": emp.full_name,
+        "position": emp.position,
+        "hire_date": str(emp.hire_date) if emp.hire_date else None,
+        "termination_date": str(emp.termination_date) if emp.termination_date else None,
+        "year": year,
+        "months": months_data,
     }
 
 

@@ -248,4 +248,119 @@ export const employeesApi = {
     apiClient
       .get('/employees/payroll-pdf-employee', { params, responseType: 'blob' })
       .then((r) => r.data),
+
+  // HR Costs (owner/ceo only)
+  hrCostsYearly: (params: {
+    year: number;
+    factory_id?: string;
+  }): Promise<HRCostsYearlyResponse> =>
+    apiClient.get('/employees/hr-costs/yearly', { params }).then((r) => r.data),
+
+  hrCostsEmployeeHistory: (params: {
+    employee_id: string;
+    year: number;
+  }): Promise<HRCostsEmployeeHistoryResponse> =>
+    apiClient
+      .get(`/employees/hr-costs/employee/${params.employee_id}/history`, { params: { year: params.year } })
+      .then((r) => r.data),
 };
+
+// ── HR Costs types ──────────────────────────────────────────
+
+export interface HRCostsDepartmentBreakdown {
+  department: string;
+  employees: number;
+  total_gross: number;
+  total_bpjs_employer: number;
+  total_pph21: number;
+  total_contractor_tax: number;
+  total_net: number;
+  total_cost: number;
+  total_overtime_pay: number;
+  total_commission: number;
+  leave_compensation: number;
+}
+
+export interface HRCostsDepartmentYearTotals {
+  department: string;
+  peak_employees: number;
+  total_gross: number;
+  total_bpjs_employer: number;
+  total_pph21: number;
+  total_contractor_tax: number;
+  total_net: number;
+  total_cost: number;
+  total_overtime_pay: number;
+  total_commission: number;
+  leave_compensation: number;
+}
+
+export interface HRCostsMonthEntry {
+  month: number;
+  month_name: string;
+  total_employees: number;
+  formal_count: number;
+  contractor_count: number;
+  total_gross: number;
+  total_bpjs_employer: number;
+  total_company_bpjs_for_employee: number;
+  total_pph21: number;
+  total_pph21_borne_by_company: number;
+  total_contractor_tax: number;
+  total_net: number;
+  total_cost: number;
+  total_overtime_pay: number;
+  total_commission: number;
+  leave_compensation: number;
+  terminations: number;
+  by_department: HRCostsDepartmentBreakdown[];
+}
+
+export interface HRCostsYearlyResponse {
+  year: number;
+  factory_id: string | null;
+  months: HRCostsMonthEntry[];
+  year_totals: {
+    total_employees: number;
+    total_gross: number;
+    total_bpjs_employer: number;
+    total_company_bpjs_for_employee: number;
+    total_pph21: number;
+    total_contractor_tax: number;
+    total_net: number;
+    total_cost: number;
+    total_overtime_pay: number;
+    total_commission: number;
+    total_leave_compensation: number;
+    terminations_count: number;
+  };
+  by_department: HRCostsDepartmentYearTotals[];
+}
+
+export interface HRCostsEmployeeMonthEntry {
+  month: number;
+  month_name: string;
+  present_days: number;
+  absent_days: number;
+  sick_days: number;
+  leave_days: number;
+  gross_salary: number;
+  net_salary: number;
+  total_cost_to_company: number;
+  bpjs_employer: number;
+  pph21: number;
+  overtime_pay: number;
+  commission: number;
+  leave_compensation: number;
+  is_termination_month: boolean;
+}
+
+export interface HRCostsEmployeeHistoryResponse {
+  employee_id: string;
+  full_name: string;
+  position: string;
+  hire_date: string | null;
+  termination_date: string | null;
+  year: number;
+  months: HRCostsEmployeeMonthEntry[];
+}

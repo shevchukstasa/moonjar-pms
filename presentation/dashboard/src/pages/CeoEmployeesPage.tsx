@@ -7,6 +7,9 @@ import {
   type EmployeeUpdatePayload,
   type PayrollItem,
   type PayrollTotals,
+  type HRCostsMonthEntry,
+  type HRCostsYearlyResponse,
+  type HRCostsEmployeeHistoryResponse,
 } from '@/api/employees';
 import { useFactories } from '@/hooks/useFactories';
 import { Card } from '@/components/ui/Card';
@@ -152,6 +155,16 @@ export default function CeoEmployeesPage() {
       month,
     }),
     enabled: activeTab === 'payroll',
+  });
+
+  // HR Costs — yearly breakdown
+  const { data: hrCostsData, isLoading: hrCostsLoading } = useQuery({
+    queryKey: ['hr-costs-yearly', factoryFilter === 'all' ? undefined : factoryFilter, year],
+    queryFn: () => employeesApi.hrCostsYearly({
+      factory_id: factoryFilter === 'all' ? undefined : factoryFilter,
+      year,
+    }),
+    enabled: activeTab === 'hr-costs',
   });
 
   // ── Mutations ───────────────────────────────────────────────
@@ -347,6 +360,15 @@ export default function CeoEmployeesPage() {
               <Button variant="secondary" size="sm" onClick={nextMonth}>&rarr;</Button>
             </div>
           )}
+
+          {/* Year selector for HR Costs */}
+          {activeTab === 'hr-costs' && (
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setYear(year - 1)}>&larr;</Button>
+              <span className="min-w-[100px] text-center text-lg font-semibold text-gray-900">{year}</span>
+              <Button variant="secondary" size="sm" onClick={() => setYear(year + 1)}>&rarr;</Button>
+            </div>
+          )}
         </div>
       </Card>
 
@@ -355,6 +377,7 @@ export default function CeoEmployeesPage() {
         tabs={[
           { id: 'employees', label: 'Employee Management' },
           { id: 'payroll', label: 'Payroll' },
+          { id: 'hr-costs', label: 'HR Costs (Yearly)' },
         ]}
         activeTab={activeTab}
         onChange={setActiveTab}
@@ -385,6 +408,18 @@ export default function CeoEmployeesPage() {
           month={month}
           departmentFilter={departmentFilter}
           factoryId={factoryFilter === 'all' ? undefined : factoryFilter}
+        />
+      )}
+
+      {activeTab === 'hr-costs' && (
+        <HRCostsTab
+          data={hrCostsData}
+          loading={hrCostsLoading}
+          year={year}
+          onJumpToMonth={(m) => {
+            setMonth(m);
+            setActiveTab('payroll');
+          }}
         />
       )}
 
@@ -1017,5 +1052,287 @@ function SummaryCard({
       <p className={`mt-1 text-lg font-bold ${color}`}>{value}</p>
       {sub && <p className="text-xs text-gray-400">{sub}</p>}
     </Card>
+  );
+}
+
+// ── HR Costs Tab ────────────────────────────────────────────
+
+function HRCostsTab({
+  data,
+  loading,
+  year,
+  onJumpToMonth,
+}: {
+  data: HRCostsYearlyResponse | undefined;
+  loading: boolean;
+  year: number;
+  onJumpToMonth: (month: number) => void;
+}) {
+  if (loading) {
+    return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
+  }
+  if (!data || data.months.length === 0) {
+    return (
+      <Card>
+        <div className="py-12 text-center text-gray-400">
+          No payroll data for {year}. This view aggregates from the Payroll tab — run payroll for each month first.
+        </div>
+      </Card>
+    );
+  }
+
+  const yt = data.year_totals;
+  const totalTaxes = yt.total_pph21 + yt.total_contractor_tax;
+  const totalBpjsPaid = yt.total_bpjs_employer + yt.total_company_bpjs_for_employee;
+  const maxCost = Math.max(...data.months.map((m) => m.total_cost), 1);
+  const deptTotals = data.by_department || [];
+  const totalDeptCost = deptTotals.reduce((s, d) => s + d.total_cost, 0) || 1;
+  const deptLabel = (d: string) => {
+    const key = (d || 'production').toLowerCase();
+    if (key === 'production') return 'Production';
+    if (key === 'sales') return 'Sales';
+    if (key === 'administration' || key === 'admin') return 'Administration';
+    return key.charAt(0).toUpperCase() + key.slice(1);
+  };
+  const deptColor = (d: string) => {
+    const key = (d || 'production').toLowerCase();
+    if (key === 'production') return { bar: 'bg-blue-500', text: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-100' };
+    if (key === 'sales') return { bar: 'bg-green-500', text: 'text-green-700', bg: 'bg-green-50', border: 'border-green-100' };
+    if (key === 'administration' || key === 'admin') return { bar: 'bg-purple-500', text: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-100' };
+    return { bar: 'bg-gray-500', text: 'text-gray-700', bg: 'bg-gray-50', border: 'border-gray-100' };
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Year Summary Cards */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
+        <SummaryCard
+          label="Total Cost YTD"
+          value={formatIDR(yt.total_cost)}
+          color="text-blue-700"
+          sub={`${data.months.length} months`}
+        />
+        <SummaryCard
+          label="Total Gross"
+          value={formatIDR(yt.total_gross)}
+          color="text-gray-900"
+        />
+        <SummaryCard
+          label="Taxes Paid"
+          value={formatIDR(totalTaxes)}
+          color="text-red-600"
+          sub={`PPh21: ${formatIDR(yt.total_pph21)}`}
+        />
+        <SummaryCard
+          label="BPJS Paid"
+          value={formatIDR(totalBpjsPaid)}
+          color="text-orange-600"
+          sub={`Employer: ${formatIDR(yt.total_bpjs_employer)}`}
+        />
+        <SummaryCard
+          label="Overtime Paid"
+          value={formatIDR(yt.total_overtime_pay)}
+          color="text-purple-600"
+        />
+        <SummaryCard
+          label="Terminations"
+          value={String(yt.terminations_count)}
+          color="text-red-700"
+          sub={yt.total_leave_compensation > 0 ? `Leave comp: ${formatIDR(yt.total_leave_compensation)}` : ''}
+        />
+      </div>
+
+      {/* Monthly Breakdown Table */}
+      <Card>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-gray-900">Monthly Breakdown — {year}</h3>
+          <p className="text-xs text-gray-500">Click a month to view full payroll</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-gray-50 text-xs font-medium uppercase text-gray-500">
+              <tr>
+                <th className="px-3 py-2 text-left">Month</th>
+                <th className="px-3 py-2 text-center">Employees</th>
+                <th className="px-3 py-2 text-right">Gross</th>
+                <th className="px-3 py-2 text-right">Overtime</th>
+                <th className="px-3 py-2 text-right">BPJS (Employer)</th>
+                <th className="px-3 py-2 text-right">PPh21</th>
+                <th className="px-3 py-2 text-right">Net Paid</th>
+                <th className="px-3 py-2 text-right">Leave Comp</th>
+                <th className="px-3 py-2 text-center">Term.</th>
+                <th className="px-3 py-2 text-right font-bold">Total Cost</th>
+                <th className="px-3 py-2 w-32">Trend</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {data.months.map((m: HRCostsMonthEntry) => {
+                const pct = (m.total_cost / maxCost) * 100;
+                return (
+                  <tr
+                    key={m.month}
+                    className="bg-white hover:bg-blue-50 cursor-pointer"
+                    onClick={() => onJumpToMonth(m.month)}
+                  >
+                    <td className="px-3 py-2 font-medium text-gray-900">{m.month_name}</td>
+                    <td className="px-3 py-2 text-center text-gray-600">
+                      {m.total_employees}
+                      {m.contractor_count > 0 && (
+                        <span className="ml-1 text-xs text-gray-400">({m.formal_count}f+{m.contractor_count}c)</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-gray-800">{formatIDR(m.total_gross)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-purple-600">
+                      {m.total_overtime_pay > 0 ? formatIDR(m.total_overtime_pay) : '-'}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-orange-600">{formatIDR(m.total_bpjs_employer)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-red-600">{formatIDR(m.total_pph21)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-green-700">{formatIDR(m.total_net)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-orange-700">
+                      {m.leave_compensation > 0 ? formatIDR(m.leave_compensation) : '-'}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {m.terminations > 0 ? (
+                        <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">
+                          {m.terminations}
+                        </span>
+                      ) : '-'}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono font-bold text-blue-700">{formatIDR(m.total_cost)}</td>
+                    <td className="px-3 py-2">
+                      <div className="h-2 w-full rounded-full bg-gray-100">
+                        <div
+                          className="h-2 rounded-full bg-blue-500"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot className="border-t-2 border-gray-300">
+              <tr className="bg-gray-50 font-semibold">
+                <td className="px-3 py-2 text-gray-700" colSpan={2}>YTD TOTAL</td>
+                <td className="px-3 py-2 text-right font-mono text-gray-900">{formatIDR(yt.total_gross)}</td>
+                <td className="px-3 py-2 text-right font-mono text-purple-700">{formatIDR(yt.total_overtime_pay)}</td>
+                <td className="px-3 py-2 text-right font-mono text-orange-700">{formatIDR(yt.total_bpjs_employer)}</td>
+                <td className="px-3 py-2 text-right font-mono text-red-700">{formatIDR(yt.total_pph21)}</td>
+                <td className="px-3 py-2 text-right font-mono text-green-700">{formatIDR(yt.total_net)}</td>
+                <td className="px-3 py-2 text-right font-mono text-orange-700">{formatIDR(yt.total_leave_compensation)}</td>
+                <td className="px-3 py-2 text-center text-red-700">{yt.terminations_count || '-'}</td>
+                <td className="px-3 py-2 text-right font-mono font-bold text-blue-800">{formatIDR(yt.total_cost)}</td>
+                <td className="px-3 py-2"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </Card>
+
+      {/* Department Breakdown */}
+      {deptTotals.length > 0 && (
+        <Card>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-base font-semibold text-gray-900">By Department (YTD)</h3>
+            <p className="text-xs text-gray-500">Production · Sales · Administration</p>
+          </div>
+
+          {/* Top-level split */}
+          <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            {deptTotals.map((d) => {
+              const c = deptColor(d.department);
+              const share = (d.total_cost / totalDeptCost) * 100;
+              return (
+                <div key={d.department} className={`rounded-lg border ${c.border} ${c.bg} p-3`}>
+                  <div className="flex items-center justify-between">
+                    <p className={`text-xs font-medium uppercase ${c.text}`}>{deptLabel(d.department)}</p>
+                    <p className={`text-xs font-semibold ${c.text}`}>{share.toFixed(1)}%</p>
+                  </div>
+                  <p className={`mt-1 text-xl font-bold ${c.text}`}>{formatIDR(d.total_cost)}</p>
+                  <p className={`mt-0.5 text-xs ${c.text} opacity-70`}>
+                    {d.peak_employees} emp · Gross {formatIDR(d.total_gross)}
+                  </p>
+                  <div className="mt-2 h-1.5 w-full rounded-full bg-white/60">
+                    <div className={`h-1.5 rounded-full ${c.bar}`} style={{ width: `${share}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Detailed by-department table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b bg-gray-50 text-xs font-medium uppercase text-gray-500">
+                <tr>
+                  <th className="px-3 py-2 text-left">Department</th>
+                  <th className="px-3 py-2 text-center">Peak Headcount</th>
+                  <th className="px-3 py-2 text-right">Gross</th>
+                  <th className="px-3 py-2 text-right">Overtime</th>
+                  <th className="px-3 py-2 text-right">Commission</th>
+                  <th className="px-3 py-2 text-right">BPJS (Employer)</th>
+                  <th className="px-3 py-2 text-right">PPh21</th>
+                  <th className="px-3 py-2 text-right">PPh23 Contractor</th>
+                  <th className="px-3 py-2 text-right">Net Paid</th>
+                  <th className="px-3 py-2 text-right font-bold">Total Cost</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {deptTotals.map((d) => {
+                  const c = deptColor(d.department);
+                  return (
+                    <tr key={d.department} className="bg-white">
+                      <td className={`px-3 py-2 font-medium ${c.text}`}>{deptLabel(d.department)}</td>
+                      <td className="px-3 py-2 text-center text-gray-600">{d.peak_employees}</td>
+                      <td className="px-3 py-2 text-right font-mono text-gray-800">{formatIDR(d.total_gross)}</td>
+                      <td className="px-3 py-2 text-right font-mono text-purple-600">
+                        {d.total_overtime_pay > 0 ? formatIDR(d.total_overtime_pay) : '-'}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-green-700">
+                        {d.total_commission > 0 ? formatIDR(d.total_commission) : '-'}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-orange-600">{formatIDR(d.total_bpjs_employer)}</td>
+                      <td className="px-3 py-2 text-right font-mono text-red-600">{formatIDR(d.total_pph21)}</td>
+                      <td className="px-3 py-2 text-right font-mono text-purple-600">
+                        {d.total_contractor_tax > 0 ? formatIDR(d.total_contractor_tax) : '-'}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-green-700">{formatIDR(d.total_net)}</td>
+                      <td className={`px-3 py-2 text-right font-mono font-bold ${c.text}`}>{formatIDR(d.total_cost)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* Tax summary breakdown */}
+      <Card>
+        <h3 className="mb-3 text-base font-semibold text-gray-900">Tax & Contributions Breakdown (YTD)</h3>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-lg border border-red-100 bg-red-50 p-3">
+            <p className="text-xs font-medium uppercase text-red-700">PPh 21 (Income Tax)</p>
+            <p className="mt-1 text-xl font-bold text-red-800">{formatIDR(yt.total_pph21)}</p>
+            <p className="mt-0.5 text-xs text-red-600">Borne by company (gross-up)</p>
+          </div>
+          <div className="rounded-lg border border-orange-100 bg-orange-50 p-3">
+            <p className="text-xs font-medium uppercase text-orange-700">BPJS Employer Share</p>
+            <p className="mt-1 text-xl font-bold text-orange-800">{formatIDR(yt.total_bpjs_employer)}</p>
+            <p className="mt-0.5 text-xs text-orange-600">JKK, JKM, JHT, JP, JKN (4%)</p>
+          </div>
+          <div className="rounded-lg border border-amber-100 bg-amber-50 p-3">
+            <p className="text-xs font-medium uppercase text-amber-700">BPJS Employee (Company-paid)</p>
+            <p className="mt-1 text-xl font-bold text-amber-800">{formatIDR(yt.total_company_bpjs_for_employee)}</p>
+            <p className="mt-0.5 text-xs text-amber-600">JHT 2%, JP 1%, JKN 1%</p>
+          </div>
+          <div className="rounded-lg border border-purple-100 bg-purple-50 p-3">
+            <p className="text-xs font-medium uppercase text-purple-700">PPh 23 (Contractor Tax)</p>
+            <p className="mt-1 text-xl font-bold text-purple-800">{formatIDR(yt.total_contractor_tax)}</p>
+            <p className="mt-0.5 text-xs text-purple-600">2.5% withheld from contractors</p>
+          </div>
+        </div>
+      </Card>
+    </div>
   );
 }

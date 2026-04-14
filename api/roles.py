@@ -23,6 +23,7 @@ def require_role(*allowed_roles: str):
 require_owner = require_role("owner")
 require_admin = require_role("owner", "administrator")
 require_management = require_role("owner", "administrator", "ceo", "production_manager")
+require_finance = require_role("owner", "administrator", "ceo")
 require_quality = require_role("owner", "administrator", "quality_manager")
 require_warehouse = require_role("owner", "administrator", "warehouse")
 require_sorting = require_role("owner", "administrator", "production_manager", "sorter_packer")

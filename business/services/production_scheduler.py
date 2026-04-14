@@ -2131,11 +2131,16 @@ def schedule_order(
 
     count = 0
     for position in positions:
+        # Per-position SAVEPOINT: if schedule_position or flush errors,
+        # the savepoint rolls back that position's changes, and the
+        # outer session stays healthy for the next iteration. Without
+        # this, psycopg2 leaves the connection in "aborted" state after
+        # any SQL error and all subsequent positions fail with
+        # InFailedSqlTransaction, cascading across the whole factory.
         try:
-            schedule_position(db, position, deadline, min_start_date=min_start_date)
-            # Flush so next position's capacity query sees this one's dates
-            # (autoflush=False means ORM won't do it automatically)
-            db.flush()
+            with db.begin_nested():
+                schedule_position(db, position, deadline, min_start_date=min_start_date)
+                db.flush()
             count += 1
         except Exception as e:
             logger.error(
@@ -2324,42 +2329,37 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
     _fifo_min_start: Optional[date] = None  # FIFO: next order can't start before this
 
     for order in active_orders:
-        # Savepoint per order so one failure doesn't poison the whole transaction
-        savepoint = db.begin_nested()
+        # Per-order SAVEPOINT via context manager so one failure doesn't
+        # poison the outer transaction. `with db.begin_nested():` auto-
+        # rollbacks the savepoint on exception, which releases psycopg2's
+        # aborted-transaction state cleanly.
         try:
-            count = schedule_order(
-                db, order, skip_batch_planning=True,
-                min_start_date=_fifo_min_start,
-            )
-            total += count
-            # Flush after each order so the next order's capacity queries
-            # see the updated planned dates (autoflush is OFF).
-            db.flush()
-            savepoint.commit()
-
-            # Update FIFO min_start: next order can't start glazing before
-            # the EARLIEST glazing date of the current order.
-            # This ensures strict FIFO: earlier orders always come first.
-            order_positions = db.query(OrderPosition).filter(
-                OrderPosition.order_id == order.id,
-                OrderPosition.planned_glazing_date.isnot(None),
-                OrderPosition.status != PositionStatus.CANCELLED.value,
-            ).all()
-            if order_positions:
-                earliest_glazing = min(
-                    p.planned_glazing_date for p in order_positions
+            with db.begin_nested():
+                count = schedule_order(
+                    db, order, skip_batch_planning=True,
+                    min_start_date=_fifo_min_start,
                 )
-                if _fifo_min_start is None or earliest_glazing > _fifo_min_start:
-                    _fifo_min_start = earliest_glazing
+                total += count
+                db.flush()
+
+                # Update FIFO min_start: next order can't start glazing
+                # before the EARLIEST glazing date of the current order.
+                order_positions = db.query(OrderPosition).filter(
+                    OrderPosition.order_id == order.id,
+                    OrderPosition.planned_glazing_date.isnot(None),
+                    OrderPosition.status != PositionStatus.CANCELLED.value,
+                ).all()
+                if order_positions:
+                    earliest_glazing = min(
+                        p.planned_glazing_date for p in order_positions
+                    )
+                    if _fifo_min_start is None or earliest_glazing > _fifo_min_start:
+                        _fifo_min_start = earliest_glazing
         except Exception as e:
             logger.error(
                 "Failed to reschedule order %s: %s", order.order_number, e,
                 exc_info=True,
             )
-            try:
-                savepoint.rollback()
-            except Exception:
-                pass
 
     # Single batch planning pass after all orders are scheduled.
     # This enables cross-order batching: positions from different orders

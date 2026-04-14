@@ -655,14 +655,12 @@ async def reschedule_overdue_endpoint(
     rescheduled = 0
     failed = 0
     for pos in overdue:
-        savepoint = db.begin_nested()
         try:
-            reschedule_position(db, pos)
-            db.flush()
-            savepoint.commit()
+            with db.begin_nested():
+                reschedule_position(db, pos)
+                db.flush()
             rescheduled += 1
         except Exception as e:
-            savepoint.rollback()
             failed += 1
             logger.warning(
                 "RESCHEDULE_OVERDUE | failed pos=%s: %s", pos.id, e,

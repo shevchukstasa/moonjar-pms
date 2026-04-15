@@ -28,11 +28,14 @@ const PRODUCT_TYPES = [
   { value: 'custom', label: 'Custom' },
 ];
 
+// IMPORTANT: values MUST match backend typology matcher enum.
+// Legacy 'face', 'face_edges_1' etc. silently broke typology matching
+// → 1-day fallback for every stage.
 const PLACE_OF_APPLICATION = [
-  { value: 'face', label: 'Face Only' },
-  { value: 'face_edges_1', label: 'Face + 1 Edge' },
-  { value: 'face_edges_2', label: 'Face + 2 Edges' },
-  { value: 'face_edges_all', label: 'Face + All Edges' },
+  { value: 'face_only', label: 'Face Only' },
+  { value: 'edges_1', label: 'Face + 1 Edge' },
+  { value: 'edges_2', label: 'Face + 2 Edges' },
+  { value: 'all_edges', label: 'Face + All Edges' },
   { value: 'with_back', label: 'With Back' },
 ];
 
@@ -43,7 +46,7 @@ const DEFAULT_ITEM = {
   finishing: '',
   collection: '',
   thickness_mm: null,
-  place_of_application: 'face',
+  place_of_application: 'face_only',
   quantity_pcs: 1,
   quantity_unit: 'pcs',
   product_type: 'tile',

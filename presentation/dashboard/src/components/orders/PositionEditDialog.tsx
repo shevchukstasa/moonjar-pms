@@ -22,11 +22,15 @@ const PRODUCT_TYPES = [
   { value: 'custom', label: 'Custom' },
 ];
 
+// IMPORTANT: these values MUST match the backend enum used by the
+// scheduler's typology matcher (api/enums place_of_application). Using
+// any other spelling (e.g. 'face', 'face-only', 'face_edges_1') breaks
+// typology matching → no StageTypologySpeed → 1-day fallback everywhere.
 const PLACE_OF_APPLICATION = [
-  { value: 'face', label: 'Face Only' },
-  { value: 'face_edges_1', label: 'Face + 1 Edge' },
-  { value: 'face_edges_2', label: 'Face + 2 Edges' },
-  { value: 'face_edges_all', label: 'Face + All Edges' },
+  { value: 'face_only', label: 'Face Only' },
+  { value: 'edges_1', label: 'Face + 1 Edge' },
+  { value: 'edges_2', label: 'Face + 2 Edges' },
+  { value: 'all_edges', label: 'Face + All Edges' },
   { value: 'with_back', label: 'With Back' },
 ];
 
@@ -50,7 +54,7 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
     size: '',
     thickness_mm: 11,
     shape: 'rectangle',
-    place_of_application: 'face',
+    place_of_application: 'face_only',
     application: '',
     collection: '',
     finishing: '',
@@ -74,7 +78,21 @@ export function PositionEditDialog({ open, onClose, position }: PositionEditDial
         size: position.size || '',
         thickness_mm: position.thickness_mm || 11,
         shape: position.shape || 'rectangle',
-        place_of_application: position.place_of_application || 'face',
+        // Normalize legacy values ('face', 'face-only', '', 'face_edges_1'...)
+        // to match backend enum.
+        place_of_application: (() => {
+          const raw = position.place_of_application || '';
+          const map: Record<string, string> = {
+            'face': 'face_only',
+            'face-only': 'face_only',
+            '': 'face_only',
+            'face_edges_1': 'edges_1',
+            'face_edges_2': 'edges_2',
+            'face_edges_all': 'all_edges',
+            'face-3-4-edges': 'all_edges',
+          };
+          return map[raw] ?? raw;
+        })(),
         application: position.application || '',
         collection: position.collection || '',
         finishing: position.finishing || '',

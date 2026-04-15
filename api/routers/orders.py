@@ -7,9 +7,46 @@ from uuid import UUID
 from typing import Optional, Union, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func, text
+
+
+# Canonical place_of_application values — MUST match backend typology
+# matcher and the 'Small/Large Tile …' typology filters. Any other value
+# silently breaks typology matching → scheduler falls back to 1 day per
+# stage → glazing, firing, sorting, packing all collapse into one day.
+CANONICAL_PLACE_OF_APPLICATION = {
+    "face_only", "edges_1", "edges_2", "all_edges", "with_back",
+}
+LEGACY_PLACE_OF_APPLICATION_MAP = {
+    "face": "face_only",
+    "face-only": "face_only",
+    "": "face_only",
+    "face_edges_1": "edges_1",
+    "face_edges_2": "edges_2",
+    "face_edges_all": "all_edges",
+    "face-3-4-edges": "all_edges",
+}
+
+
+def _canonicalize_place(val: Optional[str]) -> Optional[str]:
+    """Map legacy values to canonical enum, return as-is if already valid.
+
+    Returns 'face_only' for unknown/missing values on tile positions
+    (caller passes product_type) — scheduler cannot match typology
+    without a valid place, and 'face_only' is the dominant case.
+    """
+    if val is None:
+        return None
+    val = val.strip()
+    if val in CANONICAL_PLACE_OF_APPLICATION:
+        return val
+    mapped = LEGACY_PLACE_OF_APPLICATION_MAP.get(val)
+    if mapped:
+        return mapped
+    # Unknown value — don't silently corrupt, caller should decide
+    return val or None
 
 from api.database import get_db
 from api.auth import apply_factory_filter
@@ -56,6 +93,12 @@ class OrderItemInput(BaseModel):
     application_type: Optional[str] = None
     place_of_application: Optional[str] = None
     product_type: str = "tile"
+
+    @field_validator("place_of_application", mode="before")
+    @classmethod
+    def _normalize_place(cls, v):
+        return _canonicalize_place(v) if v is not None else v
+
     # Shape & dimension data for surface area calculation
     shape: Optional[str] = None        # rectangle, square, round, triangle, octagon, freeform
     length_cm: Optional[float] = None  # Length in cm
@@ -488,6 +531,11 @@ class PdfConfirmItemInput(BaseModel):
     place_of_application: Optional[str] = None
     thickness: float = 11.0
 
+    @field_validator("place_of_application", mode="before")
+    @classmethod
+    def _normalize_place(cls, v):
+        return _canonicalize_place(v) if v is not None else v
+
 
 class PdfConfirmInput(BaseModel):
     order_number: str
@@ -538,6 +586,11 @@ async def confirm_pdf_order(
     from business.services.order_intake import process_order_item
 
     for item_data in data.items:
+        # Guarantee a valid place_of_application so the scheduler can
+        # match a typology. process_order_item downstream relies on it.
+        _place = item_data.place_of_application
+        if not _place and item_data.product_type == "tile":
+            _place = "face_only"
         item = ProductionOrderItem(
             order_id=order.id,
             color=item_data.color,
@@ -549,7 +602,7 @@ async def confirm_pdf_order(
             quantity_sqm=item_data.quantity_sqm,
             collection=item_data.collection,
             application_type=item_data.application_type,
-            place_of_application=item_data.place_of_application,
+            place_of_application=_place,
             product_type=item_data.product_type,
         )
         db.add(item)
@@ -1015,6 +1068,11 @@ async def create_order(
 
     positions = []
     for item_data in data.items:
+        # Guarantee a valid place_of_application so the scheduler can
+        # match a typology — otherwise every stage falls back to 1 day.
+        _place = item_data.place_of_application
+        if not _place and item_data.product_type == "tile":
+            _place = "face_only"
         item = ProductionOrderItem(
             order_id=order.id,
             color=item_data.color, size=item_data.size,
@@ -1022,7 +1080,7 @@ async def create_order(
             thickness=item_data.thickness, quantity_pcs=item_data.quantity_pcs,
             quantity_sqm=item_data.quantity_sqm, collection=item_data.collection,
             application_type=item_data.application_type,
-            place_of_application=item_data.place_of_application,
+            place_of_application=_place,
             product_type=item_data.product_type,
             # Shape & dimension data for glaze surface area
             shape=item_data.shape, length_cm=item_data.length_cm,

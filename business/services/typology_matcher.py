@@ -102,12 +102,24 @@ def find_matching_typology(
         .all()
     )
 
+    # Defensive fallback: if place_of_application is missing on a tile
+    # position, treat it as 'face_only' (the dominant real-world case).
+    # Historical positions ingested from webhook/PDF often had NULL here,
+    # which silently failed every "Small/Large Tile …" typology and
+    # left the scheduler without speeds or kiln capacity — the single
+    # most common root cause of 1-day fallback across all stages.
+    _pt = getattr(position, "product_type", None)
+    _pt_val = _pt.value if hasattr(_pt, "value") else (str(_pt) if _pt else None)
+    _place_fallback = getattr(position, "place_of_application", None)
+    if not _place_fallback and _pt_val == "tile":
+        _place_fallback = "face_only"
+
     for t in typologies:
         if not _matches_jsonb(t.product_types or [], position.product_type):
             continue
         if not _matches_jsonb(
             t.place_of_application or [],
-            getattr(position, "place_of_application", None),
+            _place_fallback,
         ):
             continue
         if not _matches_jsonb(

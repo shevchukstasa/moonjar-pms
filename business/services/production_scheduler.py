@@ -296,43 +296,46 @@ def _create_board_order_task(
         from api.enums import TaskType, TaskStatus, UserRole
         import json
 
-        # Check for existing pending task (avoid spam)
-        existing = db.query(Task).filter(
-            Task.factory_id == factory_id,
-            Task.type == TaskType.BOARD_ORDER_NEEDED,
-            Task.status == TaskStatus.PENDING,
-        ).first()
-        if existing:
-            return  # already has a pending task
+        # SAVEPOINT guard: any DB failure here rolls back only this task,
+        # keeping the outer scheduling transaction alive.
+        with db.begin_nested():
+            # Check for existing pending task (avoid spam)
+            existing = db.query(Task).filter(
+                Task.factory_id == factory_id,
+                Task.type == TaskType.BOARD_ORDER_NEEDED,
+                Task.status == TaskStatus.PENDING,
+            ).first()
+            if existing:
+                return  # already has a pending task
 
-        task = Task(
-            factory_id=factory_id,
-            type=TaskType.BOARD_ORDER_NEEDED,
-            status=TaskStatus.PENDING,
-            assigned_role=UserRole.PRODUCTION_MANAGER,
-            related_order_id=order_id,
-            related_position_id=position_id,
-            blocking=False,
-            priority=6,
-            description=(
-                f"Glazing board shortage: need {boards_needed} boards "
-                f"but only {boards_available} available (deficit: {deficit}). "
-                f"Order or prepare additional boards for optimal production flow."
-            ),
-            metadata_json=json.dumps({
-                "boards_needed": boards_needed,
-                "boards_available": boards_available,
-                "deficit": deficit,
-            }),
-        )
-        db.add(task)
-        db.flush()
-        logger.info(
-            "BOARD_ORDER_TASK | factory=%s | need=%d avail=%d deficit=%d",
-            factory_id, boards_needed, boards_available, deficit,
-        )
+            task = Task(
+                factory_id=factory_id,
+                type=TaskType.BOARD_ORDER_NEEDED,
+                status=TaskStatus.PENDING,
+                assigned_role=UserRole.PRODUCTION_MANAGER,
+                related_order_id=order_id,
+                related_position_id=position_id,
+                blocking=False,
+                priority=6,
+                description=(
+                    f"Glazing board shortage: need {boards_needed} boards "
+                    f"but only {boards_available} available (deficit: {deficit}). "
+                    f"Order or prepare additional boards for optimal production flow."
+                ),
+                metadata_json=json.dumps({
+                    "boards_needed": boards_needed,
+                    "boards_available": boards_available,
+                    "deficit": deficit,
+                }),
+            )
+            db.add(task)
+            db.flush()
+            logger.info(
+                "BOARD_ORDER_TASK | factory=%s | need=%d avail=%d deficit=%d",
+                factory_id, boards_needed, boards_available, deficit,
+            )
     except Exception as e:
-        logger.debug("Failed to create board order task: %s", e)
+        logger.warning("Failed to create board order task: %s", e)
 
 
 def _apply_resource_constraint(
@@ -1027,76 +1030,78 @@ def _check_firing_profile_data(
         from business.services.typology_matcher import find_matching_typology
         import json
 
-        typology = find_matching_typology(db, position)
+        # SAVEPOINT guard — task creation isolated from outer tx.
+        with db.begin_nested():
+            typology = find_matching_typology(db, position)
 
-        # If typology exists, check for firing speed record
-        has_firing_data = False
-        if typology:
-            speed = db.query(StageTypologySpeed).filter(
-                StageTypologySpeed.typology_id == typology.id,
-                StageTypologySpeed.stage == 'firing',
-                StageTypologySpeed.productivity_rate.isnot(None),
+            # If typology exists, check for firing speed record
+            has_firing_data = False
+            if typology:
+                speed = db.query(StageTypologySpeed).filter(
+                    StageTypologySpeed.typology_id == typology.id,
+                    StageTypologySpeed.stage == 'firing',
+                    StageTypologySpeed.productivity_rate.isnot(None),
+                ).first()
+                has_firing_data = speed is not None
+
+            if has_firing_data:
+                return  # All good — firing profile configured
+
+            # No firing data — check if we already have a pending task
+            existing = db.query(Task).filter(
+                Task.related_position_id == position.id,
+                Task.type == TaskType.FIRING_PROFILE_NEEDED,
+                Task.status == TaskStatus.PENDING,
             ).first()
-            has_firing_data = speed is not None
 
-        if has_firing_data:
-            return  # All good — firing profile configured
+            if existing:
+                return  # Task already created — don't spam
 
-        # No firing data — check if we already have a pending task
-        existing = db.query(Task).filter(
-            Task.related_position_id == position.id,
-            Task.type == TaskType.FIRING_PROFILE_NEEDED,
-            Task.status == TaskStatus.PENDING,
-        ).first()
+            # Build description
+            pos_label = f"#{position.position_number}" + (
+                f".{position.split_index}" if getattr(position, 'split_index', None) else ""
+            )
+            order_num = ""
+            if hasattr(position, 'order') and position.order:
+                order_num = f" (Order {position.order.order_number})"
+            typology_name = typology.name if typology else "unknown"
 
-        if existing:
-            return  # Task already created — don't spam
+            task = Task(
+                factory_id=factory_id,
+                type=TaskType.FIRING_PROFILE_NEEDED,
+                status=TaskStatus.PENDING,
+                blocking=False,  # not immediately blocking — escalated by eve-of-kiln check
+                assigned_role=UserRole.PRODUCTION_MANAGER,
+                related_position_id=position.id,
+                related_order_id=position.order_id,
+                priority=7,
+                description=(
+                    f"Firing profile needed for position {pos_label}{order_num}. "
+                    f"No firing speed data found for typology '{typology_name}'. "
+                    f"Configure StageTypologySpeed for 'firing' stage before kiln date."
+                ),
+                due_at=(
+                    position.planned_kiln_date - timedelta(days=1)
+                    if position.planned_kiln_date else None
+                ),
+                metadata_json=json.dumps({
+                    "position_id": str(position.id),
+                    "order_id": str(position.order_id) if position.order_id else None,
+                    "typology_id": str(typology.id) if typology else None,
+                    "typology_name": typology_name,
+                    "planned_kiln_date": str(position.planned_kiln_date) if position.planned_kiln_date else None,
+                    "reason": "no_stage_typology_speed_for_firing",
+                }),
+            )
+            db.add(task)
 
-        # Build description
-        pos_label = f"#{position.position_number}" + (
-            f".{position.split_index}" if getattr(position, 'split_index', None) else ""
-        )
-        order_num = ""
-        if hasattr(position, 'order') and position.order:
-            order_num = f" (Order {position.order.order_number})"
-        typology_name = typology.name if typology else "unknown"
-
-        task = Task(
-            factory_id=factory_id,
-            type=TaskType.FIRING_PROFILE_NEEDED,
-            status=TaskStatus.PENDING,
-            blocking=False,  # not immediately blocking — escalated by eve-of-kiln check
-            assigned_role=UserRole.PRODUCTION_MANAGER,
-            related_position_id=position.id,
-            related_order_id=position.order_id,
-            priority=7,
-            description=(
-                f"Firing profile needed for position {pos_label}{order_num}. "
-                f"No firing speed data found for typology '{typology_name}'. "
-                f"Configure StageTypologySpeed for 'firing' stage before kiln date."
-            ),
-            due_at=(
-                position.planned_kiln_date - timedelta(days=1)
-                if position.planned_kiln_date else None
-            ),
-            metadata_json=json.dumps({
-                "position_id": str(position.id),
-                "order_id": str(position.order_id) if position.order_id else None,
-                "typology_id": str(typology.id) if typology else None,
-                "typology_name": typology_name,
-                "planned_kiln_date": str(position.planned_kiln_date) if position.planned_kiln_date else None,
-                "reason": "no_stage_typology_speed_for_firing",
-            }),
-        )
-        db.add(task)
-
-        logger.warning(
-            "FIRING_PROFILE_MISSING | position=%s typology=%s | "
-            "created FIRING_PROFILE_NEEDED task (fallback 1-day firing used)",
-            position.id, typology_name,
-        )
+            logger.warning(
+                "FIRING_PROFILE_MISSING | position=%s typology=%s | "
+                "created FIRING_PROFILE_NEEDED task (fallback 1-day firing used)",
+                position.id, typology_name,
+            )
     except Exception as e:
-        logger.debug("_check_firing_profile_data failed: %s", e)
+        logger.warning("_check_firing_profile_data failed: %s", e)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -1269,7 +1274,12 @@ def _create_deadline_exceeded_alert(
     planned_completion: date,
     stage_durations: dict,
 ) -> None:
-    """Create a PM task and CEO notification when planned completion exceeds deadline."""
+    """Create a PM task and CEO notification when planned completion exceeds deadline.
+
+    Wrapped in a SAVEPOINT so any failure here (DB enum mismatch, stale
+    model, missing relation) cannot abort the outer scheduling
+    transaction — the caller rolls back just this alert and continues.
+    """
     try:
         from api.models import Task
         from api.enums import TaskType, TaskStatus, UserRole
@@ -1289,88 +1299,96 @@ def _create_deadline_exceeded_alert(
         if hasattr(position, 'order') and position.order:
             order_num = position.order.order_number
 
-        # Dedup: skip if a PENDING DEADLINE_EXCEEDED task already exists
-        existing = db.query(Task).filter(
-            Task.related_position_id == position.id,
-            Task.type == TaskType.DEADLINE_EXCEEDED,
-            Task.status == TaskStatus.PENDING,
-        ).first()
-        if existing:
-            return
+        # Everything that hits the DB runs inside a SAVEPOINT so that
+        # any error here (enum mismatch, FK violation, etc.) cannot leave
+        # the outer scheduling transaction in an aborted state.
+        with db.begin_nested():
+            # Dedup: skip if a PENDING DEADLINE_EXCEEDED task already exists
+            existing = db.query(Task).filter(
+                Task.related_position_id == position.id,
+                Task.type == TaskType.DEADLINE_EXCEEDED,
+                Task.status == TaskStatus.PENDING,
+            ).first()
+            if existing:
+                return
 
-        description = (
-            f"Position {pos_label} (Order {order_num}) is {overdue_days} days late. "
-            f"Deadline: {deadline}, planned completion: {planned_completion}. "
-            f"Bottleneck: {bottleneck_stage} ({bottleneck_duration}d). "
-            f"AI suggestion: Need +{extra_workers} workers on {bottleneck_stage} "
-            f"to meet deadline. Consider working Sunday/overtime."
-        )
+            description = (
+                f"Position {pos_label} (Order {order_num}) is {overdue_days} days late. "
+                f"Deadline: {deadline}, planned completion: {planned_completion}. "
+                f"Bottleneck: {bottleneck_stage} ({bottleneck_duration}d). "
+                f"AI suggestion: Need +{extra_workers} workers on {bottleneck_stage} "
+                f"to meet deadline. Consider working Sunday/overtime."
+            )
 
-        task = Task(
-            factory_id=position.factory_id,
-            type=TaskType.DEADLINE_EXCEEDED,
-            status=TaskStatus.PENDING,
-            assigned_role=UserRole.PRODUCTION_MANAGER,
-            related_order_id=position.order_id,
-            related_position_id=position.id,
-            blocking=False,
-            priority=9,
-            description=description,
-            metadata_json=json.dumps({
-                "position_id": str(position.id),
-                "order_id": str(position.order_id) if position.order_id else None,
-                "deadline": str(deadline),
-                "planned_completion": str(planned_completion),
-                "overdue_days": overdue_days,
-                "bottleneck_stage": bottleneck_stage,
-                "bottleneck_duration_days": bottleneck_duration,
-                "extra_workers_suggested": extra_workers,
-                "stage_durations": stage_durations,
-            }),
-        )
-        db.add(task)
-        db.flush()
+            task = Task(
+                factory_id=position.factory_id,
+                type=TaskType.DEADLINE_EXCEEDED,
+                status=TaskStatus.PENDING,
+                assigned_role=UserRole.PRODUCTION_MANAGER,
+                related_order_id=position.order_id,
+                related_position_id=position.id,
+                blocking=False,
+                priority=9,
+                description=description,
+                metadata_json=json.dumps({
+                    "position_id": str(position.id),
+                    "order_id": str(position.order_id) if position.order_id else None,
+                    "deadline": str(deadline),
+                    "planned_completion": str(planned_completion),
+                    "overdue_days": overdue_days,
+                    "bottleneck_stage": bottleneck_stage,
+                    "bottleneck_duration_days": bottleneck_duration,
+                    "extra_workers_suggested": extra_workers,
+                    "stage_durations": stage_durations,
+                }),
+            )
+            db.add(task)
+            db.flush()
 
-        # Notify PM
-        notify_pm(
-            db=db,
-            factory_id=position.factory_id,
-            type="alert",
-            title=f"Deadline exceeded: position {pos_label} +{overdue_days}d late",
-            message=description,
-            related_entity_type="position",
-            related_entity_id=position.id,
-        )
+            # Notify PM
+            notify_pm(
+                db=db,
+                factory_id=position.factory_id,
+                type="alert",
+                title=f"Deadline exceeded: position {pos_label} +{overdue_days}d late",
+                message=description,
+                related_entity_type="position",
+                related_entity_id=position.id,
+            )
 
-        # Notify CEO (priority 9 = critical)
-        notify_role(
-            db=db,
-            factory_id=position.factory_id,
-            role=UserRole.CEO,
-            type="alert",
-            title=f"DEADLINE EXCEEDED: {pos_label} (Order {order_num}) +{overdue_days}d",
-            message=description,
-            related_entity_type="position",
-            related_entity_id=position.id,
-        )
+            # Notify CEO (priority 9 = critical)
+            notify_role(
+                db=db,
+                factory_id=position.factory_id,
+                role=UserRole.CEO,
+                type="alert",
+                title=f"DEADLINE EXCEEDED: {pos_label} (Order {order_num}) +{overdue_days}d",
+                message=description,
+                related_entity_type="position",
+                related_entity_id=position.id,
+            )
 
-        # Notify Sales Manager who created the order
-        _notify_sales_manager_deadline(
-            db=db,
-            position=position,
-            order_num=order_num,
-            pos_label=pos_label,
-            deadline=deadline,
-            planned_completion=planned_completion,
-            overdue_days=overdue_days,
-        )
+            # Notify Sales Manager who created the order
+            _notify_sales_manager_deadline(
+                db=db,
+                position=position,
+                order_num=order_num,
+                pos_label=pos_label,
+                deadline=deadline,
+                planned_completion=planned_completion,
+                overdue_days=overdue_days,
+            )
 
-        logger.warning(
-            "DEADLINE_EXCEEDED | pos=%s | deadline=%s completion=%s | +%d days late",
-            position.id, deadline, planned_completion, overdue_days,
-        )
+            logger.warning(
+                "DEADLINE_EXCEEDED | pos=%s | deadline=%s completion=%s | +%d days late",
+                position.id, deadline, planned_completion, overdue_days,
+            )
     except Exception as e:
-        logger.debug("_create_deadline_exceeded_alert failed: %s", e)
+        # SAVEPOINT rolled back automatically — outer tx stays clean.
+        logger.warning(
+            "_create_deadline_exceeded_alert failed for pos=%s: %s",
+            getattr(position, 'id', '?'), e,
+        )
 
 
 def _notify_sales_manager_deadline(
@@ -1470,191 +1488,193 @@ def _auto_create_missing_typology(
         from api.enums import TaskType, TaskStatus, UserRole
         import json
 
-        product_type = position.product_type
-        pt_val = product_type.value if hasattr(product_type, 'value') else str(product_type) if product_type else 'tile'
-        shape = getattr(position, 'shape', None)
-        shape_val = shape.value if hasattr(shape, 'value') else str(shape) if shape else None
-        collection = getattr(position, 'collection', None)
-        coll_val = collection.value if hasattr(collection, 'value') else str(collection) if collection else None
-        method = getattr(position, 'application_method_code', None)
-        method_val = method.value if hasattr(method, 'value') else str(method) if method else None
-        place = getattr(position, 'place_of_application', None)
-        place_val = place.value if hasattr(place, 'value') else str(place) if place else None
+        # SAVEPOINT guard — typology+speeds+task creation is isolated.
+        with db.begin_nested():
+            product_type = position.product_type
+            pt_val = product_type.value if hasattr(product_type, 'value') else str(product_type) if product_type else 'tile'
+            shape = getattr(position, 'shape', None)
+            shape_val = shape.value if hasattr(shape, 'value') else str(shape) if shape else None
+            collection = getattr(position, 'collection', None)
+            coll_val = collection.value if hasattr(collection, 'value') else str(collection) if collection else None
+            method = getattr(position, 'application_method_code', None)
+            method_val = method.value if hasattr(method, 'value') else str(method) if method else None
+            place = getattr(position, 'place_of_application', None)
+            place_val = place.value if hasattr(place, 'value') else str(place) if place else None
 
-        w = float(position.width_cm or 0) if getattr(position, 'width_cm', None) else 0
-        l = float(position.length_cm or 0) if getattr(position, 'length_cm', None) else 0
-        if not w and not l and getattr(position, 'size', None):
-            try:
-                parts = str(position.size).lower().replace('\u0445', 'x').split('x')
-                w = float(parts[0])
-                l = float(parts[1]) if len(parts) > 1 else w
-            except (ValueError, IndexError):
-                pass
+            w = float(position.width_cm or 0) if getattr(position, 'width_cm', None) else 0
+            l = float(position.length_cm or 0) if getattr(position, 'length_cm', None) else 0
+            if not w and not l and getattr(position, 'size', None):
+                try:
+                    parts = str(position.size).lower().replace('\u0445', 'x').split('x')
+                    w = float(parts[0])
+                    l = float(parts[1]) if len(parts) > 1 else w
+                except (ValueError, IndexError):
+                    pass
 
-        size_str = f"{w:.0f}x{l:.0f}" if w and l else "unknown-size"
-        typology_name = f"Auto: {pt_val} {size_str}"
-        if coll_val:
-            typology_name += f" ({coll_val})"
+            size_str = f"{w:.0f}x{l:.0f}" if w and l else "unknown-size"
+            typology_name = f"Auto: {pt_val} {size_str}"
+            if coll_val:
+                typology_name += f" ({coll_val})"
 
-        # Dedup: check if auto-created typology with same name already exists
-        existing_typo = db.query(KilnLoadingTypology).filter(
-            KilnLoadingTypology.factory_id == position.factory_id,
-            KilnLoadingTypology.name == typology_name,
-        ).first()
-        if existing_typo:
-            return
-
-        new_typology = KilnLoadingTypology(
-            factory_id=position.factory_id,
-            name=typology_name,
-            product_types=[pt_val] if pt_val else [],
-            place_of_application=[place_val] if place_val else [],
-            collections=[coll_val] if coll_val else [],
-            methods=[method_val] if method_val else [],
-            min_size_cm=min(w, l) if w and l else None,
-            max_size_cm=max(w, l) if w and l else None,
-            preferred_loading='auto',
-            is_active=True,
-            priority=0,
-            notes="Auto-created by scheduler — needs stage speed configuration.",
-        )
-        db.add(new_typology)
-        db.flush()
-
-        # Find 3 nearest existing typologies as hints (scored by attribute match)
-        hints = (
-            db.query(KilnLoadingTypology)
-            .filter(
+            # Dedup: check if auto-created typology with same name already exists
+            existing_typo = db.query(KilnLoadingTypology).filter(
                 KilnLoadingTypology.factory_id == position.factory_id,
-                KilnLoadingTypology.is_active == True,  # noqa: E712
-                KilnLoadingTypology.id != new_typology.id,
+                KilnLoadingTypology.name == typology_name,
+            ).first()
+            if existing_typo:
+                return
+
+            new_typology = KilnLoadingTypology(
+                factory_id=position.factory_id,
+                name=typology_name,
+                product_types=[pt_val] if pt_val else [],
+                place_of_application=[place_val] if place_val else [],
+                collections=[coll_val] if coll_val else [],
+                methods=[method_val] if method_val else [],
+                min_size_cm=min(w, l) if w and l else None,
+                max_size_cm=max(w, l) if w and l else None,
+                preferred_loading='auto',
+                is_active=True,
+                priority=0,
+                notes="Auto-created by scheduler — needs stage speed configuration.",
             )
-            .all()
-        )
+            db.add(new_typology)
+            db.flush()
 
-        def _score(t):
-            s = 0
-            if pt_val and pt_val in (t.product_types or []):
-                s += 3
-            if shape_val and shape_val in (t.product_types or []):
-                s += 1
-            if coll_val and coll_val in (t.collections or []):
-                s += 1
-            if method_val and method_val in (t.methods or []):
-                s += 1
-            return s
-
-        hints.sort(key=_score, reverse=True)
-        nearest = hints[:3]
-        hint_names = [h.name for h in nearest]
-
-        # ── Auto-seed speeds from best-matching typology ──
-        from api.models import StageTypologySpeed
-        if nearest and _score(nearest[0]) >= 2:
-            donor = nearest[0]
-            donor_speeds = (
-                db.query(StageTypologySpeed)
-                .filter(StageTypologySpeed.typology_id == donor.id)
+            # Find 3 nearest existing typologies as hints (scored by attribute match)
+            hints = (
+                db.query(KilnLoadingTypology)
+                .filter(
+                    KilnLoadingTypology.factory_id == position.factory_id,
+                    KilnLoadingTypology.is_active == True,  # noqa: E712
+                    KilnLoadingTypology.id != new_typology.id,
+                )
                 .all()
             )
-            seeded = 0
-            for ds in donor_speeds:
-                new_speed = StageTypologySpeed(
-                    factory_id=position.factory_id,
-                    typology_id=new_typology.id,
-                    stage=ds.stage,
-                    productivity_rate=ds.productivity_rate,
-                    rate_unit=ds.rate_unit,
-                    rate_basis=ds.rate_basis,
-                    time_unit=ds.time_unit,
-                    shift_count=ds.shift_count,
-                    shift_duration_hours=ds.shift_duration_hours,
-                    brigade_size=ds.brigade_size,
-                    auto_calibrate=True,
-                    notes=f"Auto-seeded from '{donor.name}'",
-                )
-                db.add(new_speed)
-                seeded += 1
-            if seeded:
-                new_typology.notes = (
-                    f"Auto-created by scheduler. "
-                    f"{seeded} speeds seeded from '{donor.name}' — "
-                    f"auto-calibration will adjust based on actual data."
-                )
-                db.flush()
-                logger.info(
-                    "TYPOLOGY_SPEEDS_SEEDED | typology='%s' | from='%s' | stages=%d",
-                    typology_name, donor.name, seeded,
-                )
 
-        pos_label = f"#{position.position_number}" + (
-            f".{position.split_index}" if getattr(position, 'split_index', None) else ""
-        )
+            def _score(t):
+                s = 0
+                if pt_val and pt_val in (t.product_types or []):
+                    s += 3
+                if shape_val and shape_val in (t.product_types or []):
+                    s += 1
+                if coll_val and coll_val in (t.collections or []):
+                    s += 1
+                if method_val and method_val in (t.methods or []):
+                    s += 1
+                return s
 
-        # Dedup task
-        existing_task = db.query(Task).filter(
-            Task.related_position_id == position.id,
-            Task.type == TaskType.TYPOLOGY_SPEEDS_NEEDED,
-            Task.status == TaskStatus.PENDING,
-        ).first()
-        if existing_task:
-            return
+            hints.sort(key=_score, reverse=True)
+            nearest = hints[:3]
+            hint_names = [h.name for h in nearest]
 
-        # If speeds were seeded, task is informational; otherwise needs PM action
-        _speeds_seeded = db.query(StageTypologySpeed).filter(
-            StageTypologySpeed.typology_id == new_typology.id
-        ).count()
-        _task_desc = (
-            f"New typology '{typology_name}' auto-created for position {pos_label}. "
-        )
-        if _speeds_seeded:
-            _task_desc += (
-                f"{_speeds_seeded} speeds auto-seeded from nearest typology. "
-                f"Auto-calibration enabled — speeds will adjust from production data. "
-                f"Review if needed."
-            )
-        else:
-            _task_desc += (
-                f"Please configure stage speeds (StageTypologySpeed records). "
-                f"Nearest existing typologies for reference: "
-                f"{', '.join(hint_names) if hint_names else 'none'}."
+            # ── Auto-seed speeds from best-matching typology ──
+            from api.models import StageTypologySpeed
+            if nearest and _score(nearest[0]) >= 2:
+                donor = nearest[0]
+                donor_speeds = (
+                    db.query(StageTypologySpeed)
+                    .filter(StageTypologySpeed.typology_id == donor.id)
+                    .all()
+                )
+                seeded = 0
+                for ds in donor_speeds:
+                    new_speed = StageTypologySpeed(
+                        factory_id=position.factory_id,
+                        typology_id=new_typology.id,
+                        stage=ds.stage,
+                        productivity_rate=ds.productivity_rate,
+                        rate_unit=ds.rate_unit,
+                        rate_basis=ds.rate_basis,
+                        time_unit=ds.time_unit,
+                        shift_count=ds.shift_count,
+                        shift_duration_hours=ds.shift_duration_hours,
+                        brigade_size=ds.brigade_size,
+                        auto_calibrate=True,
+                        notes=f"Auto-seeded from '{donor.name}'",
+                    )
+                    db.add(new_speed)
+                    seeded += 1
+                if seeded:
+                    new_typology.notes = (
+                        f"Auto-created by scheduler. "
+                        f"{seeded} speeds seeded from '{donor.name}' — "
+                        f"auto-calibration will adjust based on actual data."
+                    )
+                    db.flush()
+                    logger.info(
+                        "TYPOLOGY_SPEEDS_SEEDED | typology='%s' | from='%s' | stages=%d",
+                        typology_name, donor.name, seeded,
+                    )
+
+            pos_label = f"#{position.position_number}" + (
+                f".{position.split_index}" if getattr(position, 'split_index', None) else ""
             )
 
-        task = Task(
-            factory_id=position.factory_id,
-            type=TaskType.TYPOLOGY_SPEEDS_NEEDED,
-            status=TaskStatus.PENDING,
-            assigned_role=UserRole.PRODUCTION_MANAGER,
-            related_order_id=position.order_id,
-            related_position_id=position.id,
-            blocking=False,
-            priority=3 if _speeds_seeded else 6,
-            description=_task_desc,
-            metadata_json=json.dumps({
-                "typology_id": str(new_typology.id),
-                "typology_name": typology_name,
-                "position_id": str(position.id),
-                "order_id": str(position.order_id) if position.order_id else None,
-                "nearest_typologies": [
-                    {"id": str(h.id), "name": h.name} for h in nearest
-                ],
-                "product_type": pt_val,
-                "size": size_str,
-                "collection": coll_val,
-                "method": method_val,
-            }),
-        )
-        db.add(task)
-        db.flush()
+            # Dedup task
+            existing_task = db.query(Task).filter(
+                Task.related_position_id == position.id,
+                Task.type == TaskType.TYPOLOGY_SPEEDS_NEEDED,
+                Task.status == TaskStatus.PENDING,
+            ).first()
+            if existing_task:
+                return
 
-        logger.info(
-            "TYPOLOGY_AUTO_CREATED | pos=%s | typology='%s' (id=%s) | "
-            "nearest=[%s] | task created",
-            position.id, typology_name, new_typology.id,
-            ", ".join(hint_names),
-        )
+            # If speeds were seeded, task is informational; otherwise needs PM action
+            _speeds_seeded = db.query(StageTypologySpeed).filter(
+                StageTypologySpeed.typology_id == new_typology.id
+            ).count()
+            _task_desc = (
+                f"New typology '{typology_name}' auto-created for position {pos_label}. "
+            )
+            if _speeds_seeded:
+                _task_desc += (
+                    f"{_speeds_seeded} speeds auto-seeded from nearest typology. "
+                    f"Auto-calibration enabled — speeds will adjust from production data. "
+                    f"Review if needed."
+                )
+            else:
+                _task_desc += (
+                    f"Please configure stage speeds (StageTypologySpeed records). "
+                    f"Nearest existing typologies for reference: "
+                    f"{', '.join(hint_names) if hint_names else 'none'}."
+                )
+
+            task = Task(
+                factory_id=position.factory_id,
+                type=TaskType.TYPOLOGY_SPEEDS_NEEDED,
+                status=TaskStatus.PENDING,
+                assigned_role=UserRole.PRODUCTION_MANAGER,
+                related_order_id=position.order_id,
+                related_position_id=position.id,
+                blocking=False,
+                priority=3 if _speeds_seeded else 6,
+                description=_task_desc,
+                metadata_json=json.dumps({
+                    "typology_id": str(new_typology.id),
+                    "typology_name": typology_name,
+                    "position_id": str(position.id),
+                    "order_id": str(position.order_id) if position.order_id else None,
+                    "nearest_typologies": [
+                        {"id": str(h.id), "name": h.name} for h in nearest
+                    ],
+                    "product_type": pt_val,
+                    "size": size_str,
+                    "collection": coll_val,
+                    "method": method_val,
+                }),
+            )
+            db.add(task)
+            db.flush()
+
+            logger.info(
+                "TYPOLOGY_AUTO_CREATED | pos=%s | typology='%s' (id=%s) | "
+                "nearest=[%s] | task created",
+                position.id, typology_name, new_typology.id,
+                ", ".join(hint_names),
+            )
     except Exception as e:
-        logger.debug("_auto_create_missing_typology failed: %s", e)
+        logger.warning("_auto_create_missing_typology failed: %s", e)
 
 
 # ────────────────────────────────────────────────────────────────

@@ -47,6 +47,56 @@ DEFAULT_STONE_LEAD_TIME_DAYS = 35
 
 
 # ────────────────────────────────────────────────────────────────
+# Canonicalize place_of_application (must stay in sync with
+# api.routers.orders CANONICAL_PLACE_OF_APPLICATION).
+#
+# Legacy sources (sales webhook, old PDF parser, pre-migration form)
+# produced values like 'face', 'face-only', 'face_edges_1', ''. None
+# of them match the typology matcher enum, so the scheduler silently
+# falls back to 1 day per stage — every job collapses into a single
+# day with no multi-load firing.
+# ────────────────────────────────────────────────────────────────
+
+_CANONICAL_PLACE = {
+    "face_only", "edges_1", "edges_2", "all_edges", "with_back",
+}
+_LEGACY_PLACE_MAP = {
+    "face": "face_only",
+    "face-only": "face_only",
+    "": "face_only",
+    "face_edges_1": "edges_1",
+    "face_edges_2": "edges_2",
+    "face_edges_all": "all_edges",
+    "face-3-4-edges": "all_edges",
+}
+
+
+def _canonicalize_place_of_application(
+    value: Optional[str],
+    product_type: Optional[str] = None,
+) -> Optional[str]:
+    """Normalize legacy values and supply a safe default for tiles."""
+    if value is None:
+        return "face_only" if product_type == "tile" else None
+    value = value.strip()
+    if not value:
+        return "face_only" if product_type == "tile" else None
+    if value in _CANONICAL_PLACE:
+        return value
+    mapped = _LEGACY_PLACE_MAP.get(value)
+    if mapped:
+        return mapped
+    # Unknown value — log and fall back to face_only for tiles so the
+    # scheduler at least has a typology match.
+    logger.warning(
+        "Unknown place_of_application=%r (product_type=%r); "
+        "falling back to 'face_only'",
+        value, product_type,
+    )
+    return "face_only" if product_type == "tile" else value
+
+
+# ────────────────────────────────────────────────────────────────
 # Service item detection helpers
 # ────────────────────────────────────────────────────────────────
 
@@ -260,7 +310,10 @@ def process_incoming_order(
             quantity_sqm=Decimal(str(_qty_sqm_raw)) if _qty_sqm_raw else None,
             collection=item_data.get("collection"),
             application_type=item_data.get("application_type"),
-            place_of_application=item_data.get("place_of_application"),
+            place_of_application=_canonicalize_place_of_application(
+                item_data.get("place_of_application"),
+                item_data.get("product_type", ProductType.TILE.value),
+            ),
             product_type=item_data.get("product_type", ProductType.TILE.value),
             # Shape & dimension data (may come from Sales app)
             shape=item_data.get("shape"),

@@ -9,6 +9,14 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 
+interface StageSlice {
+  stage: string;
+  day_index: number;   // 1-based
+  total_days: number;
+  qty_per_day?: number | null;
+  sqm_per_day?: number | null;
+}
+
 interface PositionItem {
   id: string;
   order_number?: string;
@@ -17,10 +25,12 @@ interface PositionItem {
   size?: string;
   quantity?: number;
   quantity_sqm?: number;
+  area_sqm?: number;
   status?: string;
   product_type?: string;
   collection?: string;
   batch_id?: string;
+  stage_slice?: StageSlice | null;
 }
 
 interface BatchItem {
@@ -94,6 +104,23 @@ function StatusBadge({ status }: { status?: string }) {
 }
 
 function PositionCard({ item, onClick }: { item: PositionItem; onClick?: () => void }) {
+  const slice = item.stage_slice;
+  // Multi-day stage slice: show the per-day portion instead of the total.
+  // Falls back to full position qty when no stage_plan exists yet.
+  const dayQty =
+    slice && slice.qty_per_day != null
+      ? Math.round(Number(slice.qty_per_day))
+      : item.quantity || 0;
+  const daySqm =
+    slice && slice.sqm_per_day != null
+      ? Number(slice.sqm_per_day)
+      : item.quantity_sqm != null
+      ? Number(item.quantity_sqm)
+      : item.area_sqm != null
+      ? Number(item.area_sqm)
+      : null;
+  const multiDay = !!(slice && slice.total_days > 1);
+
   return (
     <div
       onClick={onClick}
@@ -103,16 +130,24 @@ function PositionCard({ item, onClick }: { item: PositionItem; onClick?: () => v
         <div className="flex items-center gap-1.5">
           <span className="font-semibold text-gray-900 truncate">{item.color || '—'}</span>
           {item.size && <span className="text-gray-400">{item.size}</span>}
+          {multiDay && (
+            <span className="rounded bg-blue-100 px-1 py-0.5 text-[9px] font-medium text-blue-700">
+              day {slice!.day_index}/{slice!.total_days}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1.5 text-[10px] text-gray-500 mt-0.5">
           <span>#{item.order_number}</span>
           {item.client && <span className="truncate max-w-[80px]">{item.client}</span>}
+          {multiDay && item.quantity ? (
+            <span className="text-gray-400">of {item.quantity}</span>
+          ) : null}
         </div>
       </div>
       <div className="text-right shrink-0">
-        <div className="font-medium text-gray-700">{item.quantity || 0} pcs</div>
-        {item.quantity_sqm ? (
-          <div className="text-[10px] text-gray-400">{Number(item.quantity_sqm).toFixed(2)} m²</div>
+        <div className="font-medium text-gray-700">{dayQty} pcs</div>
+        {daySqm != null ? (
+          <div className="text-[10px] text-gray-400">{daySqm.toFixed(2)} m²</div>
         ) : null}
       </div>
       <StatusBadge status={item.status} />

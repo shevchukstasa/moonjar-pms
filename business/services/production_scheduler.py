@@ -2073,6 +2073,55 @@ def schedule_position(
         _sched_meta = {}
     _sched_meta["original_kiln_date"] = planned_kiln.isoformat() if planned_kiln else None
     _sched_meta["num_loads"] = _num_loads
+
+    # ── Per-stage plan (for Daily Plan distribution) ──────────
+    # Build a dict of {stage: {start, end, days, qty_per_day}} so the
+    # Daily Plan view can spread qty across the full duration of each
+    # stage instead of dumping the whole position on a single day.
+    # Without this, a 4750-pc position with glazing_days=5 shows 4750
+    # only on day 1 of glazing and nothing on days 2-5.
+    try:
+        _qty = int(_pos_pcs or 0)
+        _sqm = float(_pos_sqm or 0)
+        _stage_plan: dict[str, dict] = {}
+
+        def _add_stage(name: str, start_d, days: int) -> "date":
+            if days <= 0 or start_d is None:
+                return start_d
+            _end = _skip_weekends(start_d + timedelta(days=max(days - 1, 0)))
+            _per_day = round(_qty / days, 2) if days > 0 else _qty
+            _sqm_per_day = round(_sqm / days, 3) if days > 0 else _sqm
+            _stage_plan[name] = {
+                "start": start_d.isoformat(),
+                "end": _end.isoformat(),
+                "days": int(days),
+                "qty_per_day": _per_day,
+                "sqm_per_day": _sqm_per_day,
+            }
+            return _skip_weekends(_end + timedelta(days=1))
+
+        _cursor = planned_glazing
+        _cursor = _add_stage("unpacking_sorting", _cursor, unpacking_days)
+        _cursor = _add_stage("engobe", _cursor, engobe_days)
+        _cursor = _add_stage("drying_engobe", _cursor, drying_engobe_days)
+        _cursor = _add_stage("glazing", _cursor, glazing_days)
+        _cursor = _add_stage("drying_glaze", _cursor, drying_glaze_days)
+        _cursor = _add_stage("edge_cleaning_loading", _cursor, edge_clean_load_days)
+
+        _cursor = planned_kiln
+        _cursor = _add_stage("firing", _cursor, firing_days)
+        _cursor = _add_stage("kiln_cooling_initial", _cursor, kiln_cool_initial_days)
+        _cursor = _add_stage("kiln_unloading", _cursor, kiln_unloading_days)
+        _cursor = _add_stage("tile_cooling", _cursor, tile_cooling_days)
+
+        _cursor = planned_sorting
+        _cursor = _add_stage("sorting", _cursor, sorting_days)
+        _cursor = _add_stage("packing", _cursor, packing_days)
+
+        _sched_meta["stage_plan"] = _stage_plan
+    except Exception as e:
+        logger.debug("Stage plan build failed: %s", e)
+
     position.schedule_metadata = _sched_meta
 
     # Increment schedule version

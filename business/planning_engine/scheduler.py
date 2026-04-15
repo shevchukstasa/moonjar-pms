@@ -68,9 +68,18 @@ _QC_STATUSES = {
 # §1  Production schedule generation
 # ────────────────────────────────────────────────────────────────
 
-def _serialize_position(pos: OrderPosition, order: Optional[ProductionOrder] = None) -> dict:
-    """Minimal serialization for schedule view."""
-    return {
+def _serialize_position(
+    pos: OrderPosition,
+    order: Optional[ProductionOrder] = None,
+    day_slice: Optional[dict] = None,
+) -> dict:
+    """Minimal serialization for schedule view.
+
+    If `day_slice` is given (from stage_plan), the serialization shows
+    only that day's slice of the position (qty_per_day, sqm_per_day)
+    plus a label like "day 2/5" so the UI can render partial progress.
+    """
+    base = {
         "id": str(pos.id),
         "order_id": str(pos.order_id),
         "order_number": order.order_number if order else None,
@@ -83,6 +92,9 @@ def _serialize_position(pos: OrderPosition, order: Optional[ProductionOrder] = N
         "priority": pos.priority_order or 0,
         "estimated_kiln": str(pos.estimated_kiln_id) if pos.estimated_kiln_id else None,
     }
+    if day_slice:
+        base["stage_slice"] = day_slice  # {stage, day_index, total_days, qty_per_day, sqm_per_day}
+    return base
 
 
 def _serialize_batch(batch: Batch, kiln: Optional[Resource] = None) -> dict:
@@ -160,21 +172,92 @@ def generate_production_schedule(
         ).all()
     } if order_ids else {}
 
-    # Index positions by planned dates
+    # Index positions by planned dates.
+    #
+    # For each section we store tuples of (position, day_slice_dict_or_None).
+    # day_slice is None when the position has no stage_plan metadata
+    # (single-day fallback, legacy behaviour), or a dict describing which
+    # slice of the multi-day stage lands on this particular day.
     glazing_by_date: dict[date, list] = {}
     kiln_by_date: dict[date, list] = {}
     sorting_by_date: dict[date, list] = {}
     completion_by_date: dict[date, list] = {}
 
+    # Stages that belong to each UI section
+    _GLAZING_STAGES = (
+        "unpacking_sorting",
+        "engobe",
+        "drying_engobe",
+        "glazing",
+        "drying_glaze",
+        "edge_cleaning_loading",
+    )
+    _SORTING_STAGES = ("sorting",)
+    _PACKING_STAGES = ("packing",)
+
+    def _expand_stage(
+        stage_name: str,
+        stage_info: dict,
+        target_dict: dict,
+        pos,
+    ):
+        """Add one position to target_dict for every day in [start, end]."""
+        try:
+            _start = date.fromisoformat(stage_info["start"])
+            _end = date.fromisoformat(stage_info["end"])
+        except Exception:
+            return
+        _days = max(int(stage_info.get("days") or 1), 1)
+        _qty = stage_info.get("qty_per_day")
+        _sqm = stage_info.get("sqm_per_day")
+        _idx = 0
+        _cur = _start
+        while _cur <= _end:
+            _idx += 1
+            if start <= _cur <= end:
+                target_dict.setdefault(_cur, []).append((
+                    pos,
+                    {
+                        "stage": stage_name,
+                        "day_index": _idx,
+                        "total_days": _days,
+                        "qty_per_day": _qty,
+                        "sqm_per_day": _sqm,
+                    },
+                ))
+            _cur = _cur + timedelta(days=1)
+
     for pos in positions:
-        if pos.planned_glazing_date:
-            glazing_by_date.setdefault(pos.planned_glazing_date, []).append(pos)
-        if pos.planned_kiln_date:
-            kiln_by_date.setdefault(pos.planned_kiln_date, []).append(pos)
-        if pos.planned_sorting_date:
-            sorting_by_date.setdefault(pos.planned_sorting_date, []).append(pos)
-        if pos.planned_completion_date:
-            completion_by_date.setdefault(pos.planned_completion_date, []).append(pos)
+        _meta = pos.schedule_metadata or {}
+        _plan = _meta.get("stage_plan") if isinstance(_meta, dict) else None
+
+        if _plan and isinstance(_plan, dict):
+            # New path: distribute across full stage durations.
+            for _sname in _GLAZING_STAGES:
+                _sinfo = _plan.get(_sname)
+                if _sinfo:
+                    _expand_stage(_sname, _sinfo, glazing_by_date, pos)
+            # kiln_loading is a single-day event on planned_kiln_date
+            if pos.planned_kiln_date:
+                kiln_by_date.setdefault(pos.planned_kiln_date, []).append((pos, None))
+            for _sname in _SORTING_STAGES:
+                _sinfo = _plan.get(_sname)
+                if _sinfo:
+                    _expand_stage(_sname, _sinfo, sorting_by_date, pos)
+            for _sname in _PACKING_STAGES:
+                _sinfo = _plan.get(_sname)
+                if _sinfo:
+                    _expand_stage(_sname, _sinfo, completion_by_date, pos)
+        else:
+            # Legacy path — single-day buckets (no stage_plan yet).
+            if pos.planned_glazing_date:
+                glazing_by_date.setdefault(pos.planned_glazing_date, []).append((pos, None))
+            if pos.planned_kiln_date:
+                kiln_by_date.setdefault(pos.planned_kiln_date, []).append((pos, None))
+            if pos.planned_sorting_date:
+                sorting_by_date.setdefault(pos.planned_sorting_date, []).append((pos, None))
+            if pos.planned_completion_date:
+                completion_by_date.setdefault(pos.planned_completion_date, []).append((pos, None))
 
     # ── Batches in date range ──
     batches = db.query(Batch).filter(
@@ -220,20 +303,31 @@ def generate_production_schedule(
             is_working = day.weekday() != 6  # Sunday = 6
             holiday_name = None
 
-        # Sections
-        glazing_pos = glazing_by_date.get(day, [])
-        kiln_loading_pos = kiln_by_date.get(day, [])
+        # Sections — each list now holds (position, day_slice_dict|None) tuples
+        glazing_entries = glazing_by_date.get(day, [])
+        kiln_loading_entries = kiln_by_date.get(day, [])
         firing_batches = batch_by_date.get(day, [])
         # Cooling: batches from yesterday (1-day cooling)
         cooling_batches = batch_by_date.get(day - timedelta(days=1), [])
-        sorting_pos = sorting_by_date.get(day, [])
-        qc_pos = completion_by_date.get(day, [])
+        sorting_entries = sorting_by_date.get(day, [])
+        qc_entries = completion_by_date.get(day, [])
+
+        def _daily_sqm(entries):
+            total = 0.0
+            for _p, _slice in entries:
+                if _slice and _slice.get("sqm_per_day") is not None:
+                    total += float(_slice["sqm_per_day"] or 0)
+                elif _p.quantity_sqm:
+                    total += float(_p.quantity_sqm)
+            return total
 
         # Metrics
-        day_positions = len(glazing_pos) + len(kiln_loading_pos) + len(sorting_pos) + len(qc_pos)
-        day_sqm = sum(
-            float(p.quantity_sqm or 0)
-            for p in glazing_pos + kiln_loading_pos + sorting_pos + qc_pos
+        day_positions = len(glazing_entries) + len(kiln_loading_entries) + len(sorting_entries) + len(qc_entries)
+        day_sqm = (
+            _daily_sqm(glazing_entries)
+            + _daily_sqm(kiln_loading_entries)
+            + _daily_sqm(sorting_entries)
+            + _daily_sqm(qc_entries)
         )
 
         if day_positions > 0 or firing_batches:
@@ -246,13 +340,13 @@ def generate_production_schedule(
             label = f"holiday: {holiday_name}" if holiday_name else "non-working day"
             warnings.append(f"{day}: work scheduled on {label}")
 
-        # Check for behind-schedule positions
-        for pos in kiln_loading_pos:
-            if pos.status in (PositionStatus.PLANNED.value, PositionStatus.INSUFFICIENT_MATERIALS.value):
-                order = orders.get(pos.order_id)
+        # Check for behind-schedule positions at kiln loading
+        for _p, _slice in kiln_loading_entries:
+            if _p.status in (PositionStatus.PLANNED.value, PositionStatus.INSUFFICIENT_MATERIALS.value):
+                order = orders.get(_p.order_id)
                 warnings.append(
-                    f"{day}: position {pos.id} not ready for kiln "
-                    f"(status={pos.status}, order={order.order_number if order else '?'})"
+                    f"{day}: position {_p.id} not ready for kiln "
+                    f"(status={_p.status}, order={order.order_number if order else '?'})"
                 )
 
         # No kiln activity warning
@@ -265,12 +359,24 @@ def generate_production_schedule(
             "is_working_day": is_working,
             "holiday_name": holiday_name,
             "sections": {
-                "glazing": [_serialize_position(p, orders.get(p.order_id)) for p in glazing_pos],
-                "kiln_loading": [_serialize_position(p, orders.get(p.order_id)) for p in kiln_loading_pos],
+                "glazing": [
+                    _serialize_position(p, orders.get(p.order_id), day_slice=s)
+                    for (p, s) in glazing_entries
+                ],
+                "kiln_loading": [
+                    _serialize_position(p, orders.get(p.order_id), day_slice=s)
+                    for (p, s) in kiln_loading_entries
+                ],
                 "firing": [_serialize_batch(b, kilns_map.get(b.resource_id)) for b in firing_batches],
                 "cooling": [_serialize_batch(b, kilns_map.get(b.resource_id)) for b in cooling_batches],
-                "sorting": [_serialize_position(p, orders.get(p.order_id)) for p in sorting_pos],
-                "qc": [_serialize_position(p, orders.get(p.order_id)) for p in qc_pos],
+                "sorting": [
+                    _serialize_position(p, orders.get(p.order_id), day_slice=s)
+                    for (p, s) in sorting_entries
+                ],
+                "qc": [
+                    _serialize_position(p, orders.get(p.order_id), day_slice=s)
+                    for (p, s) in qc_entries
+                ],
             },
             "metrics": {
                 "total_positions": day_positions,

@@ -2200,22 +2200,23 @@ def schedule_order(
 
     count = 0
     for position in positions:
-        # Per-position SAVEPOINT: if schedule_position or flush errors,
-        # the savepoint rolls back that position's changes, and the
-        # outer session stays healthy for the next iteration. Without
-        # this, psycopg2 leaves the connection in "aborted" state after
-        # any SQL error and all subsequent positions fail with
-        # InFailedSqlTransaction, cascading across the whole factory.
+        # Per-position schedule. If schedule_position or flush errors for
+        # one position, log and continue — we flush after each position so
+        # the session stays clean. Any actual DB error will be caught by
+        # the outer (reschedule_factory) per-order rollback.
         try:
-            with db.begin_nested():
-                schedule_position(db, position, deadline, min_start_date=min_start_date)
-                db.flush()
+            schedule_position(db, position, deadline, min_start_date=min_start_date)
+            db.flush()
             count += 1
         except Exception as e:
             logger.error(
                 "Failed to schedule position %s: %s", position.id, e,
                 exc_info=True,
             )
+            # Re-raise so the outer per-order handler rolls back this
+            # order cleanly (otherwise psycopg2 stays in aborted state
+            # and the next position in the loop fails too).
+            raise
 
     logger.info(
         "ORDER_SCHEDULED | order=%s | %d/%d positions scheduled, deadline=%s",
@@ -2364,16 +2365,25 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
     (e.g., new kiln added, factory-wide schedule reset).
     """
     from api.enums import OrderStatus
-    from sqlalchemy import text as _sa_text
 
-    # Ensure psycopg2 has an active transaction before we start issuing
-    # SAVEPOINTs per-order. SQLAlchemy's autobegin only reserves a
-    # SessionTransaction in Python — psycopg2 itself won't send BEGIN
-    # until a data query lands. If the caller just committed (e.g.
-    # recalculate_schedule → recalculate_all_estimates), then
-    # begin_nested() below would raise NoActiveSqlTransaction. One
-    # trivial SELECT forces psycopg2 into a transaction cleanly.
-    db.execute(_sa_text("SELECT 1"))
+    # Persist any upstream changes (e.g. estimate recalculation that the
+    # orchestrator just flushed) and start with a clean slate. We use
+    # per-order commits below instead of SAVEPOINTs because:
+    #   1. In prod the SAVEPOINT path intermittently hits
+    #      psycopg2.NoActiveSqlTransaction — psycopg2's autobegin
+    #      doesn't always cooperate when the session was handed to us
+    #      mid-pipeline from the orchestrator.
+    #   2. Per-order commits isolate failures cleanly — one broken
+    #      order doesn't poison the connection for the rest.
+    #   3. We already commit at the end of reschedule_factory, so
+    #      committing per iteration is not a semantic change.
+    try:
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
     active_orders = db.query(ProductionOrder).filter(
         ProductionOrder.factory_id == factory_id,
@@ -2408,33 +2418,37 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
     _fifo_min_start: Optional[date] = None  # FIFO: next order can't start before this
 
     for order in active_orders:
-        # Per-order SAVEPOINT via context manager so one failure doesn't
-        # poison the outer transaction. `with db.begin_nested():` auto-
-        # rollbacks the savepoint on exception, which releases psycopg2's
-        # aborted-transaction state cleanly.
+        # Per-order commit isolation: successful orders are persisted
+        # immediately, failed orders are rolled back without poisoning
+        # the session for the next iteration.
         try:
-            with db.begin_nested():
-                count = schedule_order(
-                    db, order, skip_batch_planning=True,
-                    min_start_date=_fifo_min_start,
-                )
-                total += count
-                db.flush()
+            count = schedule_order(
+                db, order, skip_batch_planning=True,
+                min_start_date=_fifo_min_start,
+            )
+            total += count
+            db.flush()
 
-                # Update FIFO min_start: next order can't start glazing
-                # before the EARLIEST glazing date of the current order.
-                order_positions = db.query(OrderPosition).filter(
-                    OrderPosition.order_id == order.id,
-                    OrderPosition.planned_glazing_date.isnot(None),
-                    OrderPosition.status != PositionStatus.CANCELLED.value,
-                ).all()
-                if order_positions:
-                    earliest_glazing = min(
-                        p.planned_glazing_date for p in order_positions
-                    )
-                    if _fifo_min_start is None or earliest_glazing > _fifo_min_start:
-                        _fifo_min_start = earliest_glazing
+            # Update FIFO min_start: next order can't start glazing
+            # before the EARLIEST glazing date of the current order.
+            order_positions = db.query(OrderPosition).filter(
+                OrderPosition.order_id == order.id,
+                OrderPosition.planned_glazing_date.isnot(None),
+                OrderPosition.status != PositionStatus.CANCELLED.value,
+            ).all()
+            if order_positions:
+                earliest_glazing = min(
+                    p.planned_glazing_date for p in order_positions
+                )
+                if _fifo_min_start is None or earliest_glazing > _fifo_min_start:
+                    _fifo_min_start = earliest_glazing
+
+            db.commit()
         except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
             logger.error(
                 "Failed to reschedule order %s: %s", order.order_number, e,
                 exc_info=True,

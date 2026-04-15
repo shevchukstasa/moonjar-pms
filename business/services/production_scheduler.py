@@ -2068,9 +2068,14 @@ def schedule_position(
 
     # Store original kiln date for batch deferral tracking.
     # Reset on each full reschedule (schedule_position call).
-    _sched_meta = position.schedule_metadata if position.schedule_metadata else {}
-    if not isinstance(_sched_meta, dict):
-        _sched_meta = {}
+    #
+    # CRITICAL: schedule_metadata is Column(JSONB) WITHOUT MutableDict
+    # wrapper — in-place mutation of the existing dict will NOT mark
+    # the object dirty, so the UPDATE is never issued and schedule_metadata
+    # stays NULL in the DB. Always build a FRESH dict and assign it so
+    # the attribute setter fires the change tracker.
+    _existing_meta = position.schedule_metadata if isinstance(position.schedule_metadata, dict) else {}
+    _sched_meta: dict = dict(_existing_meta)  # copy to new object
     _sched_meta["original_kiln_date"] = planned_kiln.isoformat() if planned_kiln else None
     _sched_meta["num_loads"] = _num_loads
 
@@ -2122,7 +2127,15 @@ def schedule_position(
     except Exception as e:
         logger.debug("Stage plan build failed: %s", e)
 
+    # Assign fresh dict (built above via dict() copy) so the attribute
+    # setter fires. Also flag_modified as belt-and-braces for JSONB
+    # columns without MutableDict wrapper.
     position.schedule_metadata = _sched_meta
+    try:
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(position, 'schedule_metadata')
+    except Exception:
+        pass
 
     # Increment schedule version
     position.schedule_version = (position.schedule_version or 0) + 1

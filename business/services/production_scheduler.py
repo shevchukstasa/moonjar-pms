@@ -2366,24 +2366,26 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
     """
     from api.enums import OrderStatus
 
-    # Persist any upstream changes (e.g. estimate recalculation that the
-    # orchestrator just flushed) and start with a clean slate. We use
-    # per-order commits below instead of SAVEPOINTs because:
-    #   1. In prod the SAVEPOINT path intermittently hits
-    #      psycopg2.NoActiveSqlTransaction — psycopg2's autobegin
-    #      doesn't always cooperate when the session was handed to us
-    #      mid-pipeline from the orchestrator.
-    #   2. Per-order commits isolate failures cleanly — one broken
-    #      order doesn't poison the connection for the rest.
-    #   3. We already commit at the end of reschedule_factory, so
-    #      committing per iteration is not a semantic change.
+    # CRITICAL: the upstream orchestrator (recalculate_schedule →
+    # recalculate_all_estimates) can leave the Session in a stuck state
+    # where `SessionTransaction.nested = True` — i.e. a leftover
+    # savepoint frame whose rollback failed silently (typically inside
+    # `_with_savepoint` helper when psycopg2 got a tx error). When that
+    # happens, EVERY subsequent query in this session goes through
+    # `Session._connection_for_bind` which at sqlalchemy/orm/session.py
+    # line 1202 hits `elif self.nested: transaction = conn.begin_nested()`
+    # — creating yet another SAVEPOINT on a connection that has no
+    # active tx, raising psycopg2.NoActiveSqlTransaction.
+    #
+    # `db.close()` discards all SessionTransaction frames (including
+    # the stuck nested one) and expunges pending objects. The next
+    # query autobegins a completely fresh tx. We lose upstream's
+    # unflushed estimates but they get recomputed anyway inside
+    # schedule_order → calculate_schedule_deadline.
     try:
-        db.commit()
+        db.close()
     except Exception:
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        pass
 
     active_orders = db.query(ProductionOrder).filter(
         ProductionOrder.factory_id == factory_id,

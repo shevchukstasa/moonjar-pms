@@ -238,5 +238,15 @@ def recalculate_all_estimates(db: Session, factory_id: UUID) -> None:
         except Exception as e:
             logger.error("Failed to recalculate order %s: %s", order.order_number, e)
 
-    db.commit()
+    # Intentionally NO db.commit() here.
+    #
+    # The orchestrator (recalculate_schedule) calls this as step 1 of a
+    # multi-step pipeline that later uses SAVEPOINT (db.begin_nested())
+    # inside reschedule_factory. Committing here ends the outer tx,
+    # and because psycopg2 in non-autocommit mode does not send BEGIN
+    # until a data query is issued, the subsequent begin_nested()
+    # fails with "SAVEPOINT can only be used in transaction blocks".
+    # Let the orchestrator commit everything at the end — partial
+    # failures are isolated by the per-order savepoints anyway.
+    db.flush()
     logger.info("Recalculated %d/%d active orders for factory %s", count, len(active_orders), factory_id)

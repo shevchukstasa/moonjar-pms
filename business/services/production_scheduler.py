@@ -2315,6 +2315,16 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
     (e.g., new kiln added, factory-wide schedule reset).
     """
     from api.enums import OrderStatus
+    from sqlalchemy import text as _sa_text
+
+    # Ensure psycopg2 has an active transaction before we start issuing
+    # SAVEPOINTs per-order. SQLAlchemy's autobegin only reserves a
+    # SessionTransaction in Python — psycopg2 itself won't send BEGIN
+    # until a data query lands. If the caller just committed (e.g.
+    # recalculate_schedule → recalculate_all_estimates), then
+    # begin_nested() below would raise NoActiveSqlTransaction. One
+    # trivial SELECT forces psycopg2 into a transaction cleanly.
+    db.execute(_sa_text("SELECT 1"))
 
     active_orders = db.query(ProductionOrder).filter(
         ProductionOrder.factory_id == factory_id,

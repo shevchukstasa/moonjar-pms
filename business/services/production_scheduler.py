@@ -1,14 +1,26 @@
 """
-Production Scheduler — upfront TOC/DBR backward scheduling.
+Production Scheduler — high-WIP left-shift (forward) scheduling.
 Business Logic: §5, §17, §20
 
-When an order comes in, the entire production path is planned immediately
-using backward scheduling from the deadline:
+When an order comes in, the entire production path is planned immediately.
+The scheduler first computes a backward-from-deadline baseline (TOC/DBR
+drum-buffer-rope), then LEFT-SHIFTS each position to the earliest feasible
+start, respecting only hard blockers:
+  - today's date (can't start in the past)
+  - FIFO min_start_date (later orders can't leapfrog earlier ones)
+  - material_ready_date (materials must be in-stock or arriving)
+  - blocking_ready_date (stone procurement, recipe config, etc.)
 
-  TOC/DBR model:
-    Drum   = kiln (the constraint)
-    Buffer = 1-day time buffers before and after the kiln
-    Rope   = pull work to arrive at the kiln on time
+The deadline is kept only as an ALERT trigger — if forward-shifted
+completion still exceeds it, a PM task + CEO notification are created
+(_create_deadline_exceeded_alert). The deadline no longer anchors the
+schedule.
+
+Rationale (architectural decision): Moonjar is artisan stone-tile
+manufacturing where worker idle time is more expensive than holding WIP,
+and early completion buffers against kiln breakdowns / QC rework / client
+change-requests. Classic TOC minimum-WIP backward scheduling is the wrong
+trade-off here.
 
 Dates are calculated per-position (not per-order) because each position
 may go to a different kiln with different availability.
@@ -1934,10 +1946,58 @@ def schedule_position(
             position.id, planned_glazing,
         )
 
+    # ── LEFT-SHIFT (forward scheduling) ─────────────────────────────
+    # Architectural decision: Moonjar runs HIGH-WIP left-shift, NOT
+    # classic TOC backward (start-as-late-as-possible). Reason: artisan
+    # production where worker idle time costs more than holding WIP, and
+    # early completion gives buffer for kiln breakdowns / QC rework.
+    #
+    # Rule: start glazing as EARLY as feasible, respecting only hard
+    # blockers (materials, blocking tasks with supplier lead times,
+    # FIFO min_start from earlier orders, today's date). The deadline
+    # is now ONLY used as a downstream alert trigger
+    # (see _create_deadline_exceeded_alert below) — it no longer acts
+    # as the scheduling anchor.
+    #
+    # This block runs AFTER material_ready/blocking_ready shifts have
+    # pushed backward-scheduled planned_glazing forward where needed,
+    # so _left_shift_earliest already contains those constraints.
+    today = date.today()
+    _left_shift_earliest = today
+    if min_start_date and min_start_date > _left_shift_earliest:
+        _left_shift_earliest = min_start_date
+    if _material_ready_date and _material_ready_date > _left_shift_earliest:
+        _left_shift_earliest = _material_ready_date
+    if _blocking_ready_date and _blocking_ready_date > _left_shift_earliest:
+        _left_shift_earliest = _blocking_ready_date
+    _left_shift_earliest = _skip_weekends(_left_shift_earliest)
+
+    if planned_glazing > _left_shift_earliest:
+        _old_glazing = planned_glazing
+        planned_glazing = _left_shift_earliest
+        planned_kiln = _skip_weekends(
+            planned_glazing + timedelta(days=pre_kiln_total + _pre_buffer)
+        )
+        planned_sorting = _skip_weekends(
+            planned_kiln + timedelta(
+                days=firing_days + kiln_cool_initial_days + kiln_unloading_days
+                + tile_cooling_days + _post_buffer
+            )
+        )
+        planned_completion = _skip_weekends(
+            planned_sorting + timedelta(days=sorting_days + packing_days)
+        )
+        logger.info(
+            "LEFT_SHIFT | pos=%s | glazing %s → %s (pulled %d days left) | "
+            "completion=%s (deadline=%s)",
+            position.id, _old_glazing, planned_glazing,
+            (_old_glazing - planned_glazing).days,
+            planned_completion, deadline,
+        )
+
     # Guard: planned_glazing must be >= today (and >= min_start_date for FIFO).
     # When overdue, find the earliest day with available capacity instead of
     # blindly stuffing everything onto today.
-    today = date.today()
     _earliest = max(today, min_start_date) if min_start_date else today
     if planned_glazing < _earliest:
         # Get daily capacity (kiln throughput = the constraint)

@@ -18,15 +18,13 @@ import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
-from typing import Optional
-
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func as sa_func, and_, or_
+from sqlalchemy import func as sa_func
 
 from api.models import SkillBadge, UserSkill, OperationLog, User, Operation, UserFactory
 from api.enums import UserRole
 from business.services.points_system import award_points
-from business.services.notifications import notify_pm, send_telegram_message, get_forum_topic
+from business.services.notifications import notify_pm, send_telegram_message
 
 logger = logging.getLogger("moonjar.skill_system")
 

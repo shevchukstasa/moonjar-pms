@@ -652,6 +652,22 @@ async def record_operation_time(
     db.add(log)
     db.commit()
     db.refresh(log)
+
+    # Update skill progress for the worker (non-blocking)
+    try:
+        from business.services.skill_system import update_skill_progress
+        changes = update_skill_progress(
+            db,
+            user_id=current_user.id,
+            operation_id=data.operation_id,
+            quantity=data.quantity_processed or 1,
+            defects=data.defect_count or 0,
+        )
+        if changes:
+            db.commit()
+    except Exception as exc:
+        logger.warning("Skill progress update failed (non-blocking): %s", exc)
+
     return _serialize_op_log(log)
 
 

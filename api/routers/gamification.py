@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.auth import get_current_user
 from api.roles import require_management, require_owner, require_any
 
 logger = logging.getLogger("moonjar.gamification")
@@ -123,6 +122,22 @@ async def start_learning_skill(
     return result
 
 
+@router.post("/skills/request-certification")
+async def request_skill_certification(
+    body: StartSkillRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_any),
+):
+    """Worker requests certification after meeting all requirements."""
+    from business.services.skill_system import request_certification
+    try:
+        result = request_certification(db, current_user.id, body.skill_badge_id)
+        db.commit()
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.post("/skills/certify")
 async def certify_skill(
     body: CertifySkillRequest,
@@ -147,6 +162,38 @@ async def revoke_skill(
     result = revoke_certification(db, body.user_skill_id, current_user.id)
     db.commit()
     return result
+
+
+# ── Points & Leaderboard ───────────────────────────────────────
+
+
+@router.get("/leaderboard")
+async def get_leaderboard(
+    factory_id: UUID = Query(...),
+    period: str = Query("year", regex="^(year|month|week)$"),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_any),
+):
+    """Top-20 workers by points for a given period (year/month/week)."""
+    from business.services.points_system import get_points_leaderboard
+    return get_points_leaderboard(db, factory_id, period)
+
+
+@router.get("/points/my")
+async def get_my_points(
+    factory_id: UUID = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_any),
+):
+    """Current user's points summary and rank."""
+    from business.services.points_system import get_user_points, get_user_rank
+    points = get_user_points(db, current_user.id, factory_id)
+    rank, total = get_user_rank(db, current_user.id, factory_id)
+    return {
+        "points": points,
+        "rank": rank,
+        "total_participants": total,
+    }
 
 
 # ── Competitions endpoints ──────────────────────────────────────
@@ -311,6 +358,24 @@ async def generate_monthly_prizes(
     prizes = generate_monthly_prizes(db, factory_id)
     db.commit()
     return {"generated": len(prizes)}
+
+
+@router.post("/prizes/generate-quarterly")
+async def generate_quarterly(
+    factory_id: UUID = Query(...),
+    year: int = Query(None),
+    quarter: int = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_owner),
+):
+    """Generate quarterly prize recommendations (budget = 2.5x monthly)."""
+    from business.services.prize_advisor import generate_quarterly_prizes
+    from datetime import datetime as dt
+    y = year or dt.now().year
+    q = quarter or ((dt.now().month - 1) // 3 + 1)
+    prizes = generate_quarterly_prizes(db, factory_id, y, q)
+    db.commit()
+    return {"generated": len(prizes), "year": y, "quarter": q}
 
 
 @router.post("/prizes/{prize_id}/approve")

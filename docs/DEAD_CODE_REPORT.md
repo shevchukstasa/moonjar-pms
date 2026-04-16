@@ -1,33 +1,149 @@
 # Moonjar PMS — Отчёт по мёртвому коду
 
-Дата сканирования: 2026-03-27 16:37
+Дата сканирования: 2026-04-17 01:56
 
 ## Сводка
 
 | Категория | Точно мёртвый | Возможно мёртвый |
 |-----------|:---:|:---:|
-| Неиспользуемые функции | 0 | 15 |
-| Неиспользуемые TS-экспорты | 0 | 205 |
-| Неиспользуемые env-переменные | 0 | 5 |
-| **ИТОГО** | **0** | **225** |
+| Неиспользуемые импорты | 43 | 0 |
+| Неиспользуемые функции | 8 | 26 |
+| Неиспользуемые классы | 2 | 0 |
+| Неиспользуемые SQLAlchemy-модели | 1 | 0 |
+| Неиспользуемые TS-экспорты | 0 | 221 |
+| Неиспользуемые env-переменные | 0 | 4 |
+| **ИТОГО** | **54** | **251** |
+
+## Неиспользуемые импорты
+
+- **[DEAD]** `api/routers/cleanup.py:167` — `PositionPhoto`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `api/routers/cleanup.py:167` — `StoneReservation`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `api/routers/cleanup.py:167` — `ShipmentItem`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `api/routers/firing_profiles.py:11` — `FiringTemperatureGroup`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `api/routers/gamification.py:12` — `get_current_user`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `api/routers/onboarding.py:14` — `User`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `api/routers/recipes.py:568` — `TaskType`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `api/routers/schedule.py:948` — `sa_func`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `api/routers/tasks.py:18` — `create_notification`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `api/routers/transcription.py:10` — `get_current_user`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `api/routers/workforce.py:13` — `get_current_user`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/auto_reorder.py:374` — `cast`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/auto_reorder.py:375` — `_JSONB`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/ceo_reports.py:10` — `Decimal`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/ceo_reports.py:11` — `Optional`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/ceo_reports.py:14` — `and_`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/competitions.py:15` — `datetime`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/competitions.py:15` — `timezone`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/competitions.py:17` — `Optional`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/competitions.py:20` — `and_`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/factory_leaderboard.py:9` — `Optional`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/points_system.py:27` — `Optional`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/points_system.py:30` — `func`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/points_system.py:30` — `extract`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/prize_advisor.py:22` — `and_`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/prize_advisor.py:22` — `extract`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/prize_advisor.py:30` — `UserRole`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/production_scheduler.py:986` — `cast`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/production_scheduler.py:1573` — `send_telegram_message`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/skill_system.py:21` — `Optional`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/skill_system.py:24` — `and_`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/skill_system.py:29` — `get_forum_topic`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/staffing_optimizer.py:18` — `Decimal`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/streaks.py:17` — `and_`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/telegram_callbacks.py:719` — `Decimal`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/transcription_logger.py:20` — `User`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/weekly_summary.py:9` — `timezone`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/weekly_summary.py:9` — `datetime`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `business/services/weekly_summary.py:227` — `literal_column`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `scripts/full_stack_audit.py:35` — `defaultdict`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `scripts/seed_reference_data.py:13` — `uuid`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `scripts/seed_reference_data.py:17` — `text`
+  - Импортирован, но не используется в файле
+- **[DEAD]** `scripts/verify_scheduling_pipeline.py:23` — `timedelta`
+  - Импортирован, но не используется в файле
 
 ## Неиспользуемые функции
 
-- **[MAYBE]** `api/config.py:92` — `model_post_init`
+- **[DEAD]** `business/services/firing_profiles.py:22` — `match_firing_profile_by_typology`
+  - Определена, но нигде не вызывается
+- **[DEAD]** `business/services/packaging_consumption.py:411` — `auto_resolve_packing_tasks`
+  - Определена, но нигде не вызывается
+- **[DEAD]** `business/services/payroll.py:145` — `calculate_pph21_monthly`
+  - Определена, но нигде не вызывается
+- **[DEAD]** `business/services/payroll.py:344` — `calculate_overtime_pay`
+  - Определена, но нигде не вызывается
+- **[DEAD]** `business/services/points_system.py:188` — `get_points_leaderboard`
+  - Определена, но нигде не вызывается
+- **[DEAD]** `business/services/prize_advisor.py:163` — `generate_quarterly_prizes`
+  - Определена, но нигде не вызывается
+- **[DEAD]** `business/services/skill_system.py:502` — `update_skill_progress`
+  - Определена, но нигде не вызывается
+- **[DEAD]** `business/services/skill_system.py:772` — `request_certification`
+  - Определена, но нигде не вызывается
+- **[MAYBE]** `api/config.py:103` — `model_post_init`
   - Метод определён, но возможно не вызывается
-- **[MAYBE]** `api/routers/integration.py:981` — `_parse_date`
+- **[MAYBE]** `api/main.py:1913` — `_enum_values_patch`
   - Приватная функция — найдено <=1 упоминание в файле
-- **[MAYBE]** `api/routers/orders.py:254` — `_cancel_order_tasks`
+- **[MAYBE]** `api/routers/cleanup.py:190` — `_purge_order_refs`
+  - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `api/routers/integration.py:1057` — `_parse_date`
+  - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `api/routers/orders.py:304` — `_cancel_order_tasks`
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `api/routers/packaging.py:52` — `_ev`
   - Приватная функция — найдено <=1 упоминание в файле
-- **[MAYBE]** `api/routers/positions.py:47` — `_next_position_number`
+- **[MAYBE]** `api/routers/positions.py:50` — `_next_position_number`
   - Приватная функция — найдено <=1 упоминание в файле
-- **[MAYBE]** `api/websocket.py:57` — `send_to_factory`
+- **[MAYBE]** `api/websocket.py:49` — `broadcast`
+  - Метод определён, но возможно не вызывается
+- **[MAYBE]** `api/websocket.py:61` — `send_to_factory`
   - Метод определён, но возможно не вызывается
 - **[MAYBE]** `business/kiln/capacity.py:38` — `_c`
   - Приватная функция — найдено <=1 упоминание в файле
-- **[MAYBE]** `business/services/order_intake.py:89` — `_get_defect_coefficient`
+- **[MAYBE]** `business/services/achievements.py:88` — `_get_threshold_for_level`
+  - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `business/services/daily_distribution.py:1541` — `_format_message_ru`
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `business/services/purchaser_lifecycle.py:323` — `_notify_on_approved`
   - Приватная функция — найдено <=1 упоминание в файле
@@ -35,14 +151,40 @@
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `business/services/purchaser_lifecycle.py:360` — `_notify_on_in_transit`
   - Приватная функция — найдено <=1 упоминание в файле
-- **[MAYBE]** `business/services/telegram_bot.py:2240` — `_fuzzy_match_material`
+- **[MAYBE]** `business/services/telegram_bot.py:3194` — `_fuzzy_match_material`
   - Приватная функция — найдено <=1 упоминание в файле
-- **[MAYBE]** `business/services/telegram_bot.py:3034` — `_edit_telegram_message`
+- **[MAYBE]** `business/services/telegram_bot.py:4325` — `_edit_telegram_message`
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `scripts/audit_pm.py:165` — `_get_router_prefix`
   - Приватная функция — найдено <=1 упоминание в файле
 - **[MAYBE]** `scripts/diff_migration.py:428` — `_parse_main_add_columns`
   - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `scripts/e2e_complex_v3.py:290` — `_create_batch_and_fire`
+  - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `scripts/e2e_complex_v3.py:318` — `_split_all_good`
+  - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `scripts/e2e_complex_v3.py:343` — `_final_qc`
+  - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `scripts/e2e_complex_v3.py:358` — `_ship_order`
+  - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `scripts/e2e_order_lifecycle_test.py:458` — `_full_pipeline_position`
+  - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `scripts/e2e_order_lifecycle_test.py:1470` — `_run_complex_order`
+  - Приватная функция — найдено <=1 упоминание в файле
+- **[MAYBE]** `scripts/generate_api_contracts.py:94` — `_resolve_auth_from_depends`
+  - Приватная функция — найдено <=1 упоминание в файле
+
+## Неиспользуемые классы
+
+- **[DEAD]** `api/routers/gamification.py:22` — `SkillBadgeCreate`
+  - Определён, но нигде не используется
+- **[DEAD]** `api/routers/gamification.py:70` — `ApprovePrize`
+  - Определён, но нигде не используется
+
+## Неиспользуемые SQLAlchemy-модели
+
+- **[DEAD]** `api/models.py:1829` — `KilnShelf`
+  - Модель определена, но не импортируется ни в одном роутере/сервисе
 
 ## Неиспользуемые TS-экспорты
 
@@ -64,6 +206,12 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/analytics.ts:107` — `AnomalyResponse`
   - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/analytics.ts:133` — `LeaderboardResponse`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/analytics.ts:153` — `AchievementsResponse`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/analytics.ts:175` — `StreaksResponse`
+  - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/auth.ts:3` — `LoginInput`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/auth.ts:8` — `GoogleLoginInput`
@@ -74,23 +222,29 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/dashboardAccess.ts:18` — `DashboardAccessCreatePayload`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:31` — `EmployeeListResponse`
+- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:33` — `EmployeeListResponse`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:93` — `AttendanceListResponse`
+- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:100` — `AttendanceListResponse`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:97` — `AttendanceCreatePayload`
+- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:104` — `AttendanceCreatePayload`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:104` — `AttendanceUpdatePayload`
+- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:112` — `AttendanceUpdatePayload`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:165` — `PayrollSummaryResponse`
+- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:174` — `PayrollSummaryResponse`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:270` — `HRCostsDepartmentBreakdown`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:284` — `HRCostsDepartmentYearTotals`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/employees.ts:340` — `HRCostsEmployeeMonthEntry`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/export.ts:3` — `exportApi`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/factoryCalendar.ts:18` — `CalendarListResponse`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/factoryCalendar.ts:45` — `CalendarBulkPayload`
+- **[MAYBE]** `presentation/dashboard/src/api/factoryCalendar.ts:47` — `CalendarBulkPayload`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/factoryCalendar.ts:50` — `BulkCreateResponse`
+- **[MAYBE]** `presentation/dashboard/src/api/factoryCalendar.ts:52` — `BulkCreateResponse`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/financials.ts:17` — `FinancialEntry`
   - Экспортируется, но не импортируется в других файлах
@@ -104,7 +258,7 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/finishedGoods.ts:57` — `FactoryAvailability`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/firingProfiles.ts:18` — `FiringProfileForm`
+- **[MAYBE]** `presentation/dashboard/src/api/firingProfiles.ts:21` — `FiringProfileForm`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/grindingStock.ts:21` — `GrindingStockListResponse`
   - Экспортируется, но не импортируется в других файлах
@@ -116,6 +270,10 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/kilnInspections.ts:18` — `InspectionResult`
   - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/onboarding.ts:33` — `QuizOption`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/onboarding.ts:44` — `ContentSlide`
+  - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/packaging.ts:3` — `PackagingCapacity`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/packaging.ts:11` — `PackagingSpacerRule`
@@ -124,11 +282,11 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/positions.ts:61` — `MaterialReservationItem`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/positions.ts:72` — `ForceUnblockResponse`
+- **[MAYBE]** `presentation/dashboard/src/api/positions.ts:87` — `ForceUnblockResponse`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/recipes.ts:60` — `RecipeLookupParams`
+- **[MAYBE]** `presentation/dashboard/src/api/recipes.ts:61` — `RecipeLookupParams`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/api/recipes.ts:70` — `RecipeLookupResult`
+- **[MAYBE]** `presentation/dashboard/src/api/recipes.ts:71` — `RecipeLookupResult`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/reference.ts:19` — `ApplicationMethodItem`
   - Экспортируется, но не импортируется в других файлах
@@ -158,11 +316,21 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/api/toc.ts:3` — `TocConstraint`
   - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/tpsDashboard.ts:140` — `LineResourceCreate`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/workforce.ts:47` — `ShiftAssignmentCreate`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/api/workforce.ts:56` — `ShiftDefinitionCreate`
+  - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/components/shared/ShapeDimensionEditor.tsx:9` — `ShapeDefinition`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/components/shared/ShapeDimensionEditor.tsx:209` — `calculateShapeArea`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/components/shared/ShapeDimensionEditor.tsx:346` — `ShapeDimensionEditorProps`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/components/ui/AnimatedSection.tsx:38` — `SlideIn`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/components/ui/Celebration.tsx:38` — `CelebrationCheck`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/config/csvImportConfigs.ts:3` — `CsvImportConfig`
   - Экспортируется, но не импортируется в других файлах
@@ -171,6 +339,10 @@
 - **[MAYBE]** `presentation/dashboard/src/hooks/useFinancials.ts:12` — `useFinancialEntries`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/useFinancials.ts:19` — `useCreateFinancialEntry`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/hooks/useGamification.ts:105` — `useCreateTeamCompetition`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/hooks/useGamification.ts:114` — `useProposeChallenge`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/useKilns.ts:50` — `useKiln`
   - Экспортируется, но не импортируется в других файлах
@@ -190,7 +362,9 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/usePackingPhotos.ts:17` — `UploadPackingPhotoArgs`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/hooks/usePositions.ts:44` — `usePosition`
+- **[MAYBE]** `presentation/dashboard/src/hooks/usePositions.ts:45` — `usePosition`
+  - Экспортируется, но не импортируется в других файлах
+- **[MAYBE]** `presentation/dashboard/src/hooks/usePositions.ts:88` — `useAllowedTransitions`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/hooks/usePurchaseRequests.ts:29` — `useCreatePurchaseRequestPurchaser`
   - Экспортируется, но не импортируется в других файлах
@@ -268,181 +442,181 @@
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/types/enums.ts:68` — `TaskType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:83` — `TaskTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:84` — `TaskTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:85` — `TaskStatus`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:86` — `TaskStatus`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:91` — `TaskStatusType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:92` — `TaskStatusType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:93` — `MaterialType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:94` — `MaterialType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:102` — `MaterialTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:103` — `MaterialTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:104` — `TransactionType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:105` — `TransactionType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:112` — `TransactionTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:113` — `TransactionTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:114` — `WriteOffReason`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:115` — `WriteOffReason`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:122` — `WriteOffReasonType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:123` — `WriteOffReasonType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:124` — `PurchaseStatus`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:125` — `PurchaseStatus`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:131` — `PurchaseStatusType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:132` — `PurchaseStatusType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:133` — `ResourceType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:134` — `ResourceType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:138` — `ResourceTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:139` — `ResourceTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:140` — `ResourceStatus`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:141` — `ResourceStatus`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:146` — `ResourceStatusType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:147` — `ResourceStatusType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:148` — `BatchStatus`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:149` — `BatchStatus`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:154` — `BatchStatusType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:155` — `BatchStatusType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:156` — `BatchMode`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:157` — `BatchMode`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:160` — `BatchModeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:161` — `BatchModeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:162` — `ScheduleSlotStatus`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:163` — `ScheduleSlotStatus`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:168` — `ScheduleSlotStatusType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:169` — `ScheduleSlotStatusType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:170` — `QcResult`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:171` — `QcResult`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:174` — `QcResultType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:175` — `QcResultType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:176` — `QcStage`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:177` — `QcStage`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:181` — `QcStageType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:182` — `QcStageType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:183` — `DefectStage`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:184` — `DefectStage`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:191` — `DefectStageType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:192` — `DefectStageType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:193` — `DefectOutcome`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:194` — `DefectOutcome`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:203` — `DefectOutcomeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:204` — `DefectOutcomeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:205` — `ProductType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:206` — `ProductType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:211` — `ProductTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:213` — `ProductTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:213` — `ShapeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:215` — `ShapeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:220` — `ShapeTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:222` — `ShapeTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:222` — `SplitCategory`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:224` — `SplitCategory`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:227` — `SplitCategoryType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:229` — `SplitCategoryType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:229` — `GrindingStatus`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:231` — `GrindingStatus`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:234` — `GrindingStatusType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:236` — `GrindingStatusType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:236` — `RepairStatus`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:238` — `RepairStatus`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:242` — `RepairStatusType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:244` — `RepairStatusType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:244` — `ManaShipmentStatus`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:246` — `ManaShipmentStatus`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:249` — `ManaShipmentStatusType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:251` — `ManaShipmentStatusType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:251` — `SurplusDispositionType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:253` — `SurplusDispositionType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:256` — `SurplusDispositionTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:258` — `SurplusDispositionTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:258` — `MaintenanceStatus`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:260` — `MaintenanceStatus`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:263` — `MaintenanceStatusType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:265` — `MaintenanceStatusType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:265` — `NotificationType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:267` — `NotificationType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:277` — `NotificationTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:279` — `NotificationTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:279` — `RelatedEntityType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:281` — `RelatedEntityType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:286` — `RelatedEntityTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:288` — `RelatedEntityTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:288` — `TpsDeviationType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:290` — `TpsDeviationType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:292` — `TpsDeviationTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:294` — `TpsDeviationTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:294` — `TpsStatus`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:296` — `TpsStatus`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:299` — `TpsStatusType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:301` — `TpsStatusType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:306` — `BufferHealthType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:308` — `BufferHealthType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:308` — `BatchCreator`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:310` — `BatchCreator`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:312` — `BatchCreatorType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:314` — `BatchCreatorType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:314` — `ReferenceAction`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:316` — `ReferenceAction`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:319` — `ReferenceActionType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:321` — `ReferenceActionType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:321` — `WebhookAuthMode`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:323` — `WebhookAuthMode`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:325` — `WebhookAuthModeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:327` — `WebhookAuthModeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:327` — `CastersRemovedReason`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:329` — `CastersRemovedReason`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:332` — `CastersRemovedReasonType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:334` — `CastersRemovedReasonType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:334` — `MediaType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:336` — `MediaType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:340` — `MediaTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:342` — `MediaTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:342` — `DashboardType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:344` — `DashboardType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:351` — `DashboardTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:353` — `DashboardTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:353` — `NotificationChannel`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:355` — `NotificationChannel`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:358` — `NotificationChannelType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:360` — `NotificationChannelType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:360` — `ExpenseType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:362` — `ExpenseType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:364` — `ExpenseTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:366` — `ExpenseTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:366` — `ExpenseCategory`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:368` — `ExpenseCategory`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:375` — `ExpenseCategoryType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:377` — `ExpenseCategoryType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:377` — `ReconciliationStatus`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:379` — `ReconciliationStatus`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:382` — `ReconciliationStatusType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:384` — `ReconciliationStatusType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:384` — `ProblemCardMode`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:386` — `ProblemCardMode`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:388` — `ProblemCardModeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:390` — `ProblemCardModeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:390` — `ProblemCardStatus`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:392` — `ProblemCardStatus`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:395` — `ProblemCardStatusType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:397` — `ProblemCardStatusType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:397` — `QmBlockType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:399` — `QmBlockType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:401` — `QmBlockTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:403` — `QmBlockTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:403` — `KilnConstantsMode`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:405` — `KilnConstantsMode`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:407` — `KilnConstantsModeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:409` — `KilnConstantsModeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:409` — `LanguagePreference`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:411` — `LanguagePreference`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:414` — `LanguagePreferenceType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:416` — `LanguagePreferenceType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:416` — `AuditActionType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:418` — `AuditActionType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:440` — `AuditActionTypeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:442` — `AuditActionTypeType`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:442` — `IpScope`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:444` — `IpScope`
   - Экспортируется, но не импортируется в других файлах
-- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:447` — `IpScopeType`
+- **[MAYBE]** `presentation/dashboard/src/types/enums.ts:449` — `IpScopeType`
   - Экспортируется, но не импортируется в других файлах
 - **[MAYBE]** `presentation/dashboard/src/types/forms.ts:3` — `loginSchema`
   - Экспортируется, но не импортируется в других файлах
@@ -461,11 +635,9 @@
 
 - **[MAYBE]** `api/config.py:40` — `TOTP_ENCRYPTION_KEY`
   - Определена в Settings, но не используется за пределами config.py
-- **[MAYBE]** `api/config.py:43` — `BACKUP_ENCRYPTION_KEY`
+- **[MAYBE]** `api/config.py:46` — `AWS_ACCESS_KEY_ID`
   - Определена в Settings, но не используется за пределами config.py
-- **[MAYBE]** `api/config.py:45` — `AWS_ACCESS_KEY_ID`
+- **[MAYBE]** `api/config.py:47` — `AWS_SECRET_ACCESS_KEY`
   - Определена в Settings, но не используется за пределами config.py
-- **[MAYBE]** `api/config.py:46` — `AWS_SECRET_ACCESS_KEY`
-  - Определена в Settings, но не используется за пределами config.py
-- **[MAYBE]** `api/config.py:51` — `SUPABASE_ANON_KEY`
+- **[MAYBE]** `api/config.py:52` — `SUPABASE_ANON_KEY`
   - Определена в Settings, но не используется за пределами config.py

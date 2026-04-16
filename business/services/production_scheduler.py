@@ -1570,7 +1570,7 @@ def _notify_sales_manager_deadline(
     """
     try:
         from api.models import User
-        from business.services.notifications import create_notification, send_telegram_message
+        from business.services.notifications import create_notification
 
         order = position.order if hasattr(position, "order") else None
         if not order:

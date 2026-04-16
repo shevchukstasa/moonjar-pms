@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'sonner';
 import { useFactory } from '@/hooks/useFactory';
 import { useAuthStore } from '@/stores/authStore';
 import {
@@ -15,6 +16,8 @@ import {
   useCertifySkill,
   useRevokeSkill,
   useCreateCompetition,
+  useCreateTeamCompetition,
+  useProposeChallenge,
   useApproveCompetition,
   useUpdateScores,
   useApprovePrize,
@@ -28,6 +31,9 @@ import type { Competition, UserSkill, Prize, CompetitionStanding } from '@/api/g
 import { Tabs } from '@/components/ui/Tabs';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
+import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { Spinner } from '@/components/ui/Spinner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { FadeIn, ScaleIn } from '@/components/ui/AnimatedSection';
@@ -475,6 +481,207 @@ function SkillCard({
 }
 
 // ══════════════════════════════════════════════════════════════════
+//  DIALOG: Team Competition (PM / Admin)
+// ══════════════════════════════════════════════════════════════════
+
+const METRIC_OPTIONS = [
+  { value: 'combined', label: 'Combined' },
+  { value: 'quality', label: 'Quality' },
+  { value: 'speed', label: 'Speed' },
+  { value: 'zero_defect', label: 'Zero Defect' },
+];
+
+const TEAM_TYPE_OPTIONS = [
+  { value: 'section', label: 'Seksi (Section)' },
+  { value: 'shift', label: 'Shift' },
+  { value: 'custom', label: 'Custom' },
+];
+
+function TeamCompetitionDialog({
+  open,
+  onClose,
+  factoryId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  factoryId: string;
+}) {
+  const createTeam = useCreateTeamCompetition();
+  const [title, setTitle] = useState('');
+  const [teamType, setTeamType] = useState('section');
+  const [metric, setMetric] = useState('combined');
+  const [qualityWeight, setQualityWeight] = useState(1.0);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [prize, setPrize] = useState('');
+  const [budget, setBudget] = useState('');
+
+  const resetForm = useCallback(() => {
+    setTitle('');
+    setTeamType('section');
+    setMetric('combined');
+    setQualityWeight(1.0);
+    setStartDate('');
+    setEndDate('');
+    setPrize('');
+    setBudget('');
+  }, []);
+
+  const handleSubmit = useCallback(() => {
+    createTeam.mutate(
+      {
+        factoryId,
+        data: {
+          title,
+          competition_type: 'team',
+          team_type: teamType,
+          metric,
+          quality_weight: qualityWeight,
+          start_date: startDate,
+          end_date: endDate,
+          prize_description: prize || undefined,
+          prize_budget_idr: budget ? Number(budget) : undefined,
+        },
+      },
+      {
+        onSuccess: () => {
+          toast.success('Kompetisi tim berhasil dibuat!');
+          resetForm();
+          onClose();
+        },
+      },
+    );
+  }, [createTeam, factoryId, title, teamType, metric, qualityWeight, startDate, endDate, prize, budget, resetForm, onClose]);
+
+  const canSubmit = title.trim() && startDate && endDate && !createTeam.isPending;
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Buat Kompetisi Tim">
+      <div className="space-y-4 min-w-[340px] sm:min-w-[460px]">
+        <Input label="Judul Kompetisi" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Kompetisi Kualitas April" />
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Select label="Tipe Tim" options={TEAM_TYPE_OPTIONS} value={teamType} onChange={(e) => setTeamType(e.target.value)} />
+          <Select label="Metrik" options={METRIC_OPTIONS} value={metric} onChange={(e) => setMetric(e.target.value)} />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-stone-300">
+            Bobot Kualitas: {qualityWeight.toFixed(1)}
+          </label>
+          <input
+            type="range"
+            min={0.5}
+            max={2.0}
+            step={0.1}
+            value={qualityWeight}
+            onChange={(e) => setQualityWeight(Number(e.target.value))}
+            className="w-full accent-violet-500 dark:accent-amber-500"
+          />
+          <div className="flex justify-between text-[10px] text-gray-400 dark:text-stone-600">
+            <span>0.5</span>
+            <span>2.0</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Input label="Tanggal Mulai" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          <Input label="Tanggal Selesai" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Input label="Hadiah (opsional)" value={prize} onChange={(e) => setPrize(e.target.value)} placeholder="Bonus + hari libur" />
+          <Input label="Anggaran Hadiah (IDR)" type="number" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="500000" />
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="ghost" onClick={onClose}>Batal</Button>
+          <Button variant="gold" disabled={!canSubmit} onClick={handleSubmit}>
+            {createTeam.isPending ? 'Membuat...' : 'Buat Kompetisi'}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  DIALOG: Propose Challenge (any worker)
+// ══════════════════════════════════════════════════════════════════
+
+function ProposeChallengeDialog({
+  open,
+  onClose,
+  factoryId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  factoryId: string;
+}) {
+  const propose = useProposeChallenge();
+  const [title, setTitle] = useState('');
+  const [metric, setMetric] = useState('combined');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
+  const resetForm = useCallback(() => {
+    setTitle('');
+    setMetric('combined');
+    setStartDate('');
+    setEndDate('');
+  }, []);
+
+  const handleSubmit = useCallback(() => {
+    propose.mutate(
+      {
+        factoryId,
+        data: {
+          title,
+          metric,
+          start_date: startDate,
+          end_date: endDate,
+        },
+      },
+      {
+        onSuccess: () => {
+          toast.success('Terkirim! PM akan mereview tantangan kamu.');
+          resetForm();
+          onClose();
+        },
+      },
+    );
+  }, [propose, factoryId, title, metric, startDate, endDate, resetForm, onClose]);
+
+  const canSubmit = title.trim() && startDate && endDate && !propose.isPending;
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Usulkan Tantangan">
+      <div className="space-y-4 min-w-[340px] sm:min-w-[420px]">
+        <Input label="Judul Tantangan" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Tantangan Zero Defect Minggu Ini" />
+
+        <Select label="Metrik" options={METRIC_OPTIONS} value={metric} onChange={(e) => setMetric(e.target.value)} />
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Input label="Tanggal Mulai" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          <Input label="Tanggal Selesai" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </div>
+
+        <p className="text-xs text-gray-400 dark:text-stone-600">
+          Usulan akan dikirim ke Production Manager untuk direview.
+        </p>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="ghost" onClick={onClose}>Batal</Button>
+          <Button variant="gold" disabled={!canSubmit} onClick={handleSubmit}>
+            {propose.isPending ? 'Mengirim...' : 'Kirim Usulan'}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
 //  TAB: Competitions
 // ══════════════════════════════════════════════════════════════════
 
@@ -486,13 +693,21 @@ function CompetitionsTab({ factoryId }: { factoryId: string }) {
   const updateScores = useUpdateScores();
   const createComp = useCreateCompetition();
   const [showCreate, setShowCreate] = useState(false);
+  const [showTeamDialog, setShowTeamDialog] = useState(false);
+  const [showProposeDialog, setShowProposeDialog] = useState(false);
 
   if (isLoading) return <div className="flex justify-center py-16"><Spinner className="h-8 w-8" /></div>;
   if (!competitions?.length && !showCreate) {
     return (
       <FadeIn className="flex flex-col items-center gap-4 py-16">
         <EmptyState title="No competitions yet" description="Create the first competition to motivate your team" />
-        {isManager && <Button variant="gold" onClick={() => setShowCreate(true)}>Create Competition</Button>}
+        <div className="flex flex-wrap justify-center gap-2">
+          {isManager && <Button variant="gold" onClick={() => setShowCreate(true)}>Create Competition</Button>}
+          {isManager && <Button variant="primary" onClick={() => setShowTeamDialog(true)}>Buat Kompetisi Tim</Button>}
+          <Button variant="secondary" onClick={() => setShowProposeDialog(true)}>Usulkan Tantangan</Button>
+        </div>
+        <TeamCompetitionDialog open={showTeamDialog} onClose={() => setShowTeamDialog(false)} factoryId={factoryId} />
+        <ProposeChallengeDialog open={showProposeDialog} onClose={() => setShowProposeDialog(false)} factoryId={factoryId} />
       </FadeIn>
     );
   }
@@ -504,14 +719,24 @@ function CompetitionsTab({ factoryId }: { factoryId: string }) {
   return (
     <FadeIn className="space-y-6">
       {/* Actions bar */}
-      {isManager && (
-        <div className="flex flex-wrap gap-2">
-          <Button variant="gold" size="sm" onClick={() => setShowCreate(true)}>+ New Competition</Button>
+      <div className="flex flex-wrap gap-2">
+        {isManager && (
+          <>
+            <Button variant="gold" size="sm" onClick={() => setShowCreate(true)}>+ New Competition</Button>
+            <Button variant="primary" size="sm" onClick={() => setShowTeamDialog(true)}>Buat Kompetisi Tim</Button>
+          </>
+        )}
+        <Button variant="secondary" size="sm" onClick={() => setShowProposeDialog(true)}>Usulkan Tantangan</Button>
+        {isManager && (
           <Button variant="secondary" size="sm" onClick={() => updateScores.mutate(factoryId)} disabled={updateScores.isPending}>
             {updateScores.isPending ? 'Updating...' : 'Refresh Scores'}
           </Button>
-        </div>
-      )}
+        )}
+      </div>
+
+      {/* Dialogs */}
+      <TeamCompetitionDialog open={showTeamDialog} onClose={() => setShowTeamDialog(false)} factoryId={factoryId} />
+      <ProposeChallengeDialog open={showProposeDialog} onClose={() => setShowProposeDialog(false)} factoryId={factoryId} />
 
       {/* Create form */}
       <AnimatePresence>

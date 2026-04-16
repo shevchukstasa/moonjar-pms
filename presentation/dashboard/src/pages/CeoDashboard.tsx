@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   BarChart3, Clock, AlertTriangle, Percent, Flame, Activity,
   Download, Trash2, Factory, Zap, CalendarDays, Wrench,
+  Trophy, Award, Users, Star,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
@@ -24,6 +25,12 @@ import {
   useActivityFeed,
   useFactoryComparison,
 } from '@/hooks/useAnalytics';
+import {
+  useCeoDashboard,
+  useProductivityImpact,
+  useCompetitions,
+  usePrizes,
+} from '@/hooks/useGamification';
 import { useFactory } from '@/hooks/useFactory';
 import { useFactories } from '@/hooks/useFactories';
 import { useKilns, type KilnItem } from '@/hooks/useKilns';
@@ -306,13 +313,14 @@ const TASK_STATUS_COLORS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 // Tab types
 // ---------------------------------------------------------------------------
-type CeoTab = 'pipeline' | 'factories' | 'tasks' | 'kilns';
+type CeoTab = 'pipeline' | 'factories' | 'tasks' | 'kilns' | 'gamification';
 
 const CEO_TABS: { id: CeoTab; label: string }[] = [
   { id: 'pipeline', label: 'Production Pipeline' },
   { id: 'factories', label: 'Cross-Factory' },
   { id: 'tasks', label: 'Tasks & Issues' },
   { id: 'kilns', label: 'Kilns & Schedule' },
+  { id: 'gamification', label: 'Gamifikasi' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -343,6 +351,12 @@ export default function CeoDashboard() {
   // Kilns
   const { data: kilnsData, isLoading: loadingKilns } = useKilns(factoryId ? { factory_id: factoryId } : undefined);
   const { data: kilnScheduleData } = useKilnSchedule(factoryId);
+
+  // Gamification (CEO summary)
+  const { data: gamifDash, isLoading: loadingGamif } = useCeoDashboard(factoryId ?? undefined);
+  const { data: gamifImpact, isLoading: loadingImpact } = useProductivityImpact(factoryId ?? undefined);
+  const { data: gamifCompetitions } = useCompetitions(factoryId ?? undefined, 'active');
+  const { data: gamifPrizes } = usePrizes(factoryId ?? undefined, 'pending');
 
   const [exporting, setExporting] = useState(false);
 
@@ -784,6 +798,329 @@ export default function CeoDashboard() {
           <Card title="Buffer Health (TOC)">
             {bufferData?.items ? <BufferHealthTable items={bufferData.items} /> : <Spinner />}
           </Card>
+        </div>
+      )}
+
+      {/* ================================================================ */}
+      {/* Tab 5: Gamifikasi                                               */}
+      {/* ================================================================ */}
+      {activeTab === 'gamification' && (
+        <div className="space-y-4">
+          {/* No factory selected hint */}
+          {!factoryId && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              Pilih pabrik untuk melihat data gamifikasi.
+            </div>
+          )}
+
+          {/* Loading state */}
+          {factoryId && loadingGamif && (
+            <div className="flex h-32 items-center justify-center"><Spinner /></div>
+          )}
+
+          {/* Main content when data ready */}
+          {factoryId && !loadingGamif && gamifDash && (
+            <>
+              {/* KPI Row */}
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+                <KpiCard
+                  title="Poin Bulan Ini"
+                  value={gamifDash.total_points_this_month.toLocaleString()}
+                  icon={<Star className="h-4 w-4" />}
+                  variant="glass"
+                />
+                <KpiCard
+                  title="Pekerja Aktif"
+                  value={gamifDash.active_users}
+                  icon={<Users className="h-4 w-4" />}
+                  variant="glass"
+                />
+                <KpiCard
+                  title="Engagement"
+                  value={`${gamifDash.engagement_rate}%`}
+                  icon={<Activity className="h-4 w-4" />}
+                  color={gamifDash.engagement_rate >= 70 ? 'green' : gamifDash.engagement_rate >= 40 ? 'yellow' : 'red'}
+                  variant="glass"
+                />
+                <KpiCard
+                  title="Kompetisi Aktif"
+                  value={gamifDash.active_competitions}
+                  icon={<Trophy className="h-4 w-4" />}
+                  variant="glass"
+                />
+                <KpiCard
+                  title="Skill Tersertifikasi"
+                  value={gamifDash.skills_certified_this_month}
+                  subtitle="bulan ini"
+                  icon={<Award className="h-4 w-4" />}
+                  variant="glass"
+                />
+                <KpiCard
+                  title="Hadiah Pending"
+                  value={gamifPrizes?.length ?? 0}
+                  color={(gamifPrizes?.length ?? 0) > 0 ? 'yellow' : 'green'}
+                  icon={<AlertTriangle className="h-4 w-4" />}
+                  variant="glass"
+                />
+              </div>
+
+              {/* Two-column: Leaderboard Top-5 + Active Competitions */}
+              <div className="grid gap-4 lg:grid-cols-2">
+                {/* Leaderboard Top 5 */}
+                <Card title="Top 5 Pekerja">
+                  {gamifDash.top_performers.length === 0 ? (
+                    <div className="py-6 text-center text-sm text-gray-500">
+                      <Trophy className="mx-auto mb-2 h-8 w-8 text-gray-300" />
+                      Belum ada data pekerja
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {gamifDash.top_performers.slice(0, 5).map((p, i) => {
+                        const medals = ['text-amber-500', 'text-gray-400', 'text-orange-500'];
+                        const medalEmojis = ['1st', '2nd', '3rd'];
+                        return (
+                          <div
+                            key={p.user_id}
+                            className={cn(
+                              'flex items-center gap-3 rounded-lg px-3 py-2',
+                              i === 0 ? 'bg-amber-50 border border-amber-200' :
+                              i < 3 ? 'bg-gray-50' : 'hover:bg-gray-50',
+                            )}
+                          >
+                            <div className={cn('flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold', i < 3 ? medals[i] : 'text-gray-400')}>
+                              {i < 3 ? (
+                                <span className="text-base">{['🥇', '🥈', '🥉'][i]}</span>
+                              ) : (
+                                <span>#{i + 1}</span>
+                              )}
+                            </div>
+                            <span className="flex-1 text-sm font-medium text-gray-900 truncate">{p.user_name}</span>
+                            <div className="text-right">
+                              <span className="text-sm font-bold tabular-nums text-gray-900">{p.points.toLocaleString()}</span>
+                              <span className="ml-1 text-[10px] text-gray-400">pts</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </Card>
+
+                {/* Active Competitions */}
+                <Card title="Kompetisi Aktif">
+                  {(!gamifCompetitions || gamifCompetitions.length === 0) ? (
+                    <div className="py-6 text-center text-sm text-gray-500">
+                      <Trophy className="mx-auto mb-2 h-8 w-8 text-gray-300" />
+                      Tidak ada kompetisi aktif
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {gamifCompetitions.slice(0, 4).map((c) => {
+                        const days = Math.max(0, Math.ceil((new Date(c.end_date).getTime() - Date.now()) / 86_400_000));
+                        const totalDays = Math.max(1, Math.ceil((new Date(c.end_date).getTime() - new Date(c.start_date).getTime()) / 86_400_000));
+                        const elapsed = totalDays - days;
+                        const pct = Math.min(100, Math.round((elapsed / totalDays) * 100));
+                        return (
+                          <div key={c.id} className="rounded-lg border border-gray-200 p-3">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-sm font-semibold text-gray-900">{c.title}</span>
+                              <span className={cn(
+                                'inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium capitalize',
+                                c.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700',
+                              )}>
+                                {c.status}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
+                              <span>{c.competition_type === 'team' ? 'Tim' : 'Individual'} &middot; {c.metric}</span>
+                              <span>{days} hari lagi</span>
+                            </div>
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+                              <div
+                                className="h-full rounded-full bg-emerald-500 transition-all"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            {c.prize_budget_idr && (
+                              <div className="mt-1.5 text-xs text-amber-600 font-medium">
+                                Hadiah: {c.prize_budget_idr >= 1_000_000 ? `${(c.prize_budget_idr / 1_000_000).toFixed(1)}M` : `${(c.prize_budget_idr / 1_000).toFixed(0)}K`} IDR
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </Card>
+              </div>
+
+              {/* Two-column: Skills Certified + Prizes Pending */}
+              <div className="grid gap-4 lg:grid-cols-2">
+                {/* Skill Certifications This Month */}
+                <Card title="Sertifikasi Skill Bulan Ini">
+                  <div className="flex items-center gap-4 py-4">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
+                      <Award className="h-8 w-8 text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="text-3xl font-bold text-gray-900">{gamifDash.skills_certified_this_month}</p>
+                      <p className="text-sm text-gray-500">sertifikasi baru</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    Pekerja yang menyelesaikan training dan mendapat badge skill baru bulan ini.
+                  </p>
+                </Card>
+
+                {/* Prizes Pending Approval */}
+                <Card title="Hadiah Menunggu Persetujuan">
+                  {(!gamifPrizes || gamifPrizes.length === 0) ? (
+                    <div className="py-6 text-center text-sm text-gray-500">
+                      <Award className="mx-auto mb-2 h-8 w-8 text-green-400" />
+                      Semua hadiah sudah diproses
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {gamifPrizes.slice(0, 5).map((p) => (
+                        <div key={p.id} className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                          <div className="min-w-0 flex-1">
+                            <span className="text-sm font-medium text-gray-900 truncate block">{p.user_name}</span>
+                            <span className="text-xs text-gray-500 truncate block">{p.description}</span>
+                          </div>
+                          {p.amount_idr && (
+                            <span className="ml-2 text-sm font-bold text-amber-700 whitespace-nowrap">
+                              {p.amount_idr >= 1_000_000 ? `${(p.amount_idr / 1_000_000).toFixed(1)}M` : `${(p.amount_idr / 1_000).toFixed(0)}K`} IDR
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                      {gamifPrizes.length > 5 && (
+                        <p className="text-xs text-gray-400 text-center">
+                          +{gamifPrizes.length - 5} hadiah lainnya
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              </div>
+
+              {/* Productivity Impact */}
+              {!loadingImpact && gamifImpact && (
+                <Card title="Dampak Produktivitas">
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                    {/* Quality */}
+                    <div className="rounded-lg border border-gray-200 p-3 text-center">
+                      <p className="text-xs text-gray-500">Kualitas</p>
+                      <p className="text-xs text-gray-400">
+                        {gamifImpact.before_gamification.avg_quality.toFixed(1)} &rarr; {gamifImpact.after_gamification.avg_quality.toFixed(1)}
+                      </p>
+                      <p className={cn(
+                        'text-lg font-bold',
+                        gamifImpact.improvement_pct.quality >= 0 ? 'text-emerald-600' : 'text-red-600',
+                      )}>
+                        {gamifImpact.improvement_pct.quality >= 0 ? '+' : ''}{gamifImpact.improvement_pct.quality.toFixed(1)}%
+                      </p>
+                    </div>
+                    {/* Speed */}
+                    <div className="rounded-lg border border-gray-200 p-3 text-center">
+                      <p className="text-xs text-gray-500">Kecepatan</p>
+                      <p className="text-xs text-gray-400">
+                        {gamifImpact.before_gamification.avg_speed.toFixed(1)} &rarr; {gamifImpact.after_gamification.avg_speed.toFixed(1)}
+                      </p>
+                      <p className={cn(
+                        'text-lg font-bold',
+                        gamifImpact.improvement_pct.speed >= 0 ? 'text-emerald-600' : 'text-red-600',
+                      )}>
+                        {gamifImpact.improvement_pct.speed >= 0 ? '+' : ''}{gamifImpact.improvement_pct.speed.toFixed(1)}%
+                      </p>
+                    </div>
+                    {/* Defect reduction */}
+                    <div className="rounded-lg border border-gray-200 p-3 text-center">
+                      <p className="text-xs text-gray-500">Penurunan Defect</p>
+                      <p className="text-xs text-gray-400">
+                        {gamifImpact.before_gamification.defect_rate.toFixed(1)}% &rarr; {gamifImpact.after_gamification.defect_rate.toFixed(1)}%
+                      </p>
+                      <p className={cn(
+                        'text-lg font-bold',
+                        gamifImpact.improvement_pct.defect_reduction >= 0 ? 'text-emerald-600' : 'text-red-600',
+                      )}>
+                        {gamifImpact.improvement_pct.defect_reduction >= 0 ? '+' : ''}{gamifImpact.improvement_pct.defect_reduction.toFixed(1)}%
+                      </p>
+                    </div>
+                    {/* ROI */}
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-center">
+                      <p className="text-xs text-emerald-700">Estimasi ROI</p>
+                      <p className="text-2xl font-bold text-emerald-700">
+                        {gamifImpact.roi_estimate > 0 ? `${gamifImpact.roi_estimate.toFixed(1)}x` : '--'}
+                      </p>
+                      <p className="text-[10px] text-emerald-600">return on investment</p>
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              {/* Monthly Points Trend */}
+              {gamifDash.monthly_trend.length > 0 && (
+                <Card title="Tren Poin Bulanan">
+                  <div className="flex items-end gap-1.5 h-24">
+                    {gamifDash.monthly_trend.map((m) => {
+                      const maxPts = Math.max(...gamifDash.monthly_trend.map((t) => t.points), 1);
+                      const height = Math.max((m.points / maxPts) * 100, 4);
+                      return (
+                        <div key={m.month} className="flex-1 flex flex-col items-center gap-0.5">
+                          <div
+                            className="w-full rounded-t bg-violet-500 transition-all"
+                            style={{ height: `${height}%` }}
+                            title={`${m.month}: ${m.points.toLocaleString()} pts (${m.users} users)`}
+                          />
+                          <span className="text-[9px] text-gray-400">{m.month.slice(5)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Card>
+              )}
+
+              {/* Engagement bar */}
+              <Card>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-gray-400" />
+                    <span className="text-sm font-semibold text-gray-800">Tingkat Engagement Tim</span>
+                  </div>
+                  <span className={cn(
+                    'text-xl font-bold',
+                    gamifDash.engagement_rate >= 70 ? 'text-emerald-600' :
+                    gamifDash.engagement_rate >= 40 ? 'text-amber-600' : 'text-red-600',
+                  )}>
+                    {gamifDash.engagement_rate}%
+                  </span>
+                </div>
+                <div className="h-3 w-full overflow-hidden rounded-full bg-gray-200">
+                  <div
+                    className={cn(
+                      'h-full rounded-full transition-all',
+                      gamifDash.engagement_rate >= 70 ? 'bg-emerald-500' :
+                      gamifDash.engagement_rate >= 40 ? 'bg-amber-500' : 'bg-red-500',
+                    )}
+                    style={{ width: `${Math.min(gamifDash.engagement_rate, 100)}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs text-gray-400">
+                  Persentase pekerja yang aktif berpartisipasi dalam sistem gamifikasi bulan ini.
+                </p>
+              </Card>
+            </>
+          )}
+
+          {/* No data state */}
+          {factoryId && !loadingGamif && !gamifDash && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-8 text-center">
+              <Trophy className="mx-auto mb-3 h-10 w-10 text-gray-300" />
+              <p className="text-sm font-medium text-gray-700">Belum ada data gamifikasi</p>
+              <p className="mt-1 text-xs text-gray-500">Data akan muncul setelah pekerja mulai mengumpulkan poin.</p>
+            </div>
+          )}
         </div>
       )}
 

@@ -7,11 +7,9 @@ All user-facing text in Indonesian (Bahasa Indonesia).
 
 import logging
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
-from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import func as sa_func, and_, cast, Date
+from sqlalchemy import func as sa_func, cast, Date
 from sqlalchemy.orm import Session
 
 from api.models import (

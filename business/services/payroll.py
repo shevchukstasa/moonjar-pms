@@ -142,31 +142,6 @@ def calculate_pph21_annual(annual_taxable_income: Decimal) -> Decimal:
     return total_tax
 
 
-def calculate_pph21_monthly(
-    monthly_gross: Decimal,
-    bpjs_employee: Decimal,
-    ptkp_status: str = "TK/0",
-) -> Decimal:
-    """Calculate monthly PPh 21 for a formal employee.
-
-    Uses the annual method: annualize gross, subtract BPJS employee share,
-    subtract PTKP, apply progressive rates, then divide by 12.
-    """
-    ptkp = PTKP_TABLE.get(ptkp_status, PTKP_TABLE["TK/0"])
-
-    annual_gross = monthly_gross * Decimal("12")
-    annual_bpjs = bpjs_employee * Decimal("12")
-    annual_net = annual_gross - annual_bpjs
-    annual_taxable = annual_net - ptkp
-
-    if annual_taxable <= ZERO:
-        return ZERO
-
-    annual_tax = calculate_pph21_annual(annual_taxable)
-    monthly_tax = _round(annual_tax / Decimal("12"))
-    return monthly_tax
-
-
 # ── TER (Tarif Efektif Rata-rata) — PMK 168/2023, effective Jan 2024 ────────
 # Category A: TK/0
 # Category B: TK/1, TK/2, TK/3, K/0
@@ -340,20 +315,6 @@ def calculate_pph21_ter(monthly_gross: Decimal, ptkp_status: str = "TK/0") -> De
 
 
 # ── Overtime Calculation ─────────────────────────────────────────────────────
-
-def calculate_overtime_pay(
-    hourly_rate: Decimal,
-    overtime_hours: float,
-    work_schedule: str = "six_day",
-    is_holiday: bool = False,
-) -> Decimal:
-    """Calculate overtime pay for a single day's overtime hours.
-
-    Multipliers reset daily (not cumulative across days).
-    """
-    result = calculate_overtime_pay_detailed(hourly_rate, overtime_hours, work_schedule, is_holiday)
-    return result["total"]
-
 
 def calculate_overtime_pay_detailed(
     hourly_rate: Decimal,

@@ -1812,11 +1812,7 @@ async def gamification_finalize():
     db = _get_db_session()
     try:
         from business.services.competitions import finalize_ended_competitions
-        for fid in _get_all_factory_ids(db):
-            try:
-                finalize_ended_competitions(db, fid)
-            except Exception as e:
-                logger.error("Competition finalization failed for %s: %s", fid, e)
+        finalize_ended_competitions(db)
         db.commit()
     except Exception as e:
         logger.error("Competition finalization failed: %s", e)
@@ -1865,11 +1861,7 @@ async def gamification_skill_progress():
     db = _get_db_session()
     try:
         from business.services.skill_system import batch_update_all_skills
-        for fid in _get_all_factory_ids(db):
-            try:
-                batch_update_all_skills(db, fid)
-            except Exception as e:
-                logger.error("Skill progress update failed for %s: %s", fid, e)
+        batch_update_all_skills(db)
         db.commit()
     except Exception as e:
         logger.error("Skill progress batch failed: %s", e)
@@ -1892,6 +1884,28 @@ async def gamification_new_season():
         db.commit()
     except Exception as e:
         logger.error("New season creation failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def gamification_quarterly_prizes():
+    """Generate quarterly prize recommendations for each factory."""
+    logger.info("Running quarterly prize generation")
+    from datetime import datetime as dt
+    db = _get_db_session()
+    try:
+        from business.services.prize_advisor import generate_quarterly_prizes
+        year = dt.now().year
+        quarter = (dt.now().month - 1) // 3 + 1
+        for fid in _get_all_factory_ids(db):
+            try:
+                generate_quarterly_prizes(db, fid, year, quarter)
+            except Exception as e:
+                logger.error("Quarterly prize generation failed for %s: %s", fid, e)
+        db.commit()
+    except Exception as e:
+        logger.error("Quarterly prize generation failed: %s", e)
         db.rollback()
     finally:
         db.close()
@@ -2124,6 +2138,9 @@ def setup_scheduler():
 
     # Monthly 1st 00:00 UTC (08:00 WITA) — generate prize recommendations
     scheduler.add_job(gamification_monthly_prizes, CronTrigger(day=1, hour=0, minute=0), id="gamification_prizes")
+
+    # Quarterly 1st of Jan/Apr/Jul/Oct 01:00 UTC (09:00 WITA) — quarterly prizes
+    scheduler.add_job(gamification_quarterly_prizes, CronTrigger(month="1,4,7,10", day=1, hour=1, minute=0), id="gamification_quarterly_prizes")
 
     # Sunday 12:00 UTC (20:00 WITA) — CEO weekly gamification report
     scheduler.add_job(gamification_ceo_report, CronTrigger(day_of_week="sun", hour=12, minute=0), id="gamification_ceo_report")

@@ -1,8 +1,8 @@
 # Moonjar PMS -- Complete API Endpoints
 
 > Auto-extracted from 67 router files in `api/routers/`
-> Total: **663** endpoints across 67 router files
-> Generated: 2026-04-16
+> Total: **667** endpoints across 67 router files
+> Generated: 2026-04-17
 > Script: `scripts/generate_api_docs.py`
 
 ## Authentication Levels
@@ -88,7 +88,7 @@
 60. [Delivery](#60-delivery-apidelivery) (1 endpoints)
 61. [Employees](#61-employees-apiemployees) (14 endpoints)
 62. [Mana Shipments](#62-mana-shipments-apimana-shipments) (6 endpoints)
-63. [Gamification](#63-gamification-apigamification) (22 endpoints)
+63. [Gamification](#63-gamification-apigamification) (26 endpoints)
 64. [Workforce](#64-workforce-apiworkforce) (14 endpoints)
 65. [Onboarding](#65-onboarding-apionboarding) (5 endpoints)
 66. [Shipments](#66-shipments-apishipments) (7 endpoints)
@@ -1027,8 +1027,11 @@
 | POST | `/api/gamification/skills/badges/seed` | management | Seed default skill badges for a factory. |
 | GET | `/api/gamification/skills/user/{user_id}` | any_auth | Get all skills and progress for a user. |
 | POST | `/api/gamification/skills/start` | any_auth | Start learning a new skill. |
+| POST | `/api/gamification/skills/request-certification` | any_auth | Worker requests certification after meeting all requirements. |
 | POST | `/api/gamification/skills/certify` | management | PM/CEO approves skill certification. |
 | POST | `/api/gamification/skills/revoke` | management | PM/CEO revokes a certification. |
+| GET | `/api/gamification/leaderboard` | any_auth | Top-20 workers by points for a given period (year/month/week). |
+| GET | `/api/gamification/points/my` | any_auth | Current user's points summary and rank. |
 | GET | `/api/gamification/competitions` | any_auth | List competitions for a factory. |
 | GET | `/api/gamification/competitions/{competition_id}/standings` | any_auth | Get competition standings/leaderboard. |
 | POST | `/api/gamification/competitions` | management | PM/CEO creates a new individual competition. |
@@ -1038,6 +1041,7 @@
 | POST | `/api/gamification/competitions/update-scores` | management | Manually trigger score update for active competitions. |
 | GET | `/api/gamification/prizes` | management | List prize recommendations. |
 | POST | `/api/gamification/prizes/generate-monthly` | owner | Generate monthly prize recommendations. |
+| POST | `/api/gamification/prizes/generate-quarterly` | owner | Generate quarterly prize recommendations (budget = 2.5x monthly). |
 | POST | `/api/gamification/prizes/{prize_id}/approve` | owner | CEO/Owner approves a prize recommendation. |
 | POST | `/api/gamification/prizes/{prize_id}/reject` | owner | CEO/Owner rejects a prize recommendation. |
 | POST | `/api/gamification/prizes/{prize_id}/award` | owner | Mark a prize as awarded. |

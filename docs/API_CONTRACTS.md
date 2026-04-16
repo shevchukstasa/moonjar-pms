@@ -1228,8 +1228,11 @@ Soft-delete a line resource (sets `is_active = false`).
 | POST | /skills/badges/seed | management | ✓ | Seed default skill badges for a factory. |
 | GET | /skills/user/{user_id} | any_auth | ✓ | Get all skills and progress for a user. |
 | POST | /skills/start | any_auth | ✓ | Start learning a new skill. |
+| POST | /skills/request-certification | any_auth | `[API-only]` | Worker requests certification after meeting all requirements. |
 | POST | /skills/certify | management | ✓ | PM/CEO approves skill certification. |
 | POST | /skills/revoke | management | ✓ | PM/CEO revokes a certification. |
+| GET | /leaderboard | any_auth | ✓ | Top-20 workers by points for a given period (year/month/week). |
+| GET | /points/my | any_auth | `[API-only]` | Current user's points summary and rank. |
 | GET | /competitions | any_auth | ✓ | List competitions for a factory. |
 | GET | /competitions/{competition_id}/standings | any_auth | ✓ | Get competition standings/leaderboard. |
 | POST | /competitions | management | ✓ | PM/CEO creates a new individual competition. |
@@ -1239,6 +1242,7 @@ Soft-delete a line resource (sets `is_active = false`).
 | POST | /competitions/update-scores | management | ✓ | Manually trigger score update for active competitions. |
 | GET | /prizes | management | ✓ | List prize recommendations. |
 | POST | /prizes/generate-monthly | owner | ✓ | Generate monthly prize recommendations. |
+| POST | /prizes/generate-quarterly | owner | `[API-only]` | Generate quarterly prize recommendations (budget = 2.5x monthly). |
 | POST | /prizes/{prize_id}/approve | owner | ✓ | CEO/Owner approves a prize recommendation. |
 | POST | /prizes/{prize_id}/reject | owner | ✓ | CEO/Owner rejects a prize recommendation. |
 | POST | /prizes/{prize_id}/award | owner | ✓ | Mark a prize as awarded. |
@@ -1319,4 +1323,4 @@ Soft-delete a line resource (sets `is_active = false`).
 
 ---
 
-*Generated 2026-04-16 by `scripts/generate_api_contracts.py`. Total: ~67 routers, ~663 endpoints.*
+*Generated 2026-04-17 by `scripts/generate_api_contracts.py`. Total: ~67 routers, ~667 endpoints.*

@@ -1,12 +1,12 @@
 # Full-Stack Architecture Audit
 
-Generated: 2026-04-16 13:02
+Generated: 2026-04-17 02:28
 
 ## Summary
 
 | Layer | Count |
 |-------|-------|
-| Backend endpoints | 662 |
+| Backend endpoints | 666 |
 | Frontend API calls | 395 |
 | Frontend pages | 54 |
 | Frontend hooks | 35 |

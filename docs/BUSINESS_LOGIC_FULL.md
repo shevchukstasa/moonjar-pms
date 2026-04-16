@@ -134,29 +134,102 @@ Reserves raw stone (bisque) for positions based on size category and product typ
 
 ---
 
-## 4. Backward Scheduling (TOC/DBR)
+## 4. Forward / Left-Shift Scheduling with Stage Capacity
 
-**File:** `production_scheduler.py` (~568 lines)
-**Called by:** `order_intake.py`, `schedule.router`, `kilns.router`
+**File:** `business/services/production_scheduler.py`
+**Called by:** `order_intake.py`, `api/routers/schedule.py`, `api/routers/kilns.py`, `business/services/pull_system.py`, нижний крон в `api/scheduler.py`
 
-### Purpose
-Backward-schedules positions from deadline to today using TOC/DBR (Drum-Buffer-Rope). Kiln is the constraint (drum).
+### Философия (обязательная, источник истины)
 
-### Key Functions
+Расписание строится **вперёд во времени (forward / left-shift packing), а не назад от дедлайна**. Принцип:
 
-- `schedule_position(db, position)` — Backward from deadline: completion -> sorting -> kiln -> glazing. Skips weekends. Finds best kiln.
-- `find_best_kiln(db, factory_id, target_date, position)` — Selects kiln: filters by temperature compatibility, checks maintenance windows, balances load.
-- `schedule_order(db, order)` — Schedules all positions in an order.
-- `reschedule_position(db, position)` — Re-run scheduling for a single position.
-- `reschedule_affected_by_kiln(db, kiln_id)` — Reschedule all positions assigned to a kiln (e.g., after breakdown).
-- `reschedule_factory(db, factory_id)` — Full factory reschedule.
-- `get_kiln_maintenance_windows(db, factory_id)` — Returns maintenance windows that block kiln availability.
+> «Всё, что можно делать сегодня — делается сегодня. Всё, что завтра — завтра. И так далее.
+>  При этом на каждый день ставим ровно столько работы, сколько смогут переварить бригады этого дня по каждой стадии, с учётом производительности и смен.»
 
-### Business Rules
-1. Working days only (Monday-Saturday by default, per factory_calendar).
-2. Buffer days added between glazing and kiln based on `buffer_target_hours`.
-3. Rope limit: max positions released per day (prevents overload before constraint).
-4. Kiln assignment considers: temperature group compatibility, maintenance windows, current load balance.
+Дедлайн — **только триггер алерта** (`_create_deadline_exceeded_alert`), **не** анкор расписания. Если по forward-пакингу позиция вылезает за дедлайн — выбрасываем алерт, но дату не подгоняем назад.
+
+### Что сдвигает позицию вправо (hard-блокеры)
+
+Для каждой позиции считается `earliest_start = max(...)` из:
+1. `date.today()` — нельзя планировать в прошлое.
+2. **Materials availability** — `_get_material_ready_date(pos)` (см. §2). Если материал не в наличии, берётся `expected_arrival_date` партии поставщика.
+3. **Blocking tasks** — `_get_blocking_tasks_ready_date(pos)` для `AWAITING_RECIPE`, `AWAITING_STENCIL`, `COLOR_MATCHING`, `CONSUMPTION_DATA` и др. (см. §20 и `docs/BLOCKING_TASKS.md`). Берётся ETA поставщика.
+4. **FIFO min_start_date** — предыдущие ордера (`ProductionOrder.created_at ASC` → `OrderPosition.priority_order` → `position_number`) должны быть уже распакованы в текущем проходе. Это даёт нижнюю границу.
+5. **Factory calendar** — `_next_working_day_cal(db, factory_id, d)` пропускает воскресенья **и** записи `FactoryCalendar.is_working_day = false` (национальные, балийские, manual holidays).
+
+После этого `earliest_start` — это «самый ранний день, когда позицию вообще можно начать». Дальше включается capacity packing.
+
+### Daily capacity cap per stage
+
+Для каждой стадии (`engobe`, `glazing`, `sorting`, `packing`, `edge_cleaning`, `qc_pre_kiln`, `qc_final`, `drying`, `unpacking`, …) — считается **пропускная способность дня** по формуле:
+
+```
+daily_cap = brigade_size × shift_count × shift_duration_hours × productivity_rate
+```
+
+Источники данных:
+- `StageTypologySpeed` (`api/models.py::StageTypologySpeed`) — per (`factory_id`, `typology_id`, `stage`): `productivity_rate`, `rate_unit` (`pcs` / `sqm`), `rate_basis` (`per_person` / `per_brigade` / `fixed_duration`), `time_unit` (`min` / `hour` / `shift`), `shift_count`, `shift_duration_hours`, `brigade_size`. **Это первичный источник.**
+- `ShiftAssignment` — если на день назначено другое число людей в бригаде (больничные, ротации), эффективная `brigade_size` берётся оттуда (`_get_effective_brigade_size`).
+- `ProcessStep.duration_hours` — fallback, если по стадии нет `StageTypologySpeed`.
+- Если и этого нет — стадия считается «1 рабочий день» (защитный fallback).
+
+**Два режима работы стадии:**
+
+| `rate_basis`      | Смысл                                                  | Как учитывается в packing                                                            |
+|-------------------|--------------------------------------------------------|--------------------------------------------------------------------------------------|
+| `per_person`      | Штук/м² в час/смену **на одного рабочего**             | `daily_cap = brigade × shifts × hours × rate` → capacity mode                        |
+| `per_brigade`     | Штук/м² в час/смену **на всю бригаду**                 | `daily_cap = shifts × hours × rate` → capacity mode                                  |
+| `fixed_duration`  | Стадия занимает N часов **блоком** (сушка, остывание) | Не ест capacity, просто блокирует `duration_days` дней                               |
+
+### Алгоритм forward packing
+
+`forward_pack_factory(db, factory_id)` — **единственный источник истины** для полного пересчёта. Шаги:
+
+1. **Снимок загрузки**: для каждой стадии и каждой даты держим словарь `loaded[(stage, date)] = used_pcs_or_sqm`.
+2. **Очередь позиций**: все активные (`PLANNED`, `IN_PRODUCTION`, `BLOCKED`) позиции сортируются по FIFO (`order.created_at` → `position.priority_order` NULLS LAST → `position_number`).
+3. **Packing loop** по одной позиции:
+   - `earliest = max(today, material_ready, blocking_ready, fifo_prev_end)`, пропустить до ближайшего рабочего дня (`_next_working_day_cal`).
+   - Идём по стадиям в порядке `_PIPELINE_STAGES` (unpacking → engobe → drying → glazing → qc_pre_kiln → kiln → cooling → qc_final → edge_cleaning → sorting → packing).
+   - Для каждой стадии — `CapInfo = _get_stage_daily_capacity_info(stage, typology)`. Если `mode='fixed_duration'` — занимаем `duration_days` подряд рабочих дней от `stage_start`. Если `mode='capacity'` — распределяем `total_qty` по дням, беря на каждый день `min(remaining, daily_cap - loaded[(stage, day)])`, переходя на следующий рабочий день пока `remaining > 0`. В `loaded` пишем занятую часть.
+   - Между стадиями учитываются resource-constraint (`drying_rack`, `glazing_board`, `work_table` — через `_STAGE_RESOURCE_MAP`) и буферные часы.
+   - **Kiln** — **отдельный constraint (drum)**, НЕ пакуется capacity-режимом. Для kiln вызывается `find_best_kiln_and_date(...)`, который подбирает печь по зонам (`get_zone_capacity`), temperature group, maintenance windows. `plan_kiln_batches(..., allow_deferral=False)` не откладывает kiln-дату ради наполнения батча, если мы в forward-режиме (иначе кэскадно сдвинет всё вниз).
+4. **Запись**: для каждой позиции заполняется `stage_plan` (JSONB, 12-стадийная схема) с `start`, `end`, `days`, `qty_per_day`, `sqm_per_day` — visual spread по дням рендерится фронтом.
+5. **Дедлайн-алерты**: если `planned_completion_date > deadline` — `_create_deadline_exceeded_alert(pos)`, но расписание НЕ меняем.
+6. **Commit per order** (SAVEPOINT) — чтобы падение одной позиции не роняло всю пачку.
+
+### Точки входа (все три должны идти через forward_pack_factory)
+
+1. **Automatic** — `api/scheduler.py` ночной крон (2:00 WITA), + `business/services/pull_system.py` на `StageCompletedEvent`.
+2. **Tablo drag-drop** — `api/routers/schedule.py::reorder_queue` пересчитывает `priority_order` и вызывает `forward_pack_factory`.
+3. **Manual "Recalculate" button** — `POST /api/schedule/recalculate` → `forward_pack_factory`.
+
+`schedule_position(db, pos)` остаётся для **единичной** позиции (создание ордера, split), но это приблизительное размещение без глобального capacity snapshot — полный пересчёт всё равно приходит ночью или по кнопке.
+
+### Ключевые функции
+
+- `forward_pack_factory(db, factory_id)` — полный пересчёт (**единственный источник истины**).
+- `_next_working_day_cal(db, factory_id, d)` — пропускает воскресенья + `FactoryCalendar.is_working_day=false`.
+- `_get_stage_daily_capacity_info(db, factory_id, stage, typology_id, pos)` — возвращает `CapInfo(mode, daily_cap, duration_days)`.
+- `_get_effective_brigade_size(db, factory_id, stage, static)` — с учётом `ShiftAssignment`.
+- `_get_stage_duration_days(db, factory_id, stage, sqm, pcs, pos)` — fallback через `ProcessStep`.
+- `find_best_kiln_and_date(db, factory_id, target_date, pos, max_shift_days=14)` — подбор kiln по зонам.
+- `plan_kiln_batches(db, factory_id, allow_deferral=True)` — группировка в батчи. **Forward scheduler вызывает с `allow_deferral=False`** — не откладываем kiln ради наполнения, сдвиг `≥60%` fill делает только ночной batch-former.
+- `schedule_position(db, pos)` — приблизительное размещение одной позиции (создание/split).
+- `reschedule_factory(db, factory_id)` — тонкий wrapper над `forward_pack_factory`.
+- `reschedule_affected_by_kiln(db, kiln_id)` — при breakdown: zeroes out positions, calls `forward_pack_factory`.
+
+### Инварианты (ломать запрещено)
+
+1. `stage_plan` остаётся 12-стадийной схемой JSONB; мутация только через `dict(existing) + flag_modified(pos, 'stage_plan')` — см. commit `0f5b496`.
+2. `priority_order`: `NULL` = FIFO-eligible, non-NULL = manual pin. FIFO chain = `order.created_at ASC → priority_order NULLS LAST → position_number`.
+3. Material status на позиции (`reserved` / `insufficient` / `consumed` / `not_reserved`) не переписывается scheduler-ом — только §2/§3.
+4. Kiln всегда проходит через `find_best_kiln_and_date` — никакого прямого присваивания.
+5. Blocking tasks (§20) — scheduler читает, но не создаёт и не закрывает их.
+6. Дедлайн → только алерт, **никогда** не сдвигает дату назад.
+7. FactoryCalendar holidays — уважаем всегда, через `_next_working_day_cal`.
+8. SAVEPOINT per order — падение одной позиции не роняет остальные.
+9. `schedule_metadata` — логируем `left_shift_trace`, `capacity_trace`, `shifted_reason` для debug.
+10. Никаких «быстро поправлю backward на forward без чтения §4» — см. project CLAUDE.md.
 
 ---
 

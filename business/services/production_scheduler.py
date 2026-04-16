@@ -2658,12 +2658,30 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
             total += count
             db.flush()
 
-            # Update FIFO min_start: next order can't start glazing
-            # before the EARLIEST glazing date of the current order.
+            # Update FIFO min_start: next order can't start glazing before
+            # the EARLIEST glazing date of the current order — but ONLY among
+            # positions that are actually PROCEEDING. Material-blocked or
+            # task-blocked positions (insufficient_materials / awaiting_recipe
+            # / awaiting_stencil / color_matching) are pushed to their
+            # supplier ETA, which MUST NOT drag later orders forward. A later
+            # order whose materials are ready should be allowed to start
+            # today regardless of an earlier order's stone procurement wait.
+            #
+            # See BUSINESS_LOGIC_FULL §4: FIFO is a "don't overtake" rule,
+            # not a "stall behind blocked predecessors" rule.
+            _FIFO_BLOCKED_STATUSES = {
+                PositionStatus.INSUFFICIENT_MATERIALS.value,
+                PositionStatus.AWAITING_RECIPE.value,
+                PositionStatus.AWAITING_STENCIL_SILKSCREEN.value,
+                PositionStatus.AWAITING_COLOR_MATCHING.value,
+                PositionStatus.AWAITING_SIZE_CONFIRMATION.value,
+                PositionStatus.AWAITING_CONSUMPTION_DATA.value,
+                PositionStatus.CANCELLED.value,
+            }
             order_positions = db.query(OrderPosition).filter(
                 OrderPosition.order_id == order.id,
                 OrderPosition.planned_glazing_date.isnot(None),
-                OrderPosition.status != PositionStatus.CANCELLED.value,
+                OrderPosition.status.notin_(list(_FIFO_BLOCKED_STATUSES)),
             ).all()
             if order_positions:
                 earliest_glazing = min(

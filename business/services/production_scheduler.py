@@ -2391,6 +2391,29 @@ def schedule_position(
 # §2  Schedule all positions in an order
 # ────────────────────────────────────────────────────────────────
 
+#: Statuses where the glazing stage is still UPCOMING.  schedule_position
+#: recomputes planned_glazing_date / planned_kiln_date / planned_sorting_date
+#: etc. for positions in these statuses.  Positions past glazing (glazed,
+#: loaded_in_kiln, fired, transferred_to_sorting, packed, shipped, …) are
+#: left alone — historical events cannot be re-planned into the future,
+#: and their old planned_glazing_date must NOT consume forward brigade
+#: capacity that real upcoming work needs.
+_PRE_GLAZING_STATUSES = frozenset({
+    PositionStatus.PLANNED.value,
+    PositionStatus.INSUFFICIENT_MATERIALS.value,
+    PositionStatus.AWAITING_RECIPE.value,
+    PositionStatus.AWAITING_STENCIL_SILKSCREEN.value,
+    PositionStatus.AWAITING_COLOR_MATCHING.value,
+    PositionStatus.AWAITING_SIZE_CONFIRMATION.value,
+    PositionStatus.AWAITING_CONSUMPTION_DATA.value,
+    PositionStatus.ENGOBE_APPLIED.value,
+    PositionStatus.ENGOBE_CHECK.value,
+    PositionStatus.SENT_TO_GLAZING.value,
+    PositionStatus.AWAITING_REGLAZE.value,
+    PositionStatus.REFIRE.value,
+})
+
+
 def schedule_order(
     db: Session,
     order: ProductionOrder,
@@ -2398,10 +2421,14 @@ def schedule_order(
     min_start_date: Optional[date] = None,
 ) -> int:
     """
-    Schedule all positions in an order using backward scheduling.
+    Schedule all pre-glazing positions in an order using forward packing.
 
     Uses the order's final_deadline. If not set, falls back to
     desired_delivery_date, then factory average lead time, then today + 21 days.
+
+    Positions past glazing (glazed, fired, packed, shipped, etc.) are NOT
+    rescheduled — see `_PRE_GLAZING_STATUSES`. Their historical planned
+    dates stay untouched.
 
     Args:
         db: Database session
@@ -2420,9 +2447,7 @@ def schedule_order(
 
     positions = db.query(OrderPosition).filter(
         OrderPosition.order_id == order.id,
-        OrderPosition.status != PositionStatus.CANCELLED.value,
-        # INSUFFICIENT_MATERIALS positions are now scheduled to expected delivery date
-        # (no longer excluded — handled in schedule_position)
+        OrderPosition.status.in_(list(_PRE_GLAZING_STATUSES)),
     ).all()
 
     count = 0
@@ -2660,28 +2685,33 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
 
             # Update FIFO min_start: next order can't start glazing before
             # the EARLIEST glazing date of the current order — but ONLY among
-            # positions that are actually PROCEEDING. Material-blocked or
-            # task-blocked positions (insufficient_materials / awaiting_recipe
-            # / awaiting_stencil / color_matching) are pushed to their
-            # supplier ETA, which MUST NOT drag later orders forward. A later
-            # order whose materials are ready should be allowed to start
-            # today regardless of an earlier order's stone procurement wait.
+            # positions that are actually PROCEEDING through glazing in the
+            # future (i.e. pre-glazing statuses: PLANNED, ENGOBE_*, etc.).
             #
-            # See BUSINESS_LOGIC_FULL §4: FIFO is a "don't overtake" rule,
-            # not a "stall behind blocked predecessors" rule.
-            _FIFO_BLOCKED_STATUSES = {
-                PositionStatus.INSUFFICIENT_MATERIALS.value,
-                PositionStatus.AWAITING_RECIPE.value,
-                PositionStatus.AWAITING_STENCIL_SILKSCREEN.value,
-                PositionStatus.AWAITING_COLOR_MATCHING.value,
-                PositionStatus.AWAITING_SIZE_CONFIRMATION.value,
-                PositionStatus.AWAITING_CONSUMPTION_DATA.value,
-                PositionStatus.CANCELLED.value,
+            # Material-blocked or task-blocked positions (insufficient_materials
+            # / awaiting_recipe / awaiting_stencil / color_matching) are pushed
+            # to their supplier ETA, which MUST NOT drag later orders forward —
+            # a later order whose materials are ready should be allowed to
+            # start today regardless of an earlier order's stone procurement
+            # wait. Past-glazing positions (glazed/loaded/fired/packed/shipped)
+            # carry HISTORICAL planned_glazing_date that also must not anchor
+            # FIFO for upcoming work.
+            #
+            # See BUSINESS_LOGIC_FULL §4: FIFO is a "don't overtake" rule
+            # among actively-planned work, not a "stall behind blocked or
+            # completed predecessors" rule.
+            _FIFO_ANCHOR_STATUSES = {
+                PositionStatus.PLANNED.value,
+                PositionStatus.ENGOBE_APPLIED.value,
+                PositionStatus.ENGOBE_CHECK.value,
+                PositionStatus.SENT_TO_GLAZING.value,
+                PositionStatus.AWAITING_REGLAZE.value,
+                PositionStatus.REFIRE.value,
             }
             order_positions = db.query(OrderPosition).filter(
                 OrderPosition.order_id == order.id,
                 OrderPosition.planned_glazing_date.isnot(None),
-                OrderPosition.status.notin_(list(_FIFO_BLOCKED_STATUSES)),
+                OrderPosition.status.in_(list(_FIFO_ANCHOR_STATUSES)),
             ).all()
             if order_positions:
                 earliest_glazing = min(

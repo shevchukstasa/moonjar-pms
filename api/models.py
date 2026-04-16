@@ -1369,6 +1369,7 @@ class StandardWork(Base):
     description = Column(sa.Text, nullable=False)
     time_minutes = Column(sa.Numeric(8, 2), nullable=False)
     is_setup = Column(sa.Boolean, nullable=False, server_default=sa.text('false'))
+    sequence = Column(sa.Integer, nullable=False, server_default=sa.text('0'))
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     process_step = relationship('ProcessStep', back_populates='standard_works', foreign_keys=[process_step_id])

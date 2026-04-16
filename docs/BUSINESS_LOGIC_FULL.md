@@ -54,6 +54,24 @@
 45. [Webhook Sender](#45-webhook-sender)
 46. [Partial Delivery](#46-partial-delivery)
 47. [Defect Alert (5-Why)](#47-defect-alert-5-why)
+48. [Master Achievement System](#48-master-achievement-system)
+49. [Attendance Monitor](#49-attendance-monitor)
+50. [Auto-Reorder](#50-auto-reorder)
+51. [CEO Reports (Gamification)](#51-ceo-reports-gamification)
+52. [Mini-Competitions Engine](#52-mini-competitions-engine)
+53. [Factory Leaderboard](#53-factory-leaderboard)
+54. [Material Substitution](#54-material-substitution)
+55. [Payroll PDF Generator](#55-payroll-pdf-generator)
+56. [Points System](#56-points-system)
+57. [Prize Advisor](#57-prize-advisor)
+58. [Production Split (Mid-Production)](#58-production-split-mid-production)
+59. [Skill Badge System](#59-skill-badge-system)
+60. [Staffing Optimizer](#60-staffing-optimizer)
+61. [Streaks & Daily Challenges](#61-streaks--daily-challenges)
+62. [TPS Auto-Calibration](#62-tps-auto-calibration)
+63. [Transcription Logger](#63-transcription-logger)
+64. [Typology Matcher](#64-typology-matcher)
+65. [Weekly Summary](#65-weekly-summary)
 
 ---
 
@@ -1024,3 +1042,507 @@ Handles partial material deliveries: records what was received, creates deficit 
 **Called by:** `quality_control.py`
 
 Creates 5-Why analysis task for quality manager when defect found during QC.
+
+---
+
+## 48. Master Achievement System
+
+**File:** `achievements.py` (~449 lines)
+**Called by:** gamification cron, Telegram bot
+
+### Purpose
+Tracks and awards 7 achievement types across 5 levels (Apprentice → Grand Master) for factory workers. Measures progress from OperationLog, QualityCheck, DefectRecord, UserSkill, and CompetitionEntry.
+
+### Key Functions
+
+- `update_achievements_for_user(db, user_id)` — Recalculates all 7 achievement types for a user. Returns list of newly unlocked achievements.
+- `get_user_achievements(db, user_id)` — Returns all achievements with progress info (current, target, thresholds).
+- `_check_level_up(db, ach, current_progress)` — Compares progress against thresholds, bumps level if crossed. Sends Telegram notification on level-up.
+- `_measure_glazing_master(db, user_id)` — Counts distinct positions worked via OperationLog.
+- `_measure_zero_defect_hero(db, user_id)` — Counts consecutive zero-defect production days (skips non-production days).
+- `_measure_speed_champion(db, user_id)` — Counts consecutive days where user's cycle time was below factory average.
+- `_measure_kiln_expert(db, user_id)` — Counts distinct batches managed via OperationLog.
+- `_measure_quality_star(db, user_id)` — Counts QC checks with OK result.
+- `_measure_skill_collector(db, user_id)` — Counts certified UserSkill records.
+- `_measure_competition_winner(db, user_id)` — Counts competition entries with rank=1.
+
+### Business Rules
+1. **7 achievement types:** glazing_master, zero_defect_hero, speed_champion, kiln_expert, quality_star, skill_collector, competition_winner.
+2. **5 levels per achievement:** Apprentice (1), Craftsman (2), Expert (3), Master (4), Grand Master (5).
+3. **Thresholds vary by type:** e.g. glazing_master = 100/500/1000/5000/10000 positions.
+4. Level-up triggers Telegram notification to user + forum #achievements topic.
+5. Zero-defect hero skips days with no production activity (weekends/holidays) — absence != zero defects.
+
+### Dependencies
+`OperationLog`, `QualityCheck`, `DefectRecord`, `UserSkill`, `CompetitionEntry`, `notifications`
+
+---
+
+## 49. Attendance Monitor
+
+**File:** `attendance_monitor.py` (~221 lines)
+**Called by:** scheduler (daily 7:30 AM Bali / 23:30 UTC)
+
+### Purpose
+Detects working days in the current month where no attendance records exist for a factory. Alerts PM (in-app) and CEO/Owner (Telegram) when gaps accumulate.
+
+### Key Functions
+
+- `check_attendance_gaps(db, factory_id)` — Scans from 1st of month to yesterday. Returns list of unfilled dates (excludes Sundays and FactoryCalendar holidays). Skips factories with no active employees.
+- `process_attendance_gaps(db, factory_id)` — Calls check, sends PM in-app notification, and Telegram alert to CEO/Owner if 3+ days unfilled.
+
+### Business Rules
+1. A day is "unfilled" if ZERO attendance records exist for that factory+date.
+2. Sundays (weekday=6) and FactoryCalendar holidays are excluded.
+3. PM always gets in-app notification when any gaps exist.
+4. CEO/Owner gets Telegram alert only when 3+ working days are unfilled.
+5. If factory has no active employees, monitoring is skipped.
+
+### Dependencies
+`Attendance`, `Employee`, `Factory`, `FactoryCalendar`, `notifications`
+
+---
+
+## 50. Auto-Reorder
+
+**File:** `auto_reorder.py` (~465 lines)
+**Called by:** daily scheduler (after min_balance recalculation)
+
+### Purpose
+Detects low stock (balance < min_balance), creates MaterialPurchaseRequest (PENDING) + mandatory PM Task, and sends Telegram notification with approve/edit/reject buttons.
+
+### Key Functions
+
+- `check_and_create_reorders(db, factory_id)` — Finds low-stock materials, groups by supplier, creates purchase requests and MATERIAL_ORDER tasks. Skips materials already covered by substitutes or with existing pending auto_reorder PRs.
+- `approve_purchase_request(db, pr_id, pm_user_id)` — PM approves, sets status=APPROVED, closes linked task.
+- `edit_purchase_request(db, pr_id, pm_user_id, updated_materials, notes)` — PM edits quantities, approves, notifies CEO of changes.
+- `reject_purchase_request(db, pr_id, pm_user_id, reason)` — PM rejects, closes PR, notifies CEO with reason.
+
+### Business Rules
+1. Deduplication: skips materials that already have a PENDING auto_reorder purchase request.
+2. Substitution check: if a substitute material covers the full deficit, the original is skipped (via `material_substitution.check_substitution_available`).
+3. For stone/frit materials: order quantity = max(deficit, avg_monthly_consumption).
+4. Purchase requests are grouped by supplier.
+5. PM task has priority=7 (high). Telegram buttons: Approve / Edit / Reject.
+6. CEO/Owner notified on edit or reject actions.
+
+### Dependencies
+`MaterialStock`, `Material`, `Supplier`, `MaterialPurchaseRequest`, `Task`, `material_substitution`, `notifications`
+
+---
+
+## 51. CEO Reports (Gamification)
+
+**File:** `ceo_reports.py` (~688 lines)
+**Called by:** scheduler (Sunday 20:00 WITA), API endpoint
+
+### Purpose
+Generates weekly gamification dashboard reports for CEO/Owner. Includes leaderboard, competitions, certifications, attention alerts, and prize recommendations. All user-facing text in Indonesian (Bahasa Indonesia).
+
+### Key Functions
+
+- `generate_weekly_gamification_report(db, factory_id)` — Telegram-formatted report with 5 sections: leaderboard, active competitions, new certifications, workers needing attention, pending prizes.
+- `generate_productivity_impact(db, factory_id, days)` — Before/after comparison: throughput, quality, active workers, avg points per worker.
+- `get_who_needs_encouragement(db, factory_id)` — Finds workers with 3+ weeks of declining points (compares last 4 weekly totals).
+- `get_ceo_dashboard_data(db, factory_id)` — Full JSON for frontend CEO dashboard: leaderboard (top 10), competitions, certifications, attention, prizes, productivity impact, season info.
+- `send_weekly_report_all_factories(db)` — Sends reports to all CEO/Owner users across all active factories.
+
+### Business Rules
+1. Weekly point delta shown per worker (current vs previous week).
+2. Workers flagged for attention only if declining 3+ consecutive weeks.
+3. IDR amounts formatted as "Rp 300rb" or "Rp 1.5jt".
+4. Report sent as in-app notification (gamification_weekly_report type).
+
+### Dependencies
+`PointTransaction`, `UserPoints`, `Competition`, `CompetitionEntry`, `UserSkill`, `SkillBadge`, `GamificationSeason`, `prize_advisor`, `notifications`
+
+---
+
+## 52. Mini-Competitions Engine
+
+**File:** `competitions.py` (~774 lines)
+**Called by:** scheduler (daily cron), API endpoints
+
+### Purpose
+Speed + quality gamification competitions for factory workers. Supports individual and team competitions with combined scoring formula.
+
+### Key Functions
+
+- `create_competition(db, ...)` — Creates individual or team competition with date range, quality_weight, and optional prize budget.
+- `create_team_competition(db, ...)` — Creates team competition with pre-defined teams (sections filtered by operation name).
+- `update_competition_scores(db, competition_id)` — Recalculates all entries from OperationLog data. Assigns ranks.
+- `finalize_competition(db, competition_id)` — Final score recalc, sets status=completed, awards points (1st=50, 2nd=30, 3rd=20, participation=10).
+- `update_all_active_competitions(db)` — Cron: activates upcoming competitions, recalculates scores for all active ones.
+- `finalize_ended_competitions(db)` — Cron: auto-finalizes competitions past end_date.
+- `auto_create_weekly_competition(db, factory_id)` — Creates "Minggu Kecepatan #N" (Speed Week) individual competition, Mon-Sun.
+- `start_new_season(db, factory_id)` — Creates monthly GamificationSeason. Closes previous season with final_standings snapshot.
+- `propose_challenge(db, ...)` — Worker-proposed challenge (status=upcoming until PM approves).
+
+### Business Rules
+1. **Scoring formula:** `combined = throughput * (quality_pct / 100) ^ quality_weight`.
+2. **Prize tiers:** 1st=50pts, 2nd=30pts, 3rd=20pts, participation=10pts.
+3. Team members resolved from OperationLog by matching team.filter_key against operation names.
+4. Weekly competitions prevent duplicates via start_date + title check.
+5. Seasons are monthly, with previous season auto-closed and final standings snapshotted.
+
+### Dependencies
+`Competition`, `CompetitionEntry`, `CompetitionTeam`, `GamificationSeason`, `OperationLog`, `points_system`
+
+---
+
+## 53. Factory Leaderboard
+
+**File:** `factory_leaderboard.py` (~210 lines)
+**Called by:** CEO/Owner dashboard API
+
+### Purpose
+Compares all active factories across 6 key metrics for CEO multi-factory view.
+
+### Key Functions
+
+- `calculate_factory_leaderboard(db, period)` — Ranks factories by: avg_cycle_days, defect_rate, on_time_pct, kiln_utilization, output_sqm, positions_completed. Period: "week" or "month".
+
+### Business Rules
+1. Each metric gets a per-factory rank. Overall rank = sum of all metric ranks (lower = better).
+2. Current vs previous period delta shown for each metric.
+3. Metrics marked as `lower_is_better` or not (affects ranking direction).
+4. Kiln utilization obtained from `daily_kpi.calculate_kiln_utilization`.
+5. Output sqm from TpsShiftMetric.actual_output.
+
+### Dependencies
+`Factory`, `ProductionOrder`, `OrderPosition`, `DefectRecord`, `QualityCheck`, `TpsShiftMetric`, `daily_kpi`
+
+---
+
+## 54. Material Substitution
+
+**File:** `material_substitution.py` (~221 lines)
+**Called by:** `auto_reorder`, `material_reservation`
+
+### Purpose
+Handles interchangeable materials (e.g. 0.2g CMC = 1g Bentonite). When one material is insufficient, checks if a substitute has enough stock to cover the deficit.
+
+### Key Functions
+
+- `find_substitutes(db, material_id)` — Finds all active substitutes from MaterialSubstitution table. Handles bidirectional lookup (material_a↔material_b) with automatic ratio inversion.
+- `check_substitution_available(db, material_id, factory_id, needed_qty)` — Checks if any substitute has sufficient stock. Returns best match even if insufficient (for info).
+- `get_combined_availability(db, material_id, factory_id)` — Total available quantity: original material balance + all substitutes converted to original-material equivalent.
+
+### Business Rules
+1. Substitution is bidirectional: if A→B has ratio 5.0, then B→A has ratio 0.2.
+2. `check_substitution_available` returns the first sufficient substitute, or the first insufficient one if none are sufficient.
+3. Conversion uses the ratio from MaterialSubstitution table (e.g. 1 unit CMC → 5 units Bentonite).
+
+### Dependencies
+`MaterialSubstitution`, `MaterialStock`, `Material`
+
+---
+
+## 55. Payroll PDF Generator
+
+**File:** `payroll_pdf.py` (~545 lines)
+**Called by:** payroll API endpoint
+
+### Purpose
+Generates payroll PDFs using ReportLab: landscape A4 summary table (all employees) and individual portrait A4 payslips in Moonjar brand style (Bahasa Indonesia).
+
+### Key Functions
+
+- `generate_payroll_summary_pdf(payroll_items, totals, year, month, factory_name)` — Landscape A4 table with all employees: base, allowances, overtime, gross, BPJS, tax, net. Company header "PT MOONJAR DESIGN BALI".
+- `generate_payslip_pdf(item, year, month, factory_name)` — Individual payslip: employee info, attendance (present/absent/sick/leave), earnings breakdown, overtime by multiplier tier, BPJS employer+employee, PPh 21 TER, deductions, net salary. Includes motivational Indonesian quote rotated by month.
+
+### Business Rules
+1. Summary includes formal/contractor counts and total cost-to-company.
+2. Payslip sections: KEHADIRAN, PENDAPATAN, LEMBUR, GAJI KOTOR, PPh 21, BPJS, POTONGAN, GAJI BERSIH.
+3. BPJS employee portion explicitly noted as "paid by company, not deducted from salary".
+4. Overtime breakdown by multiplier tiers: 1.5x, 2x, 3x, 4x.
+5. Signature block: "Stanislav Shevchuk, Direktur".
+6. Footer: "Dokumen ini bersifat rahasia" (confidential).
+
+### Dependencies
+`reportlab` (external)
+
+---
+
+## 56. Points System
+
+**File:** `points_system.py` (~290 lines)
+**Called by:** recipe verification, competitions, skill_system, streaks, Telegram bot
+
+### Purpose
+Central gamification points engine. Awards points, tracks totals (year/month/week), provides leaderboards and rankings.
+
+### Key Functions
+
+- `calculate_accuracy_points(target_g, actual_g)` — Scoring by weighing deviation: +/-1%=10pts, +/-3%=7pts, +/-5%=5pts, +/-10%=3pts, >10%=1pt.
+- `award_points(db, user_id, factory_id, points, reason, details, position_id)` — Creates PointTransaction + upserts UserPoints totals (year/month/week).
+- `get_user_points(db, user_id, factory_id)` — Current year point summary.
+- `get_recent_transactions(db, user_id, factory_id, limit)` — Last N point transactions.
+- `get_points_leaderboard(db, factory_id, period)` — Top 20 by year/month/week.
+- `get_user_rank(db, user_id, factory_id)` — User's rank and total participants.
+- `reset_weekly_points(db)` — Cron: resets points_this_week for all users.
+- `reset_monthly_points(db)` — Cron: resets points_this_month for all users.
+
+### Business Rules
+1. Points accumulate yearly with Jan 1 reset (via year column in UserPoints).
+2. Weekly and monthly counters reset independently via cron jobs.
+3. Bonus point sources: streak (+5/day), challenge (+20), achievement (+50), skill certification (+100), competition win (+50/+30/+20), team win (+30), speed bonus (+3/5/10 by stage).
+
+### Dependencies
+`UserPoints`, `PointTransaction`, `RecipeVerification`
+
+---
+
+## 57. Prize Advisor
+
+**File:** `prize_advisor.py` (~867 lines)
+**Called by:** scheduler (monthly/quarterly), CEO dashboard API
+
+### Purpose
+Rule-based prize recommendation engine. Analyzes worker productivity and suggests prizes with ROI estimate. No LLM — fast, reliable, predictable.
+
+### Key Functions
+
+- `generate_monthly_prizes(db, factory_id, year, month)` — Creates up to 5 PrizeRecommendation records: individual_mvp, most_improved, team_winner, skill_champion, zero_defect.
+- `generate_quarterly_prizes(db, factory_id, year, quarter)` — Quarterly prizes with 2.5x budget multiplier.
+- `approve_prize(db, prize_id, approver_id)` — CEO approves (status: suggested→approved).
+- `reject_prize(db, prize_id, approver_id, reason)` — CEO rejects.
+- `award_prize(db, prize_id)` — Marks prize as actually awarded (approved→awarded).
+- `get_pending_prizes(db, factory_id)` — All suggested prizes awaiting CEO approval.
+
+### Business Rules
+1. **5 prize types:** individual_mvp (Rp 300k), most_improved (Rp 200k), team_winner (Rp 500k), skill_champion (Rp 150k), zero_defect (Rp 100k).
+2. **ROI formula:** `(revenue_gain - prize_cost) / prize_cost`, where `revenue_gain = monthly_revenue_estimate * productivity_gain_pct / 100`. Default monthly_revenue_estimate = Rp 50M.
+3. Quarterly budget = 2.5x monthly.
+4. Regeneration: old `suggested` recommendations for the same period are deleted before creating new ones.
+5. Most improved: calculated as % increase in points vs previous month/period.
+6. Best team: scored 60% avg points + 40% quality (by operation section).
+
+### Dependencies
+`PrizeRecommendation`, `UserPoints`, `PointTransaction`, `OperationLog`, `UserSkill`, `SkillBadge`
+
+---
+
+## 58. Production Split (Mid-Production)
+
+**File:** `production_split.py` (~242 lines)
+**Called by:** positions API
+
+### Purpose
+Splits a position during production. Parent position is frozen (is_parent=True); children inherit parent's state and run the full remaining cycle independently.
+
+### Key Functions
+
+- `can_split_position(position)` — Validates: cannot split if loaded_in_kiln, already a parent, or a sorting sub-position.
+- `split_position_mid_production(db, position, splits, reason, created_by_id)` — Creates child positions from split specs. Freezes parent via raw SQL (is_parent, split_type, split_stage, split_at, split_reason).
+- `get_split_tree(db, position_id)` — Returns full nested tree of parent + all descendants with split metadata.
+
+### Business Rules
+1. Split quantities must sum exactly to parent quantity.
+2. Children inherit all parent attributes (recipe, size, factory, planned dates, firing_round, etc.).
+3. quantity_sqm and quantity_with_defect_margin are scaled proportionally.
+4. Children continue from the same status the parent had at time of split.
+5. Cannot split: loaded_in_kiln, already-split parents, sorting sub-positions.
+6. Parent is frozen via `is_parent=True` and retains historical data.
+
+### Dependencies
+`OrderPosition`
+
+---
+
+## 59. Skill Badge System
+
+**File:** `skill_system.py` (~1017 lines)
+**Called by:** scheduler (nightly), API endpoints, OperationLog creation
+
+### Purpose
+Learnable skills and certifications for factory workers. Workers progress by completing operations with low defect rates. Skills auto-certify or require mentor approval.
+
+### Key Functions
+
+- `seed_factory_skills(db, factory_id)` — Creates 20 default skill badges (10 production, 4 specialized, 2 quality, 1 safety, 1 leadership, 2 cross-training).
+- `get_factory_skills(db, factory_id)` — All skills with certified/learning counts.
+- `get_user_skills(db, user_id)` — User's skill progress across all badges.
+- `start_skill_learning(db, user_id, skill_badge_id)` — Begin tracking a skill (idempotent).
+- `update_skill_progress(db, user_id, operation_id, quantity, defects)` — Called after OperationLog creation. Updates matching skills, checks for certification.
+- `batch_update_all_skills(db)` — Nightly cron: recalculates all learners from OperationLog + awards cross-training badges.
+- `request_certification(db, user_id, skill_badge_id)` — Worker requests PM approval (validates requirements first).
+- `approve_certification(db, approver_id, user_skill_id)` — PM approves. Awards points, sends Telegram congratulation.
+- `revoke_certification(db, revoker_id, user_skill_id, reason)` — PM revokes (reason required). Notifies PM channel.
+
+### Business Rules
+1. **20 skills total:** 6 categories with varying requirements (30-60 operations, 85-95% defect-free).
+2. **Defect-free %** calculated from last 50 operations (`_DEFECT_WINDOW = 50`).
+3. Skills with `required_mentor_approval=True` go to `pending_approval` status; others auto-certify.
+4. **Cross-training badges** (2-stage, 4-stage) auto-awarded based on certified production skill count.
+5. Points on certification: 80-300 pts depending on skill category.
+6. Only PM/admin/owner/CEO can approve or revoke certifications.
+7. Revocation sends notification to PM channel.
+
+### Dependencies
+`SkillBadge`, `UserSkill`, `OperationLog`, `points_system`, `notifications`
+
+---
+
+## 60. Staffing Optimizer
+
+**File:** `staffing_optimizer.py` (~581 lines)
+**Called by:** API endpoint, Telegram bot
+
+### Purpose
+AI-driven optimal worker distribution suggestions. Analyzes actual throughput (TpsShiftMetric), current assignments (ShiftAssignment), and scheduled demand (OrderPosition) to recommend rebalancing across 9 production stages.
+
+### Key Functions
+
+- `suggest_optimal_staffing(db, factory_id, horizon_days)` — Full analysis: per-stage throughput, workers, utilization, bottleneck detection, actionable suggestions.
+
+### Business Rules
+1. **9 production stages analyzed:** incoming_inspection, engobe, glazing, pre_kiln_inspection, kiln_loading, firing, sorting, packing, quality_check.
+2. `workers_needed = ceil(required_daily_throughput / throughput_per_worker)`.
+3. **Understaffed:** demand > 110% capacity. **Overstaffed:** demand < 50% capacity.
+4. **Suggestion priority:** (a) move workers from overstaffed to understaffed, (b) add workers if no surplus available, (c) overtime if utilization >150%.
+5. Uses actual TpsShiftMetric data for throughput; falls back to hardcoded defaults per stage.
+6. Demand calculated from OrderPosition with planned dates within the horizon window.
+
+### Dependencies
+`TpsShiftMetric`, `ShiftAssignment`, `OrderPosition`
+
+---
+
+## 61. Streaks & Daily Challenges
+
+**File:** `streaks.py` (~379 lines)
+**Called by:** scheduler (daily), Telegram bot
+
+### Purpose
+Tracks consecutive-day streaks for PM users and generates deterministic daily challenges per factory.
+
+### Key Functions
+
+- `update_streaks_for_factory(db, factory_id, today)` — Updates all 4 streak types for all PM/admin/owner users.
+- `check_on_time_delivery(db, factory_id, today)` — True if all orders shipped today met deadline (vacuous true if no shipments).
+- `check_zero_defects(db, factory_id, today)` — True if no defect records logged today.
+- `check_daily_login(db, user_id, today)` — True if user had an active session today.
+- `check_batch_utilization(db, factory_id, today)` — True if avg kiln utilization >= 80%.
+- `get_daily_challenge(db, factory_id, today)` — Returns deterministic daily challenge (from 7 templates, selected via SHA-256 hash of factory_id + date).
+- `evaluate_challenge(db, factory_id, today)` — Measures actual progress against challenge target.
+- `get_user_streaks(db, user_id, factory_id)` — Returns all streaks with current/best/last_date.
+
+### Business Rules
+1. **4 streak types:** on_time_delivery, zero_defects, daily_login, batch_utilization.
+2. Streak increments if last activity was yesterday; resets to 1 if gap.
+3. Best streak tracked separately from current streak.
+4. **7 challenge templates:** pre_kiln_checks, kiln_utilization, ship_orders, zero_defects, batch_completion, position_progress, all_checks_pass.
+5. Challenge selection is deterministic per factory+date (SHA-256 hash mod 7).
+
+### Dependencies
+`UserStreak`, `DailyChallenge`, `ProductionOrder`, `DefectRecord`, `Batch`, `QualityCheck`, `OrderPosition`, `ActiveSession`, `daily_kpi`
+
+---
+
+## 62. TPS Auto-Calibration
+
+**File:** `tps_calibration.py` (~471 lines)
+**Called by:** scheduler (daily cron), API endpoint
+
+### Purpose
+Auto-calibrates production rates using Exponential Moving Average (EMA) of actual output. Detects drift between planned and actual rates and adjusts ProcessStep and StageTypologySpeed records.
+
+### Key Functions
+
+- `calculate_ema_rate(db, factory_id, step, lookback_days, alpha)` — EMA of actual production rate from TpsShiftMetric over last 30 days.
+- `check_calibration_needed(db, factory_id, step, threshold, min_data_points)` — Checks if drift exceeds threshold (15%). Returns suggestion or None.
+- `run_calibration(db, factory_id, auto_apply)` — Runs calibration for all active ProcessSteps. Auto-applies if step.auto_calibrate=True.
+- `apply_calibration(db, step_id, new_rate, ...)` — Updates ProcessStep rate + creates CalibrationLog entry.
+- `get_calibration_status(db, factory_id)` — Current status for all steps with drift info.
+- `calibrate_typology_speeds(db, factory_id, auto_apply, ...)` — Same EMA calibration for StageTypologySpeed records, filtered by typology_id.
+
+### Business Rules
+1. **EMA alpha=0.3** (30% weight to newest data point).
+2. **Drift threshold=15%:** calibration triggers only when |EMA - planned| / planned > 0.15.
+3. **Minimum 7 data points** required before calibration is considered.
+4. Auto-calibration enabled by default (ProcessStep.auto_calibrate=True).
+5. PM can toggle auto-calibration per step via API.
+6. CalibrationLog records: previous_rate, new_rate, ema_value, data_points, trigger (auto/manual/auto_typology).
+7. Typology speeds calibrated independently per typology_id (each typology gets its own EMA).
+
+### Dependencies
+`ProcessStep`, `StageTypologySpeed`, `TpsShiftMetric`, `CalibrationLog`
+
+---
+
+## 63. Transcription Logger
+
+**File:** `transcription_logger.py` (~85 lines)
+**Called by:** Telegram bot (voice/audio messages)
+
+### Purpose
+Transcribes voice messages via OpenAI Whisper API and persists transcription logs to the database.
+
+### Key Functions
+
+- `transcribe_audio(audio_bytes, filename)` — Async. Sends audio to OpenAI Whisper API (`whisper-1` model, `verbose_json` format). Returns text, language, and duration.
+- `save_transcription_log(db, ...)` — Persists TranscriptionLog with user_id, telegram IDs, audio duration, transcribed text, AI response summary, detected language.
+
+### Business Rules
+1. Requires OPENAI_API_KEY in settings.
+2. Default audio format: OGG (Telegram voice messages).
+3. Transcription timeout: 60 seconds.
+4. Language auto-detected by Whisper (returned in response).
+
+### Dependencies
+`TranscriptionLog`, `httpx`, OpenAI Whisper API
+
+---
+
+## 64. Typology Matcher
+
+**File:** `typology_matcher.py` (~422 lines)
+**Called by:** production_scheduler, batch formation, kiln assignment
+
+### Purpose
+Matches positions to kiln loading typologies and calculates capacity per kiln per typology using the geometry engine.
+
+### Key Functions
+
+- `find_matching_typology(db, position)` — Matches position against KilnLoadingTypology criteria (product_types, place_of_application, collections, methods, size range). Returns highest-priority match.
+- `classify_loading_zone(position)` — Returns "edge" or "flat" based on place_of_application and tile size (<=15cm max side = edge).
+- `get_effective_capacity(db, position, kiln)` — Resolution: ai_adjusted_sqm → capacity_sqm → kiln.capacity_sqm → 1.0 fallback.
+- `get_zone_capacity(db, position, kiln, zone)` — Zone-specific capacity from KilnTypologyCapacity. Falls back to proportional split (85% edge / 15% flat).
+- `calculate_typology_for_kiln(db, typology, kiln)` — Calculates capacity using geometry engine (business/kiln/capacity.py). Creates/updates KilnTypologyCapacity record.
+- `calculate_all_typology_capacities(db, factory_id, typology_id)` — Batch: all active kilns x typologies.
+
+### Business Rules
+1. Typology matching criteria: product_types, place_of_application, collections, methods (all JSONB arrays; empty = match all), plus size range.
+2. If position.place_of_application is NULL and product_type is "tile", defaults to "face_only" (prevents silent scheduler fallback).
+3. Capacity resolution order: ai_adjusted_sqm > capacity_sqm > kiln.capacity_sqm > 1.0.
+4. Edge/flat zone classification: face_only/edges_1/edges_2 with max_dim <=15cm = edge; everything else = flat.
+5. Default fallback for zone capacity: edge=85%, flat=15% of total.
+
+### Dependencies
+`KilnLoadingTypology`, `KilnTypologyCapacity`, `OrderPosition`, `Resource`, `business/kiln/capacity.py`
+
+---
+
+## 65. Weekly Summary
+
+**File:** `weekly_summary.py` (~256 lines)
+**Called by:** scheduler (Sunday 20:00 UTC / Monday 04:00 Bali)
+
+### Purpose
+Generates and sends a rich weekly production summary via Telegram to PM, CEO, and Owner users.
+
+### Key Functions
+
+- `generate_weekly_summary(db, factory_id)` — Builds summary for last 7 days: orders shipped (with delta vs previous week), positions completed, firings + kiln utilization, defect rate, on-time %, best master.
+- `send_weekly_summary(db, factory_id)` — Sends generated summary to all PM/CEO/Owner users with Telegram.
+
+### Business Rules
+1. Covers Mon-Sun (last 7 days).
+2. Delta comparison vs previous 7-day period for shipped orders.
+3. Best master determined by most positions moved to READY_FOR_SHIPMENT/SHIPPED (via updated_by field).
+4. Mood indicator: defect_rate <3% + on_time >=95% = "Excellent"; <5% + >=85% = "Good"; else = "Room for improvement".
+5. Message language: Russian (for CEO), with metrics in universal format.
+
+### Dependencies
+`ProductionOrder`, `OrderPosition`, `Batch`, `DefectRecord`, `QualityCheck`, `Factory`, `notifications`, `daily_kpi`

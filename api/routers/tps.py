@@ -15,7 +15,7 @@ from api.roles import require_management
 from api.models import (
     TpsParameter, TpsShiftMetric, TpsDeviation, Factory,
     OperationLog, Operation, OrderPosition, MasterPermission, User,
-    ProcessStep, CalibrationLog,
+    ProcessStep, CalibrationLog, StandardWork,
     KilnLoadingTypology, KilnTypologyCapacity,
     StageTypologySpeed,
 )
@@ -238,6 +238,80 @@ async def create_shift_metric(
     if metric:
         return _serialize_metric(metric)
     return result
+
+
+class ShiftMetricUpdate(BaseModel):
+    shift: Optional[int] = None
+    date: Optional[date] = None
+    stage: Optional[str] = None
+    planned_output: Optional[float] = None
+    actual_output: Optional[float] = None
+    actual_output_pcs: Optional[int] = None
+    defect_rate: Optional[float] = None
+    downtime_minutes: Optional[float] = None
+    cycle_time_minutes: Optional[float] = None
+    oee_percent: Optional[float] = None
+    takt_time_minutes: Optional[float] = None
+    notes: Optional[str] = None
+
+
+@router.get("/{metric_id}")
+async def get_shift_metric(
+    metric_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Get a single TPS shift metric by ID."""
+    metric = db.query(TpsShiftMetric).filter(TpsShiftMetric.id == metric_id).first()
+    if not metric:
+        raise HTTPException(404, "Shift metric not found")
+    # Factory scoping check
+    if hasattr(current_user, "factory_id") and current_user.factory_id:
+        if metric.factory_id != current_user.factory_id:
+            raise HTTPException(404, "Shift metric not found")
+    return _serialize_metric(metric)
+
+
+@router.patch("/{metric_id}")
+async def update_shift_metric(
+    metric_id: UUID,
+    data: ShiftMetricUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Update a TPS shift metric (partial update)."""
+    metric = db.query(TpsShiftMetric).filter(TpsShiftMetric.id == metric_id).first()
+    if not metric:
+        raise HTTPException(404, "Shift metric not found")
+    # Factory scoping check
+    if hasattr(current_user, "factory_id") and current_user.factory_id:
+        if metric.factory_id != current_user.factory_id:
+            raise HTTPException(404, "Shift metric not found")
+    updates = data.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        setattr(metric, field, value)
+    db.commit()
+    db.refresh(metric)
+    return _serialize_metric(metric)
+
+
+@router.delete("/{metric_id}")
+async def delete_shift_metric(
+    metric_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Delete a TPS shift metric."""
+    metric = db.query(TpsShiftMetric).filter(TpsShiftMetric.id == metric_id).first()
+    if not metric:
+        raise HTTPException(404, "Shift metric not found")
+    # Factory scoping check
+    if hasattr(current_user, "factory_id") and current_user.factory_id:
+        if metric.factory_id != current_user.factory_id:
+            raise HTTPException(404, "Shift metric not found")
+    db.delete(metric)
+    db.commit()
+    return {"ok": True}
 
 
 # ── TPS Dashboard Summary ──────────────────────────────────────────────
@@ -1203,6 +1277,171 @@ async def deactivate_process_step(
     step.is_active = False
     db.commit()
     return {"ok": True, "message": "Process step deactivated"}
+
+
+# ── Standard Work (sub-operations within a ProcessStep) ────────────
+
+
+class StandardWorkCreate(BaseModel):
+    description: str
+    time_minutes: float
+    is_setup: bool = False
+    sequence: Optional[int] = None
+
+
+class StandardWorkUpdate(BaseModel):
+    description: Optional[str] = None
+    time_minutes: Optional[float] = None
+    is_setup: Optional[bool] = None
+    sequence: Optional[int] = None
+
+
+class StandardWorkReorder(BaseModel):
+    ids: List[UUID]
+
+
+def _serialize_standard_work(sw) -> dict:
+    return {
+        "id": str(sw.id),
+        "process_step_id": str(sw.process_step_id),
+        "description": sw.description,
+        "time_minutes": float(sw.time_minutes) if sw.time_minutes is not None else 0,
+        "is_setup": bool(sw.is_setup),
+        "sequence": sw.sequence or 0,
+        "created_at": sw.created_at.isoformat() if sw.created_at else None,
+    }
+
+
+def _get_process_step_or_404(db: Session, step_id: UUID) -> ProcessStep:
+    step = db.query(ProcessStep).filter(ProcessStep.id == step_id).first()
+    if not step:
+        raise HTTPException(404, "Process step not found")
+    return step
+
+
+@router.get("/process-steps/{step_id}/standard-work")
+async def list_standard_work(
+    step_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List all standard work items for a process step."""
+    _get_process_step_or_404(db, step_id)
+    items = (
+        db.query(StandardWork)
+        .filter(StandardWork.process_step_id == step_id)
+        .order_by(StandardWork.sequence, StandardWork.created_at)
+        .all()
+    )
+    return {"items": [_serialize_standard_work(sw) for sw in items], "total": len(items)}
+
+
+@router.post("/process-steps/{step_id}/standard-work", status_code=201)
+async def create_standard_work(
+    step_id: UUID,
+    data: StandardWorkCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Create a standard work item for a process step."""
+    _get_process_step_or_404(db, step_id)
+
+    # Auto-assign sequence if not provided
+    seq = data.sequence
+    if seq is None:
+        max_seq = (
+            db.query(sa_func.coalesce(sa_func.max(StandardWork.sequence), -1))
+            .filter(StandardWork.process_step_id == step_id)
+            .scalar()
+        )
+        seq = (max_seq or 0) + 1
+
+    sw = StandardWork(
+        process_step_id=step_id,
+        description=data.description,
+        time_minutes=data.time_minutes,
+        is_setup=data.is_setup,
+        sequence=seq,
+    )
+    db.add(sw)
+    db.commit()
+    db.refresh(sw)
+    return _serialize_standard_work(sw)
+
+
+# NOTE: reorder MUST be before {work_id} to avoid FastAPI path conflict
+@router.post("/process-steps/{step_id}/standard-work/reorder")
+async def reorder_standard_work(
+    step_id: UUID,
+    data: StandardWorkReorder,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Reorder standard work items. Sets sequence = index for each item."""
+    _get_process_step_or_404(db, step_id)
+    for idx, work_id in enumerate(data.ids):
+        sw = db.query(StandardWork).filter(
+            StandardWork.id == work_id,
+            StandardWork.process_step_id == step_id,
+        ).first()
+        if sw:
+            sw.sequence = idx
+    db.commit()
+
+    items = (
+        db.query(StandardWork)
+        .filter(StandardWork.process_step_id == step_id)
+        .order_by(StandardWork.sequence, StandardWork.created_at)
+        .all()
+    )
+    return {"items": [_serialize_standard_work(sw) for sw in items], "total": len(items)}
+
+
+@router.patch("/process-steps/{step_id}/standard-work/{work_id}")
+async def update_standard_work(
+    step_id: UUID,
+    work_id: UUID,
+    data: StandardWorkUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Partial update of a standard work item."""
+    _get_process_step_or_404(db, step_id)
+    sw = db.query(StandardWork).filter(
+        StandardWork.id == work_id,
+        StandardWork.process_step_id == step_id,
+    ).first()
+    if not sw:
+        raise HTTPException(404, "Standard work item not found")
+
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(sw, field, value)
+
+    db.commit()
+    db.refresh(sw)
+    return _serialize_standard_work(sw)
+
+
+@router.delete("/process-steps/{step_id}/standard-work/{work_id}")
+async def delete_standard_work(
+    step_id: UUID,
+    work_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Delete a standard work item."""
+    _get_process_step_or_404(db, step_id)
+    sw = db.query(StandardWork).filter(
+        StandardWork.id == work_id,
+        StandardWork.process_step_id == step_id,
+    ).first()
+    if not sw:
+        raise HTTPException(404, "Standard work item not found")
+
+    db.delete(sw)
+    db.commit()
+    return {"ok": True}
 
 
 # ── Calibration Log ──────────────────────────────────────────────────

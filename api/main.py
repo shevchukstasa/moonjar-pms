@@ -13,6 +13,20 @@ from api.config import get_settings
 from api.database import engine, Base
 
 settings = get_settings()
+
+# ── Logging ─────────────────────────────────────────────────────
+# Python root logger defaults to WARNING, silently dropping all INFO
+# messages from the scheduler (LEFT_SHIFT, OVERDUE_PULL, GLAZING_CAP
+# decisions).  Set moonjar.* loggers to INFO so scheduling traces
+# reach Railway logs.  Override via MOONJAR_LOG_LEVEL env var.
+_log_level = os.getenv("MOONJAR_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=logging.WARNING,  # keep third-party libs quiet
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logging.getLogger("moonjar").setLevel(_log_level)
+
 logger = logging.getLogger("moonjar")
 
 IS_PRODUCTION = os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("ENV", "").lower() == "production"

@@ -265,7 +265,7 @@ interface Props {
 }
 
 export default function DailyProductionView({ factoryId }: Props) {
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState(14);
   const { data, isLoading, isError } = useProductionSchedule(factoryId, days);
 
   if (!factoryId) {

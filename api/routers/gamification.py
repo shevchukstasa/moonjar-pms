@@ -170,7 +170,7 @@ async def revoke_skill(
 @router.get("/leaderboard")
 async def get_leaderboard(
     factory_id: UUID = Query(...),
-    period: str = Query("year", regex="^(year|month|week)$"),
+    period: str = Query("year", pattern="^(year|month|week)$"),
     db: Session = Depends(get_db),
     current_user=Depends(require_any),
 ):

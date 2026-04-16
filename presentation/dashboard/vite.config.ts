@@ -32,6 +32,10 @@ export default defineConfig({
           'vendor-forms': ['react-hook-form', '@hookform/resolvers', 'zod'],
           // Table
           'vendor-table': ['@tanstack/react-table'],
+          // Icons — used widely but tree-shakeable per chunk
+          'vendor-icons': ['lucide-react'],
+          // Date utilities
+          'vendor-date': ['date-fns'],
         },
       },
     },

@@ -1,65 +1,91 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { roleRoutes } from '@/lib/roleRoutes';
 import apiClient from '@/api/client';
 import LoginPage from '@/pages/LoginPage';
 import NotFoundPage from '@/pages/NotFoundPage';
-import OwnerDashboard from '@/pages/OwnerDashboard';
-import CeoDashboard from '@/pages/CeoDashboard';
-import ManagerDashboard from '@/pages/ManagerDashboard';
-import OrderDetailPage from '@/pages/OrderDetailPage';
-import ManagerSchedulePage from '@/pages/ManagerSchedulePage';
-import ManagerKilnsPage from '@/pages/ManagerKilnsPage';
-import ManagerMaterialsPage from '@/pages/ManagerMaterialsPage';
-import ShortageDecisionPage from '@/pages/ShortageDecisionPage';
-import SizeResolutionPage from '@/pages/SizeResolutionPage';
-import TabloDashboard from '@/pages/TabloDashboard';
-import QualityManagerDashboard from '@/pages/QualityManagerDashboard';
-import WarehouseDashboard from '@/pages/WarehouseDashboard';
-import SorterPackerDashboard from '@/pages/SorterPackerDashboard';
-import PurchaserDashboard from '@/pages/PurchaserDashboard';
-import UsersPage from '@/pages/UsersPage';
-import AdminPanelPage from '@/pages/AdminPanelPage';
-import AdminRecipesPage from '@/pages/AdminRecipesPage';
-import AdminSuppliersPage from '@/pages/AdminSuppliersPage';
-import AdminCollectionsPage from '@/pages/AdminCollectionsPage';
-import AdminColorCollectionsPage from '@/pages/AdminColorCollectionsPage';
-import AdminColorsPage from '@/pages/AdminColorsPage';
-import AdminAppTypesPage from '@/pages/AdminAppTypesPage';
-import AdminPoaPage from '@/pages/AdminPoaPage';
-import AdminFinishingPage from '@/pages/AdminFinishingPage';
-import AdminTemperatureGroupsPage from '@/pages/AdminTemperatureGroupsPage';
-import AdminMaterialsPage from '@/pages/AdminMaterialsPage';
-import AdminWarehousesPage from '@/pages/AdminWarehousesPage';
-import AdminPackagingPage from '@/pages/AdminPackagingPage';
-import AdminSizesPage from '@/pages/AdminSizesPage';
-import AdminFiringProfilesPage from '@/pages/AdminFiringProfilesPage';
-import AdminStagesPage from '@/pages/AdminStagesPage';
-import TpsDashboardPage from '@/pages/TpsDashboardPage';
-import KilnFiringSchedulesPage from '@/pages/KilnFiringSchedulesPage';
-import FactoryCalendarPage from '@/pages/FactoryCalendarPage';
-import ConsumptionRulesPage from '@/pages/ConsumptionRulesPage';
-import PMGuidePage from '@/pages/PMGuidePage';
-import KilnInspectionsPage from '@/pages/KilnInspectionsPage';
-import KilnMaintenancePage from '@/pages/KilnMaintenancePage';
-import GrindingDecisionsPage from '@/pages/GrindingDecisionsPage';
-import ReconciliationsPage from '@/pages/ReconciliationsPage';
-import FinishedGoodsPage from '@/pages/FinishedGoodsPage';
-import ManaShipmentsPage from '@/pages/ManaShipmentsPage';
-import ReportsPage from '@/pages/ReportsPage';
-import DashboardAccessPage from '@/pages/DashboardAccessPage';
-import SettingsPage from '@/pages/SettingsPage';
-import AdminSettingsPage from '@/pages/AdminSettingsPage';
-import EmployeesPage from '@/pages/EmployeesPage';
-import CeoEmployeesPage from '@/pages/CeoEmployeesPage';
-import ShipmentPage from '@/pages/ShipmentPage';
-import WorkforceAssignmentPage from '@/pages/WorkforceAssignmentPage';
-import GamificationPage from '@/pages/GamificationPage';
-import OnboardingPage from '@/pages/OnboardingPage';
 import AppLayout from '@/components/layout/AppLayout';
 import { Spinner } from '@/components/ui/Spinner';
 import { ErrorBoundary, PageErrorFallback } from '@/components/ErrorBoundary';
+
+// ── Lazy-loaded pages ─────────────────────────────────────────
+// Each page becomes a separate JS chunk, loaded only when navigated to.
+
+// Role dashboards
+const OwnerDashboard = lazy(() => import('@/pages/OwnerDashboard'));
+const CeoDashboard = lazy(() => import('@/pages/CeoDashboard'));
+const ManagerDashboard = lazy(() => import('@/pages/ManagerDashboard'));
+const QualityManagerDashboard = lazy(() => import('@/pages/QualityManagerDashboard'));
+const WarehouseDashboard = lazy(() => import('@/pages/WarehouseDashboard'));
+const SorterPackerDashboard = lazy(() => import('@/pages/SorterPackerDashboard'));
+const PurchaserDashboard = lazy(() => import('@/pages/PurchaserDashboard'));
+const TabloDashboard = lazy(() => import('@/pages/TabloDashboard'));
+
+// Manager pages
+const OrderDetailPage = lazy(() => import('@/pages/OrderDetailPage'));
+const ManagerSchedulePage = lazy(() => import('@/pages/ManagerSchedulePage'));
+const ManagerKilnsPage = lazy(() => import('@/pages/ManagerKilnsPage'));
+const ManagerMaterialsPage = lazy(() => import('@/pages/ManagerMaterialsPage'));
+const ShortageDecisionPage = lazy(() => import('@/pages/ShortageDecisionPage'));
+const SizeResolutionPage = lazy(() => import('@/pages/SizeResolutionPage'));
+const ShipmentPage = lazy(() => import('@/pages/ShipmentPage'));
+const WorkforceAssignmentPage = lazy(() => import('@/pages/WorkforceAssignmentPage'));
+const GamificationPage = lazy(() => import('@/pages/GamificationPage'));
+
+// Admin pages
+const AdminPanelPage = lazy(() => import('@/pages/AdminPanelPage'));
+const AdminRecipesPage = lazy(() => import('@/pages/AdminRecipesPage'));
+const AdminSuppliersPage = lazy(() => import('@/pages/AdminSuppliersPage'));
+const AdminCollectionsPage = lazy(() => import('@/pages/AdminCollectionsPage'));
+const AdminColorCollectionsPage = lazy(() => import('@/pages/AdminColorCollectionsPage'));
+const AdminColorsPage = lazy(() => import('@/pages/AdminColorsPage'));
+const AdminAppTypesPage = lazy(() => import('@/pages/AdminAppTypesPage'));
+const AdminPoaPage = lazy(() => import('@/pages/AdminPoaPage'));
+const AdminFinishingPage = lazy(() => import('@/pages/AdminFinishingPage'));
+const AdminTemperatureGroupsPage = lazy(() => import('@/pages/AdminTemperatureGroupsPage'));
+const AdminMaterialsPage = lazy(() => import('@/pages/AdminMaterialsPage'));
+const AdminWarehousesPage = lazy(() => import('@/pages/AdminWarehousesPage'));
+const AdminPackagingPage = lazy(() => import('@/pages/AdminPackagingPage'));
+const AdminSizesPage = lazy(() => import('@/pages/AdminSizesPage'));
+const AdminFiringProfilesPage = lazy(() => import('@/pages/AdminFiringProfilesPage'));
+const AdminStagesPage = lazy(() => import('@/pages/AdminStagesPage'));
+const AdminSettingsPage = lazy(() => import('@/pages/AdminSettingsPage'));
+const DashboardAccessPage = lazy(() => import('@/pages/DashboardAccessPage'));
+
+// CEO pages
+const CeoEmployeesPage = lazy(() => import('@/pages/CeoEmployeesPage'));
+
+// Shared pages
+const UsersPage = lazy(() => import('@/pages/UsersPage'));
+const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
+const EmployeesPage = lazy(() => import('@/pages/EmployeesPage'));
+const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
+const PMGuidePage = lazy(() => import('@/pages/PMGuidePage'));
+const OnboardingPage = lazy(() => import('@/pages/OnboardingPage'));
+
+// Production-specific pages
+const TpsDashboardPage = lazy(() => import('@/pages/TpsDashboardPage'));
+const KilnFiringSchedulesPage = lazy(() => import('@/pages/KilnFiringSchedulesPage'));
+const FactoryCalendarPage = lazy(() => import('@/pages/FactoryCalendarPage'));
+const ConsumptionRulesPage = lazy(() => import('@/pages/ConsumptionRulesPage'));
+const KilnInspectionsPage = lazy(() => import('@/pages/KilnInspectionsPage'));
+const KilnMaintenancePage = lazy(() => import('@/pages/KilnMaintenancePage'));
+const GrindingDecisionsPage = lazy(() => import('@/pages/GrindingDecisionsPage'));
+
+// Warehouse pages
+const FinishedGoodsPage = lazy(() => import('@/pages/FinishedGoodsPage'));
+const ReconciliationsPage = lazy(() => import('@/pages/ReconciliationsPage'));
+const ManaShipmentsPage = lazy(() => import('@/pages/ManaShipmentsPage'));
+
+// ── Page loading fallback ─────────────────────────────────────
+function PageLoader() {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center">
+      <Spinner className="h-8 w-8" />
+    </div>
+  );
+}
 
 /** Try to restore session from JWT cookie on app mount */
 function useSessionRestore() {
@@ -88,7 +114,9 @@ function RequireAuth() {
           <PageErrorFallback error={error} onReset={reset} />
         )}
       >
-        <Outlet />
+        <Suspense fallback={<PageLoader />}>
+          <Outlet />
+        </Suspense>
       </ErrorBoundary>
     </AppLayout>
   );

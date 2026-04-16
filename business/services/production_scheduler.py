@@ -1,26 +1,36 @@
 """
-Production Scheduler — high-WIP left-shift (forward) scheduling.
-Business Logic: §5, §17, §20
+Production Scheduler — forward / left-shift scheduling with per-stage
+brigade capacity.
+Business Logic: docs/BUSINESS_LOGIC_FULL.md §4 (source of truth)
 
-When an order comes in, the entire production path is planned immediately.
-The scheduler first computes a backward-from-deadline baseline (TOC/DBR
-drum-buffer-rope), then LEFT-SHIFTS each position to the earliest feasible
-start, respecting only hard blockers:
-  - today's date (can't start in the past)
-  - FIFO min_start_date (later orders can't leapfrog earlier ones)
-  - material_ready_date (materials must be in-stock or arriving)
-  - blocking_ready_date (stone procurement, recipe config, etc.)
+Philosophy (see §4): "Everything that can be done today is done today,
+tomorrow is tomorrow, etc. Each day gets exactly as much work as the
+brigades can process on each stage, given shift count, hours, and
+productivity rate."
 
-The deadline is kept only as an ALERT trigger — if forward-shifted
-completion still exceeds it, a PM task + CEO notification are created
-(_create_deadline_exceeded_alert). The deadline no longer anchors the
-schedule.
+Schedule build per position (FIFO across orders):
+  1. Compute earliest_start = max(today, min_start_date (FIFO prev),
+     material_ready_date, blocking_ready_date), skipping Sunday and
+     FactoryCalendar holidays via `_next_working_day_cal`.
+  2. Legacy backward pass runs first as a baseline (duration math),
+     then LEFT_SHIFT pulls planned_glazing back to earliest_start.
+  3. Per-stage capacity rate limiter (`_get_stage_daily_capacity`):
+     for the glazing stage walk forward day-by-day until the selected
+     day has room under `brigade × shifts × hours × rate`. Same idea
+     applied by downstream stage durations via `_get_stage_duration_days`.
+  4. Kiln is a separate drum constraint — `find_best_kiln_and_date`
+     picks the earliest day with zone capacity for the typology.
+  5. `plan_kiln_batches(allow_deferral=False)` prevents BATCH_DEFER
+     from cascading planned dates forward to accumulate fill.
 
-Rationale (architectural decision): Moonjar is artisan stone-tile
-manufacturing where worker idle time is more expensive than holding WIP,
-and early completion buffers against kiln breakdowns / QC rework / client
-change-requests. Classic TOC minimum-WIP backward scheduling is the wrong
-trade-off here.
+Deadline is ONLY an alert trigger (`_create_deadline_exceeded_alert`),
+never an anchor — forward-shifting completion past the deadline emits
+a PM task + CEO notification but does not pull dates back.
+
+Rationale: Moonjar is artisan stone-tile manufacturing where worker
+idle time is more expensive than holding WIP, and early completion
+buffers against kiln breakdowns / QC rework / client change-requests.
+Classic TOC minimum-WIP backward scheduling is the wrong trade-off.
 
 Dates are calculated per-position (not per-order) because each position
 may go to a different kiln with different availability.
@@ -28,8 +38,9 @@ may go to a different kiln with different availability.
 Auto-reschedules on:
   - Status changes (delays)
   - Kiln breakdowns (MAINTENANCE_EMERGENCY)
-  - Manual reorder by PM
+  - Manual reorder by PM (Tablo drag-drop)
   - Material blocking/unblocking
+  - Nightly factory reschedule cron
 """
 from uuid import UUID
 from datetime import date, timedelta
@@ -746,11 +757,150 @@ def _get_factory_daily_kiln_cap(db: Session, factory_id: UUID) -> float:
 
 
 def _skip_weekends(target: date) -> date:
-    """If target falls on Sunday, move to Monday."""
+    """If target falls on Sunday, move to Monday.
+
+    Legacy helper — prefer `_next_working_day_cal` which additionally
+    respects FactoryCalendar holidays. Kept for call sites where we
+    don't have a db/factory_id in scope (e.g. duration arithmetic).
+    """
     # In Bali/Java production, Saturday is a workday; Sunday is off.
     if target.weekday() == 6:  # Sunday
         return target + timedelta(days=1)
     return target
+
+
+def _next_working_day_cal(
+    db: Session,
+    factory_id: UUID,
+    target: date,
+) -> date:
+    """Advance `target` to the next working day for this factory.
+
+    Rules:
+      1. Sunday → move to Monday.
+      2. `FactoryCalendar.is_working_day = False` → move forward until
+         the next working entry (covers national/balinese holidays and
+         manual overrides stored by admins).
+
+    Loops at most 60 days forward as a safety bound. If FactoryCalendar
+    table isn't accessible (initial bootstrap), degrades gracefully to
+    `_skip_weekends` behaviour.
+    """
+    d = target
+    try:
+        from api.models import FactoryCalendar
+        for _ in range(60):
+            if d.weekday() == 6:  # Sunday
+                d = d + timedelta(days=1)
+                continue
+            nested = db.begin_nested()
+            try:
+                row = (
+                    db.query(FactoryCalendar.is_working_day)
+                    .filter(
+                        FactoryCalendar.factory_id == factory_id,
+                        FactoryCalendar.date == d,
+                    )
+                    .first()
+                )
+                nested.commit()
+            except Exception:
+                nested.rollback()
+                row = None
+            if row is not None and row[0] is False:
+                d = d + timedelta(days=1)
+                continue
+            return d
+    except Exception:
+        pass
+    return _skip_weekends(target)
+
+
+def _get_stage_daily_capacity(
+    db: Session,
+    factory_id: UUID,
+    stage: str,
+    position: "Optional[OrderPosition]" = None,
+) -> "tuple[float, str, bool]":
+    """Return per-day processing capacity for a stage, typology-aware.
+
+    Returns:
+        (daily_cap, unit, is_fixed_duration)
+
+        daily_cap:  float — pcs/day or sqm/day that a full brigade
+                    (with dynamic ShiftAssignment adjustment) can process.
+        unit:       'pcs' or 'sqm'
+        is_fixed_duration:  True for drying/cooling where the rate is
+                    actually "hours needed, block everyone" and capacity
+                    has no meaning per day. Caller should treat such
+                    stages as blockers that occupy `duration_days`
+                    consecutive working days without consuming any
+                    shared daily cap pool.
+
+    Returns (0.0, 'pcs', False) when no StageTypologySpeed row matches —
+    caller must fall back to legacy duration-based scheduling.
+
+    Formula for capacity mode (per §4 BUSINESS_LOGIC_FULL):
+        daily_cap = effective_rate_per_hour × shift_duration_hours × shift_count
+        where effective_rate_per_hour includes brigade_size multiplier when
+        rate_basis == 'per_person'.
+    """
+    if position is None:
+        return (0.0, 'pcs', False)
+    try:
+        from api.models import StageTypologySpeed
+        from business.services.typology_matcher import find_matching_typology
+
+        typology = find_matching_typology(db, position)
+        if not typology:
+            return (0.0, 'pcs', False)
+        speed = (
+            db.query(StageTypologySpeed)
+            .filter(
+                StageTypologySpeed.typology_id == typology.id,
+                StageTypologySpeed.stage == stage,
+            )
+            .first()
+        )
+        if not speed or not speed.productivity_rate:
+            return (0.0, 'pcs', False)
+
+        rate_basis = speed.rate_basis or 'per_person'
+        unit = speed.rate_unit or 'pcs'
+        if rate_basis == 'fixed_duration':
+            return (0.0, unit, True)
+
+        rate = float(speed.productivity_rate)
+        if rate <= 0:
+            return (0.0, unit, False)
+
+        time_unit = speed.time_unit or 'hour'
+        if time_unit == 'min':
+            rate_per_hour = rate * 60.0
+        elif time_unit == 'shift':
+            rate_per_hour = rate / float(speed.shift_duration_hours or 8.0)
+        else:
+            rate_per_hour = rate
+
+        brigade = _get_effective_brigade_size(
+            db, factory_id, stage, speed.brigade_size or 1,
+        )
+        if rate_basis == 'per_person':
+            effective_rate = rate_per_hour * max(brigade, 1)
+        else:  # per_brigade
+            effective_rate = rate_per_hour
+
+        hours_per_day = (
+            float(speed.shift_duration_hours or 8.0)
+            * (speed.shift_count or 2)
+        )
+        daily_cap = effective_rate * hours_per_day
+        return (float(daily_cap), unit, False)
+    except Exception as e:
+        logger.debug(
+            "_get_stage_daily_capacity failed for stage=%s: %s", stage, e,
+        )
+        return (0.0, 'pcs', False)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -1970,7 +2120,8 @@ def schedule_position(
         _left_shift_earliest = _material_ready_date
     if _blocking_ready_date and _blocking_ready_date > _left_shift_earliest:
         _left_shift_earliest = _blocking_ready_date
-    _left_shift_earliest = _skip_weekends(_left_shift_earliest)
+    # Respect FactoryCalendar holidays + Sunday
+    _left_shift_earliest = _next_working_day_cal(db, _fid, _left_shift_earliest)
 
     if planned_glazing > _left_shift_earliest:
         _old_glazing = planned_glazing
@@ -1996,37 +2147,14 @@ def schedule_position(
         )
 
     # Guard: planned_glazing must be >= today (and >= min_start_date for FIFO).
-    # When overdue, find the earliest day with available capacity instead of
-    # blindly stuffing everything onto today.
+    # When overdue, find the earliest day with available GLAZING BRIGADE
+    # capacity (not kiln — that's a separate constraint). This is the first
+    # line of the forward-pack flow: left-shift to today, then the per-stage
+    # rate limit below handles further right-shifting if today is full.
     _earliest = max(today, min_start_date) if min_start_date else today
+    _earliest = _next_working_day_cal(db, _fid, _earliest)
     if planned_glazing < _earliest:
-        # Get daily capacity (kiln throughput = the constraint)
-        _kiln_cap = _get_factory_daily_kiln_cap(db, _fid)
-
-        # Find first day from _earliest with room
         planned_glazing = _earliest
-        for _shift in range(30):
-            candidate = _skip_weekends(_earliest + timedelta(days=_shift))
-            existing_load = float(
-                db.query(sa_func.coalesce(
-                    sa_func.sum(OrderPosition.glazeable_sqm * OrderPosition.quantity), 0
-                )).filter(
-                    OrderPosition.factory_id == _fid,
-                    OrderPosition.planned_glazing_date == candidate,
-                    OrderPosition.status != PositionStatus.CANCELLED.value,
-                    OrderPosition.id != position.id,
-                ).scalar() or 0
-            )
-            if existing_load + _pos_sqm <= _kiln_cap * 1.1:
-                planned_glazing = candidate
-                break
-            # Also accept an empty day even if single position exceeds cap
-            if existing_load == 0 and _shift > 0:
-                planned_glazing = candidate
-                break
-        else:
-            planned_glazing = _skip_weekends(today + timedelta(days=30))
-
         planned_kiln = _skip_weekends(
             planned_glazing + timedelta(days=pre_kiln_total + _pre_buffer)
         )
@@ -2040,10 +2168,9 @@ def schedule_position(
             planned_sorting + timedelta(days=sorting_days + packing_days)
         )
         logger.info(
-            "OVERDUE_SPREAD | position=%s deadline=%s | "
-            "glazing=%s (load=%.1f/%.1f sqm) completion=%s",
-            position.id, deadline, planned_glazing,
-            existing_load + _pos_sqm, _kiln_cap, planned_completion,
+            "OVERDUE_PULL_TO_TODAY | position=%s deadline=%s | "
+            "glazing=%s completion=%s (stage-cap rate limit will refine)",
+            position.id, deadline, planned_glazing, planned_completion,
         )
 
     # Find best kiln with capacity-aware date adjustment
@@ -2066,59 +2193,86 @@ def schedule_position(
     else:
         position.estimated_kiln_id = None
 
-    # ── TOC Glazing Rate Limit ────────────────────────────────
-    # Don't glaze more per day than kilns can fire.
-    # Kiln = drum (constraint), glazing must match its rhythm.
-    # Shift FORWARD from planned_glazing until a day with capacity is found.
-    if position.estimated_kiln_id and _pos_sqm > 0:
-        try:
-            from business.services.typology_matcher import get_zone_capacity, classify_loading_zone
-            kiln_obj = db.query(Resource).filter(Resource.id == position.estimated_kiln_id).first()
-            if kiln_obj:
-                zone = classify_loading_zone(position)
-                daily_kiln_cap = get_zone_capacity(db, position, kiln_obj, zone)
-                if daily_kiln_cap > 0:
-                    for shift_fwd in range(21):  # try up to 21 days forward
-                        candidate_glaze = _skip_weekends(planned_glazing + timedelta(days=shift_fwd))
-                        glaze_day_load = float(
-                            db.query(sa_func.coalesce(
-                                sa_func.sum(OrderPosition.glazeable_sqm * OrderPosition.quantity), 0
-                            ))
-                            .filter(
-                                OrderPosition.factory_id == position.factory_id,
-                                OrderPosition.planned_glazing_date == candidate_glaze,
-                                OrderPosition.status != PositionStatus.CANCELLED.value,
-                                OrderPosition.id != position.id,
-                            )
-                            .scalar() or 0
-                        )
-                        if glaze_day_load + _pos_sqm <= daily_kiln_cap * 1.1:
-                            if shift_fwd > 0:
-                                logger.info(
-                                    "GLAZING_RATE_SHIFT | position=%s | %s → %s (+%dd) | "
-                                    "day_load=%.2f + pos=%.2f vs cap=%.2f",
-                                    position.id, planned_glazing, candidate_glaze,
-                                    shift_fwd, glaze_day_load, _pos_sqm, daily_kiln_cap,
-                                )
-                            planned_glazing = candidate_glaze
-                            # Recalculate downstream dates from new glazing date
-                            planned_kiln = _skip_weekends(
-                                planned_glazing + timedelta(
-                                    days=pre_kiln_total + _pre_buffer
-                                )
-                            )
-                            planned_sorting = _skip_weekends(
-                                planned_kiln + timedelta(
-                                    days=firing_days + kiln_cool_initial_days
-                                    + kiln_unloading_days + tile_cooling_days + _post_buffer
-                                )
-                            )
-                            planned_completion = _skip_weekends(
-                                planned_sorting + timedelta(days=sorting_days + packing_days)
-                            )
-                            break
-        except Exception as e:
-            logger.debug("Glazing rate limit check skipped: %s", e)
+    # ── Per-Stage Glazing Capacity Rate Limit ────────────────────
+    # Forward/left-shift rule (BUSINESS_LOGIC_FULL §4): never stuff
+    # more glazing onto a single day than the brigade can physically do.
+    #
+    # Daily glazing cap is computed from StageTypologySpeed:
+    #   cap = brigade × shifts × hours × productivity_rate
+    # (NOT kiln m²/firing — that's the separate drum constraint handled
+    # by find_best_kiln_and_date.)
+    #
+    # Walk forward day-by-day from planned_glazing, sum up already-scheduled
+    # quantity on each candidate day, pick the first day with room. Skips
+    # Sunday + FactoryCalendar holidays via _next_working_day_cal.
+    _glaze_cap, _glaze_unit, _glaze_fixed = _get_stage_daily_capacity(
+        db, _fid, 'glazing', position,
+    )
+    if _glaze_cap > 0 and not _glaze_fixed:
+        # Value this position contributes to the day pool
+        _pos_load_value = _pos_sqm if _glaze_unit == 'sqm' else float(_pos_pcs or 0)
+        for shift_fwd in range(45):
+            candidate_glaze = _next_working_day_cal(
+                db, _fid, planned_glazing + timedelta(days=shift_fwd),
+            )
+            if _glaze_unit == 'sqm':
+                glaze_day_load = float(
+                    db.query(sa_func.coalesce(
+                        sa_func.sum(OrderPosition.glazeable_sqm * OrderPosition.quantity), 0
+                    ))
+                    .filter(
+                        OrderPosition.factory_id == position.factory_id,
+                        OrderPosition.planned_glazing_date == candidate_glaze,
+                        OrderPosition.status != PositionStatus.CANCELLED.value,
+                        OrderPosition.id != position.id,
+                    )
+                    .scalar() or 0
+                )
+            else:  # pcs
+                glaze_day_load = float(
+                    db.query(sa_func.coalesce(
+                        sa_func.sum(OrderPosition.quantity), 0
+                    ))
+                    .filter(
+                        OrderPosition.factory_id == position.factory_id,
+                        OrderPosition.planned_glazing_date == candidate_glaze,
+                        OrderPosition.status != PositionStatus.CANCELLED.value,
+                        OrderPosition.id != position.id,
+                    )
+                    .scalar() or 0
+                )
+            if glaze_day_load + _pos_load_value <= _glaze_cap * 1.05:
+                if shift_fwd > 0:
+                    logger.info(
+                        "GLAZING_CAP_SHIFT | position=%s | %s → %s (+%dd) | "
+                        "day_load=%.2f + pos=%.2f vs brigade_cap=%.2f %s",
+                        position.id, planned_glazing, candidate_glaze,
+                        shift_fwd, glaze_day_load, _pos_load_value,
+                        _glaze_cap, _glaze_unit,
+                    )
+                planned_glazing = candidate_glaze
+                # Recalculate downstream dates from new glazing date
+                planned_kiln = _skip_weekends(
+                    planned_glazing + timedelta(
+                        days=pre_kiln_total + _pre_buffer
+                    )
+                )
+                planned_sorting = _skip_weekends(
+                    planned_kiln + timedelta(
+                        days=firing_days + kiln_cool_initial_days
+                        + kiln_unloading_days + tile_cooling_days + _post_buffer
+                    )
+                )
+                planned_completion = _skip_weekends(
+                    planned_sorting + timedelta(days=sorting_days + packing_days)
+                )
+                break
+        else:
+            logger.warning(
+                "GLAZING_CAP_NO_SLOT | position=%s | could not find free "
+                "glazing day within 45 days from %s (cap=%.2f %s)",
+                position.id, planned_glazing, _glaze_cap, _glaze_unit,
+            )
 
     # Assign dates
     position.planned_glazing_date = planned_glazing
@@ -2546,10 +2700,15 @@ def reschedule_factory(db: Session, factory_id: UUID) -> int:
         )
         if all_kiln_dates:
             dates = [row[0] for row in all_kiln_dates]
+            # allow_deferral=False — do NOT shift planned_kiln_date forward
+            # to accumulate batch fill. Forward/left-shift scheduling
+            # (BUSINESS_LOGIC_FULL §4) is the source of truth here; a
+            # nightly batch-formation pass will still consolidate later.
             plan_kiln_batches(
                 db, factory_id,
                 date_from=min(dates),
                 date_to=max(dates),
+                allow_deferral=False,
             )
     except Exception as e:
         logger.warning(
@@ -2703,13 +2862,14 @@ def plan_kiln_batches(
     date_from: date,
     date_to: date,
     force_partial: bool = False,
+    allow_deferral: bool = True,
 ) -> list[dict]:
     """
     Group scheduled positions into optimal kiln batches.
 
-    This is the bridge between the backward scheduler (which assigns
-    planned_kiln_date per position) and batch_formation (which creates
-    Batch records with kiln assignments and loading plans).
+    This is the bridge between the forward/left-shift scheduler (which
+    assigns planned_kiln_date per position) and batch_formation (which
+    creates Batch records with kiln assignments and loading plans).
 
     Algorithm:
     1. Get all positions with planned_kiln_date in [date_from, date_to]
@@ -2717,11 +2877,18 @@ def plan_kiln_batches(
     2. Group by temperature compatibility (reuses firing_profiles logic).
     3. For each temperature group on each date:
        a. Calculate total area vs best kiln capacity = fill %.
-       b. If fill < MIN_KILN_FILL_PCT and no deadline pressure:
+       b. If fill < MIN_KILN_FILL_PCT and no deadline pressure AND
+          allow_deferral is True:
           - Shift those positions' planned_kiln_date forward by 1 day
-            (max MAX_BATCH_WAIT_DAYS beyond original date).
-          - They'll be picked up in the next batch planning cycle.
-       c. If fill >= MIN_KILN_FILL_PCT OR deadline pressure OR force_partial:
+            (max MAX_BATCH_WAIT_DAYS beyond original date). The whole
+            downstream pipeline (sorting/packing/completion) cascades
+            via _shift_downstream_dates.
+          - Callers running full forward-pack rescheduling MUST pass
+            allow_deferral=False — otherwise BATCH_DEFER cancels the
+            left-shift done by schedule_position (re-creates the bug
+            we tracked down in commit 4c3059f).
+       c. If fill >= MIN_KILN_FILL_PCT OR deadline pressure OR
+          force_partial OR (not allow_deferral):
           - Delegate to suggest_or_create_batches() for actual batch creation.
     4. Return batch plan summary.
 
@@ -2731,6 +2898,9 @@ def plan_kiln_batches(
         date_from: Start of planning window (inclusive)
         date_to: End of planning window (inclusive)
         force_partial: If True, fire partial kilns regardless of fill %
+        allow_deferral: If False, never shift planned_kiln_date forward
+            to accumulate fill. Forward-pack rescheduling sets this to
+            False to lock in the left-shifted schedule.
 
     Returns:
         List of batch detail dicts (from batch_formation).
@@ -2818,6 +2988,7 @@ def plan_kiln_batches(
                 force_partial
                 or fill_pct >= MIN_KILN_FILL_PCT
                 or has_deadline_pressure
+                or not allow_deferral
             )
 
             if not should_fire:

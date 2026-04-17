@@ -1889,6 +1889,61 @@ async def gamification_new_season():
         db.close()
 
 
+async def hourly_reschedule_job():
+    """Every hour: full schedule recalculation for each factory."""
+    logger.info("Running hourly schedule recalculation")
+    db = _get_db_session()
+    try:
+        from business.services.production_scheduler import reschedule_factory
+        for fid in _get_all_factory_ids(db):
+            try:
+                reschedule_factory(db, fid)
+                db.commit()
+                logger.info("HOURLY_RESCHEDULE | factory=%s", fid)
+            except Exception as e:
+                logger.error("Hourly reschedule failed for %s: %s", fid, e)
+                db.rollback()
+    finally:
+        db.close()
+
+
+async def hourly_stone_recheck_job():
+    """Every hour: re-check stone stock availability, create/update tasks."""
+    logger.info("Running hourly stone stock recheck")
+    db = _get_db_session()
+    try:
+        from business.services.stone_reservation import _check_stone_stock_and_create_task
+        from api.models import StoneReservation, OrderPosition
+        checked = 0
+        for fid in _get_all_factory_ids(db):
+            try:
+                reservations = db.query(StoneReservation).filter(
+                    StoneReservation.status == 'active',
+                    StoneReservation.factory_id == fid,
+                ).all()
+                for res in reservations:
+                    position = db.query(OrderPosition).filter(
+                        OrderPosition.id == res.position_id,
+                    ).first()
+                    if not position:
+                        continue
+                    _check_stone_stock_and_create_task(
+                        db, position, str(res.factory_id),
+                        float(res.reserved_sqm),
+                        float(res.stone_defect_pct or 0),
+                        res.reserved_qty,
+                    )
+                    checked += 1
+                db.commit()
+            except Exception as e:
+                logger.error("Stone recheck failed for factory %s: %s", fid, e)
+                db.rollback()
+        if checked:
+            logger.info("HOURLY_STONE_RECHECK | checked=%d reservations", checked)
+    finally:
+        db.close()
+
+
 async def recheck_blocked_materials_job():
     """Periodic re-check: unblock positions where materials are now sufficient."""
     logger.info("Running blocked positions recheck")
@@ -2180,6 +2235,12 @@ def setup_scheduler():
 
     # Every 4 hours — recheck blocked positions (unblock if materials available)
     scheduler.add_job(recheck_blocked_materials_job, CronTrigger(hour="2,6,10,14,18,22", minute=30), id="recheck_blocked_materials")
+
+    # Every hour :15 — full schedule recalculation per factory
+    scheduler.add_job(hourly_reschedule_job, CronTrigger(minute=15), id="hourly_reschedule")
+
+    # Every hour :45 — stone stock recheck (catches mid-day material receives)
+    scheduler.add_job(hourly_stone_recheck_job, CronTrigger(minute=45), id="hourly_stone_recheck")
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

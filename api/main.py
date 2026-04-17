@@ -1981,6 +1981,10 @@ async def lifespan(app: FastAPI):
     from api.audit import init_audit_listeners
     init_audit_listeners()
 
+    # Register auto-reschedule trigger: position.status change → reschedule_factory
+    from api.schedule_triggers import register_schedule_triggers
+    register_schedule_triggers()
+
     # Start background scheduler
     from api.scheduler import setup_scheduler
     sched = setup_scheduler()

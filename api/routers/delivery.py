@@ -1,4 +1,12 @@
-"""Delivery photo processing endpoint — OCR + smart material matching."""
+"""Delivery photo processing endpoint — OCR + smart material matching.
+
+See ``docs/BUSINESS_LOGIC_FULL.md §29`` for the canonical naming/typology rules
+applied here. Two endpoints:
+
+  - ``POST /delivery/process-photo`` — OCR + match against catalog.
+  - ``POST /delivery/create-material-from-scan`` — one-click material+size
+    creation from the parsed_* fields returned by /process-photo.
+"""
 
 import hmac as hmac_mod
 import logging
@@ -6,11 +14,13 @@ import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
-from api.models import Material, Size
+from api.models import Material, MaterialStock, Size
+from business.services import material_naming as nm
 
 logger = logging.getLogger("moonjar.delivery")
 
@@ -114,6 +124,7 @@ async def process_delivery_photo(
         {
             "id": str(m.id),
             "name": m.name,
+            "short_name": m.short_name,
             "material_type": m.material_type,
             "unit": m.unit,
             "product_subtype": m.product_subtype,
@@ -130,6 +141,9 @@ async def process_delivery_photo(
             "name": s.name,
             "width_mm": s.width_mm,
             "height_mm": s.height_mm,
+            "thickness_mm": s.thickness_mm,
+            "diameter_mm": s.diameter_mm,
+            "shape": s.shape,
         }
         for s in sizes
     ]
@@ -181,3 +195,184 @@ async def process_delivery_photo(
         "confidence": result.get("confidence"),
         "formatted_text": formatted_text,
     }
+
+
+# ──────────────────────────────────────────────────────────────────
+# POST /delivery/create-material-from-scan
+# ──────────────────────────────────────────────────────────────────
+
+
+class CreateMaterialFromScanInput(BaseModel):
+    """Payload to create a Material+Size in one shot from a delivery scan row.
+
+    The frontend builds this from parsed_* fields returned by /process-photo,
+    optionally overridden by user edits (typology choice, size override, etc).
+    """
+    name: str = Field(..., max_length=300, description="Long delivery-style name as it appeared")
+    short_name: Optional[str] = Field(None, max_length=100)
+    material_type: str = Field(..., description="stone | pigment | frit | ...")
+    product_subtype: Optional[str] = Field(None, description="tiles|3d|sink|countertop|freeform")
+    unit: str = Field("pcs")
+    supplier_id: Optional[str] = None
+    factory_id: str = Field(..., description="Factory the initial stock row will be created in")
+
+    # Size — either size_id (existing) or size_dims (create-or-find)
+    size_id: Optional[str] = None
+    width_mm: Optional[int] = None
+    height_mm: Optional[int] = None
+    thickness_mm: Optional[int] = None
+    diameter_mm: Optional[int] = None
+    shape: Optional[str] = Field("rectangle", description="rectangle|round|triangle|octagon|freeform")
+
+
+@router.post("/create-material-from-scan")
+async def create_material_from_scan(
+    payload: CreateMaterialFromScanInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(_get_user_or_internal_key),
+):
+    """Create a Material (and Size if needed) from parsed delivery-scan data.
+
+    Idempotent on `short_name` for stone — if a stone material with the same
+    canonical short_name already exists, returns it without creating a duplicate.
+    """
+    # 1. Validate unit against material_type rules (§29 hard validation)
+    if not nm.is_valid_unit_for_type(payload.material_type, payload.unit):
+        raise HTTPException(
+            422,
+            f"Unit {payload.unit!r} is not allowed for material_type {payload.material_type!r}. "
+            f"Allowed: {nm.allowed_units_for_type(payload.material_type)}",
+        )
+
+    # 2. For stone — derive canonical short_name if not provided
+    short_name = payload.short_name
+    if payload.material_type == "stone" and not short_name:
+        short_name = nm.build_short_name_from_raw(payload.name)
+    if not short_name:
+        short_name = payload.name[:100]
+
+    # 3. Idempotency on short_name for stone
+    if payload.material_type == "stone":
+        existing = (
+            db.query(Material)
+            .filter(Material.material_type == "stone", Material.short_name == short_name)
+            .first()
+        )
+        if existing:
+            logger.info(
+                "create-material-from-scan: reused existing material id=%s short_name=%r",
+                existing.id, short_name,
+            )
+            return {
+                "material_id": str(existing.id),
+                "material_code": existing.material_code,
+                "name": existing.name,
+                "short_name": existing.short_name,
+                "created": False,
+            }
+
+    # 4. Resolve or create Size
+    size_id = payload.size_id
+    if not size_id:
+        size_id = _resolve_or_create_size(db, payload)
+
+    # 5. Create Material
+    material = Material(
+        name=payload.name[:300],
+        short_name=short_name[:100] if short_name else None,
+        material_type=payload.material_type,
+        product_subtype=payload.product_subtype,
+        unit=payload.unit,
+        supplier_id=payload.supplier_id,
+        size_id=size_id,
+    )
+    db.add(material)
+    db.flush()  # assign id
+
+    # 6. Create initial empty MaterialStock row for the factory so the receipt has somewhere to land
+    stock = MaterialStock(
+        material_id=material.id,
+        factory_id=payload.factory_id,
+        balance=0,
+        min_balance=0,
+    )
+    db.add(stock)
+    db.commit()
+
+    logger.info(
+        "create-material-from-scan: created id=%s short_name=%r type=%s",
+        material.id, material.short_name, material.material_type,
+    )
+
+    return {
+        "material_id": str(material.id),
+        "material_code": material.material_code,
+        "name": material.name,
+        "short_name": material.short_name,
+        "size_id": str(size_id) if size_id else None,
+        "created": True,
+    }
+
+
+def _resolve_or_create_size(db: Session, payload: CreateMaterialFromScanInput) -> Optional[str]:
+    """Find an existing Size row matching the dimensions, else create one.
+
+    Returns size_id or None when payload has no dimensions (e.g. freeform).
+    """
+    has_rect = payload.width_mm and payload.height_mm
+    has_round = payload.diameter_mm
+
+    if not has_rect and not has_round:
+        return None
+
+    if has_round:
+        existing = (
+            db.query(Size)
+            .filter(Size.diameter_mm == payload.diameter_mm)
+            .filter(Size.shape == "round")
+            .first()
+        )
+        if existing and (
+            not payload.thickness_mm or existing.thickness_mm == payload.thickness_mm
+        ):
+            return str(existing.id)
+        d_cm = payload.diameter_mm / 10
+        t_str = f"×{payload.thickness_mm / 10:g}" if payload.thickness_mm else ""
+        size = Size(
+            name=f"Ø{d_cm:g}{t_str}"[:50],
+            width_mm=payload.diameter_mm,
+            height_mm=payload.diameter_mm,
+            thickness_mm=payload.thickness_mm,
+            diameter_mm=payload.diameter_mm,
+            shape="round",
+            is_custom=True,
+        )
+    else:
+        # Orientation-insensitive lookup
+        existing = (
+            db.query(Size)
+            .filter(
+                ((Size.width_mm == payload.width_mm) & (Size.height_mm == payload.height_mm))
+                | ((Size.width_mm == payload.height_mm) & (Size.height_mm == payload.width_mm))
+            )
+            .first()
+        )
+        if existing and (
+            not payload.thickness_mm or existing.thickness_mm == payload.thickness_mm
+        ):
+            return str(existing.id)
+        w_cm = payload.width_mm / 10
+        h_cm = payload.height_mm / 10
+        t_str = f"×{payload.thickness_mm / 10:g}" if payload.thickness_mm else ""
+        size = Size(
+            name=f"{w_cm:g}×{h_cm:g}{t_str}"[:50],
+            width_mm=payload.width_mm,
+            height_mm=payload.height_mm,
+            thickness_mm=payload.thickness_mm,
+            shape=payload.shape or "rectangle",
+            is_custom=True,
+        )
+
+    db.add(size)
+    db.flush()
+    return str(size.id)

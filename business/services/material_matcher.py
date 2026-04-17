@@ -344,11 +344,16 @@ def normalize_size(text: str) -> str:
     Convert various size formats to standard NxN format.
 
     Examples:
-        "10/10"   → "10x10"
-        "5 x 20"  → "5x20"
-        "10 X 10" → "10x10"
-        "5,5/10"  → "5.5x10"
+        "10/10"        → "10x10"
+        "5 x 20"       → "5x20"
+        "10 X 10"      → "10x10"
+        "5,5/10"       → "5.5x10"
+        "5×20×1.2"     → "5x20x1.2"  (Unicode × → ASCII x)
     """
+    # First pass: convert all unicode × (U+00D7) to ASCII x so token-level
+    # comparison works ("Lavastone 5×20×1.2" vs "Lavastone 5x20x1.2").
+    text = text.replace("×", "x")
+
     def _replace(m: re.Match) -> str:
         a = m.group(1).replace(",", ".")
         b = m.group(2).replace(",", ".")
@@ -507,13 +512,15 @@ async def find_best_match(
     supplier_type = get_supplier_material_type(supplier_name)
 
     # ── Route to smart stone matcher if supplier is stone ────
-    if supplier_type == "stone" and db_sizes is not None:
+    # Also routes when db_sizes wasn't provided — we just match on short_name
+    # in that case and skip size-id resolution.
+    if supplier_type == "stone":
         return await smart_match_stone_item(
             delivery_name=delivery_name,
             delivery_qty=delivery_qty,
             delivery_unit=delivery_unit,
             db_materials=db_materials,
-            db_sizes=db_sizes,
+            db_sizes=db_sizes or [],
             supplier_type=supplier_type,
         )
 
@@ -524,14 +531,19 @@ async def find_best_match(
 
     # ── Filter DB materials by supplier type ──────────────────
     # If we KNOW the supplier delivers stone → only match against stone materials
-    # This prevents "Grey Lava" matching "Dark Grey G9484" (a pigment!)
+    # This prevents "Grey Lava" matching "Dark Grey G9484" (a pigment!).
+    # Hard filter: when supplier_type is known, NEVER return materials of a
+    # different type — even if the type-filtered set is empty (then we fall
+    # through to "create new" rather than misclassifying).
     filtered_materials = db_materials
     if supplier_type:
-        type_filtered = [m for m in db_materials if m.get("material_type") == supplier_type]
-        if type_filtered:
-            filtered_materials = type_filtered
-            logger.debug("Supplier type=%s → filtered to %d materials (from %d)",
-                        supplier_type, len(type_filtered), len(db_materials))
+        filtered_materials = [
+            m for m in db_materials if m.get("material_type") == supplier_type
+        ]
+        logger.debug(
+            "Supplier type=%s → hard-filtered to %d materials (from %d)",
+            supplier_type, len(filtered_materials), len(db_materials),
+        )
 
     # Score filtered DB materials
     scored: list[tuple[float, dict]] = []
@@ -625,7 +637,9 @@ async def find_best_match(
 
     # ── LLM fallback for ambiguous matches (score 0.2–threshold) ──
     # When fuzzy matching is uncertain, ask AI to decide among top candidates.
-    if candidates and best_score >= 0.2:
+    # Skip when supplier_type is known — we already hard-filtered above and the
+    # canonical short_name path (smart_match_stone_item) handles stone exhaustively.
+    if candidates and best_score >= 0.2 and not supplier_type:
         try:
             from business.services.telegram_ai import ai_match_material
             ai_result = await ai_match_material(
@@ -1009,197 +1023,151 @@ async def smart_match_stone_item(
     supplier_type: str | None = None,
 ) -> dict:
     """
-    Smart matching for STONE materials with size DB lookup.
+    Smart matching for STONE materials using canonical short_name lookup.
 
-    Flow:
-    1. Parse delivery name → color, base_material, size, thickness
-    2. Determine product type from thickness (3d/tiles/sink/countertop)
-    3. Look up size in DB (convert cm → mm)
-    4. Build standard name: "{base_material} {product_type} {size_name}"
-    5. Match against existing materials
+    See ``docs/BUSINESS_LOGIC_FULL.md §29``. The algorithm is:
 
-    Returns dict compatible with find_best_match output, plus:
-        - suggested_size_name: str (from DB or proposed new)
-        - suggested_size_exists: bool
-        - suggested_product_type: str (tiles/3d/sink/countertop)
-        - needs_user_choice: bool (ambiguous size → user should pick)
-        - parsed_color: str | None
-        - parsed_base_material: str
+      1. Parse delivery_name via ``material_naming.parse_stone_delivery_name``.
+      2. Build canonical ``short_name`` ("Lava Stone {size}").
+      3. Look up matching ``Material`` by exact ``short_name`` (filtered to
+         ``material_type='stone'``). All color variants of the same size collapse
+         to one material — that is the user-stated rule.
+      4. Resolve the size in the DB ``Size`` table by mm dimensions.
+      5. Return matched / suggested-new with parsed_* fields for the UI.
+
+    No fuzzy scoring. The canonical short_name IS the match key. If callers
+    need fuzzy behaviour for non-stone materials they should not route here.
     """
+    from business.services import material_naming as nm
+
     translated = translate_material_name(delivery_name)
     translated_unit = INDO_TO_EN.get(delivery_unit.lower().strip(), delivery_unit)
 
-    # ── Step 1: Parse delivery name ──────────────────────────
-    parsed = _parse_stone_delivery_name(delivery_name)
-    color = parsed["color"]
-    base_material = parsed["base_material"]
-    size_raw = parsed["size_raw"]
-    thickness_raw = parsed["thickness_raw"]
-    is_round = parsed["is_round"]
-    diameter = parsed["diameter"]
+    # ── Step 1: Parse delivery name via the naming service ────
+    parsed_obj = nm.parse_stone_delivery_name(delivery_name)
+    color = parsed_obj.color
+    base_material = parsed_obj.base
+    is_round = parsed_obj.is_round
+    diameter_cm = parsed_obj.diameter_mm / 10 if parsed_obj.diameter_mm else None
+    thickness_raw = parsed_obj.thickness_raw
+    size_raw = None
+    if parsed_obj.width_mm and parsed_obj.height_mm:
+        size_raw = (
+            f"{parsed_obj.width_mm / 10:g}x{parsed_obj.height_mm / 10:g}"
+        )
+
+    # Canonical key — used for both lookup and suggestion display
+    canonical_short_name = nm.build_short_name(parsed_obj)
+    product_type = parsed_obj.typology
+    needs_user_choice = parsed_obj.needs_typology_choice
+    diameter = diameter_cm  # alias for code below that uses cm-scale values
 
     logger.debug(
         "smart_match_stone: delivery=%r, parsed=%s",
-        delivery_name, parsed,
+        delivery_name, parsed_obj,
     )
 
-    # ── Step 2: Determine product type ───────────────────────
-    product_type, needs_user_choice = _determine_product_type(
-        thickness_raw, size_raw, is_round, diameter,
-    )
-
-    # ── Step 3: Look up size in DB ───────────────────────────
-    suggested_size_name = None
+    # ── Step 2: Resolve size in DB by mm dimensions ──────────
+    suggested_size_name: str | None = None
     suggested_size_exists = False
     matched_size_id = None
 
-    if is_round and diameter is not None:
-        # Round: search by name pattern "Ø{diameter}"
-        dia_str = f"Ø{int(diameter)}" if diameter == int(diameter) else f"Ø{diameter}"
+    if is_round and parsed_obj.diameter_mm is not None:
         for s in db_sizes:
-            if dia_str.lower() in s["name"].lower():
+            if s.get("diameter_mm") == parsed_obj.diameter_mm:
                 suggested_size_name = s["name"]
                 suggested_size_exists = True
                 matched_size_id = s["id"]
                 break
         if not suggested_size_name:
-            suggested_size_name = dia_str
-    elif size_raw:
-        # Rectangular: convert cm → mm
-        sm = re.match(r'(\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)', size_raw)
-        if sm:
-            w_cm, h_cm = float(sm.group(1)), float(sm.group(2))
-            w_mm = int(w_cm * 10)
-            h_mm = int(h_cm * 10)
+            d = parsed_obj.diameter_mm / 10
+            suggested_size_name = f"Ø{d:g}"
+    elif parsed_obj.width_mm and parsed_obj.height_mm:
+        w_mm, h_mm = parsed_obj.width_mm, parsed_obj.height_mm
+        for s in db_sizes:
+            sw = s.get("width_mm", 0)
+            sh = s.get("height_mm", 0)
+            if (sw == w_mm and sh == h_mm) or (sw == h_mm and sh == w_mm):
+                # If thickness is also recorded, prefer an exact thickness match
+                if parsed_obj.thickness_mm and s.get("thickness_mm"):
+                    if int(s["thickness_mm"]) != parsed_obj.thickness_mm:
+                        continue
+                suggested_size_name = s["name"]
+                suggested_size_exists = True
+                matched_size_id = s["id"]
+                break
+        if not suggested_size_name:
+            suggested_size_name = nm.build_size_label(parsed_obj)
 
-            # Search DB: match both orientations
-            for s in db_sizes:
-                sw = s.get("width_mm", 0)
-                sh = s.get("height_mm", 0)
-                if (sw == w_mm and sh == h_mm) or (sw == h_mm and sh == w_mm):
-                    suggested_size_name = s["name"]
-                    suggested_size_exists = True
-                    matched_size_id = s["id"]
-                    break
-
-            if not suggested_size_name:
-                # Build size name from raw
-                suggested_size_name = size_raw
-
-    # ── Step 4: Build standard name ──────────────────────────
-    type_label = ""
-    if product_type == "3d":
-        type_label = "3D"
-    elif product_type == "tiles":
-        type_label = "Tiles"
-    elif product_type == "sink":
-        type_label = "Sink"
-    elif product_type == "countertop":
-        type_label = "Countertop"
-
-    name_parts = [base_material]
-    if type_label:
-        name_parts.append(type_label)
-    if suggested_size_name:
-        name_parts.append(suggested_size_name)
-    standard_name = " ".join(name_parts)
-
-    logger.debug(
-        "smart_match_stone: standard_name=%r, product_type=%s, size=%s (exists=%s)",
-        standard_name, product_type, suggested_size_name, suggested_size_exists,
-    )
-
-    # ── Step 5: Match against existing materials ─────────────
-    # Filter to stone materials only
+    # ── Step 3: Direct lookup by canonical short_name ────────
+    # All color variants of the same size collapse here — that is the rule
+    # documented in §29. No fuzzy scoring on the stone path.
     stone_materials = [m for m in db_materials if m.get("material_type") == "stone"]
-    if not stone_materials:
-        stone_materials = db_materials
+    matched_material = None
+    same_base_candidates: list[dict] = []
 
-    best_match = None
-    best_score = 0.0
-    base_material_matches: list[dict] = []  # Same base, different size
-
-    base_lower = base_material.lower()
-    standard_tokens = tokenize_for_matching(standard_name)
-
+    target = canonical_short_name.lower().strip()
     for mat in stone_materials:
-        db_tokens = tokenize_for_matching(mat["name"])
-        score = calculate_match_score(standard_tokens, db_tokens)
-
-        # Check if same base material
-        mat_lower = mat["name"].lower()
-        has_same_base = base_lower in mat_lower or any(
-            w in mat_lower for w in base_lower.split() if len(w) > 3
-        )
-
-        # Bonus: base material keyword
-        if has_same_base:
-            score += 0.25
-
-        # Bonus: same product type
-        if product_type and mat.get("product_subtype"):
-            if product_type == mat["product_subtype"]:
-                score += 0.15
-            elif product_type == "3d" and "3d" in mat_lower:
-                score += 0.15
-
-        # Bonus: size match
-        if suggested_size_name:
-            size_lower = suggested_size_name.lower()
-            if size_lower in mat_lower:
-                score += 0.2
-
-        # Bonus: same size_id
+        mat_short = (mat.get("short_name") or "").lower().strip()
+        # Fallback: legacy rows without short_name → normalize their name on the fly
+        if not mat_short:
+            mat_short = nm.build_short_name_from_raw(mat.get("name") or "").lower().strip()
+        if mat_short == target:
+            matched_material = mat
+            break
+        # Same base + same size_id → list as alternative
         if matched_size_id and mat.get("size_id") == matched_size_id:
-            score += 0.2
-
-        score = max(0.0, min(1.0, score))
-
-        if has_same_base:
-            base_material_matches.append({
+            same_base_candidates.append({
                 "material_id": mat["id"],
-                "material_name": mat["name"],
-                "score": round(score, 3),
+                "material_name": mat.get("short_name") or mat["name"],
+                "score": 0.95,
             })
 
-        if score > best_score:
-            best_score = score
-            best_match = mat
+    matched = matched_material is not None
+    candidates = (
+        [{
+            "material_id": matched_material["id"],
+            "material_name": matched_material.get("short_name") or matched_material["name"],
+            "score": 1.0,
+        }]
+        if matched
+        else same_base_candidates[:3]
+    )
 
-    # Sort base matches by score
-    base_material_matches.sort(key=lambda x: x["score"], reverse=True)
-
-    # Top 3 candidates
-    candidates = base_material_matches[:3] if base_material_matches else []
-    if not candidates and best_match:
-        candidates = [{"material_id": best_match["id"], "material_name": best_match["name"], "score": round(best_score, 3)}]
-
-    threshold = 0.5  # Higher threshold for smart matching
-    matched = best_match is not None and best_score >= threshold
-
-    # Determine suggestion context
     suggestion_context = None
-    if not matched and base_material_matches:
+    if not matched and same_base_candidates:
         suggestion_context = "same_base_different_size"
     elif not matched:
         suggestion_context = "new_material"
 
     result = {
         "matched": matched,
-        "material_id": best_match["id"] if matched and best_match else None,
-        "material_name": best_match["name"] if matched and best_match else None,
-        "score": round(best_score, 3),
+        "material_id": matched_material["id"] if matched else None,
+        "material_name": (
+            matched_material.get("short_name") or matched_material["name"]
+            if matched
+            else None
+        ),
+        "score": 1.0 if matched else 0.0,
         "translated_name": translated,
         "delivery_name": delivery_name,
         "quantity": delivery_qty,
         "unit": translated_unit,
-        "suggested_name": standard_name if not matched else None,
+        "suggested_name": canonical_short_name if not matched else None,
+        "suggested_short_name": canonical_short_name,
         "suggested_type": "stone",
         "suggested_subtype": product_type,
         "candidates": candidates,
-        # Stone-specific extras
+        # Stone-specific extras consumed by the UI
         "suggested_size_name": suggested_size_name,
         "suggested_size_exists": suggested_size_exists,
+        "suggested_size_id": matched_size_id,
+        "parsed_width_mm": parsed_obj.width_mm,
+        "parsed_height_mm": parsed_obj.height_mm,
+        "parsed_thickness_mm": parsed_obj.thickness_mm,
+        "parsed_thickness_raw": parsed_obj.thickness_raw,
+        "parsed_diameter_mm": parsed_obj.diameter_mm,
+        "parsed_shape": parsed_obj.shape,
         "suggested_product_type": product_type,
         "needs_user_choice": needs_user_choice,
         "parsed_color": color,
@@ -1208,10 +1176,9 @@ async def smart_match_stone_item(
     }
 
     logger.info(
-        "smart_match_stone: %r → matched=%s, score=%.3f, standard=%r, "
-        "product_type=%s, size_exists=%s, needs_choice=%s",
-        delivery_name, matched, best_score, standard_name,
-        product_type, suggested_size_exists, needs_user_choice,
+        "smart_match_stone: %r → matched=%s short_name=%r typology=%s size_exists=%s",
+        delivery_name, matched, canonical_short_name,
+        product_type, suggested_size_exists,
     )
 
     return result

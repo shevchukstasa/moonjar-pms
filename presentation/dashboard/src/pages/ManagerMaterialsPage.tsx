@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, Fragment } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
@@ -17,6 +17,9 @@ import { Dialog } from '@/components/ui/Dialog';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
+import { TypologySelector } from '@/components/material/TypologySelector';
+import { SizeInput } from '@/components/material/SizeInput';
+import { NamePreview } from '@/components/material/NamePreview';
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -154,21 +157,40 @@ export default function ManagerMaterialsPage() {
     matched_material_id: string | null;
     matched_material_name: string | null;
     confidence: number | null;
-    // Parsed fields from smart matcher (for display/creation)
+    // Parsed fields from smart matcher (see BUSINESS_LOGIC_FULL §29)
     suggested_name?: string | null;
+    suggested_short_name?: string | null;
     suggested_type?: string | null;
     suggested_size_name?: string | null;
+    suggested_size_id?: string | null;
     suggested_size_exists?: boolean;
     suggested_product_type?: string | null;
     parsed_color?: string | null;
     parsed_base_material?: string | null;
+    parsed_width_mm?: number | null;
+    parsed_height_mm?: number | null;
+    parsed_thickness_mm?: number | null;
+    parsed_thickness_raw?: string | null;
+    parsed_diameter_mm?: number | null;
+    parsed_shape?: 'rectangle' | 'round' | null;
+    needs_user_choice?: boolean;
     candidates?: Array<{ id: string; name: string; score: number }>;
     notes?: string | null;
-    // editable overrides
+    // editable overrides — user adjustments before confirm
     _qty: string;
     _material_id: string;
     _included: boolean;
     _creating?: boolean;
+    _expanded?: boolean;
+    _typology?: 'tiles' | '3d' | 'sink' | 'countertop' | 'freeform' | null;
+    _size?: {
+      shape: 'rectangle' | 'round';
+      width_mm?: number | null;
+      height_mm?: number | null;
+      thickness_mm?: number | null;
+      diameter_mm?: number | null;
+      thickness_raw?: string | null;
+    };
   }
   const [ocrDialog, setOcrDialog] = useState(false);
   const [ocrStage, setOcrStage] = useState<'upload' | 'loading' | 'confirm' | 'saving'>('upload');
@@ -203,27 +225,66 @@ export default function ManagerMaterialsPage() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       const data = resp.data;
-      const mapped: OcrMatchedItem[] = (data.items ?? []).map((it: Record<string, unknown>) => ({
-        ocr_name: String(it.delivery_name ?? it.name ?? it.ocr_name ?? ''),
-        quantity: Number(it.quantity ?? 0),
-        unit: String(it.unit ?? 'kg'),
-        matched: Boolean(it.matched),
-        matched_material_id: (it.matched_material_id as string) ?? null,
-        matched_material_name: (it.matched_material_name as string) ?? null,
-        confidence: it.confidence != null ? Number(it.confidence) : null,
-        suggested_name: (it.suggested_name as string) ?? null,
-        suggested_type: (it.suggested_type as string) ?? null,
-        suggested_size_name: (it.suggested_size_name as string) ?? null,
-        suggested_size_exists: Boolean(it.suggested_size_exists),
-        suggested_product_type: (it.suggested_product_type as string) ?? null,
-        parsed_color: (it.parsed_color as string) ?? null,
-        parsed_base_material: (it.parsed_base_material as string) ?? null,
-        candidates: (it.candidates as Array<{ id: string; name: string; score: number }>) ?? [],
-        notes: (it.notes as string) ?? null,
-        _qty: String(it.quantity ?? ''),
-        _material_id: (it.matched_material_id as string) ?? '',
-        _included: Boolean(it.matched),
-      }));
+      const mapped: OcrMatchedItem[] = (data.items ?? []).map((it: Record<string, unknown>) => {
+        const matchedId =
+          (it.material_id as string) ??
+          (it.matched_material_id as string) ??
+          null;
+        const widthMm = (it.parsed_width_mm as number) ?? null;
+        const heightMm = (it.parsed_height_mm as number) ?? null;
+        const thicknessMm = (it.parsed_thickness_mm as number) ?? null;
+        const thicknessRaw = (it.parsed_thickness_raw as string) ?? null;
+        const diameterMm = (it.parsed_diameter_mm as number) ?? null;
+        const shape = ((it.parsed_shape as string) ?? (diameterMm ? 'round' : 'rectangle')) as
+          | 'rectangle'
+          | 'round';
+        return {
+          ocr_name: String(it.delivery_name ?? it.name ?? it.ocr_name ?? ''),
+          quantity: Number(it.quantity ?? 0),
+          unit: String(it.unit ?? 'pcs'),
+          matched: Boolean(it.matched),
+          matched_material_id: matchedId,
+          matched_material_name:
+            (it.material_name as string) ??
+            (it.matched_material_name as string) ??
+            null,
+          confidence: it.confidence != null ? Number(it.confidence) : null,
+          suggested_name: (it.suggested_name as string) ?? null,
+          suggested_short_name: (it.suggested_short_name as string) ?? null,
+          suggested_type: (it.suggested_type as string) ?? null,
+          suggested_size_name: (it.suggested_size_name as string) ?? null,
+          suggested_size_id: (it.suggested_size_id as string) ?? null,
+          suggested_size_exists: Boolean(it.suggested_size_exists),
+          suggested_product_type: (it.suggested_product_type as string) ?? null,
+          parsed_color: (it.parsed_color as string) ?? null,
+          parsed_base_material: (it.parsed_base_material as string) ?? null,
+          parsed_width_mm: widthMm,
+          parsed_height_mm: heightMm,
+          parsed_thickness_mm: thicknessMm,
+          parsed_thickness_raw: thicknessRaw,
+          parsed_diameter_mm: diameterMm,
+          parsed_shape: shape,
+          needs_user_choice: Boolean(it.needs_user_choice),
+          candidates:
+            (it.candidates as Array<{ id: string; name: string; score: number }>) ?? [],
+          notes: (it.notes as string) ?? null,
+          _qty: String(it.quantity ?? ''),
+          _material_id: matchedId ?? '',
+          _included: Boolean(it.matched),
+          _expanded: false,
+          _typology:
+            ((it.suggested_product_type as 'tiles' | '3d' | 'sink' | 'countertop' | 'freeform') ??
+              null),
+          _size: {
+            shape,
+            width_mm: widthMm,
+            height_mm: heightMm,
+            thickness_mm: thicknessMm,
+            thickness_raw: thicknessRaw,
+            diameter_mm: diameterMm,
+          },
+        };
+      });
       setOcrItems(mapped);
       setOcrMeta({
         supplier: data.supplier ?? '',
@@ -239,6 +300,60 @@ export default function ManagerMaterialsPage() {
   }, []);
 
   const ocrQc = useQueryClient();
+
+  const handleCreateFromScanRow = useCallback(
+    async (idx: number) => {
+      const row = ocrItems[idx];
+      if (!row) return;
+      setOcrItems((prev) => prev.map((r, i) => (i === idx ? { ...r, _creating: true } : r)));
+      try {
+        // Stone supplier inferred when supplier metadata indicates stone — for now
+        // we always assume stone in the scan dialog (it's a stone-supplier flow).
+        // TODO(non-stone): accept a material_type override per row when needed.
+        const material_type = 'stone';
+        const payload = {
+          name: row.ocr_name,
+          short_name: row.suggested_short_name ?? null,
+          material_type,
+          product_subtype: row._typology ?? row.suggested_product_type ?? null,
+          unit: row.unit && row.unit !== 'kg' ? row.unit : 'pcs',
+          factory_id: ocrFactoryId || effectiveFactoryId,
+          size_id: row.suggested_size_id ?? null,
+          shape: row._size?.shape ?? row.parsed_shape ?? 'rectangle',
+          width_mm: row._size?.width_mm ?? row.parsed_width_mm ?? null,
+          height_mm: row._size?.height_mm ?? row.parsed_height_mm ?? null,
+          thickness_mm: row._size?.thickness_mm ?? row.parsed_thickness_mm ?? null,
+          diameter_mm: row._size?.diameter_mm ?? row.parsed_diameter_mm ?? null,
+        };
+        const resp = await apiClient.post('/delivery/create-material-from-scan', payload);
+        const created = resp.data;
+        setOcrItems((prev) =>
+          prev.map((r, i) =>
+            i === idx
+              ? {
+                  ...r,
+                  _creating: false,
+                  _expanded: false,
+                  _included: true,
+                  _material_id: created.material_id,
+                  matched: true,
+                  matched_material_id: created.material_id,
+                  matched_material_name: created.short_name ?? created.name,
+                }
+              : r,
+          ),
+        );
+        ocrQc.invalidateQueries({ queryKey: ['materials'] });
+      } catch (err: unknown) {
+        const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail;
+        setOcrError(detail ?? 'Failed to create material.');
+        setOcrItems((prev) => prev.map((r, i) => (i === idx ? { ...r, _creating: false } : r)));
+      }
+    },
+    [ocrItems, ocrFactoryId, effectiveFactoryId, ocrQc],
+  );
+
   const handleOcrConfirm = useCallback(async () => {
     const included = ocrItems.filter((it) => it._included && it._material_id && parseFloat(it._qty) > 0);
     if (included.length === 0) { setOcrError('Select at least one item with a material and quantity.'); return; }
@@ -1064,47 +1179,106 @@ export default function ManagerMaterialsPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {ocrItems.map((it, idx) => (
-                    <tr key={idx} className={it._included ? 'bg-white' : 'bg-gray-50 opacity-60'}>
-                      <td className="px-3 py-2 text-center">
-                        <input
-                          type="checkbox"
-                          checked={it._included}
-                          onChange={(e) => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _included: e.target.checked } : x))}
-                          className="h-4 w-4 rounded border-gray-300 text-blue-600"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <span className="text-gray-800">{it.ocr_name}</span>
-                        {it.confidence != null && (
-                          <span className={`ml-2 text-xs ${it.confidence >= 0.8 ? 'text-green-500' : it.confidence >= 0.5 ? 'text-amber-500' : 'text-red-500'}`}>
-                            {Math.round(it.confidence * 100)}%
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        <select
-                          value={it._material_id}
-                          onChange={(e) => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _material_id: e.target.value, _included: !!e.target.value } : x))}
-                          className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-blue-400 focus:outline-none"
-                        >
-                          <option value="">— not matched —</option>
-                          {items.map((m) => (
-                            <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.001"
-                          value={it._qty}
-                          onChange={(e) => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _qty: e.target.value } : x))}
-                          className="w-full rounded border border-gray-200 px-2 py-1 text-right text-xs focus:border-blue-400 focus:outline-none"
-                        />
-                        <span className="text-xs text-gray-400"> {it.unit}</span>
-                      </td>
-                    </tr>
+                    <Fragment key={idx}>
+                      <tr className={it._included ? 'bg-white' : 'bg-gray-50 opacity-60'}>
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={it._included}
+                            onChange={(e) => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _included: e.target.checked } : x))}
+                            className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="text-gray-800">{it.ocr_name}</div>
+                          <div className="mt-0.5 flex items-center gap-2 text-xs">
+                            {it.suggested_short_name && (
+                              <span className="text-primary-600 dark:text-gold-400">→ {it.suggested_short_name}</span>
+                            )}
+                            {it.confidence != null && (
+                              <span className={it.confidence >= 0.8 ? 'text-green-500' : it.confidence >= 0.5 ? 'text-amber-500' : 'text-red-500'}>
+                                {Math.round(it.confidence * 100)}%
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">
+                          {it.matched ? (
+                            <span className="inline-block rounded bg-green-50 px-2 py-1 text-xs text-green-700">
+                              ✓ {it.matched_material_name}
+                            </span>
+                          ) : (
+                            <div className="flex flex-col gap-1">
+                              <select
+                                value={it._material_id}
+                                onChange={(e) => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _material_id: e.target.value, _included: !!e.target.value } : x))}
+                                className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-blue-400 focus:outline-none"
+                              >
+                                <option value="">— not matched —</option>
+                                {items.map((m) => (
+                                  <option key={m.id} value={m.id}>{m.short_name || m.name} ({m.unit})</option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _expanded: !x._expanded } : x))}
+                                className="self-start text-xs text-primary-600 hover:underline dark:text-gold-400"
+                              >
+                                {it._expanded ? '× cancel' : '+ Create new'}
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.001"
+                            value={it._qty}
+                            onChange={(e) => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _qty: e.target.value } : x))}
+                            className="w-full rounded border border-gray-200 px-2 py-1 text-right text-xs focus:border-blue-400 focus:outline-none"
+                          />
+                          <span className="text-xs text-gray-400"> {it.unit}</span>
+                        </td>
+                      </tr>
+                      {it._expanded && !it.matched && (
+                        <tr className="bg-primary-50/40 dark:bg-stone-900/40">
+                          <td colSpan={4} className="px-3 py-3">
+                            <div className="space-y-3">
+                              <div className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Typology
+                              </div>
+                              <TypologySelector
+                                value={it._typology ?? null}
+                                onChange={(t) => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _typology: t } : x))}
+                              />
+                              <div className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Size
+                              </div>
+                              <SizeInput
+                                value={it._size ?? { shape: 'rectangle' }}
+                                typology={it._typology ?? undefined}
+                                onChange={(s) => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _size: s } : x))}
+                              />
+                              <NamePreview
+                                longName={it.ocr_name}
+                                size={it._size ?? { shape: 'rectangle' }}
+                                typology={it._typology ?? null}
+                              />
+                              <div className="flex justify-end">
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleCreateFromScanRow(idx)}
+                                  disabled={Boolean(it._creating) || !it._typology}
+                                >
+                                  {it._creating ? 'Creating…' : '✓ Create & match'}
+                                </Button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

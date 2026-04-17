@@ -199,6 +199,7 @@ class Size(Base):
     width_mm = Column(sa.Integer, nullable=False)
     height_mm = Column(sa.Integer, nullable=False)
     thickness_mm = Column(sa.Integer, nullable=True)
+    diameter_mm = Column(sa.Integer, nullable=True)  # round shapes (sinks, round countertops)
     shape = Column(sa.String(20), nullable=True, default='rectangle')
     is_custom = Column(sa.Boolean, nullable=False, default=False)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
@@ -459,10 +460,13 @@ class Material(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     material_code = Column(sa.String(20), unique=True)  # auto-generated, e.g. "M-0001"
     name = Column(sa.String(300), unique=True, nullable=False)
+    # Long delivery-style name as it first arrived ("Grey Lava 5×20×1.2"). Stays unique.
+    short_name = Column(sa.String(100), nullable=True, index=True)
+    # Canonical match key — for stone always "Lava Stone {size}". See BUSINESS_LOGIC_FULL §29.
     full_name = Column(sa.String(500), nullable=True)  # e.g. "Zirconium Silicate Micronized" when name = "Zircosil"
     unit = Column(sa.String(20), nullable=False, default='pcs')
     material_type = Column(sa.String(50), nullable=False)
-    product_subtype = Column(sa.String(30), nullable=True)  # tiles/sinks/table_top/custom — for stone & ready stock
+    product_subtype = Column(sa.String(30), nullable=True)  # tiles/3d/sink/countertop/freeform — see §29
     subgroup_id = Column(UUID(as_uuid=True), ForeignKey('material_subgroups.id'))
     supplier_id = Column(UUID(as_uuid=True), ForeignKey('suppliers.id'))
     size_id = Column(UUID(as_uuid=True), ForeignKey('sizes.id'), nullable=True)
@@ -906,6 +910,9 @@ class MaterialTransaction(Base):
     approved_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     approved_at = Column(sa.DateTime(timezone=True), nullable=True)
     accepted_quantity = Column(sa.Numeric(12, 3), nullable=True)
+    # Raw OCR text from the delivery note ("Grey Lava 5×20×1.2") — preserved per receipt
+    # so color/wording history is not lost when multiple variants collapse into one Material.
+    delivery_name = Column(sa.String(300), nullable=True)
 
     material = relationship('Material', foreign_keys=[material_id])
     factory = relationship('Factory', foreign_keys=[factory_id])

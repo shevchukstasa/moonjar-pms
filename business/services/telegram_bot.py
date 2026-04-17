@@ -3540,24 +3540,60 @@ async def _handle_delivery_photo(
         await send_message_with_buttons(chat_id, suggestion_text, suggestion_rows, parse_mode="")
 
     # ── Step 6: Unit mismatch resolution buttons ─────────────────
+    # Per BUSINESS_LOGIC_FULL §29 — hide buttons that would record an invalid
+    # unit for the material's type (e.g. don't offer "kg" for stone).
+    from business.services import material_naming as nm
+
     for mi in unit_mismatch_items:
         mi_idx = mi["index"]
         photo_unit = mi["unit"]
         db_unit = mi["db_unit"]
+
+        # Look up the material's type so we can validate units
+        mat_type = None
+        mat_id = mi.get("material_id")
+        if mat_id:
+            _mat = db.query(Material).filter(Material.id == mat_id).first()
+            if _mat:
+                mat_type = _mat.material_type
+
+        photo_unit_ok = (
+            nm.is_valid_unit_for_type(mat_type, photo_unit) if mat_type else True
+        )
+        db_unit_ok = (
+            nm.is_valid_unit_for_type(mat_type, db_unit) if mat_type else True
+        )
+
         warn_text = msg("unit_mismatch_warning", lang,
                         name=mi["original_name"], photo_unit=photo_unit, db_unit=db_unit)
-        unit_rows = [
-            [
-                {"text": msg("unit_keep_db_btn", lang, unit=db_unit),
-                 "callback_data": f"delivery_unit:{delivery_id}:{mi_idx}:db"},
-                {"text": msg("unit_keep_photo_btn", lang, unit=photo_unit),
-                 "callback_data": f"delivery_unit:{delivery_id}:{mi_idx}:photo"},
-            ],
-            [
-                {"text": msg("unit_create_new_btn", lang, name=mi["material_name"], unit=photo_unit),
-                 "callback_data": f"delivery_unit:{delivery_id}:{mi_idx}:new"},
-            ],
-        ]
+        if mat_type and not photo_unit_ok:
+            warn_text += (
+                f"\n\n\u26d4\ufe0f {photo_unit} is not a valid unit for "
+                f"{mat_type}. Allowed: {', '.join(nm.allowed_units_for_type(mat_type))}."
+            )
+
+        first_row = []
+        if db_unit_ok:
+            first_row.append({
+                "text": msg("unit_keep_db_btn", lang, unit=db_unit),
+                "callback_data": f"delivery_unit:{delivery_id}:{mi_idx}:db",
+            })
+        if photo_unit_ok:
+            first_row.append({
+                "text": msg("unit_keep_photo_btn", lang, unit=photo_unit),
+                "callback_data": f"delivery_unit:{delivery_id}:{mi_idx}:photo",
+            })
+
+        unit_rows = []
+        if first_row:
+            unit_rows.append(first_row)
+        if photo_unit_ok:
+            unit_rows.append([{
+                "text": msg("unit_create_new_btn", lang,
+                            name=mi["material_name"], unit=photo_unit),
+                "callback_data": f"delivery_unit:{delivery_id}:{mi_idx}:new",
+            }])
+
         await send_message_with_buttons(chat_id, warn_text, unit_rows, parse_mode="")
 
     # ── Step 7: Supplier matching against DB ─────────────────────

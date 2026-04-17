@@ -106,11 +106,21 @@ class MaterialType(str, Enum):
     OTHER = 'other'               # Прочее
 
 class MaterialProductSubtype(str, Enum):
-    """Subtype for stone/ready stock — which product type this material is for."""
+    """Subtype for stone/ready stock — which product type this material is for.
+
+    See docs/BUSINESS_LOGIC_FULL.md §29 for the canonical 5-typology model.
+    Legacy values (SINKS, TABLE_TOP, CUSTOM) are kept for backward compat with
+    existing rows; Alembic 026 migrates them to the new values.
+    """
     TILES = 'tiles'
-    SINKS = 'sinks'
-    TABLE_TOP = 'table_top'
-    CUSTOM = 'custom'
+    THREE_D = '3d'
+    SINK = 'sink'
+    COUNTERTOP = 'countertop'
+    FREEFORM = 'freeform'
+    # ── Legacy (do not use for new rows) ─────────────────────────
+    SINKS = 'sinks'              # → migrated to SINK
+    TABLE_TOP = 'table_top'      # → migrated to COUNTERTOP
+    CUSTOM = 'custom'            # → migrated to FREEFORM
 
 class TransactionType(str, Enum):
     RESERVE = 'reserve'

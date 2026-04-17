@@ -17,6 +17,7 @@ export interface MaterialItem {
   material_code: string | null;
   stock_id: string | null;
   name: string;
+  short_name: string | null;
   full_name: string | null;
   factory_id: string | null;
   balance: number;

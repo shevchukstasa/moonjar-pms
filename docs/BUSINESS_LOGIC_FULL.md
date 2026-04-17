@@ -1579,3 +1579,93 @@ Computed via `_get_stage_daily_capacity()` from `StageTypologySpeed` — `effect
 
 ### Frontend
 "Plan vs Fact" tab on ManagerSchedulePage. Component: `PlanVsFactView.tsx`. Date picker with prev/next day navigation.
+
+---
+
+## §29 Material Naming, Stone Typology & Delivery Matching
+
+### Purpose
+Single source of truth for how stone materials are named, classified, matched against the catalog on delivery, and which units are valid per material type. Drives matcher (`business/services/material_matcher.py`), delivery flow (`api/routers/delivery.py`), naming service (`business/services/material_naming.py`), Telegram bot, and the web "Scan Delivery Note" dialog.
+
+### Naming model
+
+Every `Material` has two name fields:
+
+- **`Material.name`** — long name (≤300 chars, unique). For stone, this is the human-readable name as it first arrived on a delivery note (e.g. `"Grey Lava 5×20×1.2"`, `"Bali Lava Stone 5×20×1.2"`). Preserves the original wording. Editable.
+- **`Material.short_name`** — canonical short name (≤100 chars). For stone, ALWAYS `"Lava Stone {size}"` (two words, exact case). For non-stone, defaults to `name`. Used as the matching key.
+
+**One material per `short_name`.** If "Grey Lava 5×20×1.2" arrives and "Lava Stone 5×20×1.2" already exists with `short_name == "Lava Stone 5×20×1.2"`, matcher reuses that material — the receipt adds to the existing balance. The exact wording from this delivery note is preserved in `MaterialTransaction.delivery_name` so history is not lost.
+
+Color of stone is NOT stored as a structured field on `Material`. Reasoning: stock is tracked at the `short_name` level — color variants of the same size collapse into one balance.
+
+### Stone typologies (5 values)
+
+`Material.product_subtype` for stone uses one of:
+
+| Value | Meaning | Auto-detect rule |
+|---|---|---|
+| `tiles` | Flat tile | Single thickness (e.g. `1.2`), max dim ≤ 40 cm |
+| `3d` | Relief / 3D-formed tile | Thickness expressed as range (e.g. `1-2`, `1/2`) |
+| `sink` | Wash-basin / sink | Round Ø > 40 cm, OR explicit "sink"/"wastafel" keyword |
+| `countertop` | Worktop / counter | Rectangular with any dim > 40 cm, OR round Ø > 40 cm with explicit "countertop"/"top" keyword |
+| `freeform` | Arbitrary sculptural form, no standard size grid | Explicit selection only (matcher never auto-assigns) |
+
+Ambiguous round Ø 29-40 cm → `needs_user_choice=true` returned to UI; user picks `tiles` / `sink` / `countertop`.
+
+### Size schema (per typology)
+
+`Size` table fields:
+- `width_mm`, `height_mm`, `thickness_mm` — for rectangular shapes
+- `diameter_mm` (NEW, nullable) — for round shapes
+- `shape` — `'rectangle'` | `'round'` | `'triangle'` | `'octagon'` | `'freeform'`
+
+Size lookup uses `(shape, dimensions)` tuple; orientation-insensitive for rectangles (`5×20` matches `20×5`).
+
+For `freeform` materials, `Size` is optional — short_name becomes just `"Lava Stone Freeform"` and additional descriptor lives in `name`.
+
+### Unit constraints per material type
+
+Hard-validated at API boundary (`material_naming.validate_unit_for_type`) — the UI MUST hide invalid options:
+
+| material_type | Allowed units |
+|---|---|
+| `stone` | `pcs`, `m²` |
+| `pigment`, `frit`, `oxide_carbonate`, `other_bulk` | `kg`, `g` |
+| `packaging`, `consumable`, `other` | `pcs`, `m`, `kg` |
+
+Reject delivery transactions where unit is not allowed for the material's type.
+
+### Supplier → material_type mapping
+
+Static map in `material_matcher.SUPPLIER_MATERIAL_TYPE`. When a delivery's supplier is recognized, `material_type` is forced — matcher never proposes a material of a different type. Current entries: `bestone*` → `stone`. Extend by adding rows; no code change beyond the dict.
+
+### Delivery matching algorithm (stone path)
+
+For each item from OCR:
+
+1. **Parse** raw name → `{color_word, base="Lava Stone", size_raw, thickness_raw, is_round, diameter}`. (Stripping is informational; color is discarded.)
+2. **Determine typology** by typology rules above.
+3. **Resolve size** in `Size` table by dimensions; create new `Size` row if none.
+4. **Build canonical `short_name`** = `"Lava Stone {size_label}"` (e.g. `"Lava Stone 5×20×1.2"`).
+5. **Lookup Material** by exact `short_name` match (filtered to `material_type='stone'`). Match if found.
+6. **No match** → return `suggested_short_name`, `suggested_typology`, `suggested_size_id` so user can confirm/create with one click.
+
+Token-fuzzy matching is reserved for non-stone (legacy `find_best_match` path). Stone uses direct `short_name` equality after canonicalization — no fuzzy scoring, no thresholds.
+
+### Endpoints
+- `POST /delivery/process-photo` — OCR + matching, returns items with `parsed_*` fields and `suggested_short_name`.
+- `POST /delivery/create-material-from-scan` — creates `Material` + `Size` from scan-parsed payload, returns `material_id` ready for receipt transaction.
+- `POST /materials/transactions` — accepts the receipt; stores `delivery_name` (raw OCR text) for history.
+
+### Frontend
+- `presentation/dashboard/src/components/material/TypologySelector.tsx` — 5-button picker.
+- `.../SizeInput.tsx` — dimensions input with shape-aware fields.
+- `.../NamePreview.tsx` — live `short_name` preview.
+- "Scan Delivery Note" dialog: each row is inline-editable (name / typology / size), with "Create & match" button per row.
+- Telegram bot: same rules, kg-button hidden for stone, pcs-button hidden for pigment/frit.
+
+### Migration & backfill
+Alembic `026_material_short_name_typology.py`:
+- ADD `materials.short_name`, `sizes.diameter_mm`, `material_transactions.delivery_name`.
+- Backfill: for `material_type='stone'`, derive `short_name` from existing `name` via parser; default to `name` for non-stone.
+- Map legacy `product_subtype` values: `tiles→tiles`, `sinks→sink`, `table_top→countertop`, `custom→freeform`.

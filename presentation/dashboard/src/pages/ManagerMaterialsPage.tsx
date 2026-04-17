@@ -154,10 +154,21 @@ export default function ManagerMaterialsPage() {
     matched_material_id: string | null;
     matched_material_name: string | null;
     confidence: number | null;
+    // Parsed fields from smart matcher (for display/creation)
+    suggested_name?: string | null;
+    suggested_type?: string | null;
+    suggested_size_name?: string | null;
+    suggested_size_exists?: boolean;
+    suggested_product_type?: string | null;
+    parsed_color?: string | null;
+    parsed_base_material?: string | null;
+    candidates?: Array<{ id: string; name: string; score: number }>;
+    notes?: string | null;
     // editable overrides
     _qty: string;
     _material_id: string;
     _included: boolean;
+    _creating?: boolean;
   }
   const [ocrDialog, setOcrDialog] = useState(false);
   const [ocrStage, setOcrStage] = useState<'upload' | 'loading' | 'confirm' | 'saving'>('upload');
@@ -179,13 +190,22 @@ export default function ManagerMaterialsPage() {
       });
       const data = resp.data;
       const mapped: OcrMatchedItem[] = (data.items ?? []).map((it: Record<string, unknown>) => ({
-        ocr_name: String(it.name ?? it.ocr_name ?? ''),
+        ocr_name: String(it.delivery_name ?? it.name ?? it.ocr_name ?? ''),
         quantity: Number(it.quantity ?? 0),
         unit: String(it.unit ?? 'kg'),
         matched: Boolean(it.matched),
         matched_material_id: (it.matched_material_id as string) ?? null,
         matched_material_name: (it.matched_material_name as string) ?? null,
         confidence: it.confidence != null ? Number(it.confidence) : null,
+        suggested_name: (it.suggested_name as string) ?? null,
+        suggested_type: (it.suggested_type as string) ?? null,
+        suggested_size_name: (it.suggested_size_name as string) ?? null,
+        suggested_size_exists: Boolean(it.suggested_size_exists),
+        suggested_product_type: (it.suggested_product_type as string) ?? null,
+        parsed_color: (it.parsed_color as string) ?? null,
+        parsed_base_material: (it.parsed_base_material as string) ?? null,
+        candidates: (it.candidates as Array<{ id: string; name: string; score: number }>) ?? [],
+        notes: (it.notes as string) ?? null,
         _qty: String(it.quantity ?? ''),
         _material_id: (it.matched_material_id as string) ?? '',
         _included: Boolean(it.matched),

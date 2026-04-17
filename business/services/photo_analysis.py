@@ -63,18 +63,31 @@ _PACKING_PROMPT = (
 )
 
 _DELIVERY_PROMPT = (
-    "You are analyzing a delivery note (surat jalan / накладная) photo from a stone/ceramic "
-    "factory. Read ALL information visible on the document.\n\n"
-    "Extract:\n"
-    "- Supplier name\n"
-    "- Delivery date\n"
-    "- Document/reference number\n"
-    "- List of items: material name, quantity, unit (kg/pcs/bags/liters)\n"
-    "- Any notes or remarks\n\n"
+    "You are analyzing a delivery note (surat jalan / накладная) photo from a stone or ceramic "
+    "supplier in Indonesia. These are often HANDWRITTEN in Bahasa Indonesia.\n\n"
+    "Typical column headers you may see:\n"
+    "  • Jenis / Nama Barang = material type (e.g. 'Grey Lava', 'Lavastone', 'Kaolin')\n"
+    "  • Ukuran = size as WxLxThickness in cm (e.g. '8x15x1', '10x10x14.14', '5x20x1.2')\n"
+    "  • Pcs or Jumlah = quantity in PIECES (actual count)\n"
+    "  • M2 or M² = quantity in SQUARE METERS\n"
+    "  • Keterangan = notes (edge profile, finish type, e.g. 'SC Octogon', 'H+profil', 'Bullnose')\n\n"
+    "CRITICAL RULES:\n"
+    "1. QUANTITY is NEVER a size dimension. If you see '15x15x1' in Ukuran column, "
+    "quantity is in a separate column (Pcs/M2), NOT '15'.\n"
+    "2. If both Pcs and M2 are filled, prefer Pcs (more precise) but keep M2 in notes.\n"
+    "3. material_name should COMBINE type + size: e.g. 'Grey Lava 8x15' or 'Lavastone 10x10x14.14'.\n"
+    "   This matches how materials are stored in the warehouse catalog.\n"
+    "4. unit is 'pcs' if Pcs column is used, 'm2' if only M2 is filled.\n"
+    "5. Include every row in the table, even if quantity is unclear (set quantity to null).\n"
+    "6. Put notes (edge profile, finish) into item.notes field.\n\n"
     "Return ONLY valid JSON (no markdown, no code fences):\n"
     '{"supplier": "<name or null>", "delivery_date": "<YYYY-MM-DD or null>", '
-    '"reference_number": "<string or null>", '
-    '"items": [{"material_name": "<name>", "quantity": <number>, "unit": "<unit>"}], '
+    '"reference_number": "<doc number or null>", '
+    '"material_category": "stone" | "ceramic_raw" | "packaging" | "other", '
+    '"items": [{"material_name": "<type + size combined>", '
+    '"material_type": "<e.g. Grey Lava, Lavastone>", "size": "<e.g. 8x15x1>", '
+    '"quantity": <number or null>, "unit": "pcs" | "m2" | "kg", '
+    '"notes": "<edge profile, finish, etc.>"}], '
     '"notes": "<any additional text>"}'
 )
 

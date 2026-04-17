@@ -1287,6 +1287,21 @@ export default function ManagerMaterialsPage() {
                         <tr className="bg-primary-50/40 dark:bg-stone-900/40">
                           <td colSpan={4} className="px-3 py-3">
                             <div className="space-y-3">
+                              <div>
+                                <div className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                  Long name (as on delivery — fix OCR mistakes here)
+                                </div>
+                                <input
+                                  type="text"
+                                  value={it.ocr_name}
+                                  onChange={(e) =>
+                                    setOcrItems((prev) =>
+                                      prev.map((x, i) => (i === idx ? { ...x, ocr_name: e.target.value } : x)),
+                                    )
+                                  }
+                                  className="mt-1 w-full rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-stone-700 dark:bg-stone-900"
+                                />
+                              </div>
                               <div className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Typology
                               </div>

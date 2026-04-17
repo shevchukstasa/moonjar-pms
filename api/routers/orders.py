@@ -276,6 +276,11 @@ def _order_detail(order, db: Session) -> dict:
                 "created_at": p.created_at.isoformat() if p.created_at else None,
                 # Material tracking
                 "material_status": _compute_material_status(p),
+                # Split tracking (for split button visibility)
+                "parent_position_id": str(p.parent_position_id) if p.parent_position_id else None,
+                "is_parent": getattr(p, "is_parent", False) or False,
+                "split_type": getattr(p, "split_type", None),
+                "split_category": _ev(p.split_category) if p.split_category else None,
             }
             for p in positions
         ],

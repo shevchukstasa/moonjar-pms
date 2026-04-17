@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Trash2, Thermometer, ClipboardCheck, Calendar, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Trash2, Thermometer, ClipboardCheck, Calendar, AlertTriangle, RefreshCw, Scissors } from 'lucide-react';
 import { useUiStore } from '@/stores/uiStore';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useGlazingSchedule, useFiringSchedule, useSortingSchedule, useQcSchedule, useKilnSchedule, useAutoFormBatches } from '@/hooks/useSchedule';
@@ -16,6 +16,8 @@ import { FactorySelector } from '@/components/layout/FactorySelector';
 import apiClient from '@/api/client';
 import { formatEdgeProfile, formatShape } from '@/components/tablo/PositionRow';
 import { QualityCheckDialog } from '@/components/quality/QualityCheckDialog';
+import { ProductionSplitModal } from '@/components/tablo/ProductionSplitModal';
+import type { PositionItem } from '@/components/tablo/PositionRow';
 import DailyProductionView from '@/components/schedule/DailyProductionView';
 
 const SECTION_TABS = [
@@ -37,6 +39,9 @@ export default function ManagerSchedulePage() {
   // Map factory_id → whether cleanup is allowed (used when "All Factories" selected)
   const [deleteFactoryMap, setDeleteFactoryMap] = useState<Record<string, boolean>>({});
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Production Split modal state
+  const [splitPosition, setSplitPosition] = useState<PositionItem | null>(null);
 
   // QC Check dialog state
   const [qcOpen, setQcOpen] = useState(false);
@@ -434,6 +439,46 @@ export default function ManagerSchedulePage() {
       key: 'priority_order',
       header: 'Priority',
       render: (item) => item.priority_order != null ? item.priority_order : '—',
+    },
+    // Split column — available for positions not in kiln, not already split, not sorting sub-positions
+    {
+      key: '_split',
+      header: '',
+      render: (item: { id: string; status?: string; is_parent?: boolean; split_category?: string | null; quantity?: number; order_number?: string; color?: string; size?: string; order_id?: string; product_type?: string; delay_hours?: number; priority_order?: number; batch_id?: string | null }) => {
+        const status = item.status ?? '';
+        // Mirror backend can_split_position checks
+        const isInKiln = status === 'loaded_in_kiln';
+        const isParent = item.is_parent === true;
+        const isSortingSub = item.split_category != null;
+        const cantSplit = isInKiln || isParent || isSortingSub;
+        if (cantSplit) return null;
+
+        return (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setSplitPosition({
+                id: item.id,
+                order_id: item.order_id ?? '',
+                order_number: item.order_number ?? '',
+                status: status,
+                color: item.color ?? '',
+                size: item.size ?? '',
+                quantity: item.quantity ?? 0,
+                product_type: item.product_type ?? '',
+                delay_hours: item.delay_hours ?? 0,
+                priority_order: item.priority_order ?? 0,
+                batch_id: item.batch_id ?? null,
+              } as PositionItem);
+            }}
+            className="inline-flex items-center gap-1 rounded bg-purple-50 px-2 py-1 text-xs font-medium text-purple-700 hover:bg-purple-100"
+            title="Split production"
+          >
+            <Scissors className="h-3.5 w-3.5" />
+            Split
+          </button>
+        );
+      },
     },
     // Delete column — only shown when PM cleanup is enabled
     ...(canDeletePositions ? [{
@@ -842,6 +887,22 @@ export default function ManagerSchedulePage() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Production Split Modal */}
+      {splitPosition && (
+        <ProductionSplitModal
+          position={splitPosition}
+          onClose={() => {
+            setSplitPosition(null);
+            queryClient.invalidateQueries({ queryKey: ['schedule'] });
+            queryClient.invalidateQueries({ queryKey: ['glazing-schedule'] });
+            queryClient.invalidateQueries({ queryKey: ['firing-schedule'] });
+            queryClient.invalidateQueries({ queryKey: ['sorting-schedule'] });
+            queryClient.invalidateQueries({ queryKey: ['qc-schedule'] });
+            queryClient.invalidateQueries({ queryKey: ['positions'] });
+          }}
+        />
       )}
 
       {/* QC Check Dialog */}

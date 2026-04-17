@@ -17,6 +17,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { StatusDropdown } from '@/components/tablo/StatusDropdown';
 import { formatEdgeProfile, formatPlaceOfApplication, formatShape, MaterialStatusBadge } from '@/components/tablo/PositionRow';
 import { PositionEditDialog } from '@/components/orders/PositionEditDialog';
+import { ProductionSplitModal } from '@/components/tablo/ProductionSplitModal';
+import { SplitTreeModal } from '@/components/tablo/SplitTreeModal';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { OrderProgressRing } from '@/components/orders/OrderProgressRing';
 
@@ -41,6 +43,17 @@ function posLabel(p: any): string {
   return '#?';
 }
 
+/** Check if a position can be split (mirrors backend can_split_position logic). */
+function canSplitPosition(p: Record<string, unknown>): boolean {
+  const status = p.status as string;
+  if (status === 'loaded_in_kiln' || status === 'in_kiln') return false;
+  if (p.is_parent) return false;
+  if (p.split_category) return false;  // sorting sub-positions
+  // Terminal statuses shouldn't be split either
+  if (status === 'shipped' || status === 'write_off' || status === 'merged') return false;
+  return true;
+}
+
 const VALID_STATUSES = [
   { value: 'new', label: 'New' },
   { value: 'in_production', label: 'In Production' },
@@ -63,6 +76,12 @@ export default function OrderDetailPage() {
   // Edit position
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [editingPosition, setEditingPosition] = useState<Record<string, any> | null>(null);
+
+  // Split position
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [splitPosition, setSplitPosition] = useState<any>(null);
+  // Split tree viewer
+  const [splitTreePositionId, setSplitTreePositionId] = useState<string | null>(null);
 
   // Reprocess order
   const currentUser = useCurrentUser();
@@ -542,7 +561,17 @@ export default function OrderDetailPage() {
                 key={(p.id as string) || idx}
                 position={p}
                 index={idx}
+                orderNumber={order.order_number}
                 onEdit={() => setEditingPosition(p)}
+                onSplit={() => setSplitPosition({
+                  id: p.id as string,
+                  order_number: order.order_number,
+                  quantity: p.quantity as number,
+                  color: p.color as string,
+                  size: p.size as string,
+                  status: p.status as string,
+                })}
+                onViewTree={() => setSplitTreePositionId(p.id as string)}
               />
             ))}
           </div>
@@ -564,6 +593,21 @@ export default function OrderDetailPage() {
         open={!!editingPosition}
         onClose={() => setEditingPosition(null)}
         position={editingPosition}
+      />
+
+      {/* Split Position Modal */}
+      <ProductionSplitModal
+        position={splitPosition}
+        onClose={() => {
+          setSplitPosition(null);
+          queryClient.invalidateQueries({ queryKey: ['orders', orderId] });
+        }}
+      />
+
+      {/* Split Tree Viewer */}
+      <SplitTreeModal
+        positionId={splitTreePositionId}
+        onClose={() => setSplitTreePositionId(null)}
       />
 
       {/* Confirm Status Override */}
@@ -597,11 +641,17 @@ export default function OrderDetailPage() {
 function PositionCard({
   position: p,
   index,
+  orderNumber,
   onEdit,
+  onSplit,
+  onViewTree,
 }: {
   position: Record<string, unknown>;
   index: number;
+  orderNumber: string;
   onEdit: () => void;
+  onSplit: () => void;
+  onViewTree: () => void;
 }) {
   const [materialsOpen, setMaterialsOpen] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -650,6 +700,16 @@ function PositionCard({
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-lg font-bold text-gray-400">{label}</span>
+          {p.is_parent && (
+            <span className="inline-flex items-center rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700" title="Parent position (split)">
+              PARENT
+            </span>
+          )}
+          {p.parent_position_id && !p.is_parent && (
+            <span className="inline-flex items-center rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700" title="Child of a split position">
+              CHILD
+            </span>
+          )}
           <span className="text-lg font-semibold">{color}</span>
           {size && <span className="text-sm text-gray-500">{size}</span>}
           {quantity != null && (
@@ -663,6 +723,26 @@ function PositionCard({
             <Badge status={p.status as string} />
           )}
           <MaterialStatusBadge status={p.material_status as string} />
+          {/* Split button — only for positions that can be split */}
+          {canSplitPosition(p) && (
+            <button
+              className="rounded px-2 py-1 text-xs font-medium text-orange-600 hover:bg-orange-50 hover:text-orange-800"
+              onClick={onSplit}
+              title="Split this position into multiple parts"
+            >
+              Split
+            </button>
+          )}
+          {/* Split tree — show for parent or child positions */}
+          {(p.is_parent || p.parent_position_id) && (
+            <button
+              className="rounded px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 hover:text-indigo-800"
+              onClick={onViewTree}
+              title="View split tree"
+            >
+              Tree
+            </button>
+          )}
           <button
             className="rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-800"
             onClick={onEdit}

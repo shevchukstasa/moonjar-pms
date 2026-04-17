@@ -29,6 +29,7 @@ def _calc_required_in_stock_units(
     rm,
     position,
     db: Session,
+    recipe_obj=None,
 ) -> Decimal:
     """Calculate required material in stock units (kg) using central conversion.
 
@@ -38,14 +39,40 @@ def _calc_required_in_stock_units(
     """
     try:
         from business.services.material_reservation import _calculate_required
-        raw = _calculate_required(rm, position, db=db)
-    except Exception:
-        # Fallback: simple inline calc
-        qty = Decimal(str(rm.quantity_per_unit))
-        if rm.unit == "per_sqm" and position.quantity_sqm:
-            raw = qty * Decimal(str(position.quantity_sqm))
+        recipe_for_calc = recipe_obj
+        if not recipe_for_calc and hasattr(rm, 'recipe'):
+            recipe_for_calc = rm.recipe
+        raw = _calculate_required(rm, position, recipe=recipe_for_calc, db=db)
+    except Exception as exc:
+        _pos_logger.warning(
+            "CALC_REQUIRED_FALLBACK | rm.unit=%s pos=%s | %s",
+            rm.unit, getattr(position, 'id', '?'), exc,
+        )
+        # Fallback: replicate g_per_100g and per_sqm formulas
+        qty = Decimal(str(rm.quantity_per_unit or 0))
+        unit = (rm.unit or "per_piece").lower().strip()
+        if unit == "g_per_100g":
+            # area × spray_rate_ml → ml × SG → grams → (qty/100) × grams
+            area = Decimal(str(getattr(position, 'quantity_sqm', 0) or 0))
+            if area <= 0:
+                # Estimate from glazeable_sqm * quantity
+                glz = Decimal(str(getattr(position, 'glazeable_sqm', 0) or 0))
+                pcs = Decimal(str(getattr(position, 'quantity', 1) or 1))
+                area = glz * pcs
+            r = recipe_obj or getattr(rm, 'recipe', None)
+            spray = Decimal(str(getattr(r, 'consumption_spray_ml_per_sqm', 500) or 500)) if r else Decimal("500")
+            sg = Decimal(str(getattr(r, 'specific_gravity', 1) or 1)) if r else Decimal("1")
+            total_grams = area * spray * sg
+            raw = (qty / Decimal("100")) * total_grams
+        elif unit == "per_sqm":
+            area = Decimal(str(getattr(position, 'quantity_sqm', 0) or 0))
+            if area <= 0:
+                glz = Decimal(str(getattr(position, 'glazeable_sqm', 0) or 0))
+                pcs = Decimal(str(getattr(position, 'quantity', 1) or 1))
+                area = glz * pcs
+            raw = qty * area
         else:
-            raw = qty * Decimal(str(position.quantity or 0))
+            raw = qty * Decimal(str(getattr(position, 'quantity', 0) or 0))
 
     # Convert recipe units → stock units (e.g. g→kg or ml→kg)
     calc_unit = get_calculation_unit(rm.unit)
@@ -439,7 +466,7 @@ async def get_blocking_summary(
                         ).scalar()
                     ))
                     eff = bal - (t_res - t_unres)
-                    req = _calc_required_in_stock_units(rm, p, db)
+                    req = _calc_required_in_stock_units(rm, p, db, recipe_obj=recipe)
                     deficit = max(Decimal("0"), req - max(eff, Decimal("0")))
                     if deficit > 0:
                         material_shortages.append({
@@ -1877,7 +1904,7 @@ async def get_material_reservations(
             continue
 
         # Calculate required (in stock units, e.g. kg)
-        required = _calc_required_in_stock_units(rm, p, db)
+        required = _calc_required_in_stock_units(rm, p, db, recipe_obj=recipe)
 
         # Current stock balance
         stock = (
@@ -2322,7 +2349,7 @@ async def get_position_materials(
                     position._consumption_rule = None
 
                 # Calculate required quantity
-                required = float(_calc_required_in_stock_units(rm, position, db))
+                required = float(_calc_required_in_stock_units(rm, position, db, recipe_obj=recipe))
 
                 # Check reservation status
                 reserved_qty = float(

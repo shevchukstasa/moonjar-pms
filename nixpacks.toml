@@ -2,6 +2,7 @@
 # Python backend + Node.js for frontend build at startup
 #
 # All packages via Nix (apt repos are unreliable in Railway build env).
+# npm is bundled with nodejs_20, no separate package needed.
 
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm", "postgresql_16"]
+nixPkgs = ["nodejs_20", "postgresql_16"]

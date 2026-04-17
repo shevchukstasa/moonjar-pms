@@ -1203,31 +1203,73 @@ export default function ManagerMaterialsPage() {
                           </div>
                         </td>
                         <td className="px-3 py-2">
-                          {it.matched ? (
-                            <span className="inline-block rounded bg-green-50 px-2 py-1 text-xs text-green-700">
-                              ✓ {it.matched_material_name}
-                            </span>
-                          ) : (
-                            <div className="flex flex-col gap-1">
-                              <select
-                                value={it._material_id}
-                                onChange={(e) => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _material_id: e.target.value, _included: !!e.target.value } : x))}
-                                className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-blue-400 focus:outline-none"
-                              >
-                                <option value="">— not matched —</option>
-                                {items.map((m) => (
-                                  <option key={m.id} value={m.id}>{m.short_name || m.name} ({m.unit})</option>
-                                ))}
-                              </select>
-                              <button
-                                type="button"
-                                onClick={() => setOcrItems((prev) => prev.map((x, i) => i === idx ? { ...x, _expanded: !x._expanded } : x))}
-                                className="self-start text-xs text-primary-600 hover:underline dark:text-gold-400"
-                              >
-                                {it._expanded ? '× cancel' : '+ Create new'}
-                              </button>
-                            </div>
-                          )}
+                          <div className="flex flex-col gap-1">
+                            {it.matched && (
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="inline-block rounded bg-green-50 px-2 py-1 text-xs text-green-700">
+                                  ✓ {it.matched_material_name}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setOcrItems((prev) =>
+                                      prev.map((x, i) =>
+                                        i === idx
+                                          ? {
+                                              ...x,
+                                              matched: false,
+                                              _material_id: '',
+                                              _included: false,
+                                              matched_material_id: null,
+                                              matched_material_name: null,
+                                              _expanded: false,
+                                            }
+                                          : x,
+                                      ),
+                                    )
+                                  }
+                                  className="text-xs text-gray-500 hover:underline"
+                                >
+                                  change
+                                </button>
+                              </div>
+                            )}
+                            {!it.matched && (
+                              <>
+                                <select
+                                  value={it._material_id}
+                                  onChange={(e) =>
+                                    setOcrItems((prev) =>
+                                      prev.map((x, i) =>
+                                        i === idx
+                                          ? { ...x, _material_id: e.target.value, _included: !!e.target.value }
+                                          : x,
+                                      ),
+                                    )
+                                  }
+                                  className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-blue-400 focus:outline-none"
+                                >
+                                  <option value="">— not matched —</option>
+                                  {items.map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                      {m.short_name || m.name} ({m.unit})
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setOcrItems((prev) =>
+                                      prev.map((x, i) => (i === idx ? { ...x, _expanded: !x._expanded } : x)),
+                                    )
+                                  }
+                                  className="self-start text-xs text-primary-600 hover:underline dark:text-gold-400"
+                                >
+                                  {it._expanded ? '× cancel' : '+ Create new'}
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 py-2">
                           <input

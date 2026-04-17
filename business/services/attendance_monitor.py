@@ -146,8 +146,8 @@ def process_attendance_gaps(db: Session, factory_id: UUID) -> Optional[dict]:
     date_list = ", ".join(d.strftime("%b %-d") for d in dates)
 
     # 1. In-app notification for Production Managers
-    title = "Attendance not filled"
-    message = f"{len(dates)} working day(s) without attendance this month: {date_list}"
+    title = "Посещаемость не заполнена"
+    message = f"{len(dates)} рабочих дней без посещаемости в этом месяце: {date_list}"
 
     notify_pm(
         db=db,
@@ -183,11 +183,11 @@ def _send_ceo_telegram_alert(
         f"- {d.strftime('%B %-d')} ({d.strftime('%A')})" for d in unfilled_dates
     )
     text = (
-        f"⚠️ *Attendance Gap Alert*\n"
-        f"Factory: {factory_name}\n"
-        f"{len(unfilled_dates)} working days without attendance this month:\n"
+        f"⚠️ *Пропуски в посещаемости*\n"
+        f"Фабрика: {factory_name}\n"
+        f"{len(unfilled_dates)} рабочих дней без отметок посещаемости в этом месяце:\n"
         f"{date_lines}\n\n"
-        f"Please ask Production Manager to fill attendance."
+        f"Попросите менеджера производства заполнить посещаемость."
     )
 
     # Find CEO and Owner users linked to this factory

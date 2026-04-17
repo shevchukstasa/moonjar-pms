@@ -796,7 +796,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     "edit_session_not_found": {
         "en": "Edit session not found. Press Edit Items again.",
         "id": "Sesi edit tidak ditemukan. Tekan Edit Items lagi.",
-        "ru": "Сессия редактирования не найдена. Нажмите Edit Items снова.",
+        "ru": "Сессия редактирования не найдена. Нажмите Редактировать снова.",
     },
     "error_occurred": {
         "en": "An error occurred",
@@ -874,7 +874,7 @@ MESSAGES: dict[str, dict[str, str]] = {
 }
 
 # Default language for group chats or unlinked users
-_DEFAULT_LANG = "id"
+_DEFAULT_LANG = "ru"
 
 
 def get_user_language(db: Session, telegram_user_id: Optional[int] = None, chat_id: Optional[int] = None, message_text: Optional[str] = None) -> str:
@@ -1536,10 +1536,10 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
                 if chat_id:
                     await _send_message(chat_id, success_msg.get(lang, success_msg["en"]))
             else:
-                await answer_callback_query(callback_id, "User not found")
+                await answer_callback_query(callback_id, "Пользователь не найден")
         except Exception as e:
             logger.error(f"Link user callback error: {e}")
-            await answer_callback_query(callback_id, "Error linking account")
+            await answer_callback_query(callback_id, "Ошибка привязки аккаунта")
         return
 
     # Route daily/alert/task callbacks to the dedicated handler service
@@ -1600,10 +1600,10 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
 
     if action == "link_confirm":
         # Future: confirm account linking
-        await answer_callback_query(callback_id, "Account linked!")
+        await answer_callback_query(callback_id, "Аккаунт привязан!")
     elif action == "task_done":
         # Future: mark task as done from Telegram
-        await answer_callback_query(callback_id, "Task completion not yet implemented.")
+        await answer_callback_query(callback_id, "Завершение задач пока не реализовано.")
     else:
         await answer_callback_query(callback_id, "OK")
 
@@ -2057,11 +2057,11 @@ async def _cmd_mystats(db: Session, message: dict) -> None:
 
     name = user.first_name or user.email.split("@")[0]
     text = (
-        f"\U0001f4ca *Your Stats This Week*\n\n"
-        f"\u2705 Positions processed: {week_count}\n"
-        f"\U0001f525 Zero defect streak: {current_streak} days (best: {best_streak})\n"
-        f"\U0001f3c6 Achievements unlocked: {achievement_count}\n"
-        f"\U0001f4c8 Rank: #{rank} of {total_masters} masters"
+        f"\U0001f4ca *Ваша статистика за неделю*\n\n"
+        f"\u2705 Позиций обработано: {week_count}\n"
+        f"\U0001f525 Серия без брака: {current_streak} дн. (рекорд: {best_streak})\n"
+        f"\U0001f3c6 Достижений: {achievement_count}\n"
+        f"\U0001f4c8 Место: #{rank} из {total_masters}"
     )
     await _send_message(chat_id, text)
 
@@ -2080,7 +2080,7 @@ async def _cmd_leaderboard(db: Session, message: dict) -> None:
 
     uf = db.query(UserFactory).filter(UserFactory.user_id == user.id).first()
     if not uf:
-        await _send_message(chat_id, "\U0001f3c6 *Leaderboard*\n\nNo factory assigned.")
+        await _send_message(chat_id, "\U0001f3c6 *Лидерборд*\n\nФабрика не назначена.")
         return
 
     import sqlalchemy as sa
@@ -2106,17 +2106,17 @@ async def _cmd_leaderboard(db: Session, message: dict) -> None:
     )
 
     if not top_users:
-        await _send_message(chat_id, "\U0001f3c6 *Leaderboard*\n\nNo data this week yet.")
+        await _send_message(chat_id, "\U0001f3c6 *Лидерборд*\n\nНет данных за эту неделю.")
         return
 
     medals = ["\U0001f947", "\U0001f948", "\U0001f949", "4.", "5."]
-    lines = ["\U0001f3c6 *Leaderboard This Week*\n"]
+    lines = ["\U0001f3c6 *Лидерборд за неделю*\n"]
 
     for i, (uid, cnt) in enumerate(top_users):
         u = db.query(User).get(uid)
         name = (u.first_name or u.email.split("@")[0]) if u else "?"
         prefix = medals[i] if i < len(medals) else f"{i + 1}."
-        lines.append(f"{prefix} {name} — {cnt} positions")
+        lines.append(f"{prefix} {name} — {cnt} позиций")
 
     await _send_message(chat_id, "\n".join(lines))
 
@@ -2135,7 +2135,7 @@ async def _cmd_stock(db: Session, message: dict) -> None:
 
     uf = db.query(UserFactory).filter(UserFactory.user_id == user.id).first()
     if not uf:
-        await _send_message(chat_id, "\U0001f4e6 *Stock Check*\n\nNo factory assigned.")
+        await _send_message(chat_id, "\U0001f4e6 *Склад*\n\nФабрика не назначена.")
         return
 
     low_stocks = (
@@ -2152,21 +2152,21 @@ async def _cmd_stock(db: Session, message: dict) -> None:
     if not low_stocks:
         await _send_message(
             chat_id,
-            "\U0001f4e6 *Stock Check*\n\n\u2705 All materials above minimum balance.",
+            "\U0001f4e6 *Склад*\n\n\u2705 Все материалы выше минимального остатка.",
         )
         return
 
-    lines = [f"\U0001f4e6 *Stock Alerts* ({len(low_stocks)} items)\n"]
+    lines = [f"\U0001f4e6 *Оповещения по складу* ({len(low_stocks)} позиций)\n"]
     for stock in low_stocks[:15]:
         mat = stock.material
         mat_name = mat.name if mat else f"ID:{stock.material_id}"
         balance = float(stock.balance)
         minimum = float(stock.min_balance)
         severity = "\U0001f534" if balance < minimum * 0.5 else "\U0001f7e1"
-        lines.append(f"{severity} {mat_name}: {balance:.1f} kg (min {minimum:.1f} kg)")
+        lines.append(f"{severity} {mat_name}: {balance:.1f} кг (мин {minimum:.1f} кг)")
 
     if len(low_stocks) > 15:
-        lines.append(f"\n... and {len(low_stocks) - 15} more")
+        lines.append(f"\n... и ещё {len(low_stocks) - 15}")
 
     await _send_message(chat_id, "\n".join(lines))
 
@@ -2185,7 +2185,7 @@ async def _cmd_challenge(db: Session, message: dict) -> None:
 
     uf = db.query(UserFactory).filter(UserFactory.user_id == user.id).first()
     if not uf:
-        await _send_message(chat_id, "\U0001f3af *Daily Challenge*\n\nNo factory assigned.")
+        await _send_message(chat_id, "\U0001f3af *Вызов дня*\n\nФабрика не назначена.")
         return
 
     today = date.today()
@@ -2201,7 +2201,7 @@ async def _cmd_challenge(db: Session, message: dict) -> None:
     if not challenge:
         await _send_message(
             chat_id,
-            "\U0001f3af *Daily Challenge*\n\nNo challenge set for today. Check back tomorrow!",
+            "\U0001f3af *Вызов дня*\n\nСегодня вызов не назначен. Проверьте завтра!",
         )
         return
 
@@ -2210,12 +2210,12 @@ async def _cmd_challenge(db: Session, message: dict) -> None:
     bar_empty = 10 - bar_filled
     progress_bar = "\u2588" * bar_filled + "\u2591" * bar_empty
 
-    status = "\u2705 COMPLETED!" if challenge.completed else f"{progress_pct}%"
+    status = "\u2705 ВЫПОЛНЕНО!" if challenge.completed else f"{progress_pct}%"
     text = (
-        f"\U0001f3af *Daily Challenge*\n\n"
+        f"\U0001f3af *Вызов дня*\n\n"
         f"*{challenge.title}*\n"
         f"{challenge.description or ''}\n\n"
-        f"Progress: {challenge.actual_value}/{challenge.target_value} ({status})\n"
+        f"Прогресс: {challenge.actual_value}/{challenge.target_value} ({status})\n"
         f"`[{progress_bar}]`"
     )
     await _send_message(chat_id, text)
@@ -2243,7 +2243,7 @@ async def _cmd_achievements(db: Session, message: dict) -> None:
     if not achievements:
         await _send_message(
             chat_id,
-            "\U0001f3c5 *Achievements*\n\nNo achievements yet. Keep working to unlock badges!",
+            "\U0001f3c5 *Достижения*\n\nДостижений пока нет. Продолжайте работать, чтобы открыть значки!",
         )
         return
 
@@ -2258,7 +2258,7 @@ async def _cmd_achievements(db: Session, message: dict) -> None:
         "marathon": "\U0001f3c3",
     }
 
-    lines = ["\U0001f3c5 *Your Achievements*\n"]
+    lines = ["\U0001f3c5 *Ваши достижения*\n"]
     unlocked = [a for a in achievements if a.unlocked_at]
     in_progress = [a for a in achievements if not a.unlocked_at]
 
@@ -2269,13 +2269,13 @@ async def _cmd_achievements(db: Session, message: dict) -> None:
             lines.append(f"{icon} *{a.achievement_type.replace('_', ' ').title()}* {level_stars}")
 
     if in_progress:
-        lines.append(f"\n\U0001f512 *In Progress:*")
+        lines.append(f"\n\U0001f512 *В процессе:*")
         for a in in_progress[:5]:
             icon = badge_icons.get(a.achievement_type, "\u2b1c")
             pct = min(100, int(a.progress_current / max(a.progress_target, 1) * 100))
             lines.append(f"{icon} {a.achievement_type.replace('_', ' ').title()}: {pct}%")
 
-    lines.append(f"\n\U0001f4ca Total: {len(unlocked)} unlocked, {len(in_progress)} in progress")
+    lines.append(f"\n\U0001f4ca Итого: {len(unlocked)} открыто, {len(in_progress)} в процессе")
     await _send_message(chat_id, "\n".join(lines))
 
 
@@ -2612,7 +2612,7 @@ async def _cmd_glaze(db: Session, message: dict, args: str) -> None:
     # Add "Verify Recipe" button if position has a recipe with materials
     if position.recipe_id and recipe_materials:
         keyboard = [[{
-            "text": "\U0001F4F8 Verify Recipe",
+            "text": "\U0001F4F8 Проверить рецепт",
             "callback_data": f"rv:start:{position.id}",
         }]]
         await send_message_with_buttons(chat_id, "\n".join(lines), keyboard)
@@ -2917,7 +2917,7 @@ async def _handle_voice_message(db: Session, message: dict) -> None:
         # Show the user what was heard, then process as text
         await _send_message(
             chat_id,
-            f"\U0001f399 *Transcription:*\n_{transcribed_text}_",
+            f"\U0001f399 *Расшифровка:*\n_{transcribed_text}_",
             parse_mode="Markdown",
         )
 
@@ -5144,7 +5144,7 @@ async def _handle_recipe_verify_callback(
         return
 
     if len(parts) < 3 or sub_action != "start":
-        await answer_callback_query(callback_id, "Invalid action")
+        await answer_callback_query(callback_id, "Неверное действие")
         return
 
     position_id_str = parts[2]
@@ -5152,13 +5152,13 @@ async def _handle_recipe_verify_callback(
         from uuid import UUID as _UUID
         position_id = _UUID(position_id_str)
     except ValueError:
-        await answer_callback_query(callback_id, "Invalid position ID")
+        await answer_callback_query(callback_id, "Неверный ID позиции")
         return
 
     # Load position and recipe
     position = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
     if not position:
-        await answer_callback_query(callback_id, "Position not found")
+        await answer_callback_query(callback_id, "Позиция не найдена")
         return
 
     # Determine factory
@@ -5228,11 +5228,11 @@ async def _handle_recipe_verify_callback(
         "awaiting_manual": False,
     }
 
-    await answer_callback_query(callback_id, "Starting recipe verification...")
+    await answer_callback_query(callback_id, "Начинаем проверку рецепта...")
 
     # Send ingredient list
-    lines = [f"\U0001F4F8 *Recipe Verification* — {recipe.name}\n"]
-    lines.append("Weigh each ingredient and send a photo:\n")
+    lines = [f"\U0001F4F8 *Проверка рецепта* — {recipe.name}\n"]
+    lines.append("Взвесьте каждый ингредиент и отправьте фото:\n")
     for ing in ingredients:
         num = ing["index"] + 1
         emoji_num = _num_emoji(num)
@@ -5241,7 +5241,7 @@ async def _handle_recipe_verify_callback(
     lines.append(f"\n{msg('rv_send_photo', lang, num=1)} \U0001F4F7")
 
     # Add cancel button
-    keyboard = [[{"text": "\u274C Cancel", "callback_data": "rv:cancel:0"}]]
+    keyboard = [[{"text": "\u274C Отмена", "callback_data": "rv:cancel:0"}]]
     await send_message_with_buttons(chat_id, "\n".join(lines), keyboard)
 
 
@@ -5252,7 +5252,7 @@ async def _handle_recipe_verification_photo(
     """Process a scale photo during recipe verification — read weight via AI."""
     import base64
 
-    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else "id"
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else "ru"
 
     idx = rv_session["current_index"]
     if idx >= len(rv_session["ingredients"]):
@@ -5322,7 +5322,7 @@ async def _handle_recipe_verification_manual(
     try:
         actual_g = float(text)
     except ValueError:
-        lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else "id"
+        lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else "ru"
         await _send_message(chat_id, msg("rv_ai_failed", lang))
         return
 
@@ -5340,7 +5340,7 @@ async def _process_recipe_ingredient_result(
     )
     from datetime import datetime, timezone
 
-    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else "id"
+    lang = user.language.value if hasattr(user.language, 'value') else str(user.language) if user.language else "ru"
 
     idx = rv_session["current_index"]
     ingredient = rv_session["ingredients"][idx]
@@ -5429,7 +5429,7 @@ async def _process_recipe_ingredient_result(
         next_num = rv_session["current_index"] + 1
         next_ing = rv_session["ingredients"][rv_session["current_index"]]
         prompt_msg = f"\n{msg('rv_send_photo', lang, num=next_num)} \U0001F4F7\n{next_ing['material_name']}: {next_ing['target_g']:.1f} {next_ing['unit']}"
-        keyboard = [[{"text": "\u274C Cancel", "callback_data": f"rv:cancel:{rv_session['current_index']}"}]]
+        keyboard = [[{"text": "\u274C Отмена", "callback_data": f"rv:cancel:{rv_session['current_index']}"}]]
         await send_message_with_buttons(chat_id, prompt_msg, keyboard, parse_mode="")
 
 
@@ -5478,15 +5478,15 @@ async def _cmd_points(db: Session, message: dict) -> None:
         return
 
     lines = [f"\U0001F3C6 *{msg('points_header', lang, year=year)}*\n"]
-    lines.append(f"\U0001F4CA Total: {pts['points_total']:,} points")
-    lines.append(f"\U0001F4C5 This month: {pts['points_this_month']:,} points")
-    lines.append(f"\U0001F4C8 This week: {pts['points_this_week']:,} points")
+    lines.append(f"\U0001F4CA Всего: {pts['points_total']:,} очков")
+    lines.append(f"\U0001F4C5 За месяц: {pts['points_this_month']:,} очков")
+    lines.append(f"\U0001F4C8 За неделю: {pts['points_this_week']:,} очков")
 
     if rank > 0:
-        lines.append(f"\U0001F3C5 Rank: #{rank} of {total} masters")
+        lines.append(f"\U0001F3C5 Место: #{rank} из {total}")
 
     if recent:
-        lines.append("\nRecent:")
+        lines.append("\nПоследние:")
         for txn in recent:
             reason = txn["reason"].replace("_", " ").title()
             details = txn.get("details") or {}
@@ -5497,7 +5497,7 @@ async def _cmd_points(db: Session, message: dict) -> None:
                 detail_str += f", {accuracy}%"
             if detail_str:
                 detail_str += ")"
-            lines.append(f"  +{txn['points']} pts — {reason}{detail_str}")
+            lines.append(f"  +{txn['points']} очк. — {reason}{detail_str}")
 
     await _send_message(chat_id, "\n".join(lines))
 
@@ -5517,7 +5517,7 @@ async def _cmd_cancel_verify(db: Session, message: dict) -> None:
         del _pending_recipe_verifications[chat_id]
         await _send_message(chat_id, msg("rv_cancelled", lang))
     else:
-        await _send_message(chat_id, "No active verification session.", parse_mode="")
+        await _send_message(chat_id, "Нет активной сессии проверки.", parse_mode="")
 
 
 # ────────────────────────────────────────────────────────────────

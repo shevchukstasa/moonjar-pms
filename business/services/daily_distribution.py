@@ -201,14 +201,14 @@ def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
         fid_short = fid[:8]
         inline_keyboard = [
             [
-                {"text": "\u2705 Start Day", "callback_data": f"d:a:{fid_short}:{date_str}"},
-                {"text": "\U0001f4cb Details", "callback_data": f"d:d:{fid_short}:{date_str}"},
-                {"text": "\u26a0\ufe0f Problem", "callback_data": f"d:p:{fid_short}:{date_str}"},
+                {"text": "\u2705 Начать день", "callback_data": f"d:a:{fid_short}:{date_str}"},
+                {"text": "\U0001f4cb Подробности", "callback_data": f"d:d:{fid_short}:{date_str}"},
+                {"text": "\u26a0\ufe0f Проблема", "callback_data": f"d:p:{fid_short}:{date_str}"},
             ],
             [
-                {"text": "\U0001f4ca My Stats", "callback_data": f"d:s:{fid_short}:{date_str}"},
-                {"text": "\U0001f3c6 Leaders", "callback_data": f"d:l:{fid_short}:{date_str}"},
-                {"text": "\U0001f4e6 Stock", "callback_data": f"d:k:{fid_short}:{date_str}"},
+                {"text": "\U0001f4ca Статистика", "callback_data": f"d:s:{fid_short}:{date_str}"},
+                {"text": "\U0001f3c6 Лидеры", "callback_data": f"d:l:{fid_short}:{date_str}"},
+                {"text": "\U0001f4e6 Склад", "callback_data": f"d:k:{fid_short}:{date_str}"},
             ],
         ]
 
@@ -244,7 +244,7 @@ def daily_task_distribution(db: Session, factory_id: UUID) -> dict:
             if stock_alerts:
                 forum_group_m, materials_topic = get_forum_topic("materials")
                 if forum_group_m:
-                    stock_lines = [f"\U0001f4e6 *Stock Alerts — {factory.name}* ({target_date.isoformat()})"]
+                    stock_lines = [f"\U0001f4e6 *Оповещения по складу — {factory.name}* ({target_date.isoformat()})"]
                     for sa in stock_alerts:
                         stock_lines.append(
                             f"  \U0001f7e1 {sa['material_name']}: "
@@ -673,7 +673,7 @@ def _collect_urgent_alerts(db: Session, factory_id: UUID) -> list:
         days_overdue = (today - order.final_deadline).days
         alerts.append({
             "order": order.order_number,
-            "message": f"OVERDUE {days_overdue} day{'s' if days_overdue != 1 else ''}!",
+            "message": f"ПРОСРОЧЕН на {days_overdue} дн.!",
             "deadline": order.final_deadline.isoformat(),
             "days_overdue": days_overdue,
         })
@@ -695,7 +695,7 @@ def _collect_urgent_alerts(db: Session, factory_id: UUID) -> list:
     for order in due_tomorrow:
         alerts.append({
             "order": order.order_number,
-            "message": "Due TOMORROW!",
+            "message": "Дедлайн ЗАВТРА!",
             "deadline": order.final_deadline.isoformat(),
             "days_overdue": -1,
         })
@@ -726,7 +726,7 @@ def _collect_urgent_alerts(db: Session, factory_id: UUID) -> list:
         task_label = task.type.replace("_", " ").title() if isinstance(task.type, str) else task.type.value.replace("_", " ").title()
         alerts.append({
             "order": order_num,
-            "message": f"Blocking: {task_label} pending",
+            "message": f"Блокировка: {task_label} ожидает",
             "deadline": None,
             "days_overdue": 0,
         })
@@ -1116,15 +1116,12 @@ def _update_distribution_message_id(
 # §7  Message formatting
 # ────────────────────────────────────────────────────────────────
 
-def format_daily_message(distribution: dict, language: str = "id") -> str:
-    """Format distribution as bilingual Telegram message (English + Indonesian).
+def format_daily_message(distribution: dict, language: str = "ru") -> str:
+    """Format distribution as Telegram message in Russian.
 
-    Always returns English first, then Indonesian.
+    Returns Russian message (single language for testing phase).
     """
-    en_msg = _format_message_en(distribution)
-    id_msg = _format_message_id(distribution)
-    separator = "\n\n" + "=" * 30 + "\n\U0001f1ee\U0001f1e9 Bahasa Indonesia:\n" + "=" * 30 + "\n\n"
-    return en_msg + separator + id_msg
+    return _format_message_ru(distribution)
 
 
 # ── Helper: quality emoji based on defect rate ──

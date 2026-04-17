@@ -78,10 +78,10 @@ def handle_callback(db: Session, callback_query: dict) -> str:
             return _handle_report_problem(db, callback_query, parts)
         else:
             logger.warning("Unknown callback action: %s", data)
-            return "Aksi tidak dikenal"
+            return "Неизвестное действие"
     except Exception as e:
         logger.error("Callback handler error for data=%s: %s", data, e, exc_info=True)
-        return "Terjadi kesalahan"
+        return "Произошла ошибка"
 
 
 # ────────────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ def _handle_daily_callback(db: Session, cq: dict, parts: list[str]) -> str:
     d:k:{fid8}         — Stock check
     """
     if len(parts) < 3:
-        return "Data tidak valid"
+        return "Данные недействительны"
 
     sub_action = parts[1]  # a / p / d / s / l / k
     fid_short = parts[2]
@@ -111,30 +111,30 @@ def _handle_daily_callback(db: Session, cq: dict, parts: list[str]) -> str:
     # Resolve factory by short UUID prefix
     factory = _find_factory_by_prefix(db, fid_short)
     if not factory:
-        return "Pabrik tidak ditemukan"
+        return "Фабрика не найдена"
 
     # Gamification callbacks (no date param required)
     if sub_action == "s":
         chat_id = cq.get("message", {}).get("chat", {}).get("id")
         if chat_id:
             _handle_my_stats(db, chat_id, telegram_user_id, factory.id)
-        return "\U0001f4ca Statistik dikirim"
+        return "\U0001f4ca Статистика отправлена"
 
     if sub_action == "l":
         chat_id = cq.get("message", {}).get("chat", {}).get("id")
         if chat_id:
             _handle_leaderboard(db, chat_id, factory.id)
-        return "\U0001f3c6 Papan peringkat dikirim"
+        return "\U0001f3c6 Лидерборд отправлен"
 
     if sub_action == "k":
         chat_id = cq.get("message", {}).get("chat", {}).get("id")
         if chat_id:
             _handle_stock_check(db, chat_id, factory.id)
-        return "\U0001f4e6 Status stok dikirim"
+        return "\U0001f4e6 Остатки отправлены"
 
     # Original callbacks require date (4 parts)
     if len(parts) < 4:
-        return "Data tidak valid"
+        return "Данные недействительны"
 
     date_str = parts[3]
 
@@ -144,7 +144,7 @@ def _handle_daily_callback(db: Session, cq: dict, parts: list[str]) -> str:
             "DAILY_ACK | factory=%s date=%s user=%s (tg_id=%s)",
             factory.name, date_str, user_display, telegram_user_id,
         )
-        return f"\u2705 Tugas diterima oleh {user_display}! Semangat kerja!"
+        return f"\u2705 Задачи приняты — {user_display}! Удачного дня!"
 
     elif sub_action == "p":
         # Report problem — notify PM
@@ -154,13 +154,13 @@ def _handle_daily_callback(db: Session, cq: dict, parts: list[str]) -> str:
         )
         # Send notification to PM about problem report
         _notify_pm_problem_report(db, factory, date_str, user_display, telegram_user_id)
-        return "\U0001f4dd Silakan kirim pesan dengan detail masalah di chat ini."
+        return "\U0001f4dd Опишите проблему следующим сообщ��нием в чате."
 
     elif sub_action == "d":
         # Detail — send summary privately via chat
         distribution = _get_distribution_record(db, factory.id, date_str)
         if not distribution:
-            return "Data distribusi tidak ditemukan"
+            return "Данные распределения не найдены"
 
         # Build compact detail summary
         detail_text = _build_detail_summary(distribution, date_str)
@@ -171,9 +171,9 @@ def _handle_daily_callback(db: Session, cq: dict, parts: list[str]) -> str:
             from business.services.notifications import send_telegram_message
             send_telegram_message(str(chat_id), detail_text)
 
-        return "\U0001f4cb Detail tugas dikirim"
+        return "\U0001f4cb Детали задач отправлены"
 
-    return "Aksi tidak dikenal"
+    return "Неизвестное действие"
 
 
 # ────────────────────────────────────────────────────────────────
@@ -187,7 +187,7 @@ def _handle_alert_callback(db: Session, cq: dict, parts: list[str]) -> str:
     a:r:{kid8} — Trigger kiln reschedule notification to PM
     """
     if len(parts) < 3:
-        return "Data tidak valid"
+        return "Данные недействительны"
 
     sub_action = parts[1]  # v / r
     entity_short = parts[2]
@@ -199,7 +199,7 @@ def _handle_alert_callback(db: Session, cq: dict, parts: list[str]) -> str:
         # View position details
         position = _find_position_by_prefix(db, entity_short)
         if not position:
-            return "Posisi tidak ditemukan"
+            return "Позиция не найдена"
 
         order = position.order
         order_num = order.order_number if order else "?"
@@ -209,13 +209,13 @@ def _handle_alert_callback(db: Session, cq: dict, parts: list[str]) -> str:
         status_val = position.status.value if hasattr(position.status, "value") else str(position.status)
 
         detail = (
-            f"\U0001f50d *Detail Posisi*\n"
-            f"Pesanan: {order_num}\n"
-            f"Posisi: {pos_label}\n"
-            f"Warna: {position.color or '-'}\n"
-            f"Ukuran: {position.size or '-'}\n"
-            f"Jumlah: {position.quantity} pcs\n"
-            f"Status: {status_val}"
+            f"\U0001f50d *Детали позиции*\n"
+            f"Заказ: {order_num}\n"
+            f"Позиция: {pos_label}\n"
+            f"Цвет: {position.color or '-'}\n"
+            f"Размер: {position.size or '-'}\n"
+            f"Кол-во: {position.quantity} шт\n"
+            f"Статус: {status_val}"
         )
 
         # Send detail to the chat
@@ -224,13 +224,13 @@ def _handle_alert_callback(db: Session, cq: dict, parts: list[str]) -> str:
             from business.services.notifications import send_telegram_message
             send_telegram_message(str(chat_id), detail)
 
-        return f"Detail posisi {pos_label} dikirim"
+        return f"Детали позиции {pos_label} отправлены"
 
     elif sub_action == "r":
         # Reschedule kiln — notify PM
         kiln = _find_kiln_by_prefix(db, entity_short)
         if not kiln:
-            return "Kiln tidak ditemukan"
+            return "Печь не найдена"
 
         factory_id = kiln.factory_id
         if factory_id:
@@ -238,8 +238,8 @@ def _handle_alert_callback(db: Session, cq: dict, parts: list[str]) -> str:
             notify_pm(
                 db, factory_id,
                 "kiln_reschedule_request",
-                f"\U0001f4c5 Permintaan jadwal ulang: {kiln.name}",
-                f"{user_display} meminta penjadwalan ulang kiln {kiln.name} via Telegram.",
+                f"\U0001f4c5 Запрос на перепланирование: {kiln.name}",
+                f"{user_display} запросил перепланирование печи {kiln.name} через Telegram.",
                 related_entity_type="resource",
                 related_entity_id=kiln.id,
             )
@@ -248,9 +248,9 @@ def _handle_alert_callback(db: Session, cq: dict, parts: list[str]) -> str:
                 kiln.name, user_display,
             )
 
-        return f"\U0001f4c5 Permintaan jadwal ulang kiln {kiln.name} dikirim ke PM"
+        return f"\U0001f4c5 Запрос на перепланирование печи {kiln.name} отправлен PM"
 
-    return "Aksi tidak dikenal"
+    return "Неизвестное действие"
 
 
 # ────────────────────────────────────────────────────────────────
@@ -265,7 +265,7 @@ def _handle_task_callback(db: Session, cq: dict, parts: list[str]) -> str:
     t:i:{pid8} — Report issue with task
     """
     if len(parts) < 3:
-        return "Data tidak valid"
+        return "Данные недействительны"
 
     sub_action = parts[1]  # s / d / i
     pid_short = parts[2]
@@ -282,7 +282,7 @@ def _handle_task_callback(db: Session, cq: dict, parts: list[str]) -> str:
     # Resolve position
     position = _find_position_by_prefix(db, pid_short)
     if not position:
-        return "Posisi tidak ditemukan"
+        return "Позиция не найдена"
 
     order = position.order
     order_num = order.order_number if order else "?"
@@ -296,7 +296,7 @@ def _handle_task_callback(db: Session, cq: dict, parts: list[str]) -> str:
             "TASK_START | order=%s pos=%s user=%s (tg_id=%s)",
             order_num, pos_label, user_display, telegram_user_id,
         )
-        return f"\u2705 Tugas dimulai: {order_num} Pos {pos_label}"
+        return f"\u2705 Задача начата: {order_num} Поз {pos_label}"
 
     elif sub_action == "d":
         # Task done
@@ -304,7 +304,7 @@ def _handle_task_callback(db: Session, cq: dict, parts: list[str]) -> str:
             "TASK_DONE | order=%s pos=%s user=%s (tg_id=%s)",
             order_num, pos_label, user_display, telegram_user_id,
         )
-        return f"\u2705 Tugas selesai: {order_num} Pos {pos_label}"
+        return f"\u2705 Задача выполнена: {order_num} Поз {pos_label}"
 
     elif sub_action == "i":
         # Report issue
@@ -319,14 +319,14 @@ def _handle_task_callback(db: Session, cq: dict, parts: list[str]) -> str:
             notify_pm(
                 db, factory_id,
                 "task_issue",
-                f"\u26a0\ufe0f Masalah tugas: {order_num} {pos_label}",
-                f"{user_display} melaporkan masalah pada posisi {pos_label} ({order_num}).",
+                f"\u26a0\ufe0f Проблема с задачей: {order_num} {pos_label}",
+                f"{user_display} сообщил о проблеме с позицией {pos_label} ({order_num}).",
                 related_entity_type="order_position",
                 related_entity_id=position.id,
             )
-        return f"\u26a0\ufe0f Masalah dilaporkan: {order_num} Pos {pos_label}"
+        return f"\u26a0\ufe0f Проблема зафиксирована: {order_num} Поз {pos_label}"
 
-    return "Aksi tidak dikenal"
+    return "Неизвестное действие"
 
 
 # ────────────────────────────────────────────────────────────────
@@ -340,7 +340,7 @@ def _handle_my_stats(db: Session, chat_id: int, telegram_user_id: int, factory_i
 
         user = db.query(User).filter(User.telegram_user_id == telegram_user_id).first()
         if not user:
-            send_telegram_message(str(chat_id), "Account not linked. Use /start.")
+            send_telegram_message(str(chat_id), "Аккаунт не привязан. Используйте /start.")
             return
 
         # Positions processed this week
@@ -408,11 +408,11 @@ def _handle_my_stats(db: Session, chat_id: int, telegram_user_id: int, factory_i
 
         name = user.first_name or user.email.split("@")[0]
         msg_text = (
-            f"\U0001f4ca *Your Stats This Week*\n\n"
-            f"\u2705 Positions processed: {week_count}\n"
-            f"\U0001f525 Zero defect streak: {current_streak} days (best: {best_streak})\n"
-            f"\U0001f3c6 Achievements unlocked: {achievement_count}\n"
-            f"\U0001f4c8 Rank: #{rank} of {total_masters} masters"
+            f"\U0001f4ca *Ваша статистика за неделю*\n\n"
+            f"\u2705 Позиций обработано: {week_count}\n"
+            f"\U0001f525 Серия без брака: {current_streak} дн. (рекорд: {best_streak})\n"
+            f"\U0001f3c6 Достижений: {achievement_count}\n"
+            f"\U0001f4c8 Место: #{rank} из {total_masters}"
         )
         send_telegram_message(str(chat_id), msg_text)
 
@@ -446,17 +446,17 @@ def _handle_leaderboard(db: Session, chat_id: int, factory_id: UUID) -> None:
         )
 
         if not top_users:
-            send_telegram_message(str(chat_id), "\U0001f3c6 *Leaderboard*\n\nNo data this week yet.")
+            send_telegram_message(str(chat_id), "\U0001f3c6 *Лидерборд*\n\nНет данных за эту неделю.")
             return
 
         medals = ["\U0001f947", "\U0001f948", "\U0001f949", "4.", "5."]
-        lines = ["\U0001f3c6 *Leaderboard This Week*\n"]
+        lines = ["\U0001f3c6 *Лидерборд за неделю*\n"]
 
         for i, (uid, cnt) in enumerate(top_users):
             user = db.query(User).get(uid)
             name = (user.first_name or user.email.split("@")[0]) if user else "?"
             prefix = medals[i] if i < len(medals) else f"{i + 1}."
-            lines.append(f"{prefix} {name} — {cnt} positions")
+            lines.append(f"{prefix} {name} — {cnt} позиций")
 
         send_telegram_message(str(chat_id), "\n".join(lines))
 
@@ -483,11 +483,11 @@ def _handle_stock_check(db: Session, chat_id: int, factory_id: UUID) -> None:
         if not low_stocks:
             send_telegram_message(
                 str(chat_id),
-                "\U0001f4e6 *Stock Check*\n\n\u2705 All materials above minimum balance.",
+                "\U0001f4e6 *Склад*\n\n\u2705 Все материалы выше минимального остатка.",
             )
             return
 
-        lines = [f"\U0001f4e6 *Stock Alerts* ({len(low_stocks)} items)\n"]
+        lines = [f"\U0001f4e6 *Оповещения по складу* ({len(low_stocks)} позиций)\n"]
         for stock in low_stocks[:15]:  # cap at 15 to keep message readable
             mat = stock.material
             mat_name = mat.name if mat else f"ID:{stock.material_id}"
@@ -495,11 +495,11 @@ def _handle_stock_check(db: Session, chat_id: int, factory_id: UUID) -> None:
             minimum = float(stock.min_balance)
             severity = "\U0001f534" if balance < minimum * 0.5 else "\U0001f7e1"
             lines.append(
-                f"{severity} {mat_name}: {balance:.1f} kg (min {minimum:.1f} kg)"
+                f"{severity} {mat_name}: {balance:.1f} кг (мин {minimum:.1f} кг)"
             )
 
         if len(low_stocks) > 15:
-            lines.append(f"\n... and {len(low_stocks) - 15} more")
+            lines.append(f"\n... и ещё {len(low_stocks) - 15}")
 
         send_telegram_message(str(chat_id), "\n".join(lines))
 
@@ -581,50 +581,50 @@ def _get_distribution_record(
 
 def _build_detail_summary(distribution: "DailyTaskDistribution", date_str: str) -> str:
     """Build a compact detail summary from a DailyTaskDistribution record."""
-    lines = [f"\U0001f4cb *Detail Tugas {date_str}*\n"]
+    lines = [f"\U0001f4cb *Детали задач {date_str}*\n"]
 
     glazing = distribution.glazing_tasks_json or []
     if glazing:
-        lines.append(f"\U0001f3a8 *Glasir: {len(glazing)} posisi*")
+        lines.append(f"\U0001f3a8 *Глазурь: {len(glazing)} позиций*")
         for i, t in enumerate(glazing, 1):
             behind = " \u26a0\ufe0f" if t.get("behind_schedule") else ""
             lines.append(
                 f"{i}. #{t.get('order_number','?')} "
-                f"Pos #{t.get('position_label', t.get('position_number',''))}{behind} "
+                f"Поз #{t.get('position_label', t.get('position_number',''))}{behind} "
                 f"| {t.get('color','')} {t.get('size','')} "
-                f"| {t.get('quantity',0)} pcs"
+                f"| {t.get('quantity',0)} шт"
             )
 
     kiln = distribution.kiln_loading_json or []
     if kiln:
-        lines.append(f"\n\U0001f525 *Kiln: {len(kiln)} batch*")
+        lines.append(f"\n\U0001f525 *Обжиг: {len(kiln)} партий*")
         for b in kiln:
             lines.append(
                 f"\u2022 {b.get('kiln_name','?')}: "
-                f"{b.get('positions_count',0)} posisi, "
+                f"{b.get('positions_count',0)} позиций, "
                 f"{b.get('temperature',0)}\u00b0C"
             )
 
     extra = distribution.glaze_recipes_json or {}
     kiln_prep = extra.get("kiln_prep_tasks", [])
     if kiln_prep:
-        lines.append(f"\n\U0001f3ed *Persiapan: {len(kiln_prep)} posisi*")
+        lines.append(f"\n\U0001f3ed *Подготовка: {len(kiln_prep)} позиций*")
         for i, t in enumerate(kiln_prep, 1):
             behind = " \u26a0\ufe0f" if t.get("behind_schedule") else ""
             lines.append(
                 f"{i}. #{t.get('order_number','?')} "
-                f"Pos #{t.get('position_label', t.get('position_number',''))}{behind} "
-                f"| {t.get('quantity',0)} pcs"
+                f"Поз #{t.get('position_label', t.get('position_number',''))}{behind} "
+                f"| {t.get('quantity',0)} шт"
             )
 
     urgent = extra.get("urgent_alerts", [])
     if urgent:
-        lines.append(f"\n\u26a0\ufe0f *Mendesak: {len(urgent)}*")
+        lines.append(f"\n\u26a0\ufe0f *Срочно: {len(urgent)}*")
         for a in urgent:
             lines.append(f"\u2022 {a.get('order','?')} \u2014 {a.get('message','')}")
 
     if not glazing and not kiln and not kiln_prep:
-        lines.append("Tidak ada tugas untuk tanggal ini.")
+        lines.append("Нет задач на эту дату.")
 
     return "\n".join(lines)
 
@@ -642,9 +642,9 @@ def _notify_pm_problem_report(
         notify_pm(
             db, factory.id,
             "daily_problem_report",
-            f"\u26a0\ufe0f Laporan masalah: {factory.name} ({date_str})",
-            f"{user_display} (TG ID: {telegram_user_id}) melaporkan masalah "
-            f"pada distribusi tugas {date_str}.",
+            f"\u26a0\ufe0f Сообщение о проблеме: {factory.name} ({date_str})",
+            f"{user_display} (TG ID: {telegram_user_id}) сообщил о проблеме "
+            f"в распределении задач {date_str}.",
         )
     except Exception as e:
         logger.warning("Failed to notify PM about problem report: %s", e)
@@ -671,44 +671,44 @@ def _handle_position_detail(db: Session, cq: dict, parts: list[str]) -> str:
 
     pos = _find_position_by_prefix(db, pid_prefix)
     if not pos:
-        send_telegram_message(chat_id, "❌ Position not found")
+        send_telegram_message(chat_id, "❌ Позиция не найдена")
         return "Not found"
 
     order = db.query(ProductionOrder).filter(ProductionOrder.id == pos.order_id).first()
 
     # Build detail card
-    msg = f"📋 *Position #{pos.position_number}* — {pos.color}\n"
+    msg = f"📋 *Позиция #{pos.position_number}* — {pos.color}\n"
     msg += "──────────────────\n"
-    msg += f"📐 Size: {pos.size}"
+    msg += f"📐 Размер: {pos.size}"
     if pos.shape:
         shape_val = pos.shape if isinstance(pos.shape, str) else pos.shape.value
-        msg += f" | Shape: {shape_val}"
+        msg += f" | Форма: {shape_val}"
     msg += "\n"
-    msg += f"🎨 Color: {pos.color}"
+    msg += f"🎨 Цвет: {pos.color}"
     if pos.collection:
         msg += f" | {pos.collection}"
     msg += "\n"
-    msg += f"📊 Qty: {pos.quantity} pcs"
+    msg += f"📊 Кол-во: {pos.quantity} шт"
     if pos.quantity_sqm:
-        msg += f" | {float(pos.quantity_sqm):.3f} m²"
+        msg += f" | {float(pos.quantity_sqm):.3f} м²"
     msg += "\n"
-    msg += f"🔥 Thickness: {float(pos.thickness_mm or 11)} mm\n"
+    msg += f"🔥 Толщина: {float(pos.thickness_mm or 11)} мм\n"
     if pos.edge_profile:
         ep = pos.edge_profile if isinstance(pos.edge_profile, str) else pos.edge_profile
-        msg += f"📏 Edge: {ep}"
+        msg += f"📏 Кромка: {ep}"
         if pos.edge_profile_sides:
-            msg += f" ({pos.edge_profile_sides} sides)"
+            msg += f" ({pos.edge_profile_sides} сторон)"
         msg += "\n"
     status_val = pos.status if isinstance(pos.status, str) else pos.status.value
-    msg += f"📌 Status: {status_val}\n"
+    msg += f"📌 Статус: {status_val}\n"
     if order:
-        msg += f"📦 Order: {order.order_number}\n"
+        msg += f"📦 Заказ: {order.order_number}\n"
 
     # Recipe details
     if pos.recipe_id:
         recipe = db.query(Recipe).filter(Recipe.id == pos.recipe_id).first()
         if recipe:
-            msg += f"\n📖 *RECIPE: {recipe.name}*\n"
+            msg += f"\n📖 *РЕЦЕПТ: {recipe.name}*\n"
             rms = db.query(RecipeMaterial).filter(RecipeMaterial.recipe_id == recipe.id).all()
             for rm in rms:
                 material = db.query(Material).filter(Material.id == rm.material_id).first()
@@ -739,14 +739,14 @@ def _handle_position_detail(db: Session, cq: dict, parts: list[str]) -> str:
             if recipe.specific_gravity:
                 msg += f"  SG: {float(recipe.specific_gravity)}\n"
     else:
-        msg += "\n⚠️ No recipe assigned\n"
+        msg += "\n⚠️ Рецепт не назначен\n"
 
     # Buttons
     pid8 = str(pos.id)[:8]
     buttons = {
         "inline_keyboard": [[
-            {"text": "✅ Mark Done", "callback_data": f"done:{pid8}"},
-            {"text": "⚠️ Problem", "callback_data": f"prob:{pid8}"},
+            {"text": "✅ Готово", "callback_data": f"done:{pid8}"},
+            {"text": "⚠️ Проблема", "callback_data": f"prob:{pid8}"},
         ]]
     }
 
@@ -769,7 +769,7 @@ def _handle_mark_done(db: Session, cq: dict, parts: list[str]) -> str:
     pos = _find_position_by_prefix(db, pid_prefix)
     if not pos:
         if chat_id:
-            send_telegram_message(chat_id, "❌ Position not found")
+            send_telegram_message(chat_id, "❌ Позиция не найдена")
         return "Not found"
 
     # Status advance map
@@ -790,7 +790,7 @@ def _handle_mark_done(db: Session, cq: dict, parts: list[str]) -> str:
 
     if not next_status:
         if chat_id:
-            send_telegram_message(chat_id, f"⚠️ Cannot advance from: {current}")
+            send_telegram_message(chat_id, f"⚠️ Невозможно перевести из статуса: {current}")
         return f"No advance from {current}"
 
     try:
@@ -802,9 +802,9 @@ def _handle_mark_done(db: Session, cq: dict, parts: list[str]) -> str:
         if chat_id:
             send_telegram_message(
                 chat_id,
-                f"✅ *Done!* Position #{pos.position_number} ({pos.color})\n"
+                f"✅ *Готово!* Позиция #{pos.position_number} ({pos.color})\n"
                 f"{current} → {next_status}\n\n"
-                f"🎉 Great work!",
+                f"🎉 Отличная работа!",
                 parse_mode="Markdown",
             )
         return f"Advanced to {next_status}"
@@ -812,7 +812,7 @@ def _handle_mark_done(db: Session, cq: dict, parts: list[str]) -> str:
         db.rollback()
         logger.error("Mark done failed: %s", e)
         if chat_id:
-            send_telegram_message(chat_id, f"❌ Error: {str(e)[:100]}")
+            send_telegram_message(chat_id, f"❌ Ошибка: {str(e)[:100]}")
         return "Error"
 
 
@@ -831,16 +831,16 @@ def _handle_report_problem(db: Session, cq: dict, parts: list[str]) -> str:
 
     if not pos:
         if chat_id:
-            send_telegram_message(chat_id, "❌ Position not found")
+            send_telegram_message(chat_id, "❌ Позиция не найдена")
         return "Not found"
 
     if chat_id:
         send_telegram_message(
             chat_id,
-            f"📝 *Report Problem*\n\n"
-            f"Position #{pos.position_number} — {pos.color} ({pos.size})\n\n"
-            f"Please send a text message describing the problem.\n"
-            f"Include: what happened, when, any photos if possible.",
+            f"📝 *Сообщить о проблеме*\n\n"
+            f"Позиция #{pos.position_number} — {pos.color} ({pos.size})\n\n"
+            f"Отправьте текстовое сообщение с описанием проблемы.\n"
+            f"Укажите: что случилось, когда, приложите фото если возможно.",
             parse_mode="Markdown",
         )
     return "Problem report started"

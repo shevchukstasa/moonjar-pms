@@ -2,7 +2,7 @@
 CEO Reports — Gamification dashboard reports formatted for Telegram.
 
 Weekly reports, productivity impact analysis, encouragement tracking.
-All user-facing text in Indonesian (Bahasa Indonesia).
+All user-facing text in Russian.
 """
 
 import logging
@@ -50,8 +50,8 @@ def generate_weekly_gamification_report(db: Session, factory_id: UUID) -> str:
 
     # Header
     header = (
-        f"\U0001F4CA LAPORAN GAMIFIKASI — {factory_name}\n"
-        f"Minggu: {week_start.strftime('%d/%m')} - {week_end.strftime('%d/%m/%Y')}"
+        f"\U0001F4CA ОТЧЁТ ПО ГЕЙМИФИКАЦИИ — {factory_name}\n"
+        f"Неделя: {week_start.strftime('%d/%m')} - {week_end.strftime('%d/%m/%Y')}"
     )
     sections.append(header)
 
@@ -98,14 +98,14 @@ def _build_leaderboard_section(
     )
 
     if not current_rows:
-        return "\U0001F3C6 PAPAN PERINGKAT\n  Belum ada data minggu ini."
+        return "\U0001F3C6 ЛИДЕРБОРД\n  Нет данных за эту неделю."
 
     # Previous week for delta
     prev_start = week_start - timedelta(days=7)
     prev_end = week_start - timedelta(days=1)
     prev_map = _get_points_map(db, factory_id, prev_start, prev_end)
 
-    lines = ["\U0001F3C6 PAPAN PERINGKAT"]
+    lines = ["\U0001F3C6 ЛИДЕРБОРД"]
     for i, row in enumerate(current_rows, 1):
         user = db.query(User).get(row.user_id)
         name = user.name if user else "?"
@@ -115,7 +115,7 @@ def _build_leaderboard_section(
 
         medal = _RANK_MEDALS.get(i, f"{i}.")
         delta_str = f"+{delta}" if delta >= 0 else str(delta)
-        lines.append(f"{medal} {name} — {pts} pts ({delta_str})")
+        lines.append(f"{medal} {name} — {pts} очк. ({delta_str})")
 
     return "\n".join(lines)
 
@@ -138,13 +138,13 @@ def _build_competitions_section(
     )
 
     if not active:
-        return "\u2694\uFE0F KOMPETISI AKTIF\n  Tidak ada kompetisi aktif."
+        return "\u2694\uFE0F АКТИВНЫЕ СОРЕВНОВАНИЯ\n  Нет активных соревнований."
 
-    lines = ["\u2694\uFE0F KOMPETISI AKTIF"]
+    lines = ["\u2694\uFE0F АКТИВНЫЕ СОРЕВНОВАНИЯ"]
     for comp in active:
         days_left = (comp.end_date - today).days
         title = comp.title_id or comp.title
-        lines.append(f'"{title}" (sisa {days_left} hari)')
+        lines.append(f'"{title}" (осталось {days_left} дн.)')
 
         # Get leader
         leader_entry = (
@@ -160,9 +160,9 @@ def _build_competitions_section(
             user = db.query(User).get(leader_entry.user_id)
             leader_name = user.name if user else "?"
             lines.append(
-                f"  Pemimpin: {leader_name} "
-                f"({float(leader_entry.throughput_score):.1f} m\u00B2, "
-                f"kualitas {float(leader_entry.quality_score):.0f}%)"
+                f"  Лидер: {leader_name} "
+                f"({float(leader_entry.throughput_score):.1f} м\u00B2, "
+                f"качество {float(leader_entry.quality_score):.0f}%)"
             )
 
     return "\n".join(lines)
@@ -189,9 +189,9 @@ def _build_certifications_section(
     )
 
     if not certs:
-        return "\U0001F393 SERTIFIKASI BARU\n  Tidak ada sertifikasi baru minggu ini."
+        return "\U0001F393 НОВЫЕ СЕРТИФИКАЦИИ\n  Нет новых сертификаций за эту неделю."
 
-    lines = ["\U0001F393 SERTIFIKASI BARU"]
+    lines = ["\U0001F393 НОВЫЕ СЕРТИФИКАЦИИ"]
     for skill, badge, user in certs:
         badge_name = badge.name_id or badge.name
         lines.append(f"  {user.name}: {badge_name} \u2705")
@@ -204,12 +204,12 @@ def _build_attention_section(db: Session, factory_id: UUID) -> str:
     declining = get_who_needs_encouragement(db, factory_id)
 
     if not declining:
-        return "\u26A0\uFE0F PERLU PERHATIAN\n  Semua pekerja stabil. \U0001F44D"
+        return "\u26A0\uFE0F ТРЕБУЮТ ВНИМАНИЯ\n  Все работники стабильны. \U0001F44D"
 
-    lines = ["\u26A0\uFE0F PERLU PERHATIAN"]
+    lines = ["\u26A0\uFE0F ТРЕБУЮТ ВНИМАНИЯ"]
     for w in declining:
         lines.append(
-            f"  {w['name']} — penurunan poin {w['decline_weeks']} minggu "
+            f"  {w['name']} — снижение баллов {w['decline_weeks']} нед. "
             f"({w['decline_pct']:+.0f}%)"
         )
 
@@ -222,9 +222,9 @@ def _build_prizes_section(db: Session, factory_id: UUID) -> str:
 
     pending = get_pending_prizes(db, factory_id)
     if not pending:
-        return "\U0001F381 REKOMENDASI HADIAH\n  Tidak ada rekomendasi baru."
+        return "\U0001F381 РЕКОМЕНДАЦИИ ПО ПРИЗАМ\n  Нет новых рекомендаций."
 
-    lines = ["\U0001F381 REKOMENDASI HADIAH"]
+    lines = ["\U0001F381 РЕКОМЕНДАЦИИ ПО ПРИЗАМ"]
     total_cost = 0
     total_gain = 0
 
@@ -237,10 +237,10 @@ def _build_prizes_section(db: Session, factory_id: UUID) -> str:
         # Map prize_type to short label
         type_labels = {
             "individual_mvp": "MVP",
-            "most_improved": "Berkembang",
-            "team_winner": "Tim",
-            "skill_champion": "Sertifikasi",
-            "zero_defect": "Zero Defect",
+            "most_improved": "Прогресс",
+            "team_winner": "Команда",
+            "skill_champion": "Сертификация",
+            "zero_defect": "Ноль дефектов",
         }
         label = type_labels.get(p["prize_type"], p["prize_type"])
         lines.append(f"  {label}: {recipient} — {cost_str} (ROI: {roi:.1f}\u00D7)")
@@ -249,7 +249,7 @@ def _build_prizes_section(db: Session, factory_id: UUID) -> str:
         if roi > 0:
             total_gain += cost * roi
 
-    lines.append(f"  Total: {_format_idr(total_cost)} | Est gain: {_format_idr(total_gain)}")
+    lines.append(f"  Итого: {_format_idr(total_cost)} | Ожид. выгода: {_format_idr(total_gain)}")
     return "\n".join(lines)
 
 
@@ -391,7 +391,7 @@ def send_weekly_report_all_factories(db: Session) -> None:
                     db=db,
                     user_id=user.id,
                     type="gamification_weekly_report",
-                    title=f"Laporan Gamifikasi — {factory.name}",
+                    title=f"Отчёт по геймификации — {factory.name}",
                     message=report_text,
                     factory_id=factory.id,
                 )

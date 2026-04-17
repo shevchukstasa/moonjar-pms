@@ -474,6 +474,11 @@ async def get_blocking_summary(
                     ))
                     eff = bal - (t_res - t_unres)
                     req = _calc_required_in_stock_units(rm, p, db, recipe_obj=recipe)
+                    _pos_logger.info(
+                        "SHORTAGE_CALC | mat=%s unit=%s qty_per=%s req=%s (stock_unit=%s)",
+                        mat.name, rm.unit, rm.quantity_per_unit, req,
+                        (mat.unit or "kg"),
+                    )
                     deficit = max(Decimal("0"), req - max(eff, Decimal("0")))
                     if deficit > 0:
                         material_shortages.append({

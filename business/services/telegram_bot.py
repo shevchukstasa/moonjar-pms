@@ -57,7 +57,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     "welcome_start": {
         "en": "Welcome to *Moonjar PMS*, {first_name}!\n\nTo link your Telegram account, please send the email registered in PMS.",
-        "id": "Selamat datang di *Moonjar PMS*, {first_name}!\n\nUntuk menghubungkan akun Telegram Anda, silakan kirim email yang terdaftar di sistem PMS.",
+        "id": "Добро пожаловать в *Moonjar PMS*, {first_name}!\n\nДля привязки Telegram-аккаунта отправьте email, зарегистрированный в PMS.",
         "ru": "Добро пожаловать в *Moonjar PMS*, {first_name}!\n\nДля привязки Telegram-аккаунта отправьте email, зарегистрированный в PMS.",
     },
     "group_welcome": {
@@ -113,7 +113,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     "your_tasks": {
         "en": "Your tasks:",
-        "id": "Tugas Anda:",
+        "id": "Ваши задачи:",
         "ru": "Ваши задачи:",
     },
     "help_text": {
@@ -774,7 +774,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     "factory_not_found": {
         "en": "Factory not found.",
-        "id": "Pabrik tidak ditemukan.",
+        "id": "Фабрика не найдена.",
         "ru": "Фабрика не найдена.",
     },
     "not_assigned_factory": {
@@ -918,15 +918,15 @@ def get_user_language(db: Session, telegram_user_id: Optional[int] = None, chat_
     return _DEFAULT_LANG
 
 
-def msg(key: str, lang: str = "id", **kwargs) -> str:
+def msg(key: str, lang: str = "ru", **kwargs) -> str:
     """
     Get a translated message by key.
-    Falls back: lang -> 'en' -> 'id' -> key itself.
+    Falls back: lang -> 'ru' -> 'en' -> 'id' -> key itself.
     """
     templates = MESSAGES.get(key)
     if not templates:
         return key
-    text = templates.get(lang) or templates.get("en") or templates.get("id") or key
+    text = templates.get(lang) or templates.get("ru") or templates.get("en") or templates.get("id") or key
     if kwargs:
         try:
             text = text.format(**kwargs)
@@ -1529,7 +1529,7 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
                 await answer_callback_query(callback_id, "✅")
                 success_msg = {
                     "en": f"✅ Account linked! Welcome, {user.name}. Type /help to see commands.",
-                    "id": f"✅ Akun terhubung! Selamat datang, {user.name}. Ketik /help untuk melihat perintah.",
+                    "id": f"✅ Аккаунт привязан! Добро пожаловать, {user.name}. Введите /help для списка команд.",
                     "ru": f"✅ Аккаунт привязан! Добро пожаловать, {user.name}. Введите /help для списка команд.",
                 }
                 chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
@@ -1818,7 +1818,7 @@ async def _cmd_start(db: Session, message: dict, args: str) -> None:
         logger.info(f"Deep link: linked Telegram {telegram_user_id} to PMS user {pms_user.name} ({pms_user.id})")
         success_msgs = {
             "en": f"✅ Account linked! Welcome, {pms_user.name}.\nYour role: *{pms_user.role.value if hasattr(pms_user.role, 'value') else pms_user.role}*\nType /help to see available commands.",
-            "id": f"✅ Akun terhubung! Selamat datang, {pms_user.name}.\nPeran Anda: *{pms_user.role.value if hasattr(pms_user.role, 'value') else pms_user.role}*\nKetik /help untuk melihat perintah.",
+            "id": f"✅ Аккаунт привязан! Добро пожаловать, {pms_user.name}.\nВаша роль: *{pms_user.role.value if hasattr(pms_user.role, 'value') else pms_user.role}*\nВведите /help для списка команд.",
             "ru": f"✅ Аккаунт привязан! Добро пожаловать, {pms_user.name}.\nВаша роль: *{pms_user.role.value if hasattr(pms_user.role, 'value') else pms_user.role}*\nВведите /help для списка команд.",
         }
         await _send_message(chat_id, success_msgs.get(lang, success_msgs["en"]))
@@ -1858,7 +1858,7 @@ async def _cmd_start(db: Session, message: dict, args: str) -> None:
             }])
         greetings = {
             "en": f"Welcome, {first_name}! Select your name to link your account:",
-            "id": f"Selamat datang, {first_name}! Pilih nama Anda untuk menghubungkan akun:",
+            "id": f"Добро пожаловать, {first_name}! Выберите своё имя для привязки аккаунта:",
             "ru": f"Добро пожаловать, {first_name}! Выберите своё имя для привязки аккаунта:",
         }
         await _send_message(chat_id, greetings.get(lang, greetings["en"]),

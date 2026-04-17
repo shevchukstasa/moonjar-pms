@@ -429,33 +429,33 @@ def _send_realtime_alerts(
 
         # 1. QM Block — quality issue detected
         if new_status == PositionStatus.BLOCKED_BY_QM:
-            title = f"⛔ QM BLOCK: Order {order_num} {pos_label}"
+            title = f"⛔ БЛОК ОТК: Заказ {order_num} {pos_label}"
             msg = (
-                f"Posisi {pos_label} diblokir oleh QM.\n"
-                f"Pesanan: {order_num}\n"
-                f"Warna: {position.color or '-'}\n"
-                f"Status sebelumnya: {old_status}"
+                f"Позиция {pos_label} заблокирована ОТК.\n"
+                f"Заказ: {order_num}\n"
+                f"Цвет: {position.color or '-'}\n"
+                f"Предыдущий статус: {old_status}"
             )
             if notes:
-                msg += f"\nCatatan: {notes}"
+                msg += f"\nПримечание: {notes}"
             notify_pm(db, factory_id, "qm_block", title, msg,
                       related_entity_type="order_position",
                       related_entity_id=position.id)
             # Also send to factory's masters chat with action button
             pid_short = str(position.id)[:8]
             qm_buttons = [
-                [{"text": "\U0001f50d Lihat detail", "callback_data": f"a:v:{pid_short}"}],
+                [{"text": "\U0001f50d Подробнее", "callback_data": f"a:v:{pid_short}"}],
             ]
-            _send_to_factory_chat(db, factory_id, f"⛔ *QM BLOCK*\n{msg}", inline_keyboard=qm_buttons)
+            _send_to_factory_chat(db, factory_id, f"⛔ *БЛОК ОТК*\n{msg}", inline_keyboard=qm_buttons)
             _logger.info("REALTIME_ALERT | qm_block | order=%s pos=%s", order_num, pos_label)
 
         # 2. Refire needed — significant delay
         elif new_status == PositionStatus.REFIRE:
-            title = f"🔄 REFIRE: Order {order_num} {pos_label}"
+            title = f"🔄 ПОВТОРНЫЙ ОБЖИГ: Заказ {order_num} {pos_label}"
             msg = (
-                f"Posisi {pos_label} memerlukan pembakaran ulang.\n"
-                f"Pesanan: {order_num}\n"
-                f"Putaran ke: {position.firing_round + 1}"
+                f"Позиция {pos_label} требует повторного обжига.\n"
+                f"Заказ: {order_num}\n"
+                f"Раунд: {position.firing_round + 1}"
             )
             notify_pm(db, factory_id, "refire_needed", title, msg,
                       related_entity_type="order_position",
@@ -464,11 +464,11 @@ def _send_realtime_alerts(
 
         # 3. Material shortage — position blocked
         elif new_status == PositionStatus.INSUFFICIENT_MATERIALS:
-            title = f"📦 MATERIAL SHORTAGE: Order {order_num} {pos_label}"
+            title = f"📦 НЕХВАТКА МАТЕРИАЛА: Заказ {order_num} {pos_label}"
             msg = (
-                f"Posisi {pos_label} kekurangan material.\n"
-                f"Pesanan: {order_num}\n"
-                f"Warna: {position.color or '-'}"
+                f"Позиция {pos_label} не обеспечена материалами.\n"
+                f"Заказ: {order_num}\n"
+                f"Цвет: {position.color or '-'}"
             )
             notify_pm(db, factory_id, "material_shortage", title, msg,
                       related_entity_type="order_position",
@@ -477,10 +477,10 @@ def _send_realtime_alerts(
 
         # 4. Awaiting reglaze — defect repair loop
         elif new_status == PositionStatus.AWAITING_REGLAZE:
-            title = f"🔧 REGLAZE: Order {order_num} {pos_label}"
+            title = f"🔧 ПОВТОРНАЯ ГЛАЗУРОВКА: Заказ {order_num} {pos_label}"
             msg = (
-                f"Posisi {pos_label} perlu glasir ulang setelah perbaikan.\n"
-                f"Pesanan: {order_num}"
+                f"Позиция {pos_label} требует повторной глазуровки после ремонта.\n"
+                f"Заказ: {order_num}"
             )
             notify_pm(db, factory_id, "reglaze_needed", title, msg,
                       related_entity_type="order_position",
@@ -491,11 +491,11 @@ def _send_realtime_alerts(
         elif new_status == PositionStatus.READY_FOR_SHIPMENT:
             from api.enums import UserRole
             from business.services.notifications import notify_role
-            title = f"📦 READY: Order {order_num} {pos_label}"
+            title = f"📦 ГОТОВО К ОТГРУЗКЕ: Заказ {order_num} {pos_label}"
             msg = (
-                f"Posisi {pos_label} siap dikirim.\n"
-                f"Pesanan: {order_num}\n"
-                f"Jumlah: {position.quantity} pcs"
+                f"Позиция {pos_label} готова к отгрузке.\n"
+                f"Заказ: {order_num}\n"
+                f"Количество: {position.quantity} шт"
             )
             notify_role(db, factory_id, UserRole.WAREHOUSE, "ready_for_shipment",
                         title, msg,

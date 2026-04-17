@@ -35,54 +35,54 @@ logger = logging.getLogger("moonjar.achievements")
 
 ACHIEVEMENT_TYPES = {
     "glazing_master": {
-        "label": "Glazing Master",
+        "label": "Мастер глазуровки",
         "icon": "\U0001F3A8",
         "thresholds": [100, 500, 1000, 5000, 10000],
     },
     "zero_defect_hero": {
-        "label": "Zero Defect Hero",
+        "label": "Без дефектов",
         "icon": "\u2728",
         "thresholds": [10, 30, 90, 180, 365],
     },
     "speed_champion": {
-        "label": "Speed Champion",
+        "label": "Чемпион скорости",
         "icon": "\u26A1",
         "thresholds": [7, 14, 30, 60, 90],
     },
     "kiln_expert": {
-        "label": "Kiln Expert",
+        "label": "Эксперт обжига",
         "icon": "\U0001F525",
         "thresholds": [50, 200, 500, 1500, 5000],
     },
     "quality_star": {
-        "label": "Quality Star",
+        "label": "Звезда качества",
         "icon": "\u2B50",
         "thresholds": [50, 200, 500, 1500, 5000],
     },
     "skill_collector": {
-        "label": "Skill Collector",
+        "label": "Коллекционер навыков",
         "icon": "\U0001F393",
         "thresholds": [2, 5, 10, 15, 20],
     },
     "competition_winner": {
-        "label": "Competition Winner",
+        "label": "Победитель соревнований",
         "icon": "\U0001F3C6",
         "thresholds": [1, 5, 10, 25, 50],
     },
 }
 
 LEVEL_NAMES = {
-    0: "Locked",
-    1: "Apprentice",
-    2: "Craftsman",
-    3: "Expert",
-    4: "Master",
-    5: "Grand Master",
+    0: "Не открыт",
+    1: "Ученик",
+    2: "Ремесленник",
+    3: "Эксперт",
+    4: "Мастер",
+    5: "Великий мастер",
 }
 
 
 def get_level_name(level: int) -> str:
-    return LEVEL_NAMES.get(level, "Unknown")
+    return LEVEL_NAMES.get(level, "Неизвестно")
 
 
 def _get_threshold_for_level(achievement_type: str, level: int) -> int:
@@ -184,8 +184,8 @@ def _notify_achievement(db: Session, ach: MasterAchievement):
     level_name = get_level_name(ach.level)
 
     text = (
-        f"\U0001F3C6 Achievement Unlocked: {label} {level_name} (Level {ach.level})!\n"
-        f"{icon} {ach.progress_current} total. Keep going!"
+        f"\U0001F3C6 Получено достижение: {label} {level_name} (Уровень {ach.level})!\n"
+        f"{icon} Всего: {ach.progress_current}. Так держать!"
     )
     try:
         send_telegram_message(str(user.telegram_user_id), text)
@@ -197,8 +197,8 @@ def _notify_achievement(db: Session, ach: MasterAchievement):
         forum_group, achievements_topic = get_forum_topic("achievements")
         if forum_group:
             forum_text = (
-                f"\U0001F3C6 *{user.full_name}* unlocked: {label} {level_name} (Level {ach.level})!\n"
-                f"{icon} {ach.progress_current} total."
+                f"\U0001F3C6 *{user.full_name}* получил: {label} {level_name} (Уровень {ach.level})!\n"
+                f"{icon} Всего: {ach.progress_current}."
             )
             send_telegram_message(
                 str(forum_group), forum_text,

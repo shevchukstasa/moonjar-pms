@@ -370,14 +370,14 @@ def _notify_breakdown(
     positions_rescheduled: int,
 ) -> None:
     """Notify PM + CEO about the kiln breakdown."""
-    title = f"KILN BREAKDOWN: {kiln_name}"
+    title = f"ПЕЧЬ ВЫШЛА ИЗ СТРОЯ: {kiln_name}"
     message = (
-        f"Kiln '{kiln_name}' has broken down.\n"
-        f"Reason: {reason}\n"
-        f"Affected batches: {affected_batches}\n"
-        f"Auto-reassigned: {reassigned_batches}\n"
-        f"Failed (need manual): {failed_batches}\n"
-        f"Positions rescheduled: {positions_rescheduled}"
+        f"Печь '{kiln_name}' вышла из строя.\n"
+        f"Причина: {reason}\n"
+        f"Затронуто партий: {affected_batches}\n"
+        f"Авто-переназначено: {reassigned_batches}\n"
+        f"Требуется ручное вмешательство: {failed_batches}\n"
+        f"Позиций переpланировано: {positions_rescheduled}"
     )
 
     try:
@@ -414,15 +414,15 @@ def _notify_breakdown(
             from business.services.notifications import send_telegram_message_with_buttons
             kid_short = str(kiln_id)[:8]
             tg_message = (
-                f"*PERINGATAN KILN RUSAK*\n"
-                f"Kiln: {kiln_name}\n"
-                f"Alasan: {reason}\n"
-                f"Batch terdampak: {affected_batches}\n"
-                f"Otomatis dipindah: {reassigned_batches}\n"
-                f"Perlu manual: {failed_batches}"
+                f"*ПЕЧЬ ВЫШЛА ИЗ СТРОЯ*\n"
+                f"Печь: {kiln_name}\n"
+                f"Причина: {reason}\n"
+                f"Затронуто партий: {affected_batches}\n"
+                f"Авто-переназначено: {reassigned_batches}\n"
+                f"Требуется ручное вмешательство: {failed_batches}"
             )
             buttons = [
-                [{"text": "Jadwal ulang", "callback_data": f"a:r:{kid_short}"}],
+                [{"text": "Перепланировать", "callback_data": f"a:r:{kid_short}"}],
             ]
             send_telegram_message_with_buttons(
                 str(factory.masters_group_chat_id),
@@ -487,8 +487,8 @@ async def handle_kiln_restore(
             db=db,
             factory_id=factory_id,
             type=NotificationType.KILN_BREAKDOWN.value,
-            title=f"Kiln RESTORED: {kiln_name}",
-            message=f"Kiln '{kiln_name}' is back online and active.{(' Notes: ' + notes) if notes else ''}",
+            title=f"ПЕЧЬ ВОССТАНОВЛЕНА: {kiln_name}",
+            message=f"Печь '{kiln_name}' снова в работе.{(' Примечания: ' + notes) if notes else ''}",
             related_entity_type=RelatedEntityType.KILN.value,
             related_entity_id=kiln_id,
         )

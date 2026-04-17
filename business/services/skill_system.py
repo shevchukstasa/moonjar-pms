@@ -979,11 +979,11 @@ def _notify_pending_approval(db: Session, user_id: UUID, badge: SkillBadge) -> N
                 db,
                 uf.factory_id,
                 type="skill_pending_approval",
-                title=f"Skill certification request: {worker_name}",
+                title=f"Запрос сертификации: {worker_name}",
                 message=(
                     f"{badge.icon} {badge.name} ({badge.name_id})\n"
-                    f"Category: {badge.category}\n"
-                    f"Worker has met all requirements and awaits your approval."
+                    f"Категория: {badge.category}\n"
+                    f"Работник выполнил все требования и ждёт вашего одобрения."
                 ),
             )
     except Exception:
@@ -1002,12 +1002,12 @@ def _send_certification_notification(
             return
 
         text = (
-            f"Selamat, {worker_name}! {badge.icon}\n\n"
-            f"Kamu telah mendapatkan sertifikasi:\n"
+            f"Поздравляем, {worker_name}! {badge.icon}\n\n"
+            f"Вы получили сертификацию:\n"
             f"*{badge.name}*\n"
             f"_{badge.name_id}_\n\n"
-            f"Poin diterima: +{badge.points_on_earn}\n"
-            f"Terus tingkatkan keahlianmu!"
+            f"Начислено очков: +{badge.points_on_earn}\n"
+            f"Продолжайте совершенствовать мастерство!"
         )
         send_telegram_message(worker.telegram_chat_id, text)
     except Exception:

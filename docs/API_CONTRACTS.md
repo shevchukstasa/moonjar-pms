@@ -106,6 +106,7 @@
 | GET | /config/{factory_id} | management | ✓ | Get scheduler configuration for a factory (buffer days, auto-buffer settings). |
 | PUT | /config/{factory_id} | management | ✓ | Update scheduler configuration for a factory. PM/CEO only. |
 | POST | /factory/{factory_id}/check-readiness | management | ✓ | Re-check readiness for ALL active positions: stone, materials, |
+| GET | /daily-plan | any_auth | ✓ | Plan vs Fact daily production tracking per stage. Params: factory_id (required), date (defaults today). |
 
 ---
 

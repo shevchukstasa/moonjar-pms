@@ -43,4 +43,7 @@ export const scheduleApi = {
 
   productionSchedule: (params: { factory_id: string; days?: number }) =>
     apiClient.get('/schedule/production-schedule', { params }).then((r) => r.data),
+
+  dailyPlan: (params: { factory_id: string; date?: string }) =>
+    apiClient.get('/schedule/daily-plan', { params }).then((r) => r.data),
 };

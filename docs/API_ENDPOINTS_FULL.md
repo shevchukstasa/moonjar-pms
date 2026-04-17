@@ -185,6 +185,7 @@
 | GET | `/api/schedule/config/{factory_id}` | management | Get scheduler configuration for a factory (buffer days, auto-buffer settings). |
 | PUT | `/api/schedule/config/{factory_id}` | management | Update scheduler configuration for a factory. PM/CEO only. |
 | POST | `/api/schedule/factory/{factory_id}/check-readiness` | management | Re-check readiness for ALL active positions: stone, materials, |
+| GET | `/api/schedule/daily-plan` | any_auth | Plan vs Fact daily production tracking. Params: factory_id (required), date (defaults today). Returns plan/fact/carryover per stage per position. |
 
 ## 5. Materials (`/api/materials`)
 

@@ -19,9 +19,11 @@ import { QualityCheckDialog } from '@/components/quality/QualityCheckDialog';
 import { ProductionSplitModal } from '@/components/tablo/ProductionSplitModal';
 import type { PositionItem } from '@/components/tablo/PositionRow';
 import DailyProductionView from '@/components/schedule/DailyProductionView';
+import PlanVsFactView from '@/components/schedule/PlanVsFactView';
 
 const SECTION_TABS = [
-  { id: 'daily', label: '📅 Daily Plan' },
+  { id: 'daily', label: 'Daily Plan' },
+  { id: 'planfact', label: 'Plan vs Fact' },
   { id: 'glazing', label: 'Glazing' },
   { id: 'firing', label: 'Firing' },
   { id: 'sorting', label: 'Sorting' },
@@ -654,6 +656,8 @@ export default function ManagerSchedulePage() {
       {/* Content */}
       {tab === 'daily' ? (
         <DailyProductionView factoryId={activeFactoryId} />
+      ) : tab === 'planfact' ? (
+        <PlanVsFactView factoryId={activeFactoryId} />
       ) : isLoading ? (
         <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>
       ) : tab === 'kilns' ? (

@@ -1546,3 +1546,36 @@ Generates and sends a rich weekly production summary via Telegram to PM, CEO, an
 
 ### Dependencies
 `ProductionOrder`, `OrderPosition`, `Batch`, `DefectRecord`, `QualityCheck`, `Factory`, `notifications`, `daily_kpi`
+
+---
+
+## §28 Plan vs Fact — Daily Production Tracking
+
+### Purpose
+Compare planned vs actual daily production per stage, track carryover, and show cumulative progress for each position.
+
+### Data Sources
+- **PLAN**: `OrderPosition.schedule_metadata.stage_plan[<stage>]` — contains `{start, end, days, qty_per_day}` for each stage. When target date falls within `[start, end]`, the position has `qty_per_day` planned work.
+- **FACT**: `OperationLog` entries for the given `shift_date` — `quantity_processed` summed per position per stage. Stage is resolved by mapping `Operation.name` (freeform) to stage keys via `_OP_NAME_TO_STAGE` lookup.
+- **CARRYOVER**: `max(0, planned - actual)` — what didn't get done today, expected to add to tomorrow's workload.
+- **CUMULATIVE**: Sum of all `OperationLog.quantity_processed` up to and including the target date per position per stage.
+
+### Tracked Stages (in production order)
+1. `engobe` — Engobe application
+2. `glazing` — Glaze application
+3. `edge_cleaning_loading` — Edge cleaning and board loading
+4. `kiln_loading` — Loading into kiln (special case: if no stage_plan entry, falls back to `planned_kiln_date == target_date`)
+
+### Daily Capacity
+Computed via `_get_stage_daily_capacity()` from `StageTypologySpeed` — `effective_rate_per_hour * shift_hours * shift_count`. Used for informational display only.
+
+### Color Coding (Frontend)
+- Green: actual >= plan (100%+)
+- Yellow: actual = 80-99% of plan
+- Red: actual < 80% of plan
+
+### Endpoint
+`GET /api/schedule/daily-plan?factory_id=<uuid>&date=<YYYY-MM-DD>`
+
+### Frontend
+"Plan vs Fact" tab on ManagerSchedulePage. Component: `PlanVsFactView.tsx`. Date picker with prev/next day navigation.

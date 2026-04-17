@@ -93,6 +93,14 @@ export function useProductionSchedule(factoryId?: string | null, days = 7) {
   });
 }
 
+export function useDailyPlan(factoryId?: string | null, date?: string) {
+  return useQuery({
+    queryKey: ['schedule', 'daily-plan', factoryId, date],
+    queryFn: () => scheduleApi.dailyPlan({ factory_id: factoryId!, date }),
+    enabled: !!factoryId,
+  });
+}
+
 export function useAutoFormBatches() {
   const qc = useQueryClient();
   return useMutation({

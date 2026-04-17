@@ -1101,3 +1101,247 @@ async def batch_check_readiness(
     db.commit()
     logger.info("BATCH_READINESS_CHECK | factory=%s | results=%s", factory_id, results)
     return {"ok": True, **results}
+
+
+# ────────────────────────────────────────────────────────────────
+# Plan vs Fact — daily production tracking
+# ────────────────────────────────────────────────────────────────
+
+# Stages we track in Plan vs Fact, in production order.
+# Keys must match stage_plan keys from production_scheduler.py.
+_PVF_STAGES = [
+    ("engobe",                "Engobe"),
+    ("glazing",               "Glazing"),
+    ("edge_cleaning_loading", "Edge Cleaning"),
+    ("kiln_loading",          "Kiln Loading"),
+]
+
+# Maps operation names (in `operations` table) to stage_plan keys.
+# Operation names are freeform — this mapping covers common patterns.
+_OP_NAME_TO_STAGE: dict[str, str] = {
+    "engobe":               "engobe",
+    "engobe application":   "engobe",
+    "apply engobe":         "engobe",
+    "glazing":              "glazing",
+    "glaze":                "glazing",
+    "glaze application":    "glazing",
+    "edge cleaning":        "edge_cleaning_loading",
+    "edge_cleaning":        "edge_cleaning_loading",
+    "edge clean":           "edge_cleaning_loading",
+    "edge cleaning loading": "edge_cleaning_loading",
+    "kiln loading":         "kiln_loading",
+    "kiln_loading":         "kiln_loading",
+    "loading":              "kiln_loading",
+}
+
+
+@router.get("/daily-plan")
+async def get_daily_plan(
+    factory_id: UUID,
+    target_date: date | None = Query(None, alias="date"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Plan vs Fact daily production view.
+
+    For each tracked stage (engobe, glazing, edge_cleaning, kiln_loading):
+    - PLAN: from schedule_metadata.stage_plan — how many pieces are planned
+      for this position on this date (qty_per_day if date falls in [start, end]).
+    - FACT: from operation_logs — sum of quantity_processed grouped by
+      position + stage on the given shift_date.
+    - CARRYOVER: plan - fact (clamped >= 0).
+
+    Query params:
+        factory_id  — required
+        date        — defaults to today
+    """
+    from api.models import OperationLog, Operation
+
+    target = target_date or date.today()
+
+    # ── 1. Active positions in this factory ──────────────────────
+    terminal = [
+        PositionStatus.SHIPPED, PositionStatus.CANCELLED,
+        PositionStatus.MERGED,
+    ]
+    positions = (
+        db.query(OrderPosition)
+        .join(ProductionOrder, OrderPosition.order_id == ProductionOrder.id)
+        .filter(
+            OrderPosition.factory_id == factory_id,
+            ProductionOrder.status.in_(['new', 'in_production', 'partially_ready']),
+            OrderPosition.status.notin_(terminal),
+        )
+        .all()
+    )
+
+    # Pre-load orders for display
+    order_map: dict = {}
+    if positions:
+        order_ids = list({p.order_id for p in positions})
+        for o in db.query(ProductionOrder).filter(ProductionOrder.id.in_(order_ids)).all():
+            order_map[o.id] = o
+
+    # ── 2. Build operation name → stage mapping for this factory ─
+    # Fetch all operations for the factory so we can build the mapping.
+    ops = db.query(Operation).filter(Operation.factory_id == factory_id).all()
+    op_stage_map: dict[str, str] = {}  # operation_id (str) → stage key
+    for op in ops:
+        name_lower = (op.name or "").lower().strip()
+        mapped = _OP_NAME_TO_STAGE.get(name_lower)
+        if mapped:
+            op_stage_map[str(op.id)] = mapped
+        else:
+            # Try fuzzy: if any key is a substring of the name
+            for pattern, stage_key in _OP_NAME_TO_STAGE.items():
+                if pattern in name_lower:
+                    op_stage_map[str(op.id)] = stage_key
+                    break
+
+    # ── 3. Fetch actual data (operation_logs for target date) ────
+    fact_logs = (
+        db.query(OperationLog)
+        .filter(
+            OperationLog.factory_id == factory_id,
+            OperationLog.shift_date == target,
+        )
+        .all()
+    )
+
+    # Index: (position_id_str, stage_key) → sum(quantity_processed)
+    fact_by_pos_stage: dict[tuple[str, str], int] = {}
+    for log in fact_logs:
+        stage_key = op_stage_map.get(str(log.operation_id))
+        if not stage_key:
+            continue
+        pos_id_str = str(log.position_id) if log.position_id else None
+        if not pos_id_str:
+            continue
+        key = (pos_id_str, stage_key)
+        fact_by_pos_stage[key] = fact_by_pos_stage.get(key, 0) + (log.quantity_processed or 0)
+
+    # ── 4. Compute daily capacity per stage (from first position's typology)
+    # This is approximate — capacity depends on typology of the position, but
+    # for the overview we use the first available position to get a factory-wide cap.
+    stage_capacities: dict[str, float] = {}
+    if positions:
+        from business.services.production_scheduler import _get_stage_daily_capacity
+        sample_pos = positions[0]
+        for stage_key, _label in _PVF_STAGES:
+            cap, _unit, _fixed = _get_stage_daily_capacity(db, factory_id, stage_key, sample_pos)
+            stage_capacities[stage_key] = cap
+
+    # ── 5. Build cumulative done per position per stage ──────────
+    # Query ALL operation_logs for each position up to target_date to get
+    # cumulative quantities. To avoid N+1, do a bulk aggregation.
+    pos_ids = [p.id for p in positions]
+    cumulative_by_pos_stage: dict[tuple[str, str], int] = {}
+    if pos_ids and op_stage_map:
+        op_ids_by_stage: dict[str, list[str]] = {}
+        for oid, sk in op_stage_map.items():
+            op_ids_by_stage.setdefault(sk, []).append(oid)
+
+        for sk, op_id_list in op_ids_by_stage.items():
+            op_uuids = [UUID(x) for x in op_id_list]
+            rows = (
+                db.query(
+                    OperationLog.position_id,
+                    sa.func.sum(OperationLog.quantity_processed),
+                )
+                .filter(
+                    OperationLog.factory_id == factory_id,
+                    OperationLog.shift_date <= target,
+                    OperationLog.operation_id.in_(op_uuids),
+                    OperationLog.position_id.in_(pos_ids),
+                )
+                .group_by(OperationLog.position_id)
+                .all()
+            )
+            for pid, total in rows:
+                if pid:
+                    cumulative_by_pos_stage[(str(pid), sk)] = int(total or 0)
+
+    # ── 6. Assemble response per stage ───────────────────────────
+    result_stages = []
+    for stage_key, stage_label in _PVF_STAGES:
+        stage_positions = []
+        total_planned = 0
+        total_actual = 0
+        total_carryover = 0
+
+        for pos in positions:
+            meta = pos.schedule_metadata or {}
+            stage_plan = meta.get("stage_plan", {}) if isinstance(meta, dict) else {}
+            sinfo = stage_plan.get(stage_key, {}) if isinstance(stage_plan, dict) else {}
+
+            # Check if this date falls within this stage's planned range
+            planned_today = 0
+            if sinfo:
+                try:
+                    s_start = date.fromisoformat(sinfo["start"])
+                    s_end = date.fromisoformat(sinfo["end"])
+                    if s_start <= target <= s_end:
+                        planned_today = int(round(float(sinfo.get("qty_per_day") or 0)))
+                except (KeyError, ValueError, TypeError):
+                    pass
+
+            if planned_today == 0:
+                # Also check: if stage_key is "kiln_loading" and target == planned_kiln_date
+                if stage_key == "kiln_loading" and pos.planned_kiln_date == target:
+                    planned_today = pos.quantity or 0
+
+            # Skip positions with no planned work today and no actual work today
+            pid_str = str(pos.id)
+            actual_today = fact_by_pos_stage.get((pid_str, stage_key), 0)
+
+            if planned_today == 0 and actual_today == 0:
+                continue
+
+            cumulative_done = cumulative_by_pos_stage.get((pid_str, stage_key), 0)
+            remaining = max(0, (pos.quantity or 0) - cumulative_done)
+            carryover = max(0, planned_today - actual_today)
+
+            order = order_map.get(pos.order_id)
+            pos_num = getattr(pos, "position_number", None)
+            split_idx = getattr(pos, "split_index", None)
+            label = f"#{pos_num}.{split_idx}" if pos_num is not None and split_idx is not None else (f"#{pos_num}" if pos_num is not None else "?")
+
+            stage_positions.append({
+                "position_id": pid_str,
+                "position_label": label,
+                "order_number": order.order_number if order else "",
+                "client": order.client if order else None,
+                "color": pos.color,
+                "size": pos.size,
+                "collection": pos.collection,
+                "total_qty": pos.quantity or 0,
+                "planned_today": planned_today,
+                "actual_today": actual_today,
+                "carryover": carryover,
+                "cumulative_done": cumulative_done,
+                "remaining": remaining,
+                "status": pos.status.value if hasattr(pos.status, "value") else str(pos.status),
+            })
+
+            total_planned += planned_today
+            total_actual += actual_today
+            total_carryover += carryover
+
+        result_stages.append({
+            "stage": stage_key,
+            "stage_label": stage_label,
+            "daily_capacity": stage_capacities.get(stage_key, 0),
+            "positions": stage_positions,
+            "totals": {
+                "planned": total_planned,
+                "actual": total_actual,
+                "carryover": total_carryover,
+            },
+        })
+
+    return {
+        "date": target.isoformat(),
+        "factory_id": str(factory_id),
+        "stages": result_stages,
+    }

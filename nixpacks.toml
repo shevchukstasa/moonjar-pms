@@ -2,4 +2,5 @@
 # Python backend + Node.js for frontend build at startup
 
 [phases.setup]
-aptPkgs = ["postgresql-client", "nodejs", "npm"]
+aptPkgs = ["postgresql-client"]
+nixPkgs = ["nodejs_20", "npm"]

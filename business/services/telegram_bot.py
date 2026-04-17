@@ -3253,8 +3253,8 @@ async def _handle_delivery_photo(
     """
     import os
 
-    # Determine language from user
-    lang = "id"
+    # Determine language from user (default ru during testing phase)
+    lang = "ru"
     if user and user.language:
         lang = user.language.value if hasattr(user.language, 'value') else str(user.language)
 

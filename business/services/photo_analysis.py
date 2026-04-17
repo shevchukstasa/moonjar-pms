@@ -25,10 +25,10 @@ OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 OPENAI_VISION_MODEL_OCR = "gpt-4.1-nano"    # Cheap OCR for delivery/scale/packing (~$0.10/1M)
 OPENAI_VISION_MODEL_QUALITY = "gpt-4.1"    # Smart analysis for quality/defect (~$2.00/1M)
 
-# Types that prefer cheap OpenAI model (OCR/document reading)
-_CHEAP_VISION_TYPES = {"delivery", "scale", "packing"}
-# Types that prefer Claude (complex visual analysis)
-_SMART_VISION_TYPES = {"quality", "defect"}
+# Types that prefer cheap OpenAI model (scale / simple label reading)
+_CHEAP_VISION_TYPES = {"scale", "packing"}
+# Types that need smart model (delivery with handwriting, quality defects)
+_SMART_VISION_TYPES = {"quality", "defect", "delivery"}
 
 # ── Prompts per analysis type ────────────────────────────────────────────
 
@@ -72,14 +72,20 @@ _DELIVERY_PROMPT = (
     "  • M2 or M² = quantity in SQUARE METERS\n"
     "  • Keterangan = notes (edge profile, finish type, e.g. 'SC Octogon', 'H+profil', 'Bullnose')\n\n"
     "CRITICAL RULES:\n"
-    "1. QUANTITY is NEVER a size dimension. If you see '15x15x1' in Ukuran column, "
-    "quantity is in a separate column (Pcs/M2), NOT '15'.\n"
-    "2. If both Pcs and M2 are filled, prefer Pcs (more precise) but keep M2 in notes.\n"
-    "3. material_name should COMBINE type + size: e.g. 'Grey Lava 8x15' or 'Lavastone 10x10x14.14'.\n"
+    "1. READ EVERY ROW in the table. A typical surat jalan has 5-10 line items. "
+    "If you see 8 rows in the Ukuran column, you MUST return 8 items — do NOT "
+    "skip rows that look similar or have unclear handwriting. If a quantity is "
+    "illegible, return quantity: null and include what you can read.\n"
+    "2. QUANTITY is NEVER a size dimension. If you see '15x15x1' in Ukuran column, "
+    "quantity is in a separate column (Pcs/M2), NOT '15'. Common quantities are "
+    "numbers like 1810, 440, 290, 165, 145, 127, 2 — often 2+ digits.\n"
+    "3. If both Pcs and M2 are filled, prefer Pcs (more precise) but keep M2 in notes.\n"
+    "4. material_name should COMBINE type + size: e.g. 'Grey Lava 8x15' or 'Lavastone 10x10x14.14'.\n"
     "   This matches how materials are stored in the warehouse catalog.\n"
-    "4. unit is 'pcs' if Pcs column is used, 'm2' if only M2 is filled.\n"
-    "5. Include every row in the table, even if quantity is unclear (set quantity to null).\n"
-    "6. Put notes (edge profile, finish) into item.notes field.\n\n"
+    "5. unit is 'pcs' if Pcs column is used, 'm2' if only M2 is filled.\n"
+    "6. Put notes (edge profile, finish) into item.notes field.\n"
+    "7. Same material type can appear multiple times with different sizes — each "
+    "is a separate item (e.g. 'Grey Lava 5x20x1.2' and 'Grey Lava 15x15x1' are two items).\n\n"
     "Return ONLY valid JSON (no markdown, no code fences):\n"
     '{"supplier": "<name or null>", "delivery_date": "<YYYY-MM-DD or null>", '
     '"reference_number": "<doc number or null>", '

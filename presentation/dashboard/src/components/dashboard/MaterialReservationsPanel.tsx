@@ -38,7 +38,7 @@ function GroupSection({ group }: { group: MaterialReservationGroup }) {
         <h4 className="text-sm font-semibold text-gray-700 mb-2">
           {style.icon} {group.label}
         </h4>
-        <p className="text-xs text-gray-500 italic">Belum dikonfigurasi / Not configured</p>
+        <p className="text-xs text-gray-500 italic">Not configured</p>
       </div>
     );
   }

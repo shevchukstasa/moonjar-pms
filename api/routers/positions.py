@@ -1988,7 +1988,7 @@ async def get_material_reservations(
 
     groups.append({
         "group": "stone",
-        "label": "Batu / Stone",
+        "label": "Stone",
         "items": stone_items,
     })
 
@@ -2083,7 +2083,7 @@ async def get_material_reservations(
 
     groups.append({
         "group": "recipe",
-        "label": "Glazur / Glaze",
+        "label": "Glaze & Recipe Materials",
         "items": recipe_items,
     })
 
@@ -2119,7 +2119,7 @@ async def get_material_reservations(
 
     groups.append({
         "group": "packaging",
-        "label": "Kemasan / Packaging",
+        "label": "Packaging",
         "items": packaging_items,
     })
 

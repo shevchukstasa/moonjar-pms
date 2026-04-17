@@ -1,6 +1,7 @@
 # Moonjar PMS — Nixpacks configuration for Railway
 # Python backend + Node.js for frontend build at startup
+#
+# All packages via Nix (apt repos are unreliable in Railway build env).
 
 [phases.setup]
-aptPkgs = ["postgresql-client"]
-nixPkgs = ["nodejs_20", "npm"]
+nixPkgs = ["nodejs_20", "npm", "postgresql_16"]

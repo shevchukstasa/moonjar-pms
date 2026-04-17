@@ -1636,18 +1636,17 @@ async def create_transaction(
                 _logger.warning("purchaser_lifecycle hook failed: %s", e)
 
             # Auto-unblock positions that were waiting for this material
-            if result.get("auto_approved"):
-                try:
-                    from business.services.material_reservation import check_and_unblock_positions_after_receive
-                    unblocked = check_and_unblock_positions_after_receive(
-                        db=db,
-                        material_id=data.material_id,
-                        factory_id=data.factory_id,
-                    )
-                    if unblocked:
-                        db.commit()
-                except Exception as e:
-                    _logger.warning("auto-unblock hook failed: %s", e)
+            try:
+                from business.services.material_reservation import check_and_unblock_positions_after_receive
+                unblocked = check_and_unblock_positions_after_receive(
+                    db=db,
+                    material_id=data.material_id,
+                    factory_id=data.factory_id,
+                )
+                if unblocked:
+                    db.commit()
+            except Exception as e:
+                _logger.warning("auto-unblock hook failed: %s", e)
 
             return {
                 "transaction_id": str(result["transaction_id"]),

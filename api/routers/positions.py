@@ -384,6 +384,26 @@ async def list_positions(
 
 
 # ================================================================
+# Recheck blocked positions — unblock if materials now available
+# ================================================================
+
+@router.post("/recheck-blocked")
+async def recheck_blocked_positions(
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Re-check all insufficient_materials positions across all factories.
+
+    Unblocks positions where materials are now sufficient (e.g. after
+    receiving shipment, or after fixing calculation errors).
+    """
+    from business.services.material_reservation import recheck_all_blocked_positions
+    results = recheck_all_blocked_positions(db)
+    total = sum(len(v) for v in results.values())
+    return {"unblocked_count": total, "details": results}
+
+
+# ================================================================
 # Blocking Summary — MUST be defined before /{position_id} routes
 # ================================================================
 

@@ -1165,3 +1165,27 @@ def check_and_unblock_positions_after_receive(
         )
 
     return unblocked_ids
+
+
+def recheck_all_blocked_positions(db: Session) -> dict:
+    """Periodic re-check: iterate all factories, unblock positions where
+    materials are now sufficient. Returns {factory_id: [unblocked_ids]}.
+
+    Called by cron every 4 hours and by POST /positions/recheck-blocked.
+    """
+    from api.models import Factory
+    results = {}
+    factories = db.query(Factory).filter(Factory.is_active.is_(True)).all()
+    for factory in factories:
+        try:
+            # material_id is only used for logging, pass None-safe UUID
+            unblocked = check_and_unblock_positions_after_receive(
+                db, material_id=factory.id, factory_id=factory.id,
+            )
+            if unblocked:
+                results[str(factory.id)] = [str(uid) for uid in unblocked]
+                db.commit()
+        except Exception as exc:
+            logger.error("RECHECK_BLOCKED | factory=%s | %s", factory.id, exc)
+            db.rollback()
+    return results

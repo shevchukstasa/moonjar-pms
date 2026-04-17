@@ -1889,6 +1889,23 @@ async def gamification_new_season():
         db.close()
 
 
+async def recheck_blocked_materials_job():
+    """Periodic re-check: unblock positions where materials are now sufficient."""
+    logger.info("Running blocked positions recheck")
+    db = _get_db_session()
+    try:
+        from business.services.material_reservation import recheck_all_blocked_positions
+        results = recheck_all_blocked_positions(db)
+        total = sum(len(v) for v in results.values())
+        if total:
+            logger.info("RECHECK_BLOCKED | unblocked %d positions", total)
+    except Exception as e:
+        logger.error("Blocked positions recheck failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 async def gamification_quarterly_prizes():
     """Generate quarterly prize recommendations for each factory."""
     logger.info("Running quarterly prize generation")
@@ -2160,6 +2177,9 @@ def setup_scheduler():
 
     # Quarterly 1st 16:01 UTC (00:01 WITA) — start new season
     scheduler.add_job(gamification_new_season, CronTrigger(month="1,4,7,10", day=1, hour=16, minute=1), id="gamification_season")
+
+    # Every 4 hours — recheck blocked positions (unblock if materials available)
+    scheduler.add_job(recheck_blocked_materials_job, CronTrigger(hour="2,6,10,14,18,22", minute=30), id="recheck_blocked_materials")
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

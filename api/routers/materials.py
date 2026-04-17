@@ -255,6 +255,7 @@ class TransactionInput(BaseModel):
     supplier_id: Optional[UUID] = None  # for receive: auto-match purchase requests
     defect_percent: Optional[float] = 0.0  # for receive: defect percentage
     quality_notes: Optional[str] = None  # for receive: quality notes
+    auto_approve: Optional[bool] = False  # bypass approval gate (scan flow trusts user)
 
 
 class BulkReceiveItem(BaseModel):
@@ -1676,8 +1677,8 @@ async def create_transaction(
         stock.balance += qty
     elif data.type == "receive":
         # Auto-link supplier to material if not yet set
-        if data.supplier_id and not material.supplier_id:
-            material.supplier_id = data.supplier_id
+        if data.supplier_id and not mat.supplier_id:
+            mat.supplier_id = data.supplier_id
             db.flush()
 
         # Delegate to warehouse receiving service (handles approval workflow)
@@ -1693,6 +1694,7 @@ async def create_transaction(
                 quality_notes=data.quality_notes or data.notes,
                 defect_percent=data.defect_percent or 0.0,
                 received_by_user_id=current_user.id,
+                force_auto_approve=bool(data.auto_approve),
             )
 
             # Auto-update purchase requests on material receive

@@ -30,8 +30,27 @@ const UNIT_OPTIONS = [
   { value: 'ml',  label: 'ml' },
   { value: 'pcs', label: 'pcs' },
   { value: 'm',   label: 'm' },
-  { value: 'm2',  label: 'm\u00B2' },
+  { value: 'm²',  label: 'm\u00B2' },
 ];
+
+/** Mirror of business/services/material_naming.ALLOWED_UNITS_PER_TYPE — see §29.
+ *  Keep in sync with backend; UI only exposes valid options for the chosen type. */
+const ALLOWED_UNITS_BY_TYPE: Record<string, string[]> = {
+  stone: ['pcs', 'm²'],
+  pigment: ['kg', 'g'],
+  frit: ['kg', 'g'],
+  oxide_carbonate: ['kg', 'g'],
+  other_bulk: ['kg', 'g'],
+  packaging: ['pcs', 'm', 'kg'],
+  consumable: ['pcs', 'm', 'kg'],
+};
+
+function unitOptionsForType(materialType: string | undefined | null) {
+  if (!materialType) return UNIT_OPTIONS;
+  const allowed = ALLOWED_UNITS_BY_TYPE[materialType];
+  if (!allowed) return UNIT_OPTIONS;
+  return UNIT_OPTIONS.filter((o) => allowed.includes(o.value));
+}
 
 /** Build a flat list of subgroups from hierarchy */
 function flatSubgroups(hierarchy: MaterialGroup[] | undefined) {
@@ -341,6 +360,7 @@ export default function ManagerMaterialsPage() {
               type: 'receive',
               quantity: qty,
               notes: `Delivery scan: ${row.ocr_name}${ocrMeta.reference ? ` | Ref: ${ocrMeta.reference}` : ''}${ocrMeta.supplier ? ` | ${ocrMeta.supplier}` : ''}`,
+              auto_approve: true,
             });
             receivedOk = true;
           } catch (err) {
@@ -393,6 +413,7 @@ export default function ManagerMaterialsPage() {
           type: 'receive',
           quantity: parseFloat(it._qty),
           notes: `Delivery scan: ${it.ocr_name}${ocrMeta.reference ? ` | Ref: ${ocrMeta.reference}` : ''}${ocrMeta.supplier ? ` | ${ocrMeta.supplier}` : ''}`,
+          auto_approve: true,
         });
       }
       ocrQc.invalidateQueries({ queryKey: ['materials'] });
@@ -462,13 +483,14 @@ export default function ManagerMaterialsPage() {
     const isEditing = !!editDialog.item;
 
     if (isPM && isEditing) {
-      // PM can only update: subgroup, warehouse_section, min_balance, supplier
+      // PM can update: subgroup, warehouse_section, min_balance, supplier, unit
       const payload: Record<string, unknown> = {
         subgroup_id: form.subgroup_id || null,
         material_type: form.material_type,
         min_balance: parseFloat(form.min_balance) || 0,
         supplier_id: form.supplier_id || null,
         warehouse_section: form.warehouse_section || 'raw_materials',
+        unit: form.unit,
       };
       try {
         await updateMaterial.mutateAsync({ id: editDialog.item!.id, data: payload, factoryId: effectiveFactoryId || undefined });
@@ -840,18 +862,16 @@ export default function ManagerMaterialsPage() {
             </div>
           )}
 
-          <div className={`grid gap-4 ${isPM && editDialog.item ? 'grid-cols-1' : 'grid-cols-3'}`}>
-            {/* Unit — only on create or for non-PM */}
-            {(!isPM || !editDialog.item) && (
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">Unit</label>
-                <Select
-                  options={UNIT_OPTIONS}
-                  value={form.unit}
-                  onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                />
-              </div>
-            )}
+          <div className={`grid gap-4 ${isPM && editDialog.item ? 'grid-cols-2' : 'grid-cols-3'}`}>
+            {/* Unit — editable always; options filtered by material_type per §29 */}
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Unit</label>
+              <Select
+                options={unitOptionsForType(form.material_type || editDialog.item?.material_type)}
+                value={form.unit}
+                onChange={(e) => setForm({ ...form, unit: e.target.value })}
+              />
+            </div>
             {/* Balance — only for create (non-PM edit and PM cannot edit balance directly) */}
             {!editDialog.item && (
               <NumericInput

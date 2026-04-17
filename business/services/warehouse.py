@@ -35,6 +35,7 @@ def receive_material(
     quality_notes: Optional[str] = None,
     defect_percent: float = 0.0,
     received_by_user_id: Optional[UUID] = None,
+    force_auto_approve: bool = False,
 ) -> dict:
     """
     Warehouse receives material, optionally requires PM approval.
@@ -42,6 +43,10 @@ def receive_material(
     Approval modes (from ReceivingSetting):
     - 'all': PM approves every delivery — transaction created but stock NOT updated.
     - 'auto': auto-approve if defect_percent <= threshold; otherwise route to PM.
+
+    ``force_auto_approve=True`` bypasses the gate entirely. Reserved for trusted
+    flows where the same user is initiating the receipt (e.g. delivery scan
+    "Create & receive" — there is nothing for a separate PM to approve).
 
     Returns dict with keys: transaction_id, auto_approved, task_id (optional).
     """
@@ -59,8 +64,8 @@ def receive_material(
     approval_mode = setting.approval_mode if setting else "all"
 
     # Decide whether to auto-approve
-    auto_approved = False
-    if approval_mode == "auto":
+    auto_approved = bool(force_auto_approve)
+    if not auto_approved and approval_mode == "auto":
         threshold = (
             db.query(MaterialDefectThreshold)
             .filter(MaterialDefectThreshold.material_id == material_id)

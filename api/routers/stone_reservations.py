@@ -25,6 +25,60 @@ logger = logging.getLogger("moonjar.routers.stone_reservations")
 router = APIRouter(tags=["stone-reservations"])
 
 
+@router.post("/recheck-stock")
+def recheck_stone_stock(
+    factory_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Re-run stock check on ALL active stone reservations.
+
+    For each active reservation, verifies stone availability matched
+    by SIZE (not total). Creates STONE_PROCUREMENT blocking tasks
+    where stone is insufficient.
+    """
+    from api.models import OrderPosition
+    from business.services.stone_reservation import _check_stone_stock_and_create_task
+
+    query = db.query(StoneReservation).filter(StoneReservation.status == 'active')
+    if factory_id:
+        query = query.filter(StoneReservation.factory_id == factory_id)
+    reservations = query.all()
+
+    tasks_created = 0
+    checked = 0
+    for res in reservations:
+        position = db.query(OrderPosition).filter(OrderPosition.id == res.position_id).first()
+        if not position:
+            continue
+        try:
+            _check_stone_stock_and_create_task(
+                db, position, str(res.factory_id),
+                float(res.reserved_sqm), float(res.stone_defect_pct or 0),
+                res.reserved_qty,
+            )
+            checked += 1
+        except Exception as e:
+            logger.warning("recheck_stone_stock: failed for %s: %s", res.id, e)
+
+    db.commit()
+    # Count blocking tasks
+    from api.models import Task
+    from api.enums import TaskType, TaskStatus
+    q = db.query(Task).filter(
+        Task.type == TaskType.STONE_PROCUREMENT,
+        Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+    )
+    if factory_id:
+        q = q.filter(Task.factory_id == factory_id)
+    tasks_created = q.count()
+
+    return {
+        "reservations_checked": checked,
+        "blocking_tasks_now": tasks_created,
+    }
+
+
 # ──────────────────────────────────────────────────────────────────
 # GET /stone-reservations
 # ──────────────────────────────────────────────────────────────────

@@ -349,33 +349,72 @@ def _check_stone_stock_and_create_task(
     position_id = str(position.id)
 
     try:
-        # Sum all stone stock balances at this factory
-        total_stone_balance = (
-            db.query(sa_func.coalesce(sa_func.sum(MaterialStock.balance), 0))
-            .join(Mat, Mat.id == MaterialStock.material_id)
-            .filter(
-                MaterialStock.factory_id == factory_id,
-                Mat.material_type == "stone",
+        # Find stone material matching this position's size.
+        # Match strategy:
+        #   1. Exact size_id match (Material.size_id == position.size_id) — if populated
+        #   2. Name matches position.size (e.g. "Lavastone 8x15" matches size "8x15")
+        #   3. No match → treat as zero available (safer than summing all stones)
+        pos_size = (getattr(position, "size", "") or "").strip().lower().replace(" ", "")
+        pos_size_id = getattr(position, "size_id", None)
+
+        # Fetch ALL stone materials with their stocks at this factory
+        stone_rows = (
+            db.query(Mat, MaterialStock)
+            .outerjoin(
+                MaterialStock,
+                (MaterialStock.material_id == Mat.id) & (MaterialStock.factory_id == factory_id),
             )
-            .scalar()
+            .filter(Mat.material_type == "stone")
+            .all()
         )
-        total_stone_balance = float(total_stone_balance)
 
-        # Subtract already-reserved stone (other active reservations at this factory)
-        already_reserved = db.execute(text("""
-            SELECT COALESCE(SUM(reserved_sqm), 0)
-            FROM stone_reservations
-            WHERE factory_id = :fid AND status = 'active'
-              AND position_id != :pid
-        """), {"fid": factory_id, "pid": position_id}).scalar()
-        already_reserved = float(already_reserved or 0)
+        # Find the stone that matches this position's size
+        matching_stone = None
+        matching_balance_sqm = 0.0
+        matching_unit = "m2"
+        for mat, stock in stone_rows:
+            # Strategy 1: exact size_id match
+            if pos_size_id and getattr(mat, "size_id", None) == pos_size_id:
+                matching_stone = mat
+                matching_unit = (mat.unit or "m2").lower()
+                matching_balance_sqm = float(stock.balance) if stock and matching_unit == "m2" else 0.0
+                break
+            # Strategy 2: name contains position's size string
+            mat_name = (mat.name or "").lower().replace(" ", "")
+            if pos_size and pos_size in mat_name:
+                matching_stone = mat
+                matching_unit = (mat.unit or "m2").lower()
+                # Only count balance if unit is m² (pcs stone requires piece-level match we don't have)
+                matching_balance_sqm = float(stock.balance) if stock and matching_unit == "m2" else 0.0
+                # Don't break — keep looking for better match (size_id)
 
-        effective_available = total_stone_balance - already_reserved
+        if not matching_stone:
+            logger.info(
+                "STONE_NO_MATCH | position=%s size=%s — no stone material matches this size",
+                position_id, pos_size,
+            )
 
-        if effective_available >= reserved_sqm:
+        # Subtract other active reservations FOR THIS SAME STONE MATERIAL only
+        # (reservations aren't linked to materials, so we approximate by same factory+size)
+        if matching_stone:
+            already_reserved = db.execute(text("""
+                SELECT COALESCE(SUM(sr.reserved_sqm), 0)
+                FROM stone_reservations sr
+                JOIN order_positions op ON sr.position_id = op.id
+                WHERE sr.factory_id = :fid AND sr.status = 'active'
+                  AND sr.position_id != :pid
+                  AND LOWER(REPLACE(COALESCE(op.size, ''), ' ', '')) = :size
+            """), {"fid": factory_id, "pid": position_id, "size": pos_size}).scalar()
+            already_reserved = float(already_reserved or 0)
+        else:
+            already_reserved = 0.0
+
+        effective_available = max(0.0, matching_balance_sqm - already_reserved)
+
+        if matching_stone and effective_available >= reserved_sqm:
             logger.debug(
-                "STONE_STOCK_OK | position=%s | available=%.3f needed=%.3f",
-                position_id, effective_available, reserved_sqm,
+                "STONE_STOCK_OK | position=%s | stone=%s available=%.3f needed=%.3f",
+                position_id, matching_stone.name, effective_available, reserved_sqm,
             )
             return
 
@@ -393,14 +432,21 @@ def _check_stone_stock_and_create_task(
             Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
         ).first()
 
-        if existing_task:
-            # Update description with latest numbers
-            existing_task.description = (
-                f"Stone not available: need {reserved_sqm:.2f} m², "
-                f"have {effective_available:.2f} m² "
-                f"(deficit {deficit:.2f} m²). "
-                f"Qty: {quantity} pcs, defect margin: {defect_pct*100:.0f}%."
+        stone_desc = matching_stone.name if matching_stone else f"Lavastone {pos_size}"
+        size_note = (
+            f"Нужен камень {stone_desc}: надо {reserved_sqm:.2f} m², "
+            f"на складе {effective_available:.2f} m² "
+            f"(не хватает {deficit:.2f} m²). "
+            f"Кол-во: {quantity} шт, запас на брак: {defect_pct*100:.0f}%."
+        )
+        if not matching_stone:
+            size_note = (
+                f"Нет материала камня под размер {pos_size}. "
+                f"{size_note} Возможно нужно создать Material с соответствующим размером."
             )
+
+        if existing_task:
+            existing_task.description = size_note
             logger.info(
                 "STONE_TASK_UPDATED | position=%s | task=%s",
                 position_id, existing_task.id,
@@ -416,12 +462,7 @@ def _check_stone_stock_and_create_task(
             related_order_id=position.order_id,
             related_position_id=position.id,
             blocking=True,
-            description=(
-                f"Stone not available: need {reserved_sqm:.2f} m², "
-                f"have {effective_available:.2f} m² "
-                f"(deficit {deficit:.2f} m²). "
-                f"Qty: {quantity} pcs, defect margin: {defect_pct*100:.0f}%."
-            ),
+            description=size_note,
             priority=3,
             metadata_json={
                 "reserved_sqm": reserved_sqm,

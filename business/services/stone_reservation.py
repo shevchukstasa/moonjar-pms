@@ -451,43 +451,42 @@ def _check_stone_stock_and_create_task(
                 "STONE_TASK_UPDATED | position=%s | task=%s",
                 position_id, existing_task.id,
             )
-            return
+        else:
+            # Create new blocking task
+            task = Task(
+                factory_id=position.factory_id,
+                type=TaskType.STONE_PROCUREMENT,
+                status=TaskStatus.PENDING,
+                assigned_role=UserRole.PURCHASER,
+                related_order_id=position.order_id,
+                related_position_id=position.id,
+                blocking=True,
+                description=size_note,
+                priority=3,
+                metadata_json={
+                    "reserved_sqm": reserved_sqm,
+                    "available_sqm": effective_available,
+                    "deficit_sqm": deficit,
+                    "quantity": quantity,
+                    "stone_defect_pct": defect_pct,
+                },
+            )
+            db.add(task)
+            db.flush()
 
-        # Create new blocking task
-        task = Task(
-            factory_id=position.factory_id,
-            type=TaskType.STONE_PROCUREMENT,
-            status=TaskStatus.PENDING,
-            assigned_role=UserRole.PURCHASER,
-            related_order_id=position.order_id,
-            related_position_id=position.id,
-            blocking=True,
-            description=size_note,
-            priority=3,
-            metadata_json={
-                "reserved_sqm": reserved_sqm,
-                "available_sqm": effective_available,
-                "deficit_sqm": deficit,
-                "quantity": quantity,
-                "stone_defect_pct": defect_pct,
-            },
-        )
-        db.add(task)
-        db.flush()
+            logger.info(
+                "STONE_PROCUREMENT_TASK | position=%s | task=%s | "
+                "need=%.3f available=%.3f deficit=%.3f",
+                position_id, task.id, reserved_sqm, effective_available, deficit,
+            )
 
-        logger.info(
-            "STONE_PROCUREMENT_TASK | position=%s | task=%s | "
-            "need=%.3f available=%.3f deficit=%.3f",
-            position_id, task.id, reserved_sqm, effective_available, deficit,
-        )
-
-        # Transition position to INSUFFICIENT_MATERIALS so scheduler
-        # removes it from daily plan until stone arrives.
+        # Transition position to INSUFFICIENT_MATERIALS (runs for both
+        # new and existing task paths so re-runs catch positions that
+        # were unblocked by other logic).
         from api.enums import PositionStatus
         current_status = position.status
         if hasattr(current_status, 'value'):
             current_status = current_status.value
-        # Only block if position is in an early/pre-production stage
         blockable_statuses = {
             PositionStatus.PLANNED.value,
             PositionStatus.AWAITING_RECIPE.value,

@@ -53,6 +53,7 @@ export interface BlockedPositionInfo {
 
 export interface MaterialReservationGroupItem {
   material: string;
+  material_id?: string | null;
   required: number;
   reserved: number;
   available: number;

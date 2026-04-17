@@ -1944,11 +1944,13 @@ async def get_material_reservations(
             .all()
         )
         matching_stone_name = None
+        matching_stone_id = None
         stone_available = 0.0
         for mat, stock in stone_rows:
             mat_name = (mat.name or "").lower().replace(" ", "")
             if pos_size and pos_size in mat_name:
                 matching_stone_name = mat.name
+                matching_stone_id = str(mat.id)
                 # Only count balance if unit is m² (pcs stone requires piece-level match)
                 if stock and (mat.unit or "m2").lower() == "m2":
                     stone_available = float(stock.balance or 0)
@@ -1961,9 +1963,10 @@ async def get_material_reservations(
             if deficit > 0:
                 stone_status = "insufficient"
 
-            display_name = matching_stone_name or f"Lavastone {pos_size} (нет материала)"
+            display_name = matching_stone_name or f"Lavastone {pos_size} (no material configured)"
             stone_items.append({
                 "material": display_name,
+                "material_id": matching_stone_id,
                 "required": reserved_sqm,
                 "reserved": reserved_sqm,
                 "available": stone_available,
@@ -1987,7 +1990,8 @@ async def get_material_reservations(
             if needed_sqm > 0:
                 deficit = max(0.0, needed_sqm - stone_available)
                 stone_items.append({
-                    "material": matching_stone_name or f"Lavastone {pos_size} (нет материала)",
+                    "material": matching_stone_name or f"Lavastone {pos_size} (no material configured)",
+                    "material_id": matching_stone_id,
                     "required": round(needed_sqm, 3),
                     "reserved": 0.0,
                     "available": stone_available,
@@ -2073,7 +2077,11 @@ async def get_material_reservations(
             )
             effective_available = balance - (Decimal(str(total_reserved_all)) - Decimal(str(total_unreserved_all)))
 
-            if net_reserved_pos >= required and net_reserved_pos > 0:
+            # Tolerance 0.01 kg — rounding noise in reserve storage.
+            # Without this, 0.2192508 required vs 0.219 reserved (0.25g diff)
+            # reads as "partially_reserved" even though it's effectively full.
+            rounding_tolerance = Decimal("0.01")
+            if net_reserved_pos + rounding_tolerance >= required and net_reserved_pos > 0:
                 mat_status = "force_reserved" if effective_available < 0 else "reserved"
             elif net_reserved_pos > 0:
                 mat_status = "partially_reserved"
@@ -2084,6 +2092,7 @@ async def get_material_reservations(
 
             item = {
                 "material": material.name,
+                "material_id": str(material.id),
                 "required": float(required),
                 "reserved": float(net_reserved_pos),
                 "available": float(effective_available),

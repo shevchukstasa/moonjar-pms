@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
 import { useMaterials, useCreateMaterial, useUpdateMaterial, useCreateTransaction, useMaterialTransactions, type MaterialItem } from '@/hooks/useMaterials';
@@ -344,6 +344,21 @@ export default function ManagerMaterialsPage() {
     setTxError('');
     setTxDialog({ open: true, item });
   }, []);
+
+  // Auto-open Receive dialog when URL has ?receive=<material_id>
+  // (used when navigating from Material Reservations modal on a position)
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const mid = searchParams.get('receive');
+    if (!mid || !items.length) return;
+    const target = items.find((i) => i.id === mid);
+    if (target) {
+      openTx(target, 'receive');
+      // Clear the query param so dialog doesn't reopen on re-render
+      searchParams.delete('receive');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, items, openTx, setSearchParams]);
 
   const closeTx = useCallback(() => {
     setTxDialog({ open: false, item: null });

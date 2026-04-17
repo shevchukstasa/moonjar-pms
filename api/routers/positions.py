@@ -1931,17 +1931,28 @@ async def get_material_reservations(
             .first()
         )
 
-        # Find stone stock at this factory
-        stone_stock_row = (
-            db.query(func.coalesce(func.sum(MaterialStock.balance), 0))
-            .join(Material, Material.id == MaterialStock.material_id)
-            .filter(
-                Material.material_type == "stone",
-                MaterialStock.factory_id == p.factory_id,
+        # Match stone material by position size (not sum all stones).
+        # Same logic as _check_stone_stock_and_create_task in stone_reservation.py.
+        pos_size = (getattr(p, "size", "") or "").strip().lower().replace(" ", "")
+        stone_rows = (
+            db.query(Material, MaterialStock)
+            .outerjoin(
+                MaterialStock,
+                (MaterialStock.material_id == Material.id) & (MaterialStock.factory_id == p.factory_id),
             )
-            .scalar()
+            .filter(Material.material_type == "stone")
+            .all()
         )
-        stone_available = float(stone_stock_row or 0)
+        matching_stone_name = None
+        stone_available = 0.0
+        for mat, stock in stone_rows:
+            mat_name = (mat.name or "").lower().replace(" ", "")
+            if pos_size and pos_size in mat_name:
+                matching_stone_name = mat.name
+                # Only count balance if unit is m² (pcs stone requires piece-level match)
+                if stock and (mat.unit or "m2").lower() == "m2":
+                    stone_available = float(stock.balance or 0)
+                break
 
         if stone_res:
             reserved_sqm = float(stone_res.reserved_sqm)
@@ -1950,8 +1961,9 @@ async def get_material_reservations(
             if deficit > 0:
                 stone_status = "insufficient"
 
+            display_name = matching_stone_name or f"Lavastone {pos_size} (нет материала)"
             stone_items.append({
-                "material": "Lava Stone",
+                "material": display_name,
                 "required": reserved_sqm,
                 "reserved": reserved_sqm,
                 "available": stone_available,
@@ -1975,7 +1987,7 @@ async def get_material_reservations(
             if needed_sqm > 0:
                 deficit = max(0.0, needed_sqm - stone_available)
                 stone_items.append({
-                    "material": "Lava Stone",
+                    "material": matching_stone_name or f"Lavastone {pos_size} (нет материала)",
                     "required": round(needed_sqm, 3),
                     "reserved": 0.0,
                     "available": stone_available,

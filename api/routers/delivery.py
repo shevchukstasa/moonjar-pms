@@ -19,7 +19,9 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.auth import get_current_user
-from api.models import Material, MaterialStock, Size
+from api.models import Material, MaterialStock, MaterialTransaction, Size
+from api.enums import TransactionType
+from api.routers.materials import _next_material_code
 from business.services import material_naming as nm
 
 logger = logging.getLogger("moonjar.delivery")
@@ -276,10 +278,11 @@ async def create_material_from_scan(
     if not size_id:
         size_id = _resolve_or_create_size(db, payload)
 
-    # 5. Create Material
+    # 5. Create Material — assign sequential M-XXXX code so it appears in lists
     material = Material(
         name=payload.name[:300],
         short_name=short_name[:100] if short_name else None,
+        material_code=_next_material_code(db),
         material_type=payload.material_type,
         product_subtype=payload.product_subtype,
         unit=payload.unit,

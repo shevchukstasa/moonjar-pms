@@ -327,6 +327,30 @@ export default function ManagerMaterialsPage() {
         };
         const resp = await apiClient.post('/delivery/create-material-from-scan', payload);
         const created = resp.data;
+
+        // Auto-post the receipt transaction in the same click — the user
+        // already entered qty in the row, expecting it to land. Otherwise
+        // they'd have to ALSO press "Confirm Receipt" at the bottom.
+        const qty = parseFloat(row._qty);
+        let receivedOk = false;
+        if (Number.isFinite(qty) && qty > 0) {
+          try {
+            await apiClient.post('/materials/transactions', {
+              material_id: created.material_id,
+              factory_id: ocrFactoryId || effectiveFactoryId,
+              type: 'receive',
+              quantity: qty,
+              notes: `Delivery scan: ${row.ocr_name}${ocrMeta.reference ? ` | Ref: ${ocrMeta.reference}` : ''}${ocrMeta.supplier ? ` | ${ocrMeta.supplier}` : ''}`,
+            });
+            receivedOk = true;
+          } catch (err) {
+            // Material was created but receipt failed — leave row matched so
+            // user can press "Confirm Receipt" at bottom to retry.
+            const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+            setOcrError(detail ?? 'Material created but receipt failed.');
+          }
+        }
+
         setOcrItems((prev) =>
           prev.map((r, i) =>
             i === idx
@@ -334,7 +358,9 @@ export default function ManagerMaterialsPage() {
                   ...r,
                   _creating: false,
                   _expanded: false,
-                  _included: true,
+                  // If receipt landed, drop from the bulk Confirm so user
+                  // doesn't double-receive when pressing the bottom button.
+                  _included: !receivedOk,
                   _material_id: created.material_id,
                   matched: true,
                   matched_material_id: created.material_id,
@@ -1328,7 +1354,7 @@ export default function ManagerMaterialsPage() {
                                   onClick={() => handleCreateFromScanRow(idx)}
                                   disabled={Boolean(it._creating) || !it._typology}
                                 >
-                                  {it._creating ? 'Creating…' : '✓ Create & match'}
+                                  {it._creating ? 'Creating…' : '✓ Create & receive'}
                                 </Button>
                               </div>
                             </div>
@@ -1433,7 +1459,7 @@ export default function ManagerMaterialsPage() {
                           <option value="">— select material —</option>
                           {items.map((m) => (
                             <option key={m.id} value={m.id}>
-                              {m.name} ({m.unit})
+                              {m.short_name || m.name} ({m.unit})
                             </option>
                           ))}
                         </select>
@@ -1595,8 +1621,10 @@ function MaterialsTable({ items, subgroups, isAggregate, isPM, hideNames, canDel
               <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '—'}</td>
               {!hideNames && (
                 <td className="px-4 py-3">
-                  <div className="font-medium text-gray-900">{m.name}</div>
-                  {m.full_name && <div className="text-xs text-gray-400">{m.full_name}</div>}
+                  <div className="font-medium text-gray-900">{m.short_name || m.name}</div>
+                  {m.short_name && m.short_name !== m.name && (
+                    <div className="text-xs text-gray-400">{m.name}</div>
+                  )}
                 </td>
               )}
               <td className="px-4 py-3">

@@ -754,28 +754,6 @@ async def kiln_utilization_endpoint(
     return calculate_kiln_utilization(db, factory_id, period_days=days)
 
 
-@router.get("/_debug_pos/{position_id}")
-async def debug_position_schedule(
-    position_id: UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    """TEMP debug endpoint — see raw schedule_metadata on a position."""
-    import json as _j
-    p = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
-    if not p:
-        return {"error": "not found"}
-    return {
-        "id": str(p.id),
-        "status": p.status,
-        "quantity": p.quantity,
-        "planned_glazing_date": str(p.planned_glazing_date) if p.planned_glazing_date else None,
-        "planned_kiln_date": str(p.planned_kiln_date) if p.planned_kiln_date else None,
-        "schedule_metadata_type": str(type(p.schedule_metadata)),
-        "schedule_metadata": p.schedule_metadata,
-    }
-
-
 @router.get("/production-schedule")
 async def production_schedule_endpoint(
     factory_id: UUID,

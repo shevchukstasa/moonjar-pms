@@ -103,6 +103,34 @@ function StatusBadge({ status }: { status?: string }) {
   );
 }
 
+// Map backend stage keys to human-readable labels
+const STAGE_LABELS: Record<string, string> = {
+  unpacking_sorting: 'Unpack',
+  engobe: 'Engobe',
+  drying_engobe: 'Dry engobe',
+  glazing: 'Glaze',
+  drying_glaze: 'Dry glaze',
+  edge_cleaning_loading: 'Edge+load',
+  sorting: 'Sorting',
+  packing: 'Packing',
+  kiln_loading: 'Kiln load',
+  firing: 'Firing',
+};
+
+// Color per stage — makes each sub-stage visually distinct
+const STAGE_COLORS: Record<string, string> = {
+  unpacking_sorting: 'bg-slate-100 text-slate-700',
+  engobe: 'bg-yellow-100 text-yellow-800',
+  drying_engobe: 'bg-orange-100 text-orange-700',
+  glazing: 'bg-blue-100 text-blue-800',
+  drying_glaze: 'bg-cyan-100 text-cyan-700',
+  edge_cleaning_loading: 'bg-violet-100 text-violet-700',
+  sorting: 'bg-green-100 text-green-700',
+  packing: 'bg-emerald-100 text-emerald-700',
+  kiln_loading: 'bg-orange-200 text-orange-900',
+  firing: 'bg-red-100 text-red-800',
+};
+
 function PositionCard({ item, onClick }: { item: PositionItem; onClick?: () => void }) {
   const slice = item.stage_slice;
   // Multi-day stage slice: show the per-day portion instead of the total.
@@ -120,6 +148,9 @@ function PositionCard({ item, onClick }: { item: PositionItem; onClick?: () => v
       ? Number(item.area_sqm)
       : null;
   const multiDay = !!(slice && slice.total_days > 1);
+  const stageKey = slice?.stage;
+  const stageLabel = stageKey ? STAGE_LABELS[stageKey] || stageKey : null;
+  const stageColor = stageKey ? STAGE_COLORS[stageKey] || 'bg-gray-100 text-gray-700' : '';
 
   return (
     <div
@@ -127,7 +158,12 @@ function PositionCard({ item, onClick }: { item: PositionItem; onClick?: () => v
       className="flex items-center gap-2 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs shadow-sm transition hover:shadow cursor-pointer"
     >
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {stageLabel && (
+            <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${stageColor}`}>
+              {stageLabel}
+            </span>
+          )}
           <span className="font-semibold text-gray-900 truncate">{item.color || '—'}</span>
           {item.size && <span className="text-gray-400">{item.size}</span>}
           {multiDay && (

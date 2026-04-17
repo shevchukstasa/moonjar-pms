@@ -105,6 +105,14 @@ export const materialsApi = {
     apiClient.get(`/materials/${materialId}/transactions`, { params }).then((r) => r.data),
   createTransaction: (data: TransactionInput) =>
     apiClient.post('/materials/transactions', data).then((r) => r.data),
+  bulkReceive: (data: {
+    factory_id: string;
+    supplier_id?: string | null;
+    delivery_date?: string | null;
+    reference_number?: string | null;
+    items: Array<{ material_id: string; quantity: number; notes?: string | null }>;
+    notes?: string | null;
+  }) => apiClient.post('/materials/bulk-receive', data).then((r) => r.data),
   deleteTransaction: (transactionId: string) =>
     apiClient.delete(`/materials/transactions/${transactionId}`).then((r) => r.data),
   getLowStock: (params?: { factory_id?: string }) =>

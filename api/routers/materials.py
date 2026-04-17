@@ -255,6 +255,21 @@ class TransactionInput(BaseModel):
     quality_notes: Optional[str] = None  # for receive: quality notes
 
 
+class BulkReceiveItem(BaseModel):
+    material_id: UUID
+    quantity: float
+    notes: Optional[str] = None
+
+
+class BulkReceiveInput(BaseModel):
+    factory_id: UUID
+    supplier_id: Optional[UUID] = None
+    delivery_date: Optional[str] = None  # YYYY-MM-DD, defaults to today
+    reference_number: Optional[str] = None
+    items: list[BulkReceiveItem]
+    notes: Optional[str] = None
+
+
 class ReceiptApprovalInput(BaseModel):
     decision: str  # "accept" | "reject" | "partial"
     accepted_quantity: Optional[float] = None
@@ -1553,6 +1568,63 @@ async def list_material_transactions(
         "total": total,
         "page": page,
         "per_page": per_page,
+    }
+
+
+@router.post("/bulk-receive", status_code=201)
+async def bulk_receive(
+    data: BulkReceiveInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Receive multiple materials in one go with a common supplier + date.
+
+    For each item: creates a RECEIVE transaction (via internal endpoint logic).
+    Returns summary of succeeded + failed items.
+    """
+    if not data.items:
+        raise HTTPException(400, "At least one item is required")
+
+    # Validate supplier belongs to factory (if provided)
+    if data.supplier_id:
+        sup = db.query(Supplier).filter(Supplier.id == data.supplier_id).first()
+        if not sup:
+            raise HTTPException(400, "Supplier not found")
+
+    succeeded: list[dict] = []
+    failed: list[dict] = []
+    for idx, item in enumerate(data.items):
+        try:
+            if item.quantity <= 0:
+                failed.append({"index": idx, "error": "Quantity must be positive"})
+                continue
+            # Reuse single-transaction logic via direct inline call
+            single = TransactionInput(
+                material_id=item.material_id,
+                factory_id=data.factory_id,
+                type="receive",
+                quantity=item.quantity,
+                notes=item.notes or data.notes,
+                supplier_id=data.supplier_id,
+            )
+            result = await create_transaction(single, db=db, current_user=current_user)
+            succeeded.append({
+                "index": idx,
+                "material_id": str(item.material_id),
+                "transaction_id": result.get("transaction_id"),
+            })
+        except HTTPException as http_exc:
+            failed.append({"index": idx, "material_id": str(item.material_id), "error": http_exc.detail})
+        except Exception as exc:
+            failed.append({"index": idx, "material_id": str(item.material_id), "error": str(exc)})
+
+    return {
+        "succeeded": len(succeeded),
+        "failed": len(failed),
+        "delivery_date": data.delivery_date,
+        "supplier_id": str(data.supplier_id) if data.supplier_id else None,
+        "reference_number": data.reference_number,
+        "details": {"succeeded": succeeded, "failed": failed},
     }
 
 

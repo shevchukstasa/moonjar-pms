@@ -178,6 +178,20 @@ export default function ManagerMaterialsPage() {
   const [ocrFactoryId, setOcrFactoryId] = useState(effectiveFactoryId);
   const ocrFileRef = { current: null as HTMLInputElement | null };
 
+  // Bulk Receive dialog state
+  interface BulkItem {
+    material_id: string;
+    quantity: string;
+    notes: string;
+  }
+  const [bulkDialog, setBulkDialog] = useState(false);
+  const [bulkSupplierId, setBulkSupplierId] = useState('');
+  const [bulkDate, setBulkDate] = useState(new Date().toISOString().slice(0, 10));
+  const [bulkRef, setBulkRef] = useState('');
+  const [bulkItems, setBulkItems] = useState<BulkItem[]>([{ material_id: '', quantity: '', notes: '' }]);
+  const [bulkError, setBulkError] = useState('');
+  const [bulkSaving, setBulkSaving] = useState(false);
+
   const handleOcrFile = useCallback(async (file: File) => {
     if (!file) return;
     setOcrError('');
@@ -514,6 +528,19 @@ export default function ManagerMaterialsPage() {
               📷 Scan Delivery
             </Button>
           )}
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setBulkDialog(true);
+              setBulkDate(new Date().toISOString().slice(0, 10));
+              setBulkSupplierId('');
+              setBulkRef('');
+              setBulkItems([{ material_id: '', quantity: '', notes: '' }]);
+              setBulkError('');
+            }}
+          >
+            📦 Bulk Receive
+          </Button>
           <Button onClick={() => openCreate(activeType !== 'all' ? activeType : undefined)}>
             + Add Material
           </Button>
@@ -1103,6 +1130,189 @@ export default function ManagerMaterialsPage() {
             </div>
           </div>
         )}
+      </Dialog>
+
+      {/* Bulk Receive Dialog */}
+      <Dialog
+        open={bulkDialog}
+        onClose={() => setBulkDialog(false)}
+        title="📦 Bulk Receive Materials"
+        className="w-full max-w-4xl"
+      >
+        <div className="space-y-4">
+          {/* Header: supplier + date + reference */}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Date</label>
+              <input
+                type="date"
+                value={bulkDate}
+                onChange={(e) => setBulkDate(e.target.value)}
+                className="w-full rounded border border-gray-200 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Supplier</label>
+              <Select
+                options={[
+                  { value: '', label: '— not selected —' },
+                  ...suppliers.map((s) => ({ value: s.id, label: s.name })),
+                ]}
+                value={bulkSupplierId}
+                onChange={(e) => setBulkSupplierId(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Reference / Note #</label>
+              <Input
+                type="text"
+                value={bulkRef}
+                onChange={(e) => setBulkRef(e.target.value)}
+                placeholder="e.g. 245/basv/IV/26"
+              />
+            </div>
+          </div>
+
+          {/* Items table */}
+          <div className="rounded-lg border border-gray-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr className="text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-3 py-2 text-left">Material</th>
+                  <th className="px-3 py-2 text-right w-32">Quantity</th>
+                  <th className="px-3 py-2 text-left">Notes</th>
+                  <th className="px-3 py-2 w-10"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {bulkItems.map((row, idx) => {
+                  const mat = items.find((m) => m.id === row.material_id);
+                  return (
+                    <tr key={idx}>
+                      <td className="px-3 py-2">
+                        <select
+                          value={row.material_id}
+                          onChange={(e) =>
+                            setBulkItems((prev) =>
+                              prev.map((x, i) => (i === idx ? { ...x, material_id: e.target.value } : x)),
+                            )
+                          }
+                          className="w-full rounded border border-gray-200 px-2 py-1 text-xs"
+                        >
+                          <option value="">— select material —</option>
+                          {items.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} ({m.unit})
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center justify-end gap-1">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.001"
+                            value={row.quantity}
+                            onChange={(e) =>
+                              setBulkItems((prev) =>
+                                prev.map((x, i) => (i === idx ? { ...x, quantity: e.target.value } : x)),
+                              )
+                            }
+                            className="w-24 rounded border border-gray-200 px-2 py-1 text-right text-xs"
+                          />
+                          <span className="text-xs text-gray-400">{mat?.unit ?? ''}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <Input
+                          type="text"
+                          value={row.notes}
+                          onChange={(e) =>
+                            setBulkItems((prev) =>
+                              prev.map((x, i) => (i === idx ? { ...x, notes: e.target.value } : x)),
+                            )
+                          }
+                          placeholder="Optional notes"
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          onClick={() => setBulkItems((prev) => prev.filter((_, i) => i !== idx))}
+                          disabled={bulkItems.length === 1}
+                          className="text-red-500 hover:text-red-700 disabled:opacity-30"
+                          title="Remove row"
+                        >
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <button
+            onClick={() => setBulkItems((prev) => [...prev, { material_id: '', quantity: '', notes: '' }])}
+            className="text-sm text-blue-600 hover:text-blue-800"
+          >
+            + Add another material
+          </button>
+
+          {bulkError && (
+            <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{bulkError}</p>
+          )}
+
+          <div className="flex justify-end gap-2 border-t pt-3">
+            <Button variant="secondary" onClick={() => setBulkDialog(false)} disabled={bulkSaving}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                setBulkError('');
+                const validRows = bulkItems.filter((r) => r.material_id && parseFloat(r.quantity) > 0);
+                if (validRows.length === 0) {
+                  setBulkError('Add at least one row with material and quantity.');
+                  return;
+                }
+                if (!effectiveFactoryId) {
+                  setBulkError('Select a factory first.');
+                  return;
+                }
+                setBulkSaving(true);
+                try {
+                  const { materialsApi } = await import('@/api/materials');
+                  const result = await materialsApi.bulkReceive({
+                    factory_id: effectiveFactoryId,
+                    supplier_id: bulkSupplierId || null,
+                    delivery_date: bulkDate || null,
+                    reference_number: bulkRef || null,
+                    items: validRows.map((r) => ({
+                      material_id: r.material_id,
+                      quantity: parseFloat(r.quantity),
+                      notes: r.notes || null,
+                    })),
+                  });
+                  matQc.invalidateQueries({ queryKey: ['materials'] });
+                  matQc.invalidateQueries({ queryKey: ['transactions'] });
+                  setBulkDialog(false);
+                  if (result.failed > 0) {
+                    setBulkError(`Partial success: ${result.succeeded} received, ${result.failed} failed. Check list.`);
+                  }
+                } catch (e: unknown) {
+                  const err = e as { response?: { data?: { detail?: string } } };
+                  setBulkError(err?.response?.data?.detail ?? 'Bulk receive failed.');
+                } finally {
+                  setBulkSaving(false);
+                }
+              }}
+              disabled={bulkSaving}
+            >
+              {bulkSaving ? 'Saving…' : `✓ Receive ${bulkItems.filter((r) => r.material_id && parseFloat(r.quantity) > 0).length} items`}
+            </Button>
+          </div>
+        </div>
       </Dialog>
     </div>
   );

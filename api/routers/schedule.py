@@ -1177,9 +1177,12 @@ async def get_daily_plan(
     target = target_date or date.today()
 
     # ── 1. Active positions in this factory ──────────────────────
+    # Terminal statuses — these are done or cancelled, don't include in plan.
+    # Same list as production-schedule endpoint for consistency.
     terminal = [
         PositionStatus.SHIPPED, PositionStatus.CANCELLED,
-        PositionStatus.MERGED,
+        PositionStatus.MERGED, PositionStatus.PACKED,
+        PositionStatus.READY_FOR_SHIPMENT,
     ]
     positions = (
         db.query(OrderPosition)

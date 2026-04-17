@@ -360,7 +360,7 @@ async def hourly_webhook_retry():
             try:
                 payload = event.payload_json
                 order_data = payload.get("order", payload)
-                source = payload.get("source", "sales_webhook_retry")
+                source = payload.get("source", "sales_webhook")
 
                 process_incoming_order(
                     db,

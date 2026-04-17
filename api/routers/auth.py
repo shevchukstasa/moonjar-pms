@@ -189,22 +189,27 @@ async def google_login(data: GoogleLoginRequest, request: Request, response: Res
 async def refresh_token(request: Request, response: Response, db: Session = Depends(get_db)):
     token = request.cookies.get("refresh_token")
     if not token:
+        logger.info("REFRESH_401: no cookie")
         raise HTTPException(401, "No refresh token")
     try:
         payload = decode_token(token)
-    except Exception:
+    except Exception as e:
+        logger.info("REFRESH_401: decode failed: %s", type(e).__name__)
         raise HTTPException(401, "Invalid refresh token")
     if payload.get("type") != "refresh":
+        logger.info("REFRESH_401: wrong token type: %s", payload.get("type"))
         raise HTTPException(401, "Invalid token type")
 
     # Verify old session is still valid
     old_jti = payload.get("jti")
+    user_id_from_token = payload.get("sub")
     if old_jti:
         old_session = db.query(ActiveSession).filter(
             ActiveSession.token_jti == old_jti,
             ActiveSession.revoked == False,
         ).first()
         if not old_session:
+            logger.info("REFRESH_401: session revoked for user=%s jti=%s", user_id_from_token, old_jti[:8])
             raise HTTPException(401, "Session revoked")
         # Revoke old session (token rotation)
         old_session.revoked = True
@@ -213,6 +218,7 @@ async def refresh_token(request: Request, response: Response, db: Session = Depe
 
     user = db.query(User).filter(User.id == payload["sub"], User.is_active == True).first()
     if not user:
+        logger.info("REFRESH_401: user not found/inactive user_id=%s", user_id_from_token)
         raise HTTPException(401, "User not found")
 
     # Create new session with new JTI

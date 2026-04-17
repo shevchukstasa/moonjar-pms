@@ -335,8 +335,8 @@ def check_packing_materials(
         }
 
     # Create blocking task — warning only (does NOT change position status)
-    shortage_desc = ", ".join(
-        f"{s['material_name']}: need {s['needed']}, have {s['available']}"
+    shortage_desc = "; ".join(
+        f"need {s['needed']:.0f} of {s['material_name']}, have {s['available']:.0f} in stock"
         for s in shortages
     )
     task = Task(
@@ -347,7 +347,7 @@ def check_packing_materials(
         related_order_id=position.order_id,
         related_position_id=position_id,
         blocking=True,
-        description=f"Packing materials shortage for sorting: {shortage_desc}",
+        description=f"Insufficient packaging: {shortage_desc}",
         priority=2,
         metadata_json={
             "shortages": shortages,
@@ -381,15 +381,41 @@ def on_sorting_start(
     """Hook called when a position transitions to TRANSFERRED_TO_SORTING.
 
     Orchestrates:
-    1. Reserve packaging materials (existing logic)
-    2. Check packing material availability → create warning task if insufficient
+    1. Check packaging rules exist → create blocking task if not configured
+    2. Reserve packaging materials (existing logic)
+    3. Check packing material stock availability → create warning task if insufficient
 
-    Does NOT block the position status change — just creates a task as a warning
-    so warehouse knows to restock before packing begins.
+    Does NOT block the position status change — just creates tasks as warnings
+    so PM/warehouse knows to configure rules / restock before packing begins.
     """
-    result = {"reserve": None, "availability": None}
+    from api.models import Task, OrderPosition
+    from api.enums import TaskType, TaskStatus, UserRole
 
-    # 1. Reserve packaging
+    result = {"reserve": None, "availability": None, "rules_check": None}
+
+    # 0. Load position to check packaging rules
+    position = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not position:
+        logger.warning("on_sorting_start: position %s not found", position_id)
+        return result
+
+    # 1. Check if packaging rules exist for this position's size
+    try:
+        needs = calculate_packaging_needs(db, position)
+        if not needs.materials:
+            # No packaging rules configured for this size — create blocking task
+            result["rules_check"] = _create_packaging_rules_missing_task(
+                db, position, factory_id,
+            )
+            # No point trying to reserve or check availability
+            return result
+        else:
+            result["rules_check"] = {"ok": True, "rules_configured": True}
+    except Exception as e:
+        logger.warning("on_sorting_start: packaging rules check failed for %s: %s", position_id, e)
+        result["rules_check"] = {"ok": False, "error": str(e)}
+
+    # 2. Reserve packaging
     try:
         reserve_result = reserve_packaging(db, position_id, factory_id, user_id)
         result["reserve"] = reserve_result
@@ -397,7 +423,7 @@ def on_sorting_start(
         logger.warning("on_sorting_start: reserve_packaging failed for %s: %s", position_id, e)
         result["reserve"] = {"ok": False, "error": str(e)}
 
-    # 2. Check availability and create task if insufficient
+    # 3. Check availability and create task if insufficient
     try:
         availability = check_packing_materials(db, position_id, factory_id)
         result["availability"] = availability
@@ -406,3 +432,81 @@ def on_sorting_start(
         result["availability"] = {"ok": False, "error": str(e)}
 
     return result
+
+
+def _create_packaging_rules_missing_task(
+    db: Session,
+    position,
+    factory_id: UUID,
+) -> dict:
+    """Create a blocking task when no PackagingBoxCapacity exists for position's size.
+
+    Deduplication: skips if an open PACKING_MATERIALS_NEEDED task for missing rules
+    already exists for this position.
+
+    Returns dict with task creation status.
+    """
+    from api.models import Task
+    from api.enums import TaskType, TaskStatus, UserRole
+
+    size_label = position.size or "unknown"
+
+    # Deduplication: check for existing open task for this position
+    existing_task = db.query(Task).filter(
+        Task.related_position_id == position.id,
+        Task.type == TaskType.PACKING_MATERIALS_NEEDED,
+        Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+    ).first()
+
+    if existing_task:
+        # Update description if needed
+        existing_task.description = (
+            f"Packaging rules not configured for size {size_label}. "
+            f"Configure box types in Admin Settings → Packaging."
+        )
+        existing_task.updated_at = datetime.now(timezone.utc)
+        logger.info(
+            "PACKAGING_RULES_TASK_UPDATED | position=%s | task=%s | size=%s",
+            position.id, existing_task.id, size_label,
+        )
+        return {
+            "ok": True,
+            "rules_configured": False,
+            "task_id": str(existing_task.id),
+            "task_status": "updated",
+        }
+
+    # Create new blocking task
+    task = Task(
+        factory_id=factory_id,
+        type=TaskType.PACKING_MATERIALS_NEEDED,
+        status=TaskStatus.PENDING,
+        assigned_role=UserRole.PRODUCTION_MANAGER,
+        related_order_id=position.order_id,
+        related_position_id=position.id,
+        blocking=True,
+        description=(
+            f"Packaging rules not configured for size {size_label}. "
+            f"Configure box types in Admin Settings → Packaging."
+        ),
+        priority=3,
+        metadata_json={
+            "reason": "no_packaging_rules",
+            "size": size_label,
+            "position_quantity": int(position.quantity or 0),
+        },
+    )
+    db.add(task)
+    db.flush()
+
+    logger.info(
+        "PACKAGING_RULES_MISSING | position=%s | task=%s | size=%s",
+        position.id, task.id, size_label,
+    )
+
+    return {
+        "ok": True,
+        "rules_configured": False,
+        "task_id": str(task.id),
+        "task_status": "created",
+    }

@@ -20,7 +20,7 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func as sa_func
 
 logger = logging.getLogger("moonjar.stone_reservation")
 
@@ -305,6 +305,11 @@ def reserve_stone_for_position(
         quantity, reserved_sqm, defect_pct * 100,
     )
 
+    # ── Check stone stock availability and create blocking task if insufficient ──
+    _check_stone_stock_and_create_task(
+        db, position, factory_id, reserved_sqm, defect_pct, quantity,
+    )
+
     return {
         "reservation_id": reservation_id,
         "size_category": size_category,
@@ -313,6 +318,134 @@ def reserve_stone_for_position(
         "reserved_sqm": reserved_sqm,
         "stone_defect_pct": defect_pct,
     }
+
+
+# ──────────────────────────────────────────────────────────────────
+# §3b  Stone stock availability check + blocking task
+# ──────────────────────────────────────────────────────────────────
+
+def _check_stone_stock_and_create_task(
+    db: Session,
+    position,
+    factory_id: str,
+    reserved_sqm: float,
+    defect_pct: float,
+    quantity: int,
+) -> None:
+    """Check if factory has enough stone stock for the reservation.
+
+    If total stone stock (minus other active reservations) is less than
+    the required sqm, creates a STONE_PROCUREMENT blocking task
+    linked to this position.
+
+    Deduplication: skips if an open STONE_PROCUREMENT task already exists
+    for this position.
+
+    Best-effort: never raises — failures are logged and swallowed.
+    """
+    from api.models import MaterialStock, Material as Mat, Task
+    from api.enums import TaskType, TaskStatus, UserRole
+
+    position_id = str(position.id)
+
+    try:
+        # Sum all stone stock balances at this factory
+        total_stone_balance = (
+            db.query(sa_func.coalesce(sa_func.sum(MaterialStock.balance), 0))
+            .join(Mat, Mat.id == MaterialStock.material_id)
+            .filter(
+                MaterialStock.factory_id == factory_id,
+                Mat.material_type == "stone",
+            )
+            .scalar()
+        )
+        total_stone_balance = float(total_stone_balance)
+
+        # Subtract already-reserved stone (other active reservations at this factory)
+        already_reserved = db.execute(text("""
+            SELECT COALESCE(SUM(reserved_sqm), 0)
+            FROM stone_reservations
+            WHERE factory_id = :fid AND status = 'active'
+              AND position_id != :pid
+        """), {"fid": factory_id, "pid": position_id}).scalar()
+        already_reserved = float(already_reserved or 0)
+
+        effective_available = total_stone_balance - already_reserved
+
+        if effective_available >= reserved_sqm:
+            logger.debug(
+                "STONE_STOCK_OK | position=%s | available=%.3f needed=%.3f",
+                position_id, effective_available, reserved_sqm,
+            )
+            return
+
+        deficit = reserved_sqm - effective_available
+        logger.info(
+            "STONE_STOCK_INSUFFICIENT | position=%s | "
+            "available=%.3f needed=%.3f deficit=%.3f",
+            position_id, effective_available, reserved_sqm, deficit,
+        )
+
+        # Deduplication: check if there's already an open task for this position
+        existing_task = db.query(Task).filter(
+            Task.related_position_id == position.id,
+            Task.type == TaskType.STONE_PROCUREMENT,
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+        ).first()
+
+        if existing_task:
+            # Update description with latest numbers
+            existing_task.description = (
+                f"Stone not available: need {reserved_sqm:.2f} m², "
+                f"have {effective_available:.2f} m² "
+                f"(deficit {deficit:.2f} m²). "
+                f"Qty: {quantity} pcs, defect margin: {defect_pct*100:.0f}%."
+            )
+            logger.info(
+                "STONE_TASK_UPDATED | position=%s | task=%s",
+                position_id, existing_task.id,
+            )
+            return
+
+        # Create new blocking task
+        task = Task(
+            factory_id=position.factory_id,
+            type=TaskType.STONE_PROCUREMENT,
+            status=TaskStatus.PENDING,
+            assigned_role=UserRole.PURCHASER,
+            related_order_id=position.order_id,
+            related_position_id=position.id,
+            blocking=True,
+            description=(
+                f"Stone not available: need {reserved_sqm:.2f} m², "
+                f"have {effective_available:.2f} m² "
+                f"(deficit {deficit:.2f} m²). "
+                f"Qty: {quantity} pcs, defect margin: {defect_pct*100:.0f}%."
+            ),
+            priority=3,
+            metadata_json={
+                "reserved_sqm": reserved_sqm,
+                "available_sqm": effective_available,
+                "deficit_sqm": deficit,
+                "quantity": quantity,
+                "stone_defect_pct": defect_pct,
+            },
+        )
+        db.add(task)
+        db.flush()
+
+        logger.info(
+            "STONE_PROCUREMENT_TASK | position=%s | task=%s | "
+            "need=%.3f available=%.3f deficit=%.3f",
+            position_id, task.id, reserved_sqm, effective_available, deficit,
+        )
+
+    except Exception as e:
+        logger.warning(
+            "STONE_STOCK_CHECK_FAILED | position=%s | %s — "
+            "task not created, reservation still valid",
+            position_id, e,
+        )
 
 
 # ──────────────────────────────────────────────────────────────────

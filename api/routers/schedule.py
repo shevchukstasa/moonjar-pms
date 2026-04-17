@@ -39,8 +39,9 @@ SECTION_STATUSES = {
         PositionStatus.REFIRE, PositionStatus.AWAITING_REGLAZE,
     ],
     "sorting": [
-        PositionStatus.TRANSFERRED_TO_SORTING, PositionStatus.PACKED,
-        PositionStatus.READY_FOR_SHIPMENT,
+        # Only actively-being-sorted positions. PACKED/READY_FOR_SHIPMENT
+        # belong to Warehouse dashboard (finishedgoods) and Shipment flow.
+        PositionStatus.TRANSFERRED_TO_SORTING,
     ],
     "qc": [
         PositionStatus.SENT_TO_QUALITY_CHECK, PositionStatus.QUALITY_CHECK_DONE,

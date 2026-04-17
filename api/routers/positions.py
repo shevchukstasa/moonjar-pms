@@ -384,71 +384,6 @@ async def list_positions(
 
 
 # ================================================================
-# Debug: material calc test (temporary)
-# ================================================================
-
-@router.get("/debug-material-calc")
-async def debug_material_calc(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    """Temporary debug endpoint — shows material calc internals."""
-    from business.services.material_reservation import _calculate_required
-    # Find first insufficient_materials position
-    pos = (
-        db.query(OrderPosition)
-        .filter(OrderPosition.status == PositionStatus.INSUFFICIENT_MATERIALS)
-        .first()
-    )
-    if not pos:
-        return {"error": "no insufficient_materials positions"}
-
-    recipe = db.query(Recipe).filter(Recipe.id == pos.recipe_id).first()
-    if not recipe:
-        return {"error": "no recipe"}
-
-    rms = db.query(RecipeMaterial).filter(RecipeMaterial.recipe_id == recipe.id).limit(2).all()
-    results = []
-    for rm in rms:
-        mat = db.query(Material).get(rm.material_id)
-        info = {
-            "material": mat.name if mat else "?",
-            "rm_unit": rm.unit,
-            "qty_per_unit": float(rm.quantity_per_unit),
-            "mat_stock_unit": mat.unit if mat else "?",
-            "pos_quantity": pos.quantity,
-            "pos_quantity_sqm": float(pos.quantity_sqm) if pos.quantity_sqm else None,
-            "pos_glazeable_sqm": float(pos.glazeable_sqm) if pos.glazeable_sqm else None,
-            "recipe_sg": float(recipe.specific_gravity) if recipe.specific_gravity else None,
-            "recipe_spray": float(recipe.consumption_spray_ml_per_sqm) if recipe.consumption_spray_ml_per_sqm else None,
-        }
-        try:
-            raw = _calculate_required(rm, pos, recipe=recipe, db=db)
-            info["_calculate_required_raw"] = float(raw)
-            calc_unit = get_calculation_unit(rm.unit)
-            info["calc_unit"] = calc_unit
-            stock_unit = (mat.unit or "kg").lower()
-            info["stock_unit"] = stock_unit
-            converted = convert_to_stock_unit(
-                raw, calc_unit, stock_unit,
-                specific_gravity=Decimal(str(recipe.specific_gravity)) if recipe.specific_gravity else None,
-                material_name=mat.name if mat else "",
-            )
-            info["converted_to_stock"] = float(converted)
-        except Exception as e:
-            info["error"] = f"{type(e).__name__}: {e}"
-
-        try:
-            full = _calc_required_in_stock_units(rm, pos, db, recipe_obj=recipe)
-            info["_calc_required_in_stock_units"] = float(full)
-        except Exception as e:
-            info["helper_error"] = f"{type(e).__name__}: {e}"
-
-        results.append(info)
-    return {"position": str(pos.id)[:8], "recipe": recipe.name, "results": results}
-
-
-# ================================================================
 # Blocking Summary — MUST be defined before /{position_id} routes
 # ================================================================
 
@@ -539,11 +474,6 @@ async def get_blocking_summary(
                     ))
                     eff = bal - (t_res - t_unres)
                     req = _calc_required_in_stock_units(rm, p, db, recipe_obj=recipe)
-                    _pos_logger.info(
-                        "SHORTAGE_CALC | mat=%s unit=%s qty_per=%s req=%s (stock_unit=%s)",
-                        mat.name, rm.unit, rm.quantity_per_unit, req,
-                        (mat.unit or "kg"),
-                    )
                     deficit = max(Decimal("0"), req - max(eff, Decimal("0")))
                     if deficit > 0:
                         material_shortages.append({

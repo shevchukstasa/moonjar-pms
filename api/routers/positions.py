@@ -21,6 +21,49 @@ from api.models import (
     GrindingStock, FinishedGoodsStock, Task,
     MaterialTransaction, MaterialStock, RecipeMaterial, Material, Recipe,
 )
+from api.unit_conversion import get_calculation_unit, convert_to_stock_unit
+_pos_logger = logging.getLogger("moonjar.positions")
+
+
+def _calc_required_in_stock_units(
+    rm,
+    position,
+    db: Session,
+) -> Decimal:
+    """Calculate required material in stock units (kg) using central conversion.
+
+    This replaces inline `qty_per_unit * sqm` calculations that forgot g→kg.
+    Uses the same _calculate_required logic as material_reservation.py but
+    falls back to simple formulas when the full service is not available.
+    """
+    try:
+        from business.services.material_reservation import _calculate_required
+        raw = _calculate_required(rm, position, db=db)
+    except Exception:
+        # Fallback: simple inline calc
+        qty = Decimal(str(rm.quantity_per_unit))
+        if rm.unit == "per_sqm" and position.quantity_sqm:
+            raw = qty * Decimal(str(position.quantity_sqm))
+        else:
+            raw = qty * Decimal(str(position.quantity or 0))
+
+    # Convert recipe units → stock units (e.g. g→kg or ml→kg)
+    calc_unit = get_calculation_unit(rm.unit)
+    mat = db.query(Material).get(rm.material_id) if rm.material_id else None
+    stock_unit = (mat.unit or "kg").lower() if mat else "kg"
+    sg = None
+    if mat and hasattr(mat, 'specific_gravity') and mat.specific_gravity:
+        sg = Decimal(str(mat.specific_gravity))
+    elif hasattr(rm, 'recipe') and rm.recipe and rm.recipe.specific_gravity:
+        sg = Decimal(str(rm.recipe.specific_gravity))
+
+    return convert_to_stock_unit(
+        raw, calc_unit, stock_unit,
+        specific_gravity=sg,
+        material_name=mat.name if mat else "",
+    )
+
+
 from api.enums import (
     PositionStatus, OrderStatus, SplitCategory, DefectStage, DefectOutcome,
     GrindingStatus, TaskType, TaskStatus, UserRole,
@@ -396,10 +439,7 @@ async def get_blocking_summary(
                         ).scalar()
                     ))
                     eff = bal - (t_res - t_unres)
-                    if rm.unit == "per_sqm" and p.quantity_sqm:
-                        req = Decimal(str(rm.quantity_per_unit)) * Decimal(str(p.quantity_sqm))
-                    else:
-                        req = Decimal(str(rm.quantity_per_unit)) * Decimal(str(p.quantity))
+                    req = _calc_required_in_stock_units(rm, p, db)
                     deficit = max(Decimal("0"), req - max(eff, Decimal("0")))
                     if deficit > 0:
                         material_shortages.append({
@@ -1836,11 +1876,8 @@ async def get_material_reservations(
         if not material:
             continue
 
-        # Calculate required
-        if rm.unit == "per_sqm" and p.quantity_sqm:
-            required = Decimal(str(rm.quantity_per_unit)) * Decimal(str(p.quantity_sqm))
-        else:
-            required = Decimal(str(rm.quantity_per_unit)) * Decimal(str(p.quantity))
+        # Calculate required (in stock units, e.g. kg)
+        required = _calc_required_in_stock_units(rm, p, db)
 
         # Current stock balance
         stock = (
@@ -2285,44 +2322,7 @@ async def get_position_materials(
                     position._consumption_rule = None
 
                 # Calculate required quantity
-                try:
-                    from business.services.material_reservation import _calculate_required
-                    from api.unit_conversion import get_calculation_unit, convert_to_stock_unit
-                    required_calc = _calculate_required(rm, position, recipe=recipe, db=db)
-                    calc_unit = get_calculation_unit(rm.unit)
-                    stock_unit = (material.unit or "pcs").lower().strip()
-                    sg = recipe.specific_gravity if recipe else None
-                    required = float(convert_to_stock_unit(
-                        required_calc, calc_unit, stock_unit,
-                        specific_gravity=sg, material_name=material.name,
-                    ))
-                except Exception as _calc_err:
-                    import logging as _clog
-                    _clog.getLogger("moonjar.positions").warning(
-                        "Material calc error for %s (rm.unit=%s): %s",
-                        material.name, rm.unit, _calc_err,
-                    )
-                    # Fallback: g_per_100g needs area × spray_rate × SG formula
-                    rm_unit = (rm.unit or "per_piece").lower().strip()
-                    stock_u = (material.unit or "pcs").lower().strip()
-                    qty_per = float(rm.quantity_per_unit or 0)
-                    pos_qty = float(position.quantity or 1)
-                    area_sqm = float(position.glazeable_sqm or 0) * pos_qty
-
-                    if rm_unit == "g_per_100g" and area_sqm > 0:
-                        # area × spray_rate_ml → total_ml × SG → grams
-                        spray_rate = float(recipe.consumption_spray_ml_per_sqm or 500) if recipe else 500
-                        sg_val = float(recipe.specific_gravity or 1.0) if recipe else 1.0
-                        total_grams = area_sqm * spray_rate * sg_val
-                        required = (qty_per / 100.0) * total_grams
-                        if stock_u == "kg":
-                            required = required / 1000.0
-                    elif rm_unit == "per_sqm":
-                        required = qty_per * area_sqm
-                        if stock_u == "kg":
-                            required = required / 1000.0
-                    else:
-                        required = qty_per * pos_qty
+                required = float(_calc_required_in_stock_units(rm, position, db))
 
                 # Check reservation status
                 reserved_qty = float(

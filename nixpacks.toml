@@ -1,8 +1,9 @@
 # Moonjar PMS — Nixpacks configuration for Railway
 # Python backend + Node.js for frontend build at startup
 #
-# All packages via Nix (apt repos are unreliable in Railway build env).
-# npm is bundled with nodejs_20, no separate package needed.
+# All packages via Nix (apt repos unreliable in Railway build env).
+# npm bundled with nodejs_20. python312 explicit because custom
+# nixPkgs overrides Nixpacks' auto-detected Python provider.
 
 [phases.setup]
-nixPkgs = ["nodejs_20", "postgresql_16"]
+nixPkgs = ["python312", "nodejs_20", "postgresql_16"]

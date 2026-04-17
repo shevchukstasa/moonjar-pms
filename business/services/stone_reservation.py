@@ -434,15 +434,15 @@ def _check_stone_stock_and_create_task(
 
         stone_desc = matching_stone.name if matching_stone else f"Lavastone {pos_size}"
         size_note = (
-            f"Нужен камень {stone_desc}: надо {reserved_sqm:.2f} m², "
-            f"на складе {effective_available:.2f} m² "
-            f"(не хватает {deficit:.2f} m²). "
-            f"Кол-во: {quantity} шт, запас на брак: {defect_pct*100:.0f}%."
+            f"Stone shortage: {stone_desc} — need {reserved_sqm:.2f} m², "
+            f"have {effective_available:.2f} m² "
+            f"(deficit {deficit:.2f} m²). "
+            f"Qty: {quantity} pcs, defect margin: {defect_pct*100:.0f}%."
         )
         if not matching_stone:
             size_note = (
-                f"Нет материала камня под размер {pos_size}. "
-                f"{size_note} Возможно нужно создать Material с соответствующим размером."
+                f"No stone material for size {pos_size}. "
+                f"{size_note} Create a Material entry matching this size."
             )
 
         if existing_task:
@@ -480,6 +480,27 @@ def _check_stone_stock_and_create_task(
             "need=%.3f available=%.3f deficit=%.3f",
             position_id, task.id, reserved_sqm, effective_available, deficit,
         )
+
+        # Transition position to INSUFFICIENT_MATERIALS so scheduler
+        # removes it from daily plan until stone arrives.
+        from api.enums import PositionStatus
+        current_status = position.status
+        if hasattr(current_status, 'value'):
+            current_status = current_status.value
+        # Only block if position is in an early/pre-production stage
+        blockable_statuses = {
+            PositionStatus.PLANNED.value,
+            PositionStatus.AWAITING_RECIPE.value,
+            PositionStatus.AWAITING_STENCIL_SILKSCREEN.value,
+            PositionStatus.AWAITING_COLOR_MATCHING.value,
+            PositionStatus.AWAITING_CONSUMPTION_DATA.value,
+        }
+        if current_status in blockable_statuses:
+            position.status = PositionStatus.INSUFFICIENT_MATERIALS
+            logger.info(
+                "STONE_BLOCK_POSITION | position=%s | %s → insufficient_materials",
+                position_id, current_status,
+            )
 
     except Exception as e:
         logger.warning(

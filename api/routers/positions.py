@@ -41,13 +41,20 @@ def _calc_required_in_stock_units(
         from business.services.material_reservation import _calculate_required
         recipe_for_calc = recipe_obj
         if not recipe_for_calc and hasattr(rm, 'recipe'):
-            recipe_for_calc = rm.recipe
+            try:
+                recipe_for_calc = rm.recipe
+            except Exception:
+                pass
         raw = _calculate_required(rm, position, recipe=recipe_for_calc, db=db)
     except Exception as exc:
-        _pos_logger.warning(
-            "CALC_REQUIRED_FALLBACK | rm.unit=%s pos=%s | %s",
-            rm.unit, getattr(position, 'id', '?'), exc,
+        _pos_logger.error(
+            "CALC_REQUIRED_FALLBACK | rm.unit=%s pos=%s mat=%s | %s: %s",
+            rm.unit, getattr(position, 'id', '?'),
+            getattr(rm, 'material_id', '?'),
+            type(exc).__name__, exc,
         )
+        import traceback
+        _pos_logger.error("CALC_REQUIRED_TRACEBACK: %s", traceback.format_exc())
         # Fallback: replicate g_per_100g and per_sqm formulas
         qty = Decimal(str(rm.quantity_per_unit or 0))
         unit = (rm.unit or "per_piece").lower().strip()

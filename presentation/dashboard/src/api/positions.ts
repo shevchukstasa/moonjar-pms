@@ -51,11 +51,28 @@ export interface BlockedPositionInfo {
   factory_id: string;
 }
 
+export interface MaterialReservationGroupItem {
+  material: string;
+  required: number;
+  reserved: number;
+  available: number;
+  deficit: number;
+  unit: string;
+  status: string;
+}
+
+export interface MaterialReservationGroup {
+  group: 'stone' | 'recipe' | 'packaging';
+  label: string;
+  items: MaterialReservationGroupItem[];
+}
+
 export interface MaterialReservationResponse {
   position_id: string;
   recipe_name: string | null;
   materials: MaterialReservationItem[];
   has_recipe: boolean;
+  groups?: MaterialReservationGroup[];
 }
 
 export interface MaterialReservationItem {

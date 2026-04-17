@@ -1,5 +1,6 @@
 import { useMaterialReservations } from '@/hooks/usePositions';
 import { Spinner } from '@/components/ui/Spinner';
+import type { MaterialReservationGroup, MaterialReservationGroupItem } from '@/api/positions';
 
 interface MaterialReservationsPanelProps {
   positionId: string;
@@ -21,6 +22,75 @@ const STATUS_LABELS: Record<string, string> = {
   available: 'Available',
   insufficient: 'Insufficient',
 };
+
+const GROUP_STYLES: Record<string, { border: string; bg: string; icon: string }> = {
+  stone: { border: 'border-l-amber-500', bg: 'bg-amber-50', icon: '🪨' },
+  recipe: { border: 'border-l-blue-500', bg: 'bg-blue-50', icon: '🎨' },
+  packaging: { border: 'border-l-emerald-500', bg: 'bg-emerald-50', icon: '📦' },
+};
+
+function GroupSection({ group }: { group: MaterialReservationGroup }) {
+  const style = GROUP_STYLES[group.group] || { border: 'border-l-gray-400', bg: 'bg-gray-50', icon: '' };
+
+  if (group.items.length === 0) {
+    return (
+      <div className={`rounded-lg border-l-4 ${style.border} ${style.bg} p-4 mb-3`}>
+        <h4 className="text-sm font-semibold text-gray-700 mb-2">
+          {style.icon} {group.label}
+        </h4>
+        <p className="text-xs text-gray-500 italic">Belum dikonfigurasi / Not configured</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`rounded-lg border-l-4 ${style.border} mb-3 overflow-hidden`}>
+      <div className={`${style.bg} px-4 py-2`}>
+        <h4 className="text-sm font-semibold text-gray-700">
+          {style.icon} {group.label}
+        </h4>
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-200 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-4 pb-2 pt-2 pr-4">Material</th>
+            <th className="pb-2 pt-2 pr-4 text-right">Required</th>
+            <th className="pb-2 pt-2 pr-4 text-right">Reserved</th>
+            <th className="pb-2 pt-2 pr-4 text-right">Available</th>
+            <th className="pb-2 pt-2 pr-4 text-right">Deficit</th>
+            <th className="pb-2 pt-2 px-4">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {group.items.map((m: MaterialReservationGroupItem, idx: number) => (
+            <tr key={`${group.group}-${idx}`} className="border-b border-gray-100 hover:bg-gray-50">
+              <td className="py-2 px-4 pr-4">
+                <div className="font-medium text-gray-900">{m.material}</div>
+              </td>
+              <td className="py-2 pr-4 text-right font-mono text-gray-700">
+                {m.required.toFixed(2)} <span className="text-xs text-gray-400">{m.unit}</span>
+              </td>
+              <td className="py-2 pr-4 text-right font-mono text-gray-700">
+                {m.reserved.toFixed(2)}
+              </td>
+              <td className={`py-2 pr-4 text-right font-mono ${m.available < 0 ? 'text-red-600 font-semibold' : 'text-gray-700'}`}>
+                {m.available.toFixed(2)}
+              </td>
+              <td className={`py-2 pr-4 text-right font-mono ${m.deficit > 0 ? 'text-red-600 font-semibold' : 'text-gray-400'}`}>
+                {m.deficit > 0 ? m.deficit.toFixed(2) : '\u2014'}
+              </td>
+              <td className="py-2 px-4">
+                <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[m.status] || 'bg-gray-100 text-gray-600'}`}>
+                  {STATUS_LABELS[m.status] || m.status}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export function MaterialReservationsPanel({ positionId, onClose }: MaterialReservationsPanelProps) {
   const { data, isLoading, error } = useMaterialReservations(positionId);
@@ -46,6 +116,9 @@ export function MaterialReservationsPanel({ positionId, onClose }: MaterialReser
     );
   }
 
+  // Use new grouped response if available, otherwise fall back to legacy flat view
+  const hasGroups = data.groups && data.groups.length > 0;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div
@@ -63,11 +136,17 @@ export function MaterialReservationsPanel({ positionId, onClose }: MaterialReser
             className="text-gray-400 hover:text-gray-600 text-xl leading-none"
             onClick={onClose}
           >
-            ×
+            &times;
           </button>
         </div>
 
-        {!data.has_recipe ? (
+        {hasGroups ? (
+          <div className="space-y-1">
+            {data.groups!.map((g) => (
+              <GroupSection key={g.group} group={g} />
+            ))}
+          </div>
+        ) : !data.has_recipe ? (
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-center text-sm text-gray-500">
             No recipe assigned — material reservations not applicable
           </div>
@@ -100,7 +179,7 @@ export function MaterialReservationsPanel({ positionId, onClose }: MaterialReser
                     {m.available.toFixed(2)}
                   </td>
                   <td className={`py-2 pr-4 text-right font-mono ${m.deficit > 0 ? 'text-red-600 font-semibold' : 'text-gray-400'}`}>
-                    {m.deficit > 0 ? m.deficit.toFixed(2) : '—'}
+                    {m.deficit > 0 ? m.deficit.toFixed(2) : '\u2014'}
                   </td>
                   <td className="py-2">
                     <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[m.status] || 'bg-gray-100 text-gray-600'}`}>

@@ -1901,123 +1901,261 @@ async def get_material_reservations(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Return material reservation details for a position.
+    """Return unified material reservation details for a position.
 
-    Shows each recipe material with required / reserved / available / deficit.
+    Shows 3 groups: stone, recipe/glaze, packaging — each with
+    required / reserved / available / deficit per material.
+
+    Backward compatible: `materials` still contains the flat glaze list.
+    New field `groups` has all 3 sections.
     """
+    from api.models import StoneReservation
+    from business.services.packaging_consumption import calculate_packaging_needs
+
     p = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
     if not p:
         raise HTTPException(404, "Position not found")
 
-    recipe = db.query(Recipe).filter(Recipe.id == p.recipe_id).first() if p.recipe_id else None
-    if not recipe:
-        return {
-            "position_id": str(p.id),
-            "recipe_name": None,
-            "materials": [],
-            "has_recipe": False,
-        }
+    groups = []
 
-    recipe_materials = (
-        db.query(RecipeMaterial)
-        .filter(RecipeMaterial.recipe_id == recipe.id)
-        .all()
-    )
-
-    materials_info = []
-    for rm in recipe_materials:
-        material = db.query(Material).get(rm.material_id)
-        if not material:
-            continue
-
-        # Calculate required (in stock units, e.g. kg)
-        required = _calc_required_in_stock_units(rm, p, db, recipe_obj=recipe)
-
-        # Current stock balance
-        stock = (
-            db.query(MaterialStock)
+    # ── GROUP 1: Stone ────────────────────────────────────────────
+    stone_items = []
+    try:
+        stone_res = (
+            db.query(StoneReservation)
             .filter(
-                MaterialStock.material_id == rm.material_id,
-                MaterialStock.factory_id == p.factory_id,
+                StoneReservation.position_id == position_id,
+                StoneReservation.status == "active",
             )
+            .order_by(StoneReservation.created_at.desc())
             .first()
         )
-        balance = Decimal(str(stock.balance)) if stock else Decimal("0")
 
-        # Net reserved for this position
-        pos_reserved = (
-            db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+        # Find stone stock at this factory
+        stone_stock_row = (
+            db.query(func.coalesce(func.sum(MaterialStock.balance), 0))
+            .join(Material, Material.id == MaterialStock.material_id)
             .filter(
-                MaterialTransaction.related_position_id == position_id,
-                MaterialTransaction.material_id == rm.material_id,
-                MaterialTransaction.type == TransactionType.RESERVE,
+                Material.material_type == "stone",
+                MaterialStock.factory_id == p.factory_id,
             )
             .scalar()
         )
-        pos_unreserved = (
-            db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
-            .filter(
-                MaterialTransaction.related_position_id == position_id,
-                MaterialTransaction.material_id == rm.material_id,
-                MaterialTransaction.type == TransactionType.UNRESERVE,
-            )
-            .scalar()
-        )
-        net_reserved_pos = Decimal(str(pos_reserved)) - Decimal(str(pos_unreserved))
+        stone_available = float(stone_stock_row or 0)
 
-        # Total net reserved across ALL positions for this material+factory
-        total_reserved_all = (
-            db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
-            .filter(
-                MaterialTransaction.material_id == rm.material_id,
-                MaterialTransaction.factory_id == p.factory_id,
-                MaterialTransaction.type == TransactionType.RESERVE,
-            )
-            .scalar()
-        )
-        total_unreserved_all = (
-            db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
-            .filter(
-                MaterialTransaction.material_id == rm.material_id,
-                MaterialTransaction.factory_id == p.factory_id,
-                MaterialTransaction.type == TransactionType.UNRESERVE,
-            )
-            .scalar()
-        )
-        effective_available = balance - (Decimal(str(total_reserved_all)) - Decimal(str(total_unreserved_all)))
+        if stone_res:
+            reserved_sqm = float(stone_res.reserved_sqm)
+            deficit = max(0.0, reserved_sqm - stone_available) if stone_available < reserved_sqm else 0.0
+            stone_status = "reserved" if reserved_sqm > 0 else "available"
+            if deficit > 0:
+                stone_status = "insufficient"
 
-        # Determine status
-        if net_reserved_pos >= required and net_reserved_pos > 0:
-            if effective_available < 0:
-                mat_status = "force_reserved"
-            else:
-                mat_status = "reserved"
-        elif net_reserved_pos > 0:
-            mat_status = "partially_reserved"
+            stone_items.append({
+                "material": "Lava Stone",
+                "required": reserved_sqm,
+                "reserved": reserved_sqm,
+                "available": stone_available,
+                "deficit": round(deficit, 3),
+                "unit": "m²",
+                "status": stone_status,
+            })
         else:
-            if effective_available >= required:
-                mat_status = "available"
+            # No reservation yet — show what would be needed
+            from business.services.stone_reservation import (
+                _calculate_reserved_sqm,
+                _size_category_from_position,
+                _product_type_str,
+                get_stone_defect_rate,
+            )
+            size_cat = _size_category_from_position(p)
+            prod_type = _product_type_str(p)
+            defect_pct = get_stone_defect_rate(db, p.factory_id, size_cat, prod_type)
+            needed_sqm = _calculate_reserved_sqm(p, defect_pct)
+
+            if needed_sqm > 0:
+                deficit = max(0.0, needed_sqm - stone_available)
+                stone_items.append({
+                    "material": "Lava Stone",
+                    "required": round(needed_sqm, 3),
+                    "reserved": 0.0,
+                    "available": stone_available,
+                    "deficit": round(deficit, 3),
+                    "unit": "m²",
+                    "status": "insufficient" if deficit > 0 else "available",
+                })
+    except Exception as e:
+        logger.warning("material-reservations: stone section failed for %s: %s", position_id, e)
+
+    groups.append({
+        "group": "stone",
+        "label": "Batu / Stone",
+        "items": stone_items,
+    })
+
+    # ── GROUP 2: Recipe / Glaze ───────────────────────────────────
+    recipe = db.query(Recipe).filter(Recipe.id == p.recipe_id).first() if p.recipe_id else None
+    recipe_items = []
+    has_recipe = recipe is not None
+
+    if recipe:
+        recipe_materials = (
+            db.query(RecipeMaterial)
+            .filter(RecipeMaterial.recipe_id == recipe.id)
+            .all()
+        )
+
+        for rm in recipe_materials:
+            material = db.query(Material).get(rm.material_id)
+            if not material:
+                continue
+
+            required = _calc_required_in_stock_units(rm, p, db, recipe_obj=recipe)
+
+            stock = (
+                db.query(MaterialStock)
+                .filter(
+                    MaterialStock.material_id == rm.material_id,
+                    MaterialStock.factory_id == p.factory_id,
+                )
+                .first()
+            )
+            balance = Decimal(str(stock.balance)) if stock else Decimal("0")
+
+            pos_reserved = (
+                db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+                .filter(
+                    MaterialTransaction.related_position_id == position_id,
+                    MaterialTransaction.material_id == rm.material_id,
+                    MaterialTransaction.type == TransactionType.RESERVE,
+                )
+                .scalar()
+            )
+            pos_unreserved = (
+                db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+                .filter(
+                    MaterialTransaction.related_position_id == position_id,
+                    MaterialTransaction.material_id == rm.material_id,
+                    MaterialTransaction.type == TransactionType.UNRESERVE,
+                )
+                .scalar()
+            )
+            net_reserved_pos = Decimal(str(pos_reserved)) - Decimal(str(pos_unreserved))
+
+            total_reserved_all = (
+                db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+                .filter(
+                    MaterialTransaction.material_id == rm.material_id,
+                    MaterialTransaction.factory_id == p.factory_id,
+                    MaterialTransaction.type == TransactionType.RESERVE,
+                )
+                .scalar()
+            )
+            total_unreserved_all = (
+                db.query(func.coalesce(func.sum(MaterialTransaction.quantity), 0))
+                .filter(
+                    MaterialTransaction.material_id == rm.material_id,
+                    MaterialTransaction.factory_id == p.factory_id,
+                    MaterialTransaction.type == TransactionType.UNRESERVE,
+                )
+                .scalar()
+            )
+            effective_available = balance - (Decimal(str(total_reserved_all)) - Decimal(str(total_unreserved_all)))
+
+            if net_reserved_pos >= required and net_reserved_pos > 0:
+                mat_status = "force_reserved" if effective_available < 0 else "reserved"
+            elif net_reserved_pos > 0:
+                mat_status = "partially_reserved"
             else:
-                mat_status = "insufficient"
+                mat_status = "available" if effective_available >= required else "insufficient"
 
-        deficit = max(Decimal("0"), required - max(effective_available, Decimal("0")))
+            deficit = max(Decimal("0"), required - max(effective_available, Decimal("0")))
 
-        materials_info.append({
-            "material_id": str(rm.material_id),
-            "name": material.name,
-            "type": material.material_type or "",
-            "required": float(required),
-            "reserved": float(net_reserved_pos),
-            "available": float(effective_available),
-            "deficit": float(deficit),
-            "status": mat_status,
-        })
+            item = {
+                "material": material.name,
+                "required": float(required),
+                "reserved": float(net_reserved_pos),
+                "available": float(effective_available),
+                "deficit": float(deficit),
+                "unit": "kg",
+                "status": mat_status,
+            }
+            recipe_items.append(item)
+
+    groups.append({
+        "group": "recipe",
+        "label": "Glazur / Glaze",
+        "items": recipe_items,
+    })
+
+    # ── GROUP 3: Packaging ────────────────────────────────────────
+    packaging_items = []
+    try:
+        pkg_needs = calculate_packaging_needs(db, p)
+        for need in pkg_needs.materials:
+            stock = (
+                db.query(MaterialStock)
+                .filter(
+                    MaterialStock.material_id == need.material_id,
+                    MaterialStock.factory_id == p.factory_id,
+                )
+                .first()
+            )
+            available = float(stock.balance) if stock else 0.0
+            needed = float(need.quantity_needed)
+            deficit = max(0.0, needed - available)
+            pkg_status = "available" if deficit <= 0 else "insufficient"
+
+            packaging_items.append({
+                "material": need.material_name,
+                "required": needed,
+                "reserved": 0.0,
+                "available": available,
+                "deficit": round(deficit, 2),
+                "unit": "pcs",
+                "status": pkg_status,
+            })
+    except Exception as e:
+        logger.warning("material-reservations: packaging section failed for %s: %s", position_id, e)
+
+    groups.append({
+        "group": "packaging",
+        "label": "Kemasan / Packaging",
+        "items": packaging_items,
+    })
+
+    # ── Backward-compatible flat materials list (glaze only) ──────
+    # Old frontend expects: materials[].{material_id, name, type, required, reserved, available, deficit, status}
+    flat_materials = []
+    if recipe:
+        recipe_materials_compat = (
+            db.query(RecipeMaterial)
+            .filter(RecipeMaterial.recipe_id == recipe.id)
+            .all()
+        )
+        for rm in recipe_materials_compat:
+            material = db.query(Material).get(rm.material_id)
+            if not material:
+                continue
+            # Find matching item from recipe_items by name
+            matched = next((ri for ri in recipe_items if ri["material"] == material.name), None)
+            if matched:
+                flat_materials.append({
+                    "material_id": str(rm.material_id),
+                    "name": material.name,
+                    "type": material.material_type or "",
+                    "required": matched["required"],
+                    "reserved": matched["reserved"],
+                    "available": matched["available"],
+                    "deficit": matched["deficit"],
+                    "status": matched["status"],
+                })
 
     return {
         "position_id": str(p.id),
         "recipe_name": recipe.name if recipe else None,
-        "materials": materials_info,
-        "has_recipe": True,
+        "materials": flat_materials,
+        "has_recipe": has_recipe,
+        "groups": groups,
     }
 
 

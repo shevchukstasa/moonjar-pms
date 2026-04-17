@@ -4,13 +4,18 @@ import type { MaterialReservationGroup, MaterialReservationGroupItem } from '@/a
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 
-// Smart unit display: for kg values below 0.1, show in grams instead.
+// Display rules:
+// - kg ≥ 0.1 → "X.XXX kg" (3 decimals)
+// - kg < 0.1 → "N g" (integer grams, rounded)
+// - other units (m², pcs) → 2 decimals
 // Avoids misleading "0.00 kg" for small pigments like 1.6 g of Golden brown.
 function formatQty(value: number, unit: string): { value: string; unit: string } {
-  if (unit === 'kg' && Math.abs(value) < 0.1 && value !== 0) {
-    return { value: (value * 1000).toFixed(1), unit: 'g' };
+  if (unit === 'kg') {
+    if (Math.abs(value) < 0.1 && value !== 0) {
+      return { value: String(Math.round(value * 1000)), unit: 'g' };
+    }
+    return { value: value.toFixed(3), unit: 'kg' };
   }
-  if (unit === 'kg') return { value: value.toFixed(3), unit };
   return { value: value.toFixed(2), unit };
 }
 
@@ -120,13 +125,13 @@ function GroupSection({ group, onClose }: { group: MaterialReservationGroup; onC
                   {req.value} <span className="text-xs text-gray-400">{req.unit}</span>
                 </td>
                 <td className="py-2 pr-4 text-right font-mono text-gray-700">
-                  {res.value}
+                  {res.value} <span className="text-xs text-gray-400">{res.unit}</span>
                 </td>
                 <td className={`py-2 pr-4 text-right font-mono ${m.available < 0 ? 'text-red-600 font-semibold' : 'text-gray-700'}`}>
-                  {avl.value}
+                  {avl.value} <span className="text-xs text-gray-400">{avl.unit}</span>
                 </td>
                 <td className={`py-2 pr-4 text-right font-mono ${m.deficit > 0 ? 'text-red-600 font-semibold' : 'text-gray-400'}`}>
-                  {m.deficit > 0 ? dfc.value : '\u2014'}
+                  {m.deficit > 0 ? (<>{dfc.value} <span className="text-xs text-gray-400">{dfc.unit}</span></>) : '\u2014'}
                 </td>
                 <td className="py-2 px-2">
                   <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[m.status] || 'bg-gray-100 text-gray-600'}`}>

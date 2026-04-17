@@ -1110,21 +1110,33 @@ async def batch_check_readiness(
 # Stages we track in Plan vs Fact, in production order.
 # Keys must match stage_plan keys from production_scheduler.py.
 _PVF_STAGES = [
+    ("unpacking_sorting",     "Unpacking"),
     ("engobe",                "Engobe"),
+    ("drying_engobe",         "Drying (engobe)"),
     ("glazing",               "Glazing"),
+    ("drying_glaze",          "Drying (glaze)"),
     ("edge_cleaning_loading", "Edge Cleaning"),
     ("kiln_loading",          "Kiln Loading"),
+    ("sorting",               "Sorting"),
+    ("packing",               "Packing"),
 ]
 
 # Maps operation names (in `operations` table) to stage_plan keys.
 # Operation names are freeform — this mapping covers common patterns.
 _OP_NAME_TO_STAGE: dict[str, str] = {
+    "unpacking":            "unpacking_sorting",
+    "unpack":               "unpacking_sorting",
+    "unpacking sorting":    "unpacking_sorting",
     "engobe":               "engobe",
     "engobe application":   "engobe",
     "apply engobe":         "engobe",
+    "drying engobe":        "drying_engobe",
+    "drying_engobe":        "drying_engobe",
     "glazing":              "glazing",
     "glaze":                "glazing",
     "glaze application":    "glazing",
+    "drying glaze":         "drying_glaze",
+    "drying_glaze":         "drying_glaze",
     "edge cleaning":        "edge_cleaning_loading",
     "edge_cleaning":        "edge_cleaning_loading",
     "edge clean":           "edge_cleaning_loading",
@@ -1132,6 +1144,10 @@ _OP_NAME_TO_STAGE: dict[str, str] = {
     "kiln loading":         "kiln_loading",
     "kiln_loading":         "kiln_loading",
     "loading":              "kiln_loading",
+    "sorting":              "sorting",
+    "sort":                 "sorting",
+    "packing":              "packing",
+    "pack":                 "packing",
 }
 
 

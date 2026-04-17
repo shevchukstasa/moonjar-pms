@@ -28,11 +28,15 @@ from api.enums import (
 
 logger = logging.getLogger("moonjar.planning_scheduler")
 
-# Terminal statuses — positions done or cancelled
+# Terminal statuses — positions done or cancelled, not in daily production plan.
+# PACKED is included: once a position is packed, it's out of production stages
+# even if its historical stage_plan has future dates from when it was in flight.
 _TERMINAL_STATUSES = {
     PositionStatus.SHIPPED.value,
     PositionStatus.CANCELLED.value,
     PositionStatus.MERGED.value,
+    PositionStatus.PACKED.value,
+    PositionStatus.READY_FOR_SHIPMENT.value,
 }
 
 # Status groups for schedule sections

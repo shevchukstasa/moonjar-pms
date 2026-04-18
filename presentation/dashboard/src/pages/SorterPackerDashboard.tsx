@@ -12,13 +12,13 @@ import {
 } from '@/hooks/usePositions';
 import { useSorterTasks, useCompleteTask } from '@/hooks/useTasks';
 import type { TaskItem } from '@/api/tasks';
-import { usePackingPhotos, useUploadPackingPhoto, useDeletePackingPhoto } from '@/hooks/usePackingPhotos';
+import { usePackingPhotos, useUploadPackingPhoto } from '@/hooks/usePackingPhotos';
 
 /* ============================================================
    TYPES & CONSTS
    ============================================================ */
 
-type View = 'home' | 'sort' | 'pack' | 'grind' | 'photos' | 'tasks';
+type View = 'home' | 'sort' | 'pack' | 'grind' | 'tasks';
 
 const COLOR_DOT: Record<string, string> = {};
 function colorHash(color: string): string {
@@ -240,12 +240,6 @@ export default function SorterPackerDashboard() {
           </motion.div>
         )}
 
-        {view === 'photos' && (
-          <motion.div key="photos" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.2 }}>
-            <PhotosView onBack={() => setView('home')} />
-          </motion.div>
-        )}
-
         {view === 'tasks' && (
           <motion.div key="tasks" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.2 }}>
             <TasksView
@@ -389,14 +383,6 @@ function HomeView({
           count={counts.tasks}
           gradient="from-indigo-400 to-violet-500"
           onClick={() => onNavigate('tasks')}
-        />
-        <ActionTile
-          emoji="📷"
-          label="Foto"
-          sub="bukti packing"
-          count={null}
-          gradient="from-sky-400 to-blue-500"
-          onClick={() => onNavigate('photos')}
           wide
         />
       </div>
@@ -1064,52 +1050,155 @@ function PackView({
   onBack: () => void;
   onSuccess: () => void;
 }) {
-  const changeStatus = useChangePositionStatus();
-  const [sending, setSending] = useState<string | null>(null);
-
-  const sendToQC = async (p: PositionItem) => {
-    setSending(p.id);
-    try {
-      await changeStatus.mutateAsync({ id: p.id, status: 'sent_to_quality_check' });
-      toast.success(`📦 ${p.order_number} · ${p.quantity} pcs → QC`, {
-        description: 'Mantap! +poin',
-      });
-      onSuccess();
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Gagal';
-      toast.error(msg);
-    } finally {
-      setSending(null);
-    }
-  };
-
   return (
     <>
-      <BackBar title="Pak → QC" onBack={onBack} subtitle={`${positions.length} siap`} />
-      <div className="mx-auto max-w-xl px-4 py-4">
+      <BackBar title="Pak → QC" onBack={onBack} subtitle={`${positions.length} siap dipak`} />
+      <div className="mx-auto max-w-xl px-4 py-4 space-y-3">
+        <div className="flex items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+          <span className="text-base">📸</span>
+          <div>
+            <div className="font-semibold">Foto dulu, baru kirim ke QC</div>
+            <div className="mt-0.5 text-emerald-700">Pak plitka, ambil foto dusnya, lalu kirim. Tanpa foto tidak bisa kirim.</div>
+          </div>
+        </div>
+
         {isLoading ? (
           <div className="flex justify-center py-16"><Spinner className="h-8 w-8" /></div>
         ) : positions.length === 0 ? (
           <EmptyTile emoji="📦" title="Beres!" sub="Tidak ada yang perlu dikirim." />
         ) : (
-          <div className="grid gap-3">
+          <div className="grid gap-4">
             {positions.map((p) => (
-              <div key={p.id} className="space-y-2">
-                <PositionCard p={p} accent="from-emerald-50/70 to-teal-50/50" />
-                <motion.button
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => sendToQC(p)}
-                  disabled={sending === p.id}
-                  className="w-full rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 px-4 py-4 text-base font-bold text-white shadow-md disabled:opacity-60"
-                >
-                  {sending === p.id ? 'Mengirim…' : '✨ Kirim ke QC →'}
-                </motion.button>
-              </div>
+              <PackCard key={p.id} p={p} onSuccess={onSuccess} />
             ))}
           </div>
         )}
       </div>
     </>
+  );
+}
+
+function PackCard({ p, onSuccess }: { p: PositionItem; onSuccess: () => void }) {
+  const changeStatus = useChangePositionStatus();
+  const { data: photosData } = usePackingPhotos({ position_id: p.id });
+  const photos = photosData?.items || [];
+  const hasPhoto = photos.length > 0;
+
+  const uploadMutation = useUploadPackingPhoto();
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [expanded, setExpanded] = useState(!hasPhoto);
+
+  useEffect(() => {
+    if (!pendingFile) { setPreview(null); return; }
+    const url = URL.createObjectURL(pendingFile);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [pendingFile]);
+
+  const handleUpload = async () => {
+    if (!pendingFile) return;
+    try {
+      await uploadMutation.mutateAsync({
+        file: pendingFile,
+        orderId: p.order_id,
+        positionId: p.id,
+        notes: undefined,
+      });
+      toast.success('📸 Foto tersimpan');
+      setPendingFile(null);
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message || 'Gagal unggah foto';
+      toast.error(msg);
+    }
+  };
+
+  const sendToQC = async () => {
+    setSending(true);
+    try {
+      await changeStatus.mutateAsync({ id: p.id, status: 'sent_to_quality_check' });
+      toast.success(`📦 ${p.order_number} · ${p.quantity} pcs → QC`, { description: 'Mantap! +poin' });
+      onSuccess();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Gagal';
+      toast.error(msg);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="rounded-3xl border border-gray-100 bg-white p-3 shadow-sm">
+      <PositionCard p={p} accent="from-emerald-50/70 to-teal-50/50" />
+
+      {/* Photo section */}
+      <div className="mt-3">
+        {hasPhoto && !expanded ? (
+          <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 p-3">
+            <div className="flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl">
+              <img src={photos[0].photo_url} alt="" className="h-full w-full object-cover" />
+            </div>
+            <div className="flex-1 text-sm">
+              <div className="font-semibold text-emerald-800">✓ Foto tersimpan ({photos.length})</div>
+              <button onClick={() => setExpanded(true)} className="text-xs text-emerald-600 underline">Ganti / tambah foto</button>
+            </div>
+          </div>
+        ) : preview ? (
+          <div>
+            <img src={preview} alt="preview" className="w-full rounded-2xl object-cover" />
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={() => setPendingFile(null)}
+                className="flex-1 rounded-2xl bg-gray-100 py-2.5 text-sm font-semibold text-gray-700"
+              >
+                Buang
+              </button>
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={handleUpload}
+                disabled={uploadMutation.isPending}
+                className="flex-[2] rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 py-2.5 text-sm font-bold text-white shadow-md disabled:opacity-60"
+              >
+                {uploadMutation.isPending ? 'Mengunggah…' : '✨ Unggah foto'}
+              </motion.button>
+            </div>
+          </div>
+        ) : (
+          <label className="flex cursor-pointer items-center gap-3 rounded-2xl border-2 border-dashed border-sky-200 bg-sky-50/40 p-3 hover:border-sky-400">
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) setPendingFile(f);
+              }}
+              className="hidden"
+            />
+            <span className="text-3xl">📷</span>
+            <div className="text-sm">
+              <div className="font-semibold text-gray-900">Ambil foto dus</div>
+              <div className="text-xs text-gray-500">kamera atau galeri · wajib</div>
+            </div>
+          </label>
+        )}
+      </div>
+
+      {/* Send to QC — gated on photo */}
+      <motion.button
+        whileTap={hasPhoto ? { scale: 0.97 } : undefined}
+        onClick={sendToQC}
+        disabled={!hasPhoto || sending}
+        className={`mt-3 w-full rounded-2xl px-4 py-4 text-base font-bold text-white shadow-md ${
+          hasPhoto
+            ? 'bg-gradient-to-br from-emerald-500 to-teal-600'
+            : 'cursor-not-allowed bg-gray-300'
+        }`}
+      >
+        {sending ? 'Mengirim…' : hasPhoto ? '✨ Kirim ke QC →' : '📷 Ambil foto dulu'}
+      </motion.button>
+    </div>
   );
 }
 
@@ -1124,232 +1213,33 @@ function GrindView({
   isLoading: boolean;
   onBack: () => void;
 }) {
-  const changeStatus = useChangePositionStatus();
-  const [busy, setBusy] = useState<string | null>(null);
-
-  const decide = async (p: PositionItem, action: 'grind' | 'mana') => {
-    setBusy(p.id);
-    const newStatus = action === 'grind' ? 'awaiting_reglaze' : 'mana_confirmation';
-    try {
-      await changeStatus.mutateAsync({ id: p.id, status: newStatus, notes: `Grinding decision: ${action}` });
-      toast.success(
-        action === 'grind' ? `⚙️ ${p.order_number} → reglaze` : `💥 ${p.order_number} → Mana`,
-      );
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Gagal';
-      toast.error(msg);
-    } finally {
-      setBusy(null);
-    }
-  };
+  const totalQty = positions.reduce((s, p) => s + (p.quantity || 0), 0);
 
   return (
     <>
-      <BackBar title="Stok gerinda" onBack={onBack} subtitle={`${positions.length} perlu diputuskan`} />
-      <div className="mx-auto max-w-xl px-4 py-4">
+      <BackBar title="Stok gerinda" onBack={onBack} subtitle={`${positions.length} posisi · ${totalQty} pcs`} />
+      <div className="mx-auto max-w-xl px-4 py-4 space-y-3">
+        <div className="flex items-start gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+          <span className="text-base">ℹ️</span>
+          <div>
+            <div className="font-semibold">Ini daftar stok — bukan keputusan</div>
+            <div className="mt-0.5 text-slate-500">Keputusan gerinda vs Mana diambil PM. Kamu lihat aja apa yang ada, untuk tahu kalau ditanya.</div>
+          </div>
+        </div>
+
         {isLoading ? (
           <div className="flex justify-center py-16"><Spinner className="h-8 w-8" /></div>
         ) : positions.length === 0 ? (
-          <EmptyTile emoji="⚙️" title="Tidak ada keputusan" sub="Stok gerinda kosong." />
-        ) : (
-          <div className="grid gap-4">
-            {positions.map((p) => (
-              <div key={p.id} className="rounded-3xl border border-gray-100 bg-white p-3 shadow-sm">
-                <PositionCard p={p} accent="from-slate-50 to-white" />
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <motion.button
-                    whileTap={{ scale: 0.96 }}
-                    onClick={() => decide(p, 'grind')}
-                    disabled={busy === p.id}
-                    className="rounded-2xl bg-gradient-to-br from-slate-500 to-slate-700 px-4 py-4 text-sm font-bold text-white shadow-md disabled:opacity-60"
-                  >
-                    ⚙️ Gerinda
-                  </motion.button>
-                  <motion.button
-                    whileTap={{ scale: 0.96 }}
-                    onClick={() => decide(p, 'mana')}
-                    disabled={busy === p.id}
-                    className="rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 px-4 py-4 text-sm font-bold text-white shadow-md disabled:opacity-60"
-                  >
-                    💥 Mana
-                  </motion.button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
-/* ============================================================
-   PHOTOS VIEW
-   ============================================================ */
-
-function PhotosView({ onBack }: { onBack: () => void }) {
-  const activeFactoryId = useUiStore((s) => s.activeFactoryId);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  const { data: posData } = usePositions(
-    activeFactoryId
-      ? { factory_id: activeFactoryId, status: 'packed,transferred_to_sorting,sent_to_quality_check', per_page: 200 }
-      : { status: 'packed,transferred_to_sorting,sent_to_quality_check', per_page: 200 },
-  );
-  const positions = posData?.items || [];
-  const selected = positions.find((p) => p.id === selectedId) || null;
-
-  if (selected) {
-    return (
-      <>
-        <BackBar
-          title="Foto packing"
-          onBack={() => setSelectedId(null)}
-          subtitle={`${selected.order_number} · ${selected.color}`}
-        />
-        <div className="mx-auto max-w-xl px-4 py-4">
-          <PhotoEditor position={selected} />
-        </div>
-      </>
-    );
-  }
-
-  return (
-    <>
-      <BackBar title="Foto packing" onBack={onBack} subtitle="Tap posisi untuk foto" />
-      <div className="mx-auto max-w-xl px-4 py-4">
-        {positions.length === 0 ? (
-          <EmptyTile emoji="📷" title="Tidak ada posisi" sub="Belum ada yang perlu difoto." />
+          <EmptyTile emoji="⚙️" title="Kosong" sub="Tidak ada stok gerinda." />
         ) : (
           <div className="grid gap-3">
             {positions.map((p) => (
-              <PositionCard
-                key={p.id}
-                p={p}
-                onClick={() => setSelectedId(p.id)}
-                accent="from-sky-50 to-blue-50"
-              />
+              <PositionCard key={p.id} p={p} accent="from-slate-50 to-white" />
             ))}
           </div>
         )}
       </div>
     </>
-  );
-}
-
-function PhotoEditor({ position }: { position: PositionItem }) {
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [notes, setNotes] = useState('');
-  const uploadMutation = useUploadPackingPhoto();
-  const deleteMutation = useDeletePackingPhoto();
-  const { data, isLoading } = usePackingPhotos({ position_id: position.id });
-  const photos = data?.items || [];
-
-  useEffect(() => {
-    if (!pendingFile) { setPreview(null); return; }
-    const url = URL.createObjectURL(pendingFile);
-    setPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [pendingFile]);
-
-  const handleUpload = async () => {
-    if (!pendingFile) return;
-    try {
-      await uploadMutation.mutateAsync({
-        file: pendingFile,
-        orderId: position.order_id,
-        positionId: position.id,
-        notes: notes || undefined,
-      });
-      toast.success('📸 Foto terunggah');
-      setPendingFile(null);
-      setNotes('');
-    } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message || 'Gagal unggah';
-      toast.error(msg);
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      {/* Camera input */}
-      <div className="rounded-3xl bg-white p-4 shadow-sm">
-        {!preview ? (
-          <label className="block cursor-pointer rounded-2xl border-2 border-dashed border-gray-200 bg-gradient-to-br from-sky-50/40 to-blue-50/40 p-8 text-center hover:border-sky-300">
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) setPendingFile(f);
-              }}
-              className="hidden"
-            />
-            <div className="text-5xl">📷</div>
-            <p className="mt-2 text-base font-bold text-gray-900">Ambil foto</p>
-            <p className="text-xs text-gray-500">atau pilih dari galeri</p>
-          </label>
-        ) : (
-          <div>
-            <img src={preview} alt="preview" className="w-full rounded-2xl object-cover" />
-            <textarea
-              placeholder="Catatan (opsional)"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              className="mt-3 w-full rounded-2xl border border-gray-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
-            />
-            <div className="mt-3 flex gap-2">
-              <button
-                onClick={() => setPendingFile(null)}
-                className="flex-1 rounded-2xl bg-gray-100 py-3 text-sm font-semibold text-gray-700"
-              >
-                Buang
-              </button>
-              <motion.button
-                whileTap={{ scale: 0.97 }}
-                onClick={handleUpload}
-                disabled={uploadMutation.isPending}
-                className="flex-[2] rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 py-3 text-sm font-bold text-white shadow-md disabled:opacity-60"
-              >
-                {uploadMutation.isPending ? 'Mengunggah…' : '✨ Unggah'}
-              </motion.button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Gallery */}
-      <div>
-        <p className="mb-2 text-xs font-semibold uppercase text-gray-500">
-          Sudah diunggah · {photos.length}
-        </p>
-        {isLoading ? (
-          <div className="flex justify-center py-8"><Spinner className="h-6 w-6" /></div>
-        ) : photos.length === 0 ? (
-          <p className="text-xs text-gray-400">Belum ada foto.</p>
-        ) : (
-          <div className="grid grid-cols-3 gap-2">
-            {photos.map((ph) => (
-              <div key={ph.id} className="group relative aspect-square overflow-hidden rounded-xl border border-gray-100">
-                <img src={ph.photo_url} alt="" className="h-full w-full object-cover" />
-                <button
-                  onClick={() => {
-                    if (confirm('Hapus foto ini?')) deleteMutation.mutate(ph.id);
-                  }}
-                  className="absolute right-1 top-1 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white opacity-90"
-                  disabled={deleteMutation.isPending}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
 

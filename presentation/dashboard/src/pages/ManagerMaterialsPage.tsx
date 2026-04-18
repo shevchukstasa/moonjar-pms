@@ -840,10 +840,18 @@ export default function ManagerMaterialsPage() {
           )}
 
           <div className="grid grid-cols-2 gap-4">
-            {/* Factory — PM cannot change, others can */}
+            {/* Factory — picks which factory's stock record the balance /
+                min_balance / warehouse_section fields below update.
+                Catalog-level fields (name, supplier, unit) are always shared.
+                PM cannot change; others can. */}
             {!isPM && (
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">Factory</label>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Stock factory
+                  <span className="text-gray-400 font-normal ml-1">
+                    (which factory's balance / min / warehouse)
+                  </span>
+                </label>
                 <Select
                   options={[
                     { value: '', label: 'All factories (auto)' },

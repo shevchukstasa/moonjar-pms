@@ -48,6 +48,7 @@ const AdminMaterialsPage = lazy(() => import('@/pages/AdminMaterialsPage'));
 const AdminWarehousesPage = lazy(() => import('@/pages/AdminWarehousesPage'));
 const AdminPackagingPage = lazy(() => import('@/pages/AdminPackagingPage'));
 const AdminSizesPage = lazy(() => import('@/pages/AdminSizesPage'));
+const AdminDesignsPage = lazy(() => import('@/pages/AdminDesignsPage'));
 const AdminFiringProfilesPage = lazy(() => import('@/pages/AdminFiringProfilesPage'));
 const AdminStagesPage = lazy(() => import('@/pages/AdminStagesPage'));
 const AdminSettingsPage = lazy(() => import('@/pages/AdminSettingsPage'));
@@ -179,6 +180,7 @@ export default function App() {
             <Route path="/admin/warehouses" element={<AdminWarehousesPage />} />
             <Route path="/admin/packaging" element={<AdminPackagingPage />} />
             <Route path="/admin/sizes" element={<AdminSizesPage />} />
+            <Route path="/admin/designs" element={<AdminDesignsPage />} />
             <Route path="/admin/consumption-rules" element={<ConsumptionRulesPage />} />
             <Route path="/admin/firing-profiles" element={<AdminFiringProfilesPage />} />
             <Route path="/admin/stages" element={<AdminStagesPage />} />

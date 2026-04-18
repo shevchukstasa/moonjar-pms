@@ -251,12 +251,28 @@ export default function AdminSizesPage() {
       {
         key: 'width_mm',
         header: 'A (mm)',
-        render: (s: SizeItem) => <span className="font-mono text-sm">{s.width_mm}</span>,
+        render: (s: SizeItem) => {
+          const sh = (s.shape ?? '').toLowerCase();
+          const isRound = sh === 'round' || sh === 'circle' || s.diameter_mm != null;
+          return (
+            <span className="font-mono text-sm">
+              {isRound ? `Ø ${s.diameter_mm ?? s.width_mm}` : s.width_mm}
+            </span>
+          );
+        },
       },
       {
         key: 'height_mm',
         header: 'B (mm)',
-        render: (s: SizeItem) => <span className="font-mono text-sm">{s.height_mm}</span>,
+        render: (s: SizeItem) => {
+          const sh = (s.shape ?? '').toLowerCase();
+          const isRound = sh === 'round' || sh === 'circle' || s.diameter_mm != null;
+          return isRound ? (
+            <span className="text-gray-300">&mdash;</span>
+          ) : (
+            <span className="font-mono text-sm">{s.height_mm}</span>
+          );
+        },
       },
       {
         key: 'thickness_mm',

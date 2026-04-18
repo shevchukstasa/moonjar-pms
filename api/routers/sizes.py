@@ -45,7 +45,26 @@ class SizeUpdateInput(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────
 
-VALID_SHAPES = {"rectangle", "square", "round", "freeform", "triangle", "octagon"}
+VALID_SHAPES = {
+    "rectangle", "square", "round", "freeform", "triangle", "octagon",
+    # Extended shapes exposed by the frontend ShapeDimensionEditor.
+    # Downstream business code (capacity, surface_area) only distinguishes
+    # "round" vs "triangle" vs "octagon" vs everything-else (treated as
+    # rectangle). These are stored as-is so the UI can re-render with the
+    # right dimension fields on edit.
+    "oval", "semicircle", "trapezoid", "trapezoid_truncated",
+    "rhombus", "parallelogram",
+}
+
+# Frontend uses "circle" in its selector labels; canonical DB value is "round".
+_SHAPE_ALIASES = {"circle": "round"}
+
+
+def _canonical_shape(v: str | None) -> str | None:
+    """Normalize a shape name from UI to the canonical DB value."""
+    if not v:
+        return v
+    return _SHAPE_ALIASES.get(v.lower(), v.lower())
 
 
 def _serialize_size(s: Size) -> dict:
@@ -241,7 +260,8 @@ async def create_size(
     db: Session = Depends(get_db),
     current_user=Depends(require_admin_or_pm),
 ):
-    if data.shape and data.shape not in VALID_SHAPES:
+    canonical = _canonical_shape(data.shape)
+    if canonical and canonical not in VALID_SHAPES:
         raise HTTPException(400, f"Invalid shape: {data.shape}. Must be one of: {', '.join(sorted(VALID_SHAPES))}")
 
     # Check uniqueness
@@ -255,7 +275,7 @@ async def create_size(
         height_mm=data.height_mm,
         thickness_mm=data.thickness_mm,
         diameter_mm=data.diameter_mm,
-        shape=data.shape or "rectangle",
+        shape=canonical or "rectangle",
         is_custom=data.is_custom,
     )
     db.add(s)
@@ -280,7 +300,8 @@ async def update_size(
     if not s:
         raise HTTPException(404, "Size not found")
 
-    if data.shape is not None and data.shape not in VALID_SHAPES:
+    canonical_upd = _canonical_shape(data.shape) if data.shape is not None else None
+    if canonical_upd is not None and canonical_upd not in VALID_SHAPES:
         raise HTTPException(400, f"Invalid shape: {data.shape}. Must be one of: {', '.join(sorted(VALID_SHAPES))}")
 
     dimensions_changed = False
@@ -300,7 +321,7 @@ async def update_size(
     if data.diameter_mm is not None:
         s.diameter_mm = data.diameter_mm
     if data.shape is not None:
-        s.shape = data.shape
+        s.shape = canonical_upd
     if data.is_custom is not None:
         s.is_custom = data.is_custom
 

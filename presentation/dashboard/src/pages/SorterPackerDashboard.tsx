@@ -214,7 +214,7 @@ export default function SorterPackerDashboard() {
               positions={sortingQ.data?.items || []}
               isLoading={sortingQ.isLoading}
               onBack={() => setView('home')}
-              onSuccess={(n, rate) => { bump(n); if (rate >= 85) fireConfetti(); }}
+              onSuccess={(n, defectPct) => { bump(n); if (defectTier(defectPct).confetti) fireConfetti(); }}
             />
           </motion.div>
         )}
@@ -494,7 +494,7 @@ function SortView({
     return (
       <>
         <BackBar title={active.order_number} subtitle={`${active.color} · ${active.size}`} onBack={() => setActiveId(null)} />
-        <div className="mx-auto max-w-xl px-4 py-4">
+        <div className="mx-auto max-w-3xl px-4 py-4">
           <SplitWizard
             position={active}
             onDone={(n, rate) => {
@@ -596,6 +596,15 @@ interface Defect {
   color: string;
   desc: string;
 }
+interface DefectTier { emoji: string; label: string; msg: string; color: string; confetti: boolean; }
+function defectTier(pct: number): DefectTier {
+  if (pct <= 3) return { emoji: '🏆', label: 'Juara!', msg: 'Kerja hebat! +poin bonus', color: 'from-emerald-500 to-teal-600', confetti: true };
+  if (pct <= 5) return { emoji: '✨', label: 'Bagus', msg: 'Hasil bagus. +poin', color: 'from-green-500 to-emerald-600', confetti: true };
+  if (pct <= 7) return { emoji: '😐', label: 'So-so', msg: 'Lumayan. Bisa lebih baik', color: 'from-amber-400 to-orange-500', confetti: false };
+  if (pct <= 10) return { emoji: '⚠️', label: 'Hati-hati', msg: 'Cacat tinggi — periksa prosesnya', color: 'from-orange-500 to-rose-500', confetti: false };
+  return { emoji: '💀', label: 'Gawat', msg: 'Cacat sangat tinggi. Lapor PM.', color: 'from-red-600 to-rose-700', confetti: false };
+}
+
 const DEFECTS: Defect[] = [
   { key: 'refire', label: 'Bakar ulang', emoji: '🔥', color: 'from-amber-400 to-orange-500', desc: 'Perlu bakar lagi' },
   { key: 'repair', label: 'Perbaikan', emoji: '🔧', color: 'from-yellow-400 to-amber-500', desc: 'Glaze ulang & bakar' },
@@ -607,7 +616,6 @@ const DEFECTS: Defect[] = [
 function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (goodCount: number, rate: number) => void }) {
   const splitMutation = useSplitPosition();
   const [defects, setDefects] = useState<Partial<Record<DefectKey, number>>>({});
-  const [pad, setPad] = useState<DefectKey | null>(null);
   const [notes, setNotes] = useState('');
   const [showNotes, setShowNotes] = useState(false);
 
@@ -628,12 +636,13 @@ function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (go
     };
     try {
       await splitMutation.mutateAsync({ id: position.id, data: payload });
-      const rate = Math.round((payload.good_quantity / position.quantity) * 100);
-      const emoji = rate >= 95 ? '🏆' : rate >= 85 ? '🎉' : rate >= 70 ? '👍' : '💪';
-      toast.success(`${emoji} ${payload.good_quantity} bagus dari ${position.quantity} (${rate}%)`, {
-        description: rate >= 95 ? 'Kerja hebat! +poin bonus' : 'Tersimpan. +poin',
+      const goodQty = payload.good_quantity;
+      const defectPct = Math.round(((position.quantity - goodQty) / position.quantity) * 100);
+      const t = defectTier(defectPct);
+      toast.success(`${t.emoji} ${goodQty} bagus dari ${position.quantity} · ${defectPct}% cacat`, {
+        description: t.msg,
       });
-      onDone(payload.good_quantity, rate);
+      onDone(goodQty, defectPct);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
         || (err as { message?: string })?.message
@@ -653,7 +662,8 @@ function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (go
 
   const hasDefects = defectSum > 0;
 
-  const rate = Math.round((good / position.quantity) * 100);
+  const defectPct = Math.round((defectSum / Math.max(1, position.quantity)) * 100);
+  const tier = defectTier(defectPct);
 
   return (
     <div className="space-y-4">
@@ -692,38 +702,68 @@ function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (go
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
           {DEFECTS.map((d) => {
             const v = defects[d.key] || 0;
             const active = v > 0;
+            const remainingCap = position.quantity - defectSum + v;
+            const setV = (next: number) => setDefect(d.key, Math.max(0, Math.min(remainingCap, next)));
+            const canInc = v < remainingCap;
             return (
-              <motion.button
+              <div
                 key={d.key}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setPad(d.key)}
-                className={`relative overflow-hidden rounded-2xl p-3 text-left transition-all ${
-                  active
-                    ? `bg-gradient-to-br ${d.color} text-white shadow-md`
-                    : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                className={`relative overflow-hidden rounded-2xl p-3 transition-all ${
+                  active ? `bg-gradient-to-br ${d.color} text-white shadow-md` : 'bg-gray-50 text-gray-700'
                 }`}
               >
-                <div className="flex items-center justify-between">
+                {/* Label */}
+                <div className="flex items-center gap-2">
                   <span className="text-2xl">{d.emoji}</span>
-                  {active && (
-                    <motion.span
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      className="rounded-full bg-white/30 px-2 py-0.5 text-sm font-bold"
-                    >
-                      {v}
-                    </motion.span>
-                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className={`text-sm font-bold leading-tight ${active ? '' : 'text-gray-900'}`}>{d.label}</div>
+                    <div className={`text-[10px] leading-tight ${active ? 'text-white/80' : 'text-gray-400'}`}>{d.desc}</div>
+                  </div>
                 </div>
-                <div className="mt-2">
-                  <div className={`text-sm font-bold ${active ? '' : 'text-gray-900'}`}>{d.label}</div>
-                  <div className={`text-[10px] ${active ? 'text-white/80' : 'text-gray-400'}`}>{d.desc}</div>
+
+                {/* Value */}
+                <div className={`mt-2 text-center text-4xl font-extrabold leading-none ${active ? '' : 'text-gray-300'}`}>
+                  {v}
                 </div>
-              </motion.button>
+
+                {/* Steppers */}
+                <div className="mt-2 grid grid-cols-3 gap-1.5">
+                  <motion.button
+                    whileTap={{ scale: 0.88 }}
+                    onClick={() => setV(v - 1)}
+                    disabled={v <= 0}
+                    className={`rounded-xl py-2.5 text-lg font-bold disabled:opacity-30 ${
+                      active ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100'
+                    }`}
+                  >
+                    −
+                  </motion.button>
+                  <motion.button
+                    whileTap={{ scale: 0.88 }}
+                    onClick={() => setV(v + 1)}
+                    disabled={!canInc}
+                    className={`rounded-xl py-2.5 text-lg font-bold disabled:opacity-30 ${
+                      active ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100'
+                    }`}
+                  >
+                    +
+                  </motion.button>
+                  <motion.button
+                    whileTap={{ scale: 0.88 }}
+                    onClick={() => setV(v + 10)}
+                    disabled={!canInc}
+                    className={`rounded-xl py-2.5 text-xs font-bold disabled:opacity-30 ${
+                      active ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100'
+                    }`}
+                  >
+                    +10
+                  </motion.button>
+                </div>
+              </div>
             );
           })}
         </div>
@@ -746,7 +786,10 @@ function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (go
           <div className="text-right">
             <p className="text-[10px] uppercase tracking-wide text-gray-400">Cacat</p>
             <p className="mt-1 text-5xl font-extrabold leading-none text-amber-600">{defectSum}</p>
-            <p className="mt-1 text-xs text-gray-400">{hasDefects ? `${Math.round((defectSum / position.quantity) * 100)}%` : 'belum ada'}</p>
+            <p className="mt-1 flex items-center justify-end gap-1 text-xs">
+              <span className="text-base">{tier.emoji}</span>
+              <span className="text-gray-500">{defectPct}% · {tier.label}</span>
+            </p>
           </div>
         </div>
 
@@ -789,145 +832,22 @@ function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (go
           whileHover={{ y: -1 }}
           onClick={() => submit(false)}
           disabled={!isValid || splitMutation.isPending}
-          className="relative mt-4 w-full overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 via-green-500 to-teal-600 px-4 py-5 text-white shadow-xl disabled:cursor-not-allowed disabled:opacity-50"
+          className={`relative mt-4 w-full overflow-hidden rounded-2xl bg-gradient-to-br ${tier.color} px-4 py-5 text-white shadow-xl disabled:cursor-not-allowed disabled:opacity-50`}
         >
           <div className="absolute -right-4 -top-4 h-20 w-20 rounded-full bg-white/10" />
           <div className="relative flex items-center justify-center gap-3">
-            <span className="text-2xl">{rate >= 95 ? '🏆' : rate >= 85 ? '✨' : '✓'}</span>
+            <span className="text-2xl">{tier.emoji}</span>
             <div className="text-left">
               <div className="text-lg font-extrabold">
                 {splitMutation.isPending ? 'Menyimpan…' : 'Selesai & Simpan'}
               </div>
-              <div className="text-xs text-white/90">{good} bagus · {defectSum} cacat · {rate}%</div>
+              <div className="text-xs text-white/90">{good} bagus · {defectSum} cacat · {defectPct}% · {tier.label}</div>
             </div>
           </div>
         </motion.button>
       </motion.div>
 
-      {/* Numpad modal */}
-      <AnimatePresence>
-        {pad && (
-          <NumPad
-            defect={DEFECTS.find((d) => d.key === pad)!}
-            max={position.quantity - defectSum + (defects[pad] || 0)}
-            initial={defects[pad] || 0}
-            onClose={() => setPad(null)}
-            onSave={(v) => {
-              setDefect(pad, v);
-              setPad(null);
-            }}
-          />
-        )}
-      </AnimatePresence>
     </div>
-  );
-}
-
-function NumPad({
-  defect, max, initial, onClose, onSave,
-}: {
-  defect: Defect;
-  max: number;
-  initial: number;
-  onClose: () => void;
-  onSave: (v: number) => void;
-}) {
-  const [v, setV] = useState<string>(initial > 0 ? String(initial) : '');
-  const n = parseInt(v || '0', 10);
-  const overflow = n > max;
-
-  const press = (key: string) => {
-    if (key === 'del') {
-      setV((s) => s.slice(0, -1));
-      return;
-    }
-    if (key === 'clear') {
-      setV('');
-      return;
-    }
-    setV((s) => (s.length >= 4 ? s : (s === '0' ? key : s + key)));
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      onClick={onClose}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center"
-    >
-      <motion.div
-        initial={{ y: 40, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 40, opacity: 0 }}
-        transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl"
-      >
-        {/* Header */}
-        <div className={`rounded-2xl bg-gradient-to-br ${defect.color} p-4 text-white`}>
-          <div className="flex items-center gap-3">
-            <span className="text-3xl">{defect.emoji}</span>
-            <div>
-              <div className="text-base font-bold">{defect.label}</div>
-              <div className="text-xs text-white/80">{defect.desc}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Display */}
-        <div className="mt-4 text-center">
-          <div className={`text-6xl font-extrabold ${overflow ? 'text-red-600' : 'text-gray-900'}`}>
-            {v || '0'}
-          </div>
-          <div className="mt-1 text-xs text-gray-400">maks {max} pcs</div>
-        </div>
-
-        {/* Keypad */}
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((k) => (
-            <motion.button
-              key={k}
-              whileTap={{ scale: 0.92 }}
-              onClick={() => press(k)}
-              className="rounded-2xl bg-gray-100 py-4 text-2xl font-bold text-gray-900 hover:bg-gray-200"
-            >
-              {k}
-            </motion.button>
-          ))}
-          <motion.button whileTap={{ scale: 0.92 }} onClick={() => press('clear')}
-            className="rounded-2xl bg-gray-100 py-4 text-sm font-bold text-gray-600 hover:bg-gray-200">
-            C
-          </motion.button>
-          <motion.button whileTap={{ scale: 0.92 }} onClick={() => press('0')}
-            className="rounded-2xl bg-gray-100 py-4 text-2xl font-bold text-gray-900 hover:bg-gray-200">
-            0
-          </motion.button>
-          <motion.button whileTap={{ scale: 0.92 }} onClick={() => press('del')}
-            className="rounded-2xl bg-gray-100 py-4 text-xl font-bold text-gray-600 hover:bg-gray-200">
-            ⌫
-          </motion.button>
-        </div>
-
-        {/* Actions */}
-        <div className="mt-4 flex gap-2">
-          <button
-            onClick={onClose}
-            className="flex-1 rounded-2xl bg-gray-100 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-200"
-          >
-            Batal
-          </button>
-          <motion.button
-            whileTap={{ scale: 0.97 }}
-            onClick={() => onSave(Math.max(0, Math.min(max, n)))}
-            disabled={overflow}
-            className={`flex-[2] rounded-2xl py-3 text-sm font-bold text-white shadow-lg disabled:opacity-50 bg-gradient-to-br ${defect.color}`}
-          >
-            Simpan {n > 0 ? `${Math.min(max, n)} pcs` : ''}
-          </motion.button>
-        </div>
-      </motion.div>
-    </motion.div>
   );
 }
 

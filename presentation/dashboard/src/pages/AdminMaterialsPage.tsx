@@ -27,6 +27,7 @@ import { Tabs } from '@/components/ui/Tabs';
 import { MaterialDeduplication } from '@/components/admin/MaterialDeduplication';
 import { buildStoneShortName } from '@/lib/stoneNaming';
 import { TypologySelector, type StoneTypology } from '@/components/material/TypologySelector';
+import { DesignPicker } from '@/components/material/DesignPicker';
 import { sizesApi } from '@/api/sizes';
 import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
 import { CSV_CONFIGS } from '@/config/csvImportConfigs';
@@ -72,6 +73,7 @@ interface CatalogForm {
   subgroup_id: string;
   material_type: string;
   product_subtype: string;  // typology: tiles|3d|sink|countertop|freeform (§29)
+  design_id: string;        // stone_design FK — discriminator for same-size variants
   unit: string;
   supplier_id: string;
   size_id: string;
@@ -91,6 +93,7 @@ const emptyCatalogForm: CatalogForm = {
   subgroup_id: '',
   material_type: '',
   product_subtype: '',
+  design_id: '',
   unit: 'kg',
   supplier_id: '',
   size_id: '',
@@ -327,6 +330,7 @@ function CatalogTab() {
         subgroup_id: item.subgroup_id ?? '',
         material_type: item.material_type ?? '',
         product_subtype: ((item as unknown as Record<string, unknown>).product_subtype as string) ?? '',
+        design_id: ((item as unknown as Record<string, unknown>).design_id as string) ?? '',
         unit: item.unit,
         supplier_id: item.supplier_id ?? '',
         size_id: ((item as unknown as Record<string, unknown>).size_id as string) ?? '',
@@ -428,6 +432,7 @@ function CatalogTab() {
       full_name: form.full_name.trim() || null,
       material_type: form.material_type,
       product_subtype: form.product_subtype || null,
+      design_id: form.design_id || null,
       subgroup_id: form.subgroup_id || null,
       unit: form.unit,
       supplier_id: form.supplier_id || null,
@@ -725,6 +730,16 @@ function CatalogTab() {
                 <TypologySelector
                   value={(form.product_subtype || null) as StoneTypology | null}
                   onChange={(t) => setForm({ ...form, product_subtype: t })}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Дизайн <span className="text-gray-400">(опционально — различает материалы одного размера)</span>
+                </label>
+                <DesignPicker
+                  value={form.design_id || null}
+                  onChange={(id) => setForm({ ...form, design_id: id ?? '' })}
+                  typology={form.product_subtype}
                 />
               </div>
               <div>

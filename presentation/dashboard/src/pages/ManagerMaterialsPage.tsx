@@ -483,6 +483,11 @@ export default function ManagerMaterialsPage() {
 
     const isEditing = !!editDialog.item;
 
+    // Factory: dialog dropdown picks WHICH factory's stock row to update.
+    // Falls back to page-level filter, then to the material's current stock.
+    const targetFactoryId =
+      form.factory_id || effectiveFactoryId || editDialog.item?.factory_id || undefined;
+
     if (isPM && isEditing) {
       // PM can update: subgroup, warehouse_section, min_balance, supplier, unit
       const payload: Record<string, unknown> = {
@@ -494,7 +499,7 @@ export default function ManagerMaterialsPage() {
         unit: form.unit,
       };
       try {
-        await updateMaterial.mutateAsync({ id: editDialog.item!.id, data: payload, factoryId: effectiveFactoryId || undefined });
+        await updateMaterial.mutateAsync({ id: editDialog.item!.id, data: payload, factoryId: targetFactoryId });
         closeEdit();
       } catch (err: unknown) {
         const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -513,12 +518,14 @@ export default function ManagerMaterialsPage() {
         supplier_id: form.supplier_id || null,
         warehouse_section: form.warehouse_section || 'raw_materials',
       };
-      if (form.factory_id) {
+      // On create, factory_id selects which factory to seed stock for.
+      // Backend CreateMaterialInput accepts factory_id in body; Update does not.
+      if (!isEditing && form.factory_id) {
         payload.factory_id = form.factory_id;
       }
       try {
         if (isEditing) {
-          await updateMaterial.mutateAsync({ id: editDialog.item!.id, data: payload, factoryId: effectiveFactoryId || undefined });
+          await updateMaterial.mutateAsync({ id: editDialog.item!.id, data: payload, factoryId: targetFactoryId });
         } else {
           await createMaterial.mutateAsync(payload);
         }

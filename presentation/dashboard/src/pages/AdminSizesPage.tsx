@@ -40,6 +40,60 @@ const emptyForm: SizeForm = {
   is_custom: false,
 };
 
+/**
+ * For non-rectangular shapes, derive bounding-box width_mm/height_mm from the
+ * shape-specific fields filled in by ShapeDimensionEditor (cm → mm ×10).
+ * Returns null when the required field(s) for this shape aren't present.
+ */
+function deriveBoundingBoxMm(
+  shape: string,
+  dims: Record<string, number>,
+): { width_mm: number; height_mm: number; diameter_mm: number | null } | null {
+  const toMm = (cm: number) => Math.round(cm * 10);
+  switch (shape) {
+    case 'circle': {
+      const d = dims.diameter;
+      if (!d || d <= 0) return null;
+      const mm = toMm(d);
+      return { width_mm: mm, height_mm: mm, diameter_mm: mm };
+    }
+    case 'oval': {
+      const d1 = dims.diameter_1, d2 = dims.diameter_2;
+      if (!d1 || !d2) return null;
+      return { width_mm: toMm(d1), height_mm: toMm(d2), diameter_mm: null };
+    }
+    case 'triangle': {
+      const a = dims.side_a, b = dims.side_b, c = dims.side_c;
+      if (!a || !b || !c) return null;
+      // Use the longest side as bounding box approximation
+      const longest = Math.max(a, b, c);
+      return { width_mm: toMm(longest), height_mm: toMm(longest), diameter_mm: null };
+    }
+    case 'octagon': {
+      const w = dims.width, h = dims.height;
+      if (!w || !h) return null;
+      return { width_mm: toMm(w), height_mm: toMm(h), diameter_mm: null };
+    }
+    case 'trapezoid':
+    case 'trapezoid_truncated': {
+      const a = dims.side_a, b = dims.side_b, h = dims.height;
+      if (!a || !b || !h) return null;
+      return { width_mm: toMm(Math.max(a, b)), height_mm: toMm(h), diameter_mm: null };
+    }
+    case 'freeform': {
+      // Freeform — user typically has no strict dimensions. Fall back to
+      // whatever numeric values we can find, or default to 0×0 (will fail
+      // validation and prompt the user to fill at least one).
+      const values = Object.values(dims).filter((v) => typeof v === 'number' && v > 0);
+      if (values.length === 0) return null;
+      const max = Math.max(...values);
+      return { width_mm: toMm(max), height_mm: toMm(max), diameter_mm: null };
+    }
+    default:
+      return null;
+  }
+}
+
 export default function AdminSizesPage() {
   const navigate = useNavigate();
   const { data, isLoading } = useSizes();
@@ -105,13 +159,33 @@ export default function AdminSizesPage() {
 
   const handleSubmit = useCallback(() => {
     setErrorMsg('');
-    const w = parseInt(form.width_mm);
-    const h = parseInt(form.height_mm);
     const t = form.thickness_mm ? parseInt(form.thickness_mm) : undefined;
+    const isRect = form.shape === 'rectangle' || form.shape === 'square' || !form.shape;
 
     if (!form.name.trim()) { setErrorMsg('Name is required'); return; }
-    if (isNaN(w) || w <= 0) { setErrorMsg('Width (a) must be a positive number'); return; }
-    if (isNaN(h) || h <= 0) { setErrorMsg('Height (b) must be a positive number'); return; }
+
+    // For rectangle/square — W & H come from the generic inputs.
+    // For other shapes — derive bounding-box W & H from shape_dimensions so
+    // the DB's NOT NULL width_mm/height_mm columns are satisfied without
+    // forcing the user to re-enter them (diameter, sides, etc).
+    let w: number;
+    let h: number;
+    let diameter_mm: number | null = null;
+    if (isRect) {
+      w = parseInt(form.width_mm);
+      h = parseInt(form.height_mm);
+      if (isNaN(w) || w <= 0) { setErrorMsg('Width (A) must be a positive number'); return; }
+      if (isNaN(h) || h <= 0) { setErrorMsg('Height (B) must be a positive number'); return; }
+    } else {
+      const bbox = deriveBoundingBoxMm(form.shape, form.shape_dimensions);
+      if (!bbox) {
+        setErrorMsg('Enter dimensions for the selected shape');
+        return;
+      }
+      w = bbox.width_mm;
+      h = bbox.height_mm;
+      diameter_mm = bbox.diameter_mm;
+    }
     if (form.thickness_mm && (isNaN(t!) || t! <= 0)) { setErrorMsg('Thickness must be a positive number'); return; }
 
     const payload = {
@@ -119,6 +193,7 @@ export default function AdminSizesPage() {
       width_mm: w,
       height_mm: h,
       thickness_mm: t ?? null,
+      diameter_mm,
       shape: form.shape,
       shape_dimensions: Object.keys(form.shape_dimensions).length > 0 ? form.shape_dimensions : undefined,
       calculated_area_cm2: form.calculated_area_cm2 > 0 ? form.calculated_area_cm2 : undefined,
@@ -296,23 +371,36 @@ export default function AdminSizesPage() {
             placeholder="e.g. 10x10, 20x40"
             required
           />
-          <div className="grid grid-cols-3 gap-3">
-            <Input
-              label="A — Width (mm)"
-              type="number"
-              value={form.width_mm}
-              onChange={(e) => setForm({ ...form, width_mm: e.target.value })}
-              placeholder="100"
-              required
-            />
-            <Input
-              label="B — Height (mm)"
-              type="number"
-              value={form.height_mm}
-              onChange={(e) => setForm({ ...form, height_mm: e.target.value })}
-              placeholder="100"
-              required
-            />
+          {/* Rectangle/square — generic A/B/T inputs. For other shapes,
+              dimensions come from ShapeDimensionEditor below and W/H are
+              derived automatically (deriveBoundingBoxMm). */}
+          {(form.shape === 'rectangle' || form.shape === 'square' || !form.shape) ? (
+            <div className="grid grid-cols-3 gap-3">
+              <Input
+                label="A — Width (mm)"
+                type="number"
+                value={form.width_mm}
+                onChange={(e) => setForm({ ...form, width_mm: e.target.value })}
+                placeholder="100"
+                required
+              />
+              <Input
+                label="B — Height (mm)"
+                type="number"
+                value={form.height_mm}
+                onChange={(e) => setForm({ ...form, height_mm: e.target.value })}
+                placeholder="100"
+                required
+              />
+              <Input
+                label="Thickness (mm)"
+                type="number"
+                value={form.thickness_mm}
+                onChange={(e) => setForm({ ...form, thickness_mm: e.target.value })}
+                placeholder="—"
+              />
+            </div>
+          ) : (
             <Input
               label="Thickness (mm)"
               type="number"
@@ -320,7 +408,7 @@ export default function AdminSizesPage() {
               onChange={(e) => setForm({ ...form, thickness_mm: e.target.value })}
               placeholder="—"
             />
-          </div>
+          )}
           <ShapeDimensionEditor
             shape={form.shape}
             dimensions={form.shape_dimensions}

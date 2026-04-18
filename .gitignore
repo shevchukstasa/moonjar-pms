@@ -43,3 +43,4 @@ alembic/versions/*.pyc
 # Build
 *.egg
 build/
+scripts/_semarang_stock_backup_*.json

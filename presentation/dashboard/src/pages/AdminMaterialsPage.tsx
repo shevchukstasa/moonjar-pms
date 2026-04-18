@@ -64,20 +64,26 @@ function flatSubgroups(hierarchy: MaterialGroup[] | undefined) {
 
 interface CatalogForm {
   name: string;
+  short_name: string;
+  full_name: string;
   subgroup_id: string;
   material_type: string;
   unit: string;
   supplier_id: string;
   size_id: string;
+  balance_override: string;  // admin/owner override — blank = don't touch
 }
 
 const emptyCatalogForm: CatalogForm = {
   name: '',
+  short_name: '',
+  full_name: '',
   subgroup_id: '',
   material_type: '',
   unit: 'kg',
   supplier_id: '',
   size_id: '',
+  balance_override: '',
 };
 
 /** Build auto-name for stone material from a Size record */
@@ -280,11 +286,14 @@ function CatalogTab() {
     (item: MaterialItem) => {
       setForm({
         name: item.name,
+        short_name: item.short_name ?? '',
+        full_name: item.full_name ?? '',
         subgroup_id: item.subgroup_id ?? '',
         material_type: item.material_type ?? '',
         unit: item.unit,
         supplier_id: item.supplier_id ?? '',
         size_id: ((item as unknown as Record<string, unknown>).size_id as string) ?? '',
+        balance_override: '',  // blank = don't override
       });
       setFormError('');
       setEditDialog({ open: true, item });
@@ -310,12 +319,22 @@ function CatalogTab() {
 
     const payload: Record<string, unknown> = {
       name: form.name.trim(),
+      short_name: form.short_name.trim() || null,
+      full_name: form.full_name.trim() || null,
       material_type: form.material_type,
       subgroup_id: form.subgroup_id || null,
       unit: form.unit,
       supplier_id: form.supplier_id || null,
       size_id: form.size_id || null,
     };
+    // Balance override — owner/admin can set balance directly (skips audit).
+    // Blank field = don't touch; any parseable number applies.
+    if (form.balance_override.trim() !== '') {
+      const v = parseFloat(form.balance_override);
+      if (Number.isFinite(v) && v >= 0) {
+        payload.balance = v;
+      }
+    }
 
     try {
       if (editDialog.item) {
@@ -517,10 +536,22 @@ function CatalogTab() {
       >
         <div className="space-y-4">
           <Input
-            label="Name *"
+            label="Name (long, as on delivery) *"
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
-            placeholder="e.g. Zinc Oxide ZnO"
+            placeholder="e.g. Grey Lava 5×20×1.2"
+          />
+          <Input
+            label="Short name (canonical match key — §29)"
+            value={form.short_name}
+            onChange={(e) => setForm({ ...form, short_name: e.target.value })}
+            placeholder="e.g. Lava Stone 5×20×1.2"
+          />
+          <Input
+            label="Full name (optional)"
+            value={form.full_name}
+            onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+            placeholder="e.g. Zirconium Silicate Micronized"
           />
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -587,6 +618,26 @@ function CatalogTab() {
           {!editDialog.item && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
               Stock will be auto-created for all active factories with balance 0.
+            </div>
+          )}
+          {editDialog.item && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+              <div className="mb-1 text-xs font-medium text-amber-900">
+                Override balance (owner/admin — skips audit)
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  value={form.balance_override}
+                  onChange={(e) => setForm({ ...form, balance_override: e.target.value })}
+                  placeholder={`Current: ${Number(editDialog.item.balance).toFixed(3)} ${editDialog.item.unit}`}
+                  className="flex-1"
+                />
+                <span className="text-xs text-gray-500">{editDialog.item.unit}</span>
+              </div>
+              <p className="mt-1 text-xs text-amber-700">
+                Leave blank to keep current balance. Applies to your primary factory's stock.
+              </p>
             </div>
           )}
           {formError && <p className="text-sm text-red-600">{formError}</p>}

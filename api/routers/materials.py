@@ -234,6 +234,7 @@ class MaterialCreateInput(BaseModel):
 
 class MaterialUpdateInput(BaseModel):
     name: Optional[str] = None
+    short_name: Optional[str] = None
     full_name: Optional[str] = None
     subgroup_id: Optional[UUID] = None
     balance: Optional[float] = None
@@ -243,6 +244,7 @@ class MaterialUpdateInput(BaseModel):
     warehouse_section: Optional[str] = None
     supplier_id: Optional[UUID] = None
     size_id: Optional[UUID] = None
+    product_subtype: Optional[str] = None
 
 
 class TransactionInput(BaseModel):
@@ -1383,7 +1385,8 @@ async def update_material(
         mat.size_id = updates.pop('size_id')
 
     # Catalog-level fields
-    catalog_fields = {'name', 'full_name', 'unit', 'supplier_id'}
+    catalog_fields = {'name', 'short_name', 'full_name', 'unit', 'supplier_id',
+                      'product_subtype', 'size_id'}
     # Stock-level fields
     stock_fields = {'balance', 'min_balance', 'min_balance_auto', 'warehouse_section'}
 

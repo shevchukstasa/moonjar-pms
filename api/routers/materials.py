@@ -175,6 +175,7 @@ def _serialize_material_aggregate(mat: Material, stocks: list[MaterialStock], db
         "avg_monthly_consumption": sum(float(s.avg_monthly_consumption or 0) for s in stocks),
         "unit": mat.unit,
         "material_type": _ev(mat.material_type),
+        "product_subtype": getattr(mat, 'product_subtype', None),
         "subgroup_id": subgroup_id,
         "subgroup_name": subgroup_name,
         "group_name": group_name,

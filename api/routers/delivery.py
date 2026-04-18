@@ -117,8 +117,14 @@ async def process_delivery_photo(
 
     readings = result.get("readings", {})
 
-    # 3. Determine supplier from Vision result or hint
+    # 3. Determine supplier from Vision result or hint.
+    #    When OCR missed the supplier header but classified the category as
+    #    stone, synthesize a sentinel so the matcher takes the stone-specific
+    #    exact-canonical path (prevents fuzzy-matching a brand-new 30x40x1.2
+    #    tile to an existing 5x20x1.2 material just because both are "Grey Lava").
     supplier_name = supplier_hint or readings.get("supplier")
+    if not supplier_name and readings.get("material_category") == "stone":
+        supplier_name = "stone_supplier"  # keyword maps to supplier_type="stone"
 
     # 4. Get all materials from DB
     materials = db.query(Material).all()
@@ -160,6 +166,11 @@ async def process_delivery_photo(
                 "name": i.get("material_name", i.get("name", "")),
                 "quantity": i.get("quantity", 0),
                 "unit": i.get("unit", "pcs"),
+                # keterangan from OCR (edge profile / shape / design hint) —
+                # consumed by the UI to pre-fill design picker for 3D tiles
+                # and to preserve the supplier's description when creating
+                # a new material row.
+                "keterangan": i.get("keterangan") or i.get("notes"),
             }
             for i in items
         ],

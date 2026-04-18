@@ -27,8 +27,12 @@ OPENAI_VISION_MODEL_QUALITY = "gpt-4.1"    # Smart analysis for quality/defect (
 
 # Types that prefer cheap OpenAI model (scale / simple label reading)
 _CHEAP_VISION_TYPES = {"scale", "packing"}
-# Types that need smart model (delivery with handwriting, quality defects)
-_SMART_VISION_TYPES = {"quality", "defect", "delivery"}
+# Types that need smart model (quality defects — OpenAI 4.1 best here)
+_SMART_VISION_TYPES = {"quality", "defect"}
+# Types that require Claude Vision directly — handwriting + structured table
+# extraction where row-order fidelity matters (surat jalan / delivery note).
+# Claude Sonnet 4 outperforms GPT-4.1 on Indonesian handwriting in testing.
+_CLAUDE_FIRST_VISION_TYPES = {"delivery"}
 
 # ── Prompts per analysis type ────────────────────────────────────────────
 
@@ -64,37 +68,56 @@ _PACKING_PROMPT = (
 
 _DELIVERY_PROMPT = (
     "You are analyzing a delivery note (surat jalan / накладная) photo from a stone or ceramic "
-    "supplier in Indonesia. These are often HANDWRITTEN in Bahasa Indonesia.\n\n"
+    "supplier in Indonesia. These are HANDWRITTEN in Bahasa Indonesia.\n\n"
+    "Common suppliers: CV. BESTONE INDONESIA (stone), CV. Sony Oscar, Sumber Rezeki.\n\n"
     "Typical column headers you may see:\n"
     "  • Jenis / Nama Barang = material type (e.g. 'Grey Lava', 'Lavastone', 'Kaolin')\n"
-    "  • Ukuran = size as WxLxThickness in cm (e.g. '8x15x1', '10x10x14.14', '5x20x1.2')\n"
+    "  • Ukuran = size as WxHxThickness in cm (e.g. '8x15x1', '10x10x14.14', '5x20x1-2')\n"
     "  • Pcs or Jumlah = quantity in PIECES (actual count)\n"
     "  • M2 or M² = quantity in SQUARE METERS\n"
-    "  • Keterangan = notes (edge profile, finish type, e.g. 'SC Octogon', 'H+profil', 'Bullnose')\n\n"
+    "  • Keterangan = notes: edge profile ('H+profil', 'Bullnose'), finish\n"
+    "    ('Smooth'), shape ('Octogon', 'Triangle'), design variant ('Pengul ISI',\n"
+    "    'SC Octagon'). This column is CRUCIAL for 3D tiles and sinks.\n\n"
     "CRITICAL RULES:\n"
-    "1. READ EVERY ROW in the table. A typical surat jalan has 5-10 line items. "
-    "If you see 8 rows in the Ukuran column, you MUST return 8 items — do NOT "
-    "skip rows that look similar or have unclear handwriting. If a quantity is "
-    "illegible, return quantity: null and include what you can read.\n"
-    "2. QUANTITY is NEVER a size dimension. If you see '15x15x1' in Ukuran column, "
-    "quantity is in a separate column (Pcs/M2), NOT '15'. Common quantities are "
-    "numbers like 1810, 440, 290, 165, 145, 127, 2 — often 2+ digits.\n"
-    "3. If both Pcs and M2 are filled, prefer Pcs (more precise) but keep M2 in notes.\n"
-    "4. material_name should COMBINE type + size: e.g. 'Grey Lava 8x15' or 'Lavastone 10x10x14.14'.\n"
-    "   This matches how materials are stored in the warehouse catalog.\n"
-    "5. unit is 'pcs' if Pcs column is used, 'm2' if only M2 is filled.\n"
-    "6. Put notes (edge profile, finish) into item.notes field.\n"
-    "7. Same material type can appear multiple times with different sizes — each "
-    "is a separate item (e.g. 'Grey Lava 5x20x1.2' and 'Grey Lava 15x15x1' are two items).\n\n"
+    "1. ROW ORDER — return items in the SAME physical order as they appear on\n"
+    "   the paper (top-to-bottom). Do NOT re-sort. The 1st row on paper = items[0].\n"
+    "   A typical row has ONE size in Ukuran and ONE quantity; keep them paired.\n"
+    "2. READ EVERY ROW. If the table has 8 rows, return 8 items — do NOT skip\n"
+    "   rows that look similar or have unclear handwriting. Return quantity: null\n"
+    "   only when totally illegible; never silently drop a row.\n"
+    "3. SIZE FIDELITY — write digits EXACTLY as on paper. '14.14' is NOT '14.5'.\n"
+    "   '10x10x14.14' is NOT '10x10x1'. '5x20x1-2' is NOT '5x20x1.2' (the dash\n"
+    "   indicates a thickness RANGE 1-2cm — keep the dash). If handwriting is\n"
+    "   unclear on one digit, report what you see; do not guess.\n"
+    "4. QUANTITY is NEVER a size dimension. If you see '15x15x1' in Ukuran,\n"
+    "   quantity is in a separate Pcs/M2 column. Quantities are usually 2-4\n"
+    "   digits (1810, 440, 290, 165, 145, 127) or small counts (1, 2) for samples.\n"
+    "5. KETERANGAN — copy literally into item.keterangan. These words matter:\n"
+    "   • 'Triangle' / 'Triangel' → the piece shape is triangle (not rectangle)\n"
+    "   • 'Octogon' / 'Octagon' → octagon shape\n"
+    "   • 'Bullnose' / 'Pengul' / 'H+profil' → edge profile\n"
+    "   • 'Sample' → this is a sample (usually qty 1-2)\n"
+    "   • Numbers like ISI, 1515, 1STI appearing alone are design variant codes.\n"
+    "6. If both Pcs and M2 are filled, prefer Pcs (more precise) but keep M2 too.\n"
+    "7. material_name should be type + size: 'Grey Lava 5x20x1-2'. Keep the\n"
+    "   separator exactly as on paper (x, ×, or - for ranges).\n"
+    "8. unit is 'pcs' if Pcs column is used, 'm2' if only M2 is filled.\n"
+    "9. Supplier appears in a header block (logo + address). Copy verbatim, e.g.\n"
+    "   'CV. BESTONE INDONESIA'. Reference number is next to 'SURAT JALAN No.'.\n\n"
     "Return ONLY valid JSON (no markdown, no code fences):\n"
-    '{"supplier": "<name or null>", "delivery_date": "<YYYY-MM-DD or null>", '
-    '"reference_number": "<doc number or null>", '
-    '"material_category": "stone" | "ceramic_raw" | "packaging" | "other", '
-    '"items": [{"material_name": "<type + size combined>", '
-    '"material_type": "<e.g. Grey Lava, Lavastone>", "size": "<e.g. 8x15x1>", '
-    '"quantity": <number or null>, "unit": "pcs" | "m2" | "kg", '
-    '"notes": "<edge profile, finish, etc.>"}], '
-    '"notes": "<any additional text>"}'
+    '{"supplier": "<supplier name from header, verbatim, or null>",\n'
+    ' "delivery_date": "<YYYY-MM-DD or null>",\n'
+    ' "reference_number": "<e.g. 245/BST/IV/26, or null>",\n'
+    ' "material_category": "stone" | "ceramic_raw" | "packaging" | "other",\n'
+    ' "items": [\n'
+    '   {"material_name": "<type + size, verbatim>",\n'
+    '    "material_type": "<e.g. Grey Lava>",\n'
+    '    "size": "<e.g. 5x20x1-2 or 10x10x14.14>",\n'
+    '    "quantity": <number or null>,\n'
+    '    "unit": "pcs" | "m2" | "kg",\n'
+    '    "keterangan": "<contents of Keterangan column for this row, verbatim>"}\n'
+    ' ],\n'
+    ' "notes": "<any additional text outside the table>"}'
 )
 
 PROMPTS = {
@@ -257,22 +280,31 @@ async def analyze_photo(
 
     system_prompt = _build_system_prompt(analysis_type, context)
 
-    # Smart model selection: cheap nano for OCR, gpt-4.1 for quality analysis
+    # Smart model selection:
+    #   - delivery → Claude Sonnet 4 FIRST (best on handwritten surat jalan)
+    #   - scale/packing → GPT-4.1-nano (cheap OCR, printed labels)
+    #   - quality/defect → GPT-4.1 (smart defect analysis)
+    # Each path falls back to the other provider if its primary fails.
     raw_text = None
     provider = None
 
-    if analysis_type in _CHEAP_VISION_TYPES and openai_key:
-        # gpt-4.1-nano for OCR tasks (delivery/scale/packing) — $0.10/1M tokens
+    if analysis_type in _CLAUDE_FIRST_VISION_TYPES and anthropic_key:
+        # Claude Sonnet 4 for handwritten delivery notes — prompt caching cuts cost
+        raw_text = await _call_claude_vision(system_prompt, b64_image, media_type, anthropic_key)
+        provider = "anthropic-sonnet-4"
+
+    if not raw_text and analysis_type in _CHEAP_VISION_TYPES and openai_key:
+        # gpt-4.1-nano for OCR tasks (scale/packing) — $0.10/1M tokens
         raw_text = await _call_openai_vision(system_prompt, b64_image, media_type, openai_key, model=OPENAI_VISION_MODEL_OCR)
         provider = "openai-nano"
 
     if not raw_text and analysis_type in _SMART_VISION_TYPES and openai_key:
-        # gpt-4.1 for quality/defect analysis — $2.00/1M tokens (was Claude $3.00)
+        # gpt-4.1 for quality/defect analysis — $2.00/1M tokens
         raw_text = await _call_openai_vision(system_prompt, b64_image, media_type, openai_key, model=OPENAI_VISION_MODEL_QUALITY)
         provider = "openai-4.1"
 
     if not raw_text and anthropic_key:
-        # Fallback to Claude if OpenAI fails
+        # Generic Claude fallback if primary path failed
         raw_text = await _call_claude_vision(system_prompt, b64_image, media_type, anthropic_key)
         provider = "anthropic"
 

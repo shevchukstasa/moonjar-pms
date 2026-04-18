@@ -555,19 +555,26 @@ async def find_best_match(
         score_base = calculate_match_score(base_tokens, db_tokens)
         score = max(score_full, score_base)
 
-        # ── Bonus: size match (same base size, ignore thickness) ──
-        delivery_sizes = re.findall(r'\d+(?:\.\d+)?x\d+(?:\.\d+)?', normalize_size(delivery_name))
-        db_sizes = re.findall(r'\d+(?:\.\d+)?x\d+(?:\.\d+)?', normalize_size(mat["name"]))
-        if delivery_sizes and db_sizes:
-            # Extract just WxH (first 2 numbers), ignore thickness
-            d_base = delivery_sizes[0]
-            db_base = db_sizes[0]
+        # ── Size match logic ────────────────────────────────────
+        # If BOTH names encode a size (e.g. "Grey Lava 5x20" vs "Grey Lava 10x10"),
+        # a mismatch is a strong negative signal — different sizes are different
+        # materials in the warehouse, even when the base type is identical.
+        # Stone-supplier deliveries take the smart_match_stone_item path above
+        # (exact canonical match); this block is for the fuzzy fallback where
+        # getting sizes wrong causes visible "Grey Lava 30x40x1.2 → Grey Lava 5x20x1.2"
+        # false-positives in the bot.
+        delivery_sizes_raw = re.findall(r'\d+(?:\.\d+)?x\d+(?:\.\d+)?', normalize_size(delivery_name))
+        mat_sizes_raw = re.findall(r'\d+(?:\.\d+)?x\d+(?:\.\d+)?', normalize_size(mat["name"]))
+        if delivery_sizes_raw and mat_sizes_raw:
+            d_base = delivery_sizes_raw[0]
+            db_base = mat_sizes_raw[0]
             if d_base == db_base:
                 score += 0.2  # exact size match
             else:
-                # Same material, different size is FINE — don't penalize
-                # "Lava Stone 5x20" and "Lava Stone 10x10" are same material type
-                pass
+                # Hard cap: when both sides have a size and they differ, ensure
+                # score can't clear the threshold on tokens alone. 0.35 keeps the
+                # entry visible as a candidate suggestion without auto-matching.
+                score = min(score, 0.35)
 
         # ── Bonus: same unit ───────────────────────────────────
         mat_unit = (mat.get("unit") or "").lower()
@@ -759,6 +766,11 @@ async def match_delivery_items(
             supplier_name=supplier_name,
             db_sizes=db_sizes,
         )
+        # Carry keterangan (edge profile / shape / design hint) forward so the
+        # bot can show it and pre-fill design picker on 3D tiles.
+        keterangan = item.get("keterangan")
+        if keterangan:
+            result["keterangan"] = keterangan
         results.append(result)
 
     matched_count = sum(1 for r in results if r["matched"])

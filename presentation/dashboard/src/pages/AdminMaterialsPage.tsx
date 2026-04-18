@@ -975,6 +975,14 @@ function StockByFactoryTab() {
       min_balance: parseFloat(stockForm.min_balance) || 0,
       warehouse_section: stockForm.warehouse_section || 'raw_materials',
     };
+    // Balance — only included when user actually changed it (so unchanged
+    // stock rows don't carry a redundant write that could interact with
+    // audit logs). Compare numerically against the original.
+    const newBal = parseFloat(stockForm.balance);
+    const oldBal = Number(stockDialog.item.balance);
+    if (Number.isFinite(newBal) && newBal >= 0 && Math.abs(newBal - oldBal) > 1e-6) {
+      payload.balance = newBal;
+    }
     try {
       await updateMaterial.mutateAsync({
         id: stockDialog.item.id,
@@ -1203,6 +1211,23 @@ function StockByFactoryTab() {
               <span className="font-semibold">
                 {Number(stockDialog.item.balance).toFixed(3)} {stockDialog.item.unit}
               </span>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+              <div className="mb-1 text-xs font-medium text-amber-900">
+                Balance (owner/admin — direct override, skips audit)
+              </div>
+              <div className="flex items-center gap-2">
+                <NumericInput
+                  value={stockForm.balance}
+                  onChange={(e) => setStockForm({ ...stockForm, balance: e.target.value })}
+                  placeholder={`Current: ${Number(stockDialog.item.balance).toFixed(3)}`}
+                  className="flex-1"
+                />
+                <span className="text-xs text-gray-500">{stockDialog.item.unit}</span>
+              </div>
+              <p className="mt-1 text-xs text-amber-700">
+                Change number and press Update to overwrite stock directly. Leave as-is to keep.
+              </p>
             </div>
             <NumericInput
               label="Min Balance"

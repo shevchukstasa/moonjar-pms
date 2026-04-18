@@ -269,6 +269,10 @@ const navByRole: Record<string, NavSection[]> = {
     {
       section: 'Purchasing', icon: '🛒', defaultOpen: true, items: [
         { to: '/purchaser', label: 'Purchasing', icon: '🛒' },
+        // Stone materials catalog + delivery-scan — purchaser owns incoming
+        // stock per §29 (auto-fill short_name, create materials from scan).
+        { to: '/manager/materials', label: 'Materials', icon: '📦' },
+        { to: '/admin/materials', label: 'Catalog (admin)', icon: '🧾' },
       ],
     },
     {

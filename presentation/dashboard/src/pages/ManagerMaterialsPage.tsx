@@ -20,6 +20,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { TypologySelector } from '@/components/material/TypologySelector';
 import { SizeInput } from '@/components/material/SizeInput';
 import { NamePreview } from '@/components/material/NamePreview';
+import { buildStoneShortName } from '@/lib/stoneNaming';
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -1340,11 +1341,23 @@ export default function ManagerMaterialsPage() {
                                 <input
                                   type="text"
                                   value={it.ocr_name}
-                                  onChange={(e) =>
+                                  onChange={(e) => {
+                                    const newName = e.target.value;
+                                    const newShort = buildStoneShortName(newName);
                                     setOcrItems((prev) =>
-                                      prev.map((x, i) => (i === idx ? { ...x, ocr_name: e.target.value } : x)),
-                                    )
-                                  }
+                                      prev.map((x, i) =>
+                                        i === idx
+                                          ? {
+                                              ...x,
+                                              ocr_name: newName,
+                                              // Keep canonical short_name in sync so
+                                              // /create-material-from-scan stores the right key.
+                                              suggested_short_name: newShort,
+                                            }
+                                          : x,
+                                      ),
+                                    );
+                                  }}
                                   className="mt-1 w-full rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-stone-700 dark:bg-stone-900"
                                 />
                               </div>

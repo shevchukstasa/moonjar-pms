@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
 import { MaterialDeduplication } from '@/components/admin/MaterialDeduplication';
+import { buildStoneShortName } from '@/lib/stoneNaming';
 import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
 import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 import { useQueryClient } from '@tanstack/react-query';
@@ -255,7 +256,26 @@ function CatalogTab() {
   });
   const [form, setForm] = useState<CatalogForm>(emptyCatalogForm);
   const [formError, setFormError] = useState('');
+  // Tracks whether the user manually edited short_name so auto-fill from
+  // the Name field doesn't overwrite their deliberate change.
+  const [shortNameTouched, setShortNameTouched] = useState(false);
   const isStoneType = STONE_TYPES.includes(form.material_type);
+
+  const handleNameChange = useCallback(
+    (newName: string) => {
+      setForm((prev) => {
+        const next = { ...prev, name: newName };
+        // Auto-fill short_name from name for stone materials, unless the user
+        // has already edited short_name manually. Follows §29 canonical rule.
+        const isStone = STONE_TYPES.includes(prev.material_type);
+        if (isStone && !shortNameTouched) {
+          next.short_name = buildStoneShortName(newName);
+        }
+        return next;
+      });
+    },
+    [shortNameTouched],
+  );
 
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; item: MaterialItem | null }>({
     open: false,
@@ -277,6 +297,7 @@ function CatalogTab() {
         subgroup_id: sg?.subgroupId ?? '',
       });
       setFormError('');
+      setShortNameTouched(false);  // fresh form — allow auto-fill
       setEditDialog({ open: true, item: null });
     },
     [subgroups],
@@ -296,6 +317,9 @@ function CatalogTab() {
         balance_override: '',  // blank = don't override
       });
       setFormError('');
+      // Existing row already has a short_name — treat as manually set so
+      // editing Name doesn't clobber it unless the user asks to regenerate.
+      setShortNameTouched(Boolean(item.short_name));
       setEditDialog({ open: true, item });
     },
     [],
@@ -538,15 +562,42 @@ function CatalogTab() {
           <Input
             label="Name (long, as on delivery) *"
             value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            onChange={(e) => handleNameChange(e.target.value)}
             placeholder="e.g. Grey Lava 5×20×1.2"
           />
-          <Input
-            label="Short name (canonical match key — §29)"
-            value={form.short_name}
-            onChange={(e) => setForm({ ...form, short_name: e.target.value })}
-            placeholder="e.g. Lava Stone 5×20×1.2"
-          />
+          <div>
+            <div className="mb-1 flex items-baseline justify-between">
+              <label className="block text-sm font-medium text-gray-700">
+                Short name (canonical match key — §29)
+              </label>
+              {isStoneType && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForm((prev) => ({ ...prev, short_name: buildStoneShortName(prev.name) }));
+                    setShortNameTouched(false);
+                  }}
+                  className="text-xs text-primary-600 hover:underline"
+                  title="Regenerate from Name using §29 rules"
+                >
+                  ↻ regenerate
+                </button>
+              )}
+            </div>
+            <Input
+              value={form.short_name}
+              onChange={(e) => {
+                setForm({ ...form, short_name: e.target.value });
+                setShortNameTouched(true);
+              }}
+              placeholder="e.g. Lava Stone 5×20×1.2"
+            />
+            {isStoneType && !shortNameTouched && (
+              <p className="mt-0.5 text-xs text-gray-400">
+                Auto-filled from Name. Edit this field to override.
+              </p>
+            )}
+          </div>
           <Input
             label="Full name (optional)"
             value={form.full_name}

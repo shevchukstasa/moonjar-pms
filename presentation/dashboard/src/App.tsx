@@ -165,7 +165,7 @@ export default function App() {
             <Route path="/admin/application-types" element={<AdminAppTypesPage />} />
             <Route path="/admin/places-of-application" element={<AdminPoaPage />} />
             <Route path="/admin/finishing-types" element={<AdminFinishingPage />} />
-            <Route path="/admin/materials" element={<AdminMaterialsPage />} />
+            {/* moved below — purchaser needs access */}
             <Route path="/admin/size-resolution/:taskId" element={<SizeResolutionPage />} />
             <Route path="/admin/dashboard-access" element={<DashboardAccessPage />} />
             <Route path="/admin/settings" element={<AdminSettingsPage />} />
@@ -189,13 +189,20 @@ export default function App() {
           <Route element={<RequireRole roles={['owner', 'administrator', 'ceo']} />}>
             <Route path="/users" element={<UsersPage />} />
           </Route>
+          {/* Materials pages — shared by owner, admin, PM, and purchaser.
+              Purchaser owns incoming stock per §29 and needs the catalog +
+              scan dialog to create/match stone materials on delivery. */}
+          <Route element={<RequireRole roles={['owner', 'administrator', 'production_manager', 'purchaser']} />}>
+            <Route path="/admin/materials" element={<AdminMaterialsPage />} />
+            <Route path="/manager/materials" element={<ManagerMaterialsPage />} />
+          </Route>
           <Route element={<RequireRole roles={['production_manager', 'owner', 'administrator']} />}>
             <Route path="/manager" element={<ManagerDashboard />} />
             <Route path="/manager/orders/:orderId" element={<OrderDetailPage />} />
             <Route path="/manager/orders/:orderId/shipment" element={<ShipmentPage />} />
             <Route path="/manager/schedule" element={<ManagerSchedulePage />} />
             <Route path="/manager/kilns" element={<ManagerKilnsPage />} />
-            <Route path="/manager/materials" element={<ManagerMaterialsPage />} />
+            {/* moved below — purchaser needs access */}
             <Route path="/manager/kiln-inspections" element={<KilnInspectionsPage />} />
             <Route path="/manager/kiln-maintenance" element={<KilnMaintenancePage />} />
             <Route path="/manager/grinding" element={<GrindingDecisionsPage />} />

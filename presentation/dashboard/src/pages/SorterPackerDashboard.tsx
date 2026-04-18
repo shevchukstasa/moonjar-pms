@@ -494,7 +494,7 @@ function SortView({
     return (
       <>
         <BackBar title={active.order_number} subtitle={`${active.color} · ${active.size}`} onBack={() => setActiveId(null)} />
-        <div className="mx-auto max-w-3xl px-4 py-4">
+        <div className="mx-auto max-w-6xl px-4 py-4">
           <SplitWizard
             position={active}
             onDone={(n, rate) => {
@@ -702,70 +702,16 @@ function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (go
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
-          {DEFECTS.map((d) => {
-            const v = defects[d.key] || 0;
-            const active = v > 0;
-            const remainingCap = position.quantity - defectSum + v;
-            const setV = (next: number) => setDefect(d.key, Math.max(0, Math.min(remainingCap, next)));
-            const canInc = v < remainingCap;
-            return (
-              <div
-                key={d.key}
-                className={`relative overflow-hidden rounded-2xl p-3 transition-all ${
-                  active ? `bg-gradient-to-br ${d.color} text-white shadow-md` : 'bg-gray-50 text-gray-700'
-                }`}
-              >
-                {/* Label */}
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">{d.emoji}</span>
-                  <div className="min-w-0 flex-1">
-                    <div className={`text-sm font-bold leading-tight ${active ? '' : 'text-gray-900'}`}>{d.label}</div>
-                    <div className={`text-[10px] leading-tight ${active ? 'text-white/80' : 'text-gray-400'}`}>{d.desc}</div>
-                  </div>
-                </div>
-
-                {/* Value */}
-                <div className={`mt-2 text-center text-4xl font-extrabold leading-none ${active ? '' : 'text-gray-300'}`}>
-                  {v}
-                </div>
-
-                {/* Steppers */}
-                <div className="mt-2 grid grid-cols-3 gap-1.5">
-                  <motion.button
-                    whileTap={{ scale: 0.88 }}
-                    onClick={() => setV(v - 1)}
-                    disabled={v <= 0}
-                    className={`rounded-xl py-2.5 text-lg font-bold disabled:opacity-30 ${
-                      active ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100'
-                    }`}
-                  >
-                    −
-                  </motion.button>
-                  <motion.button
-                    whileTap={{ scale: 0.88 }}
-                    onClick={() => setV(v + 1)}
-                    disabled={!canInc}
-                    className={`rounded-xl py-2.5 text-lg font-bold disabled:opacity-30 ${
-                      active ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100'
-                    }`}
-                  >
-                    +
-                  </motion.button>
-                  <motion.button
-                    whileTap={{ scale: 0.88 }}
-                    onClick={() => setV(v + 10)}
-                    disabled={!canInc}
-                    className={`rounded-xl py-2.5 text-xs font-bold disabled:opacity-30 ${
-                      active ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100'
-                    }`}
-                  >
-                    +10
-                  </motion.button>
-                </div>
-              </div>
-            );
-          })}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {DEFECTS.map((d) => (
+            <DefectCell
+              key={d.key}
+              defect={d}
+              value={defects[d.key] || 0}
+              max={position.quantity - defectSum + (defects[d.key] || 0)}
+              onChange={(v) => setDefect(d.key, v)}
+            />
+          ))}
         </div>
       </div>
 
@@ -847,6 +793,102 @@ function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (go
         </motion.button>
       </motion.div>
 
+    </div>
+  );
+}
+
+/* ---- Defect cell with inline editable input + steppers ---- */
+
+function DefectCell({
+  defect, value, max, onChange,
+}: {
+  defect: Defect;
+  value: number;
+  max: number;
+  onChange: (v: number) => void;
+}) {
+  const active = value > 0;
+  const canInc = value < max;
+  const [focused, setFocused] = useState(false);
+  const [raw, setRaw] = useState(String(value));
+
+  useEffect(() => { if (!focused) setRaw(String(value)); }, [value, focused]);
+
+  const commit = (s: string) => {
+    const parsed = parseInt(s.replace(/[^0-9]/g, '') || '0', 10);
+    onChange(Math.max(0, Math.min(max, parsed)));
+  };
+  const setV = (next: number) => onChange(Math.max(0, Math.min(max, next)));
+
+  return (
+    <div
+      className={`relative flex flex-col overflow-hidden rounded-2xl p-3 transition-all ${
+        active ? `bg-gradient-to-br ${defect.color} text-white shadow-md` : 'bg-gray-50 text-gray-700'
+      }`}
+    >
+      {/* Header — fixed height so numbers line up across cards */}
+      <div className="flex h-14 items-start gap-2">
+        <span className="text-3xl leading-none">{defect.emoji}</span>
+        <div className="min-w-0 flex-1">
+          <div className={`text-sm font-bold leading-tight ${active ? '' : 'text-gray-900'}`}>{defect.label}</div>
+          <div className={`text-[10px] leading-tight ${active ? 'text-white/80' : 'text-gray-400'}`}>{defect.desc}</div>
+        </div>
+      </div>
+
+      {/* Editable value input */}
+      <input
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        value={focused ? raw : String(value)}
+        onFocus={(e) => { setFocused(true); setRaw(String(value)); e.currentTarget.select(); }}
+        onBlur={() => { setFocused(false); commit(raw); }}
+        onChange={(e) => {
+          const cleaned = e.target.value.replace(/[^0-9]/g, '').slice(0, 4);
+          setRaw(cleaned);
+          const n = parseInt(cleaned || '0', 10);
+          if (n <= max) onChange(n);
+        }}
+        onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }}
+        className={`mt-3 w-full bg-transparent text-center text-5xl font-extrabold leading-none tracking-tight outline-none ${
+          active ? 'text-white placeholder-white/40' : 'text-gray-300 focus:text-gray-900'
+        }`}
+        aria-label={`${defect.label} count`}
+      />
+
+      {/* Steppers */}
+      <div className="mt-3 grid grid-cols-3 gap-1.5">
+        <motion.button
+          whileTap={{ scale: 0.88 }}
+          onClick={() => setV(value - 1)}
+          disabled={value <= 0}
+          className={`rounded-xl py-3 text-xl font-bold disabled:opacity-30 ${
+            active ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100'
+          }`}
+        >
+          −
+        </motion.button>
+        <motion.button
+          whileTap={{ scale: 0.88 }}
+          onClick={() => setV(value + 1)}
+          disabled={!canInc}
+          className={`rounded-xl py-3 text-xl font-bold disabled:opacity-30 ${
+            active ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100'
+          }`}
+        >
+          +
+        </motion.button>
+        <motion.button
+          whileTap={{ scale: 0.88 }}
+          onClick={() => setV(value + 10)}
+          disabled={!canInc}
+          className={`rounded-xl py-3 text-sm font-bold disabled:opacity-30 ${
+            active ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100'
+          }`}
+        >
+          +10
+        </motion.button>
+      </div>
     </div>
   );
 }

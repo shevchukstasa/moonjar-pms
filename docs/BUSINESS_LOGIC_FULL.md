@@ -390,6 +390,21 @@ Handles post-firing sorting: splits positions into sub-positions based on outcom
 | TO_MANA | -> ManaShipment |
 | TO_STOCK | -> finished_goods_stock |
 
+### Split Quantity Validation (partial sort & surplus tolerance)
+
+The split endpoint (`POST /positions/{id}/split`) accepts `total = good + refire + repair + color_mismatch + grinding + write_off` and compares to `position.quantity` (tiles physically loaded into kiln):
+
+| Case | Rule | Behavior |
+|------|------|----------|
+| `total == qty` | Normal | Parent → PACKED with good qty; defect sub-positions created per category. |
+| `total < qty` | **Partial sort** | Create a residual sub-position with `status=TRANSFERRED_TO_SORTING, quantity=qty-total`. Sorter can finish the remainder later (next day). Frontend shows a confirmation dialog explaining the carry-over. |
+| `total > qty`, overflow `≤ 10%` | **Surplus production** | Kiln overages are valid (≤10% of loaded qty). Accept the split as-is; log at INFO level. Surplus vs *ordered* qty still gets routed downstream by `handle_surplus()` (showroom / coaster box / mana). |
+| `total > qty`, overflow `> 10%` | **Reject** | Return 400: physically impossible or miscounted. Sorter must recount. |
+
+**Why 10% ceiling:** production margin buffer is typically 3% of ordered qty, capped at +30 tiles (see manager task generation). Sorter-observed overages above 10% signal either a counting error or a process problem that needs investigation — system refuses to silently absorb them.
+
+**UI alignment (sorter dashboard):** the same rules are mirrored in `SorterPackerDashboard.tsx` as four distinct submit modes (`ok` / `partial` / `surplus` / `block_overflow`) with matching status banner colors (emerald / amber / orange / red) and a confirmation dialog for non-OK modes. Manual input is never silently capped — if the user types a number that makes the total invalid, the UI shows the error and blocks submit until they fix it.
+
 ---
 
 ## 10. Surplus Handling

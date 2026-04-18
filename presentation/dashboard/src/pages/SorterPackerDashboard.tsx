@@ -613,43 +613,32 @@ const DEFECTS: Defect[] = [
   { key: 'write_off', label: 'Rusak', emoji: '💥', color: 'from-red-500 to-rose-600', desc: 'Buang / write off' },
 ];
 
-function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (goodCount: number, rate: number) => void }) {
+const GOOD_CAT: Defect = { key: 'good' as DefectKey, label: 'Bagus', emoji: '✓', color: 'from-emerald-400 to-teal-500', desc: 'Plitka bagus' };
+
+type SubmitMode = 'ok' | 'partial' | 'surplus' | 'block_overflow';
+
+function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (goodCount: number, defectPct: number) => void }) {
   const splitMutation = useSplitPosition();
+  const [good, setGood] = useState<number>(0);
   const [defects, setDefects] = useState<Partial<Record<DefectKey, number>>>({});
   const [notes, setNotes] = useState('');
   const [showNotes, setShowNotes] = useState(false);
+  const [confirm, setConfirm] = useState<null | SubmitMode>(null);
 
   const defectSum = Object.values(defects).reduce((a, b) => a + (b || 0), 0);
-  const good = position.quantity - defectSum;
-  const overflow = defectSum > position.quantity;
-  const isValid = !overflow && good >= 0;
+  const total = good + defectSum;
+  const qty = position.quantity;
+  const diff = total - qty;
+  const overflowPct = qty > 0 ? (diff / qty) * 100 : 0;
 
-  const submit = async (allGood = false) => {
-    const payload = {
-      good_quantity: allGood ? position.quantity : good,
-      refire_quantity: allGood ? 0 : defects.refire || 0,
-      repair_quantity: allGood ? 0 : defects.repair || 0,
-      color_mismatch_quantity: allGood ? 0 : defects.color_mismatch || 0,
-      grinding_quantity: allGood ? 0 : defects.grinding || 0,
-      write_off_quantity: allGood ? 0 : defects.write_off || 0,
-      notes: notes || undefined,
-    };
-    try {
-      await splitMutation.mutateAsync({ id: position.id, data: payload });
-      const goodQty = payload.good_quantity;
-      const defectPct = Math.round(((position.quantity - goodQty) / position.quantity) * 100);
-      const t = defectTier(defectPct);
-      toast.success(`${t.emoji} ${goodQty} bagus dari ${position.quantity} · ${defectPct}% cacat`, {
-        description: t.msg,
-      });
-      onDone(goodQty, defectPct);
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        || (err as { message?: string })?.message
-        || 'Gagal simpan';
-      toast.error(msg);
-    }
-  };
+  let mode: SubmitMode;
+  if (total === qty) mode = 'ok';
+  else if (total < qty) mode = 'partial';
+  else if (overflowPct <= 10) mode = 'surplus';
+  else mode = 'block_overflow';
+
+  const defectPct = qty > 0 ? Math.round((defectSum / qty) * 100) : 0;
+  const tier = defectTier(defectPct);
 
   const setDefect = (k: DefectKey, v: number) => {
     setDefects((d) => {
@@ -660,10 +649,35 @@ function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (go
     });
   };
 
-  const hasDefects = defectSum > 0;
+  const doSubmit = async () => {
+    const payload = {
+      good_quantity: good,
+      refire_quantity: defects.refire || 0,
+      repair_quantity: defects.repair || 0,
+      color_mismatch_quantity: defects.color_mismatch || 0,
+      grinding_quantity: defects.grinding || 0,
+      write_off_quantity: defects.write_off || 0,
+      notes: notes || undefined,
+    };
+    try {
+      await splitMutation.mutateAsync({ id: position.id, data: payload });
+      toast.success(`${tier.emoji} ${good} bagus dari ${qty} · ${defectPct}% cacat`, {
+        description: tier.msg,
+      });
+      onDone(good, defectPct);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        || (err as { message?: string })?.message
+        || 'Gagal simpan';
+      toast.error(msg);
+    }
+  };
 
-  const defectPct = Math.round((defectSum / Math.max(1, position.quantity)) * 100);
-  const tier = defectTier(defectPct);
+  const attemptSubmit = () => {
+    if (mode === 'block_overflow') return;
+    if (mode === 'ok') { void doSubmit(); return; }
+    setConfirm(mode);
+  };
 
   return (
     <div className="space-y-4">
@@ -686,15 +700,15 @@ function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (go
         {isStockCollection(position.collection) && <StockPanel positionId={position.id} />}
       </div>
 
-      {/* Defect reporter — primary path */}
+      {/* Category grid — good + 5 defects */}
       <div className="rounded-3xl border border-gray-100 bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <p className="text-sm font-semibold text-gray-900">
-            {hasDefects ? 'Cacat dilaporkan' : 'Cek tiap plitka · tap kategori kalo ada cacat:'}
+            Hitung tiap kategori:
           </p>
-          {hasDefects && (
+          {(good > 0 || defectSum > 0) && (
             <button
-              onClick={() => setDefects({})}
+              onClick={() => { setGood(0); setDefects({}); }}
               className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200"
             >
               Reset
@@ -702,32 +716,42 @@ function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (go
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <DefectCell defect={GOOD_CAT} value={good} onChange={setGood} />
           {DEFECTS.map((d) => (
             <DefectCell
               key={d.key}
               defect={d}
               value={defects[d.key] || 0}
-              max={position.quantity - defectSum + (defects[d.key] || 0)}
               onChange={(v) => setDefect(d.key, v)}
             />
           ))}
         </div>
       </div>
 
-      {/* Running total — ALWAYS visible */}
+      {/* Running total — validation state */}
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         className="rounded-3xl bg-gradient-to-br from-white to-emerald-50/30 p-5 shadow-sm"
       >
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div>
-            <p className="text-[10px] uppercase tracking-wide text-gray-400">Bagus (auto)</p>
-            <p className={`mt-1 text-5xl font-extrabold leading-none ${overflow ? 'text-red-600' : 'text-emerald-600'}`}>
-              {overflow ? '!!' : good}
+            <p className="text-[10px] uppercase tracking-wide text-gray-400">Total dihitung</p>
+            <p className={`mt-1 text-5xl font-extrabold leading-none ${
+              mode === 'block_overflow' ? 'text-red-600'
+              : mode === 'surplus' ? 'text-orange-600'
+              : mode === 'partial' ? 'text-amber-600'
+              : 'text-emerald-600'
+            }`}>
+              {total}
             </p>
-            <p className="mt-1 text-xs text-gray-400">dari {position.quantity}</p>
+            <p className="mt-1 text-xs text-gray-400">di kiln: {qty}</p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wide text-gray-400">Bagus</p>
+            <p className="mt-1 text-5xl font-extrabold leading-none text-emerald-600">{good}</p>
+            <p className="mt-1 text-xs text-gray-400">plitka OK</p>
           </div>
           <div className="text-right">
             <p className="text-[10px] uppercase tracking-wide text-gray-400">Cacat</p>
@@ -739,21 +763,8 @@ function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (go
           </div>
         </div>
 
-        {/* Progress bar */}
-        <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-gray-100">
-          <motion.div
-            initial={false}
-            animate={{ width: `${Math.min(100, (good / Math.max(1, position.quantity)) * 100)}%` }}
-            transition={{ type: 'spring', stiffness: 200, damping: 24 }}
-            className={`h-full ${overflow ? 'bg-red-500' : 'bg-gradient-to-r from-emerald-400 to-teal-500'}`}
-          />
-        </div>
-
-        {overflow && (
-          <p className="mt-2 text-xs text-red-600">
-            Total cacat ({defectSum}) lebih dari {position.quantity}. Perbaiki angkanya.
-          </p>
-        )}
+        {/* Status banner */}
+        <StatusBanner mode={mode} total={total} qty={qty} diff={diff} overflowPct={overflowPct} />
 
         {/* Notes toggle */}
         <button
@@ -774,51 +785,179 @@ function SplitWizard({ position, onDone }: { position: PositionItem; onDone: (go
 
         {/* Submit — big green dopamine button */}
         <motion.button
-          whileTap={{ scale: 0.97 }}
-          whileHover={{ y: -1 }}
-          onClick={() => submit(false)}
-          disabled={!isValid || splitMutation.isPending}
-          className={`relative mt-4 w-full overflow-hidden rounded-2xl bg-gradient-to-br ${tier.color} px-4 py-5 text-white shadow-xl disabled:cursor-not-allowed disabled:opacity-50`}
+          whileTap={{ scale: mode === 'block_overflow' ? 1 : 0.97 }}
+          whileHover={mode === 'block_overflow' ? undefined : { y: -1 }}
+          onClick={attemptSubmit}
+          disabled={mode === 'block_overflow' || total === 0 || splitMutation.isPending}
+          className={`relative mt-4 w-full overflow-hidden rounded-2xl bg-gradient-to-br ${
+            mode === 'block_overflow' ? 'from-red-500 to-rose-600'
+            : mode === 'surplus' ? 'from-orange-500 to-amber-600'
+            : mode === 'partial' ? 'from-amber-500 to-orange-500'
+            : tier.color
+          } px-4 py-5 text-white shadow-xl disabled:cursor-not-allowed disabled:opacity-50`}
         >
           <div className="absolute -right-4 -top-4 h-20 w-20 rounded-full bg-white/10" />
           <div className="relative flex items-center justify-center gap-3">
-            <span className="text-2xl">{tier.emoji}</span>
+            <span className="text-2xl">
+              {mode === 'block_overflow' ? '🚫' : mode === 'surplus' ? '➕' : mode === 'partial' ? '⏸️' : tier.emoji}
+            </span>
             <div className="text-left">
               <div className="text-lg font-extrabold">
-                {splitMutation.isPending ? 'Menyimpan…' : 'Selesai & Simpan'}
+                {splitMutation.isPending ? 'Menyimpan…'
+                  : mode === 'block_overflow' ? 'Angka tidak valid'
+                  : mode === 'surplus' ? 'Simpan surplus…'
+                  : mode === 'partial' ? 'Simpan sebagian…'
+                  : 'Selesai & Simpan'}
               </div>
-              <div className="text-xs text-white/90">{good} bagus · {defectSum} cacat · {defectPct}% · {tier.label}</div>
+              <div className="text-xs text-white/90">
+                {total} dihitung · {qty} di kiln · {defectPct}% cacat
+              </div>
             </div>
           </div>
         </motion.button>
       </motion.div>
 
+      {/* Confirm dialogs for partial / surplus */}
+      <AnimatePresence>
+        {confirm && (
+          <ConfirmSubmitDialog
+            mode={confirm}
+            total={total}
+            qty={qty}
+            diff={diff}
+            overflowPct={overflowPct}
+            onClose={() => setConfirm(null)}
+            onConfirm={() => { setConfirm(null); void doSubmit(); }}
+          />
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+function StatusBanner({ mode, total, qty, diff, overflowPct }: { mode: SubmitMode; total: number; qty: number; diff: number; overflowPct: number }) {
+  if (mode === 'ok' || total === 0) return null;
+  if (mode === 'partial') {
+    return (
+      <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs">
+        <span className="text-base">⏸️</span>
+        <div className="text-amber-900">
+          <div className="font-semibold">Kurang {qty - total} plitka dari kiln</div>
+          <div className="text-amber-700">Kalau simpan sekarang, sisanya akan tetap ada di sortir — kamu bisa lanjut besok.</div>
+        </div>
+      </div>
+    );
+  }
+  if (mode === 'surplus') {
+    return (
+      <div className="mt-3 flex items-start gap-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-xs">
+        <span className="text-base">➕</span>
+        <div className="text-orange-900">
+          <div className="font-semibold">Lebih {diff} plitka dari yang ada di kiln ({Math.round(overflowPct)}%)</div>
+          <div className="text-orange-700">Surplus produksi sampai 10% OK — konfirmasi jumlah fisik benar.</div>
+        </div>
+      </div>
+    );
+  }
+  // block_overflow
+  return (
+    <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-xs">
+      <span className="text-base">🚫</span>
+      <div className="text-red-900">
+        <div className="font-semibold">Terlalu banyak: {total} dihitung, kiln cuma {qty} ({Math.round(overflowPct)}% lebih)</div>
+        <div className="text-red-700">Maks 10% dari {qty} = {Math.floor(qty * 1.10)}. Periksa angkanya — kemungkinan salah ketik atau hitung ulang plitka fisik.</div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmSubmitDialog({
+  mode, total, qty, diff, overflowPct, onClose, onConfirm,
+}: {
+  mode: SubmitMode;
+  total: number;
+  qty: number;
+  diff: number;
+  overflowPct: number;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const isPartial = mode === 'partial';
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center"
+    >
+      <motion.div
+        initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-t-3xl bg-white p-6 shadow-2xl sm:rounded-3xl"
+      >
+        <div className="text-center">
+          <div className="text-5xl">{isPartial ? '⏸️' : '➕'}</div>
+          <h3 className="mt-3 text-lg font-bold text-gray-900">
+            {isPartial ? 'Kurang dari kiln' : 'Lebih dari kiln'}
+          </h3>
+          <p className="mt-1 text-sm text-gray-500">
+            {isPartial
+              ? `Kamu hitung ${total} plitka, tapi di kiln ${qty}.`
+              : `Kamu hitung ${total} plitka, di kiln ${qty} — lebih ${diff} (${Math.round(overflowPct)}%).`}
+          </p>
+        </div>
+
+        <div className={`mt-4 rounded-2xl p-4 text-sm ${isPartial ? 'bg-amber-50 text-amber-900' : 'bg-orange-50 text-orange-900'}`}>
+          {isPartial ? (
+            <>
+              <p><strong>Kalau lanjut:</strong> posisi di-split. {total} plitka masuk sortir sekarang, sisa {qty - total} tetap menunggu.</p>
+              <p className="mt-2">Kamu bisa selesaikan sisanya nanti / besok.</p>
+            </>
+          ) : (
+            <>
+              <p><strong>Surplus produksi sampai 10% valid</strong> — kiln kadang menghasilkan plitka lebih banyak dari yang dimuat.</p>
+              <p className="mt-2">Pastikan kamu sudah hitung ulang fisiknya.</p>
+            </>
+          )}
+        </div>
+
+        <div className="mt-5 flex gap-2">
+          <button
+            onClick={onClose}
+            className="flex-1 rounded-2xl bg-gray-100 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-200"
+          >
+            Periksa lagi
+          </button>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            onClick={onConfirm}
+            className={`flex-[2] rounded-2xl py-3 text-sm font-bold text-white shadow-lg bg-gradient-to-br ${
+              isPartial ? 'from-amber-500 to-orange-500' : 'from-orange-500 to-amber-600'
+            }`}
+          >
+            Ya, benar — simpan
+          </motion.button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
 /* ---- Defect cell with inline editable input + steppers ---- */
 
 function DefectCell({
-  defect, value, max, onChange,
+  defect, value, onChange,
 }: {
   defect: Defect;
   value: number;
-  max: number;
   onChange: (v: number) => void;
 }) {
   const active = value > 0;
-  const canInc = value < max;
   const [focused, setFocused] = useState(false);
   const [raw, setRaw] = useState(String(value));
 
   useEffect(() => { if (!focused) setRaw(String(value)); }, [value, focused]);
 
-  const commit = (s: string) => {
-    const parsed = parseInt(s.replace(/[^0-9]/g, '') || '0', 10);
-    onChange(Math.max(0, Math.min(max, parsed)));
-  };
-  const setV = (next: number) => onChange(Math.max(0, Math.min(max, next)));
+  const setV = (next: number) => onChange(Math.max(0, next));
 
   return (
     <div
@@ -835,19 +974,23 @@ function DefectCell({
         </div>
       </div>
 
-      {/* Editable value input */}
+      {/* Editable value input — no cap, validation happens at submit */}
       <input
         type="text"
         inputMode="numeric"
         pattern="[0-9]*"
         value={focused ? raw : String(value)}
         onFocus={(e) => { setFocused(true); setRaw(String(value)); e.currentTarget.select(); }}
-        onBlur={() => { setFocused(false); commit(raw); }}
+        onBlur={() => {
+          setFocused(false);
+          const parsed = parseInt(raw.replace(/[^0-9]/g, '') || '0', 10);
+          onChange(Math.max(0, parsed));
+        }}
         onChange={(e) => {
-          const cleaned = e.target.value.replace(/[^0-9]/g, '').slice(0, 4);
+          const cleaned = e.target.value.replace(/[^0-9]/g, '').slice(0, 5);
           setRaw(cleaned);
           const n = parseInt(cleaned || '0', 10);
-          if (n <= max) onChange(n);
+          onChange(Math.max(0, n));
         }}
         onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }}
         className={`mt-3 w-full bg-transparent text-center text-5xl font-extrabold leading-none tracking-tight outline-none ${
@@ -871,8 +1014,7 @@ function DefectCell({
         <motion.button
           whileTap={{ scale: 0.88 }}
           onClick={() => setV(value + 1)}
-          disabled={!canInc}
-          className={`rounded-xl py-3 text-xl font-bold disabled:opacity-30 ${
+          className={`rounded-xl py-3 text-xl font-bold ${
             active ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100'
           }`}
         >
@@ -881,8 +1023,7 @@ function DefectCell({
         <motion.button
           whileTap={{ scale: 0.88 }}
           onClick={() => setV(value + 10)}
-          disabled={!canInc}
-          className={`rounded-xl py-3 text-sm font-bold disabled:opacity-30 ${
+          className={`rounded-xl py-3 text-sm font-bold ${
             active ? 'bg-white/25 text-white hover:bg-white/35' : 'bg-white text-gray-700 shadow-sm hover:bg-gray-100'
           }`}
         >

@@ -763,11 +763,19 @@ async def split_position(
         data.good_quantity + data.refire_quantity + data.repair_quantity
         + data.color_mismatch_quantity + data.grinding_quantity + data.write_off_quantity
     )
-    if total != p.quantity:
+    # Allow surplus up to +10% of kiln load (production margin / kiln overages)
+    # and partial sort (under-count), which creates a residual sub-position.
+    # See BUSINESS_LOGIC_FULL.md §Sorting (#partial-and-surplus).
+    MAX_OVERFLOW_PCT = 0.10
+    max_allowed = int(p.quantity * (1 + MAX_OVERFLOW_PCT))
+    if total > max_allowed:
         raise HTTPException(
             400,
-            f"Total ({total}) must equal position quantity ({p.quantity})",
+            f"Total ({total}) exceeds position quantity ({p.quantity}) by more than 10% "
+            f"— maximum allowed {max_allowed}. Recount physical tiles or fix the numbers.",
         )
+    residual_qty = max(0, p.quantity - total)  # partial sort: remaining stays in sorting
+    is_surplus = total > p.quantity
 
     now = datetime.now(timezone.utc)
     sub_positions = []
@@ -954,6 +962,49 @@ async def split_position(
             "quantity": dr.quantity,
             "outcome": "write_off",
         }
+
+    # 8. Partial sort — leftover tiles stay awaiting sorting (carried over)
+    if residual_qty > 0:
+        residual_pos = OrderPosition(
+            id=uuid_mod.uuid4(),
+            order_id=p.order_id,
+            order_item_id=p.order_item_id,
+            parent_position_id=p.id,
+            factory_id=p.factory_id,
+            status=PositionStatus.TRANSFERRED_TO_SORTING,
+            quantity=residual_qty,
+            color=p.color,
+            size=p.size,
+            application=p.application,
+            finishing=p.finishing,
+            collection=p.collection,
+            application_type=p.application_type,
+            place_of_application=p.place_of_application,
+            product_type=p.product_type,
+            shape=p.shape,
+            thickness_mm=p.thickness_mm,
+            recipe_id=p.recipe_id,
+            mandatory_qc=p.mandatory_qc,
+            split_category=None,
+            priority_order=p.priority_order,
+            position_number=p.position_number,
+            split_index=_si(),
+            edge_profile=getattr(p, 'edge_profile', None),
+            edge_profile_sides=getattr(p, 'edge_profile_sides', None),
+            edge_profile_notes=getattr(p, 'edge_profile_notes', None),
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(residual_pos)
+        sub_positions.append(residual_pos)
+
+    if is_surplus:
+        import logging
+        logging.getLogger(__name__).info(
+            "Position %s surplus sort: kiln=%d sorted=%d diff=+%d (+%.1f%%)",
+            p.id, p.quantity if not residual_qty else (p.quantity - residual_qty),
+            total, total - p.quantity, ((total - p.quantity) / max(1, p.quantity)) * 100,
+        )
 
     db.commit()
     db.refresh(p)

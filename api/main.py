@@ -244,6 +244,9 @@ def _ensure_schema():
         # Consumption measurement: PM needs to measure consumption rate
         ("position_status", "awaiting_consumption_data"),
         ("task_type", "consumption_measurement"),
+        # Sorted — separates sort step (category distribution) from pack step
+        # (physical packing + photo + packaging consumption).
+        ("position_status", "sorted"),
     ]
     try:
         raw_conn = engine.raw_connection()

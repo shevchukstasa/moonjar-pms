@@ -390,6 +390,29 @@ Handles post-firing sorting: splits positions into sub-positions based on outcom
 | TO_MANA | -> ManaShipment |
 | TO_STOCK | -> finished_goods_stock |
 
+### Sort → Pack separation (SORTED status)
+
+Sorting and packing are distinct steps; the post-fire lifecycle runs:
+
+```
+TRANSFERRED_TO_SORTING → (Split wizard) → SORTED → (Pack action) → PACKED → (Send to QC) → SENT_TO_QUALITY_CHECK
+```
+
+- **Split** only distributes tiles into categories (good / refire / repair / color_mismatch / grinding / write_off). Parent becomes `SORTED`. **Packaging is NOT consumed at this step.**
+- **Pack** (`POST /positions/{id}/pack`) is the point where packaging materials are deducted and the position becomes `PACKED`. The endpoint enforces three hard gates — fail any of them and the position stays `SORTED`:
+  1. **Photo required** — at least one `OrderPackingPhoto` must be attached. Returns 400 with "Photo required before packing".
+  2. **Packaging rules configured** — `calculate_packaging_needs()` must return a non-empty materials list for the position's size. If absent, the `on_sorting_start` hook already filed a `PACKING_MATERIALS_NEEDED` blocking task for PM; the endpoint returns 400 referencing the size that needs rules.
+  3. **Packaging stock sufficient** — `consume_packaging()` must succeed. Propagates the underlying exception as 400 so sorter sees why.
+- **Send to QC** (`changeStatus → sent_to_quality_check`) is only reachable from `PACKED`.
+
+**UI consequences:** the Sorter dashboard's Pak tile lists both `SORTED` and `PACKED` positions. Each card renders differently:
+- `SORTED` → photo uploader + amber "📦 Pak sekarang" button (disabled until photo uploaded). On failure the backend's error is shown in-card as a red blocker banner referring the sorter to PM.
+- `PACKED` → green "✨ Kirim ke QC" button.
+
+**Why this matters:** packaging rule / stock problems used to be warning-logged at Split time and silently swallowed — the position moved to `PACKED` regardless. Now they are real blockers: sorter can't mark a box "packed" if the system has no way to account for its boxes or spacers.
+
+---
+
 ### Split Quantity Validation (partial sort & surplus tolerance)
 
 The split endpoint (`POST /positions/{id}/split`) accepts `total = good + refire + repair + color_mismatch + grinding + write_off` and compares to `position.quantity` (tiles physically loaded into kiln):

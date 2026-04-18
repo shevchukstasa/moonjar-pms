@@ -77,6 +77,18 @@ export function useSplitPosition() {
   });
 }
 
+export function usePackPosition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => positionsApi.pack(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+    },
+  });
+}
+
 export function useStockAvailability(positionId?: string) {
   return useQuery({
     queryKey: ['stock-availability', positionId],

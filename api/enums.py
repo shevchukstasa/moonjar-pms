@@ -39,7 +39,8 @@ class PositionStatus(str, Enum):
     TRANSFERRED_TO_SORTING = 'transferred_to_sorting'
     REFIRE = 'refire'
     AWAITING_REGLAZE = 'awaiting_reglaze'
-    PACKED = 'packed'
+    SORTED = 'sorted'           # Categories assigned, physical packing pending
+    PACKED = 'packed'           # Physically packed, photo uploaded, ready for QC
     SENT_TO_QUALITY_CHECK = 'sent_to_quality_check'
     QUALITY_CHECK_DONE = 'quality_check_done'
     READY_FOR_SHIPMENT = 'ready_for_shipment'

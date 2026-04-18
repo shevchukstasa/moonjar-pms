@@ -7,6 +7,7 @@ import {
   usePositions,
   useChangePositionStatus,
   useSplitPosition,
+  usePackPosition,
   useStockAvailability,
   type PositionItem,
 } from '@/hooks/usePositions';
@@ -156,10 +157,11 @@ export default function SorterPackerDashboard() {
       ? { factory_id: activeFactoryId, status: 'transferred_to_sorting' }
       : { status: 'transferred_to_sorting' },
   );
+  // Pak view shows both SORTED (ready to pack) and PACKED (ready to send)
   const packedQ = usePositions(
     activeFactoryId
-      ? { factory_id: activeFactoryId, status: 'packed' }
-      : { status: 'packed' },
+      ? { factory_id: activeFactoryId, status: 'sorted,packed' }
+      : { status: 'sorted,packed' },
   );
   const grindingQ = usePositions(
     activeFactoryId
@@ -362,7 +364,7 @@ function HomeView({
         <ActionTile
           emoji="📦"
           label="Pak → QC"
-          sub="siap dikirim"
+          sub="foto · pak · kirim"
           count={counts.packed}
           gradient="from-emerald-400 to-teal-500"
           onClick={() => onNavigate('pack')}
@@ -1050,15 +1052,17 @@ function PackView({
   onBack: () => void;
   onSuccess: () => void;
 }) {
+  const sortedCount = positions.filter((p) => p.status === 'sorted').length;
+  const packedCount = positions.filter((p) => p.status === 'packed').length;
   return (
     <>
-      <BackBar title="Pak → QC" onBack={onBack} subtitle={`${positions.length} siap dipak`} />
+      <BackBar title="Pak → QC" onBack={onBack} subtitle={`${sortedCount} perlu dipak · ${packedCount} siap QC`} />
       <div className="mx-auto max-w-xl px-4 py-4 space-y-3">
         <div className="flex items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
           <span className="text-base">📸</span>
           <div>
-            <div className="font-semibold">Foto dulu, baru kirim ke QC</div>
-            <div className="mt-0.5 text-emerald-700">Pak plitka, ambil foto dusnya, lalu kirim. Tanpa foto tidak bisa kirim.</div>
+            <div className="font-semibold">Alur: foto → pak → kirim ke QC</div>
+            <div className="mt-0.5 text-emerald-700">1) Ambil foto dus. 2) Tap «Pak» — sistem cek aturan dus + stok. 3) Baru bisa kirim ke QC.</div>
           </div>
         </div>
 
@@ -1080,15 +1084,19 @@ function PackView({
 
 function PackCard({ p, onSuccess }: { p: PositionItem; onSuccess: () => void }) {
   const changeStatus = useChangePositionStatus();
+  const packMutation = usePackPosition();
   const { data: photosData } = usePackingPhotos({ position_id: p.id });
   const photos = photosData?.items || [];
   const hasPhoto = photos.length > 0;
+  const isSorted = p.status === 'sorted';
+  const isPacked = p.status === 'packed';
 
   const uploadMutation = useUploadPackingPhoto();
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [expanded, setExpanded] = useState(!hasPhoto);
+  const [packError, setPackError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!pendingFile) { setPreview(null); return; }
@@ -1114,6 +1122,22 @@ function PackCard({ p, onSuccess }: { p: PositionItem; onSuccess: () => void }) 
     }
   };
 
+  const handlePack = async () => {
+    setPackError(null);
+    try {
+      await packMutation.mutateAsync(p.id);
+      toast.success(`📦 ${p.order_number} · ${p.quantity} pcs dipak`, {
+        description: 'Sekarang bisa dikirim ke QC',
+      });
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        || (err as { message?: string })?.message
+        || 'Gagal pak';
+      setPackError(msg);
+      toast.error(msg);
+    }
+  };
+
   const sendToQC = async () => {
     setSending(true);
     try {
@@ -1130,74 +1154,110 @@ function PackCard({ p, onSuccess }: { p: PositionItem; onSuccess: () => void }) 
 
   return (
     <div className="rounded-3xl border border-gray-100 bg-white p-3 shadow-sm">
-      <PositionCard p={p} accent="from-emerald-50/70 to-teal-50/50" />
-
-      {/* Photo section */}
-      <div className="mt-3">
-        {hasPhoto && !expanded ? (
-          <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 p-3">
-            <div className="flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl">
-              <img src={photos[0].photo_url} alt="" className="h-full w-full object-cover" />
-            </div>
-            <div className="flex-1 text-sm">
-              <div className="font-semibold text-emerald-800">✓ Foto tersimpan ({photos.length})</div>
-              <button onClick={() => setExpanded(true)} className="text-xs text-emerald-600 underline">Ganti / tambah foto</button>
-            </div>
-          </div>
-        ) : preview ? (
-          <div>
-            <img src={preview} alt="preview" className="w-full rounded-2xl object-cover" />
-            <div className="mt-2 flex gap-2">
-              <button
-                onClick={() => setPendingFile(null)}
-                className="flex-1 rounded-2xl bg-gray-100 py-2.5 text-sm font-semibold text-gray-700"
-              >
-                Buang
-              </button>
-              <motion.button
-                whileTap={{ scale: 0.97 }}
-                onClick={handleUpload}
-                disabled={uploadMutation.isPending}
-                className="flex-[2] rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 py-2.5 text-sm font-bold text-white shadow-md disabled:opacity-60"
-              >
-                {uploadMutation.isPending ? 'Mengunggah…' : '✨ Unggah foto'}
-              </motion.button>
-            </div>
-          </div>
-        ) : (
-          <label className="flex cursor-pointer items-center gap-3 rounded-2xl border-2 border-dashed border-sky-200 bg-sky-50/40 p-3 hover:border-sky-400">
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) setPendingFile(f);
-              }}
-              className="hidden"
-            />
-            <span className="text-3xl">📷</span>
-            <div className="text-sm">
-              <div className="font-semibold text-gray-900">Ambil foto dus</div>
-              <div className="text-xs text-gray-500">kamera atau galeri · wajib</div>
-            </div>
-          </label>
-        )}
+      <div className="flex items-center justify-between">
+        <PositionCard p={p} accent={isPacked ? 'from-emerald-50/70 to-teal-50/50' : 'from-amber-50/60 to-orange-50/50'} />
       </div>
 
-      {/* Send to QC — gated on photo */}
-      <motion.button
-        whileTap={hasPhoto ? { scale: 0.97 } : undefined}
-        onClick={sendToQC}
-        disabled={!hasPhoto || sending}
-        className={`mt-3 w-full rounded-2xl px-4 py-4 text-base font-bold text-white shadow-md ${
-          hasPhoto
-            ? 'bg-gradient-to-br from-emerald-500 to-teal-600'
-            : 'cursor-not-allowed bg-gray-300'
-        }`}
-      >
-        {sending ? 'Mengirim…' : hasPhoto ? '✨ Kirim ke QC →' : '📷 Ambil foto dulu'}
-      </motion.button>
+      {/* Status pill */}
+      <div className="mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+           style={{ backgroundColor: isPacked ? '#d1fae5' : '#fef3c7', color: isPacked ? '#065f46' : '#92400e' }}>
+        {isPacked ? '✓ Dipak · siap ke QC' : '📦 Belum dipak'}
+      </div>
+
+      {/* --- SORTED: photo + pack action --- */}
+      {isSorted && (
+        <>
+          <div className="mt-3">
+            {hasPhoto && !expanded ? (
+              <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 p-3">
+                <div className="flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl">
+                  <img src={photos[0].photo_url} alt="" className="h-full w-full object-cover" />
+                </div>
+                <div className="flex-1 text-sm">
+                  <div className="font-semibold text-emerald-800">✓ Foto tersimpan ({photos.length})</div>
+                  <button onClick={() => setExpanded(true)} className="text-xs text-emerald-600 underline">Ganti / tambah foto</button>
+                </div>
+              </div>
+            ) : preview ? (
+              <div>
+                <img src={preview} alt="preview" className="w-full rounded-2xl object-cover" />
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => setPendingFile(null)}
+                    className="flex-1 rounded-2xl bg-gray-100 py-2.5 text-sm font-semibold text-gray-700"
+                  >
+                    Buang
+                  </button>
+                  <motion.button
+                    whileTap={{ scale: 0.97 }}
+                    onClick={handleUpload}
+                    disabled={uploadMutation.isPending}
+                    className="flex-[2] rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 py-2.5 text-sm font-bold text-white shadow-md disabled:opacity-60"
+                  >
+                    {uploadMutation.isPending ? 'Mengunggah…' : '✨ Unggah foto'}
+                  </motion.button>
+                </div>
+              </div>
+            ) : (
+              <label className="flex cursor-pointer items-center gap-3 rounded-2xl border-2 border-dashed border-sky-200 bg-sky-50/40 p-3 hover:border-sky-400">
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) setPendingFile(f);
+                  }}
+                  className="hidden"
+                />
+                <span className="text-3xl">📷</span>
+                <div className="text-sm">
+                  <div className="font-semibold text-gray-900">Ambil foto dus</div>
+                  <div className="text-xs text-gray-500">kamera atau galeri · wajib</div>
+                </div>
+              </label>
+            )}
+          </div>
+
+          {/* Pack error banner (blocker from backend) */}
+          {packError && (
+            <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-xs">
+              <span className="text-base">🚫</span>
+              <div className="text-red-900">
+                <div className="font-semibold">Tidak bisa pak</div>
+                <div className="mt-0.5 text-red-700">{packError}</div>
+                <div className="mt-1 text-red-600">Hubungi PM — aturan packaging / stok dus perlu dibenerin.</div>
+              </div>
+            </div>
+          )}
+
+          {/* Pack button — gated on photo */}
+          <motion.button
+            whileTap={hasPhoto ? { scale: 0.97 } : undefined}
+            onClick={handlePack}
+            disabled={!hasPhoto || packMutation.isPending}
+            className={`mt-3 w-full rounded-2xl px-4 py-4 text-base font-bold text-white shadow-md ${
+              hasPhoto
+                ? 'bg-gradient-to-br from-amber-500 to-orange-600'
+                : 'cursor-not-allowed bg-gray-300'
+            }`}
+          >
+            {packMutation.isPending ? 'Mengepak…' : hasPhoto ? '📦 Pak sekarang' : '📷 Ambil foto dulu'}
+          </motion.button>
+        </>
+      )}
+
+      {/* --- PACKED: send-to-QC action --- */}
+      {isPacked && (
+        <motion.button
+          whileTap={{ scale: 0.97 }}
+          onClick={sendToQC}
+          disabled={sending}
+          className="mt-3 w-full rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 px-4 py-4 text-base font-bold text-white shadow-md disabled:opacity-60"
+        >
+          {sending ? 'Mengirim…' : '✨ Kirim ke QC →'}
+        </motion.button>
+      )}
     </div>
   );
 }

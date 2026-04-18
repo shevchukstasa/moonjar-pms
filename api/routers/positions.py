@@ -791,21 +791,13 @@ async def split_position(
         _base_si += 1
         return _base_si
 
-    # 1. Update parent — good quantity, mark as packed
+    # 1. Update parent — good quantity, mark as SORTED.
+    # Packaging consumption is deferred to the explicit /pack step so a missing
+    # packaging rule or box-shortage becomes a hard blocker at packing time,
+    # not a silently-swallowed warning at sort time.
     p.quantity = data.good_quantity
-    transition_position_status(db, p.id, PositionStatus.PACKED.value, changed_by=current_user.id)
+    transition_position_status(db, p.id, PositionStatus.SORTED.value, changed_by=current_user.id)
     p.updated_at = now
-
-    # Consume packaging materials (boxes + spacers)
-    try:
-        from business.services.packaging_consumption import consume_packaging
-        if p.factory_id:
-            consume_packaging(db, p.id, p.factory_id, user_id=current_user.id)
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(
-            "Failed to consume packaging for position %s: %s", p.id, e
-        )
 
     # 2. Refire sub-position — tile is already glazed, just needs another firing pass
     if data.refire_quantity > 0:
@@ -1046,6 +1038,84 @@ async def split_position(
         },
         "stock_fulfillment": stock_fulfillment,
         "surplus_handled": surplus_handled,
+    }
+
+
+@router.post("/{position_id}/pack")
+async def pack_position(
+    position_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_sorting),
+):
+    """
+    Pack a SORTED position: consume packaging materials, require at least one
+    packing photo, transition to PACKED.
+
+    Hard-blocks if:
+    - position is not in SORTED status
+    - no packing photos are attached
+    - packaging rules are missing for this size (400 + blocking task already created by split hook)
+    - insufficient packaging stock on factory (400 + warning task)
+    """
+    from api.models import OrderPackingPhoto
+    from business.services.packaging_consumption import consume_packaging, calculate_packaging_needs
+
+    p = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
+    if not p:
+        raise HTTPException(404, "Position not found")
+
+    if _ev(p.status) != "sorted":
+        raise HTTPException(400, f"Position status must be 'sorted' to pack, got '{_ev(p.status)}'")
+
+    # Gate 1: at least one photo required
+    photo_count = (
+        db.query(OrderPackingPhoto)
+        .filter(OrderPackingPhoto.position_id == p.id)
+        .count()
+    )
+    if photo_count < 1:
+        raise HTTPException(
+            400,
+            "Photo required before packing. Upload at least one packing photo first.",
+        )
+
+    # Gate 2: packaging rules configured
+    try:
+        needs = calculate_packaging_needs(db, p)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("pack_position: calculate_packaging_needs failed for %s: %s", p.id, e)
+        raise HTTPException(400, f"Cannot calculate packaging needs: {e}")
+
+    if not needs.materials:
+        raise HTTPException(
+            400,
+            f"No packaging rules configured for size '{p.size or 'unknown'}'. "
+            f"PM must configure box capacity before packing can proceed.",
+        )
+
+    # Gate 3: consume packaging (may raise if stock insufficient)
+    if not p.factory_id:
+        raise HTTPException(400, "Position has no factory — cannot consume packaging")
+
+    try:
+        consume_result = consume_packaging(db, p.id, p.factory_id, user_id=current_user.id)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("pack_position: consume_packaging failed for %s: %s", p.id, e)
+        raise HTTPException(400, f"Packaging consumption failed: {e}")
+
+    # Transition to PACKED
+    now = datetime.now(timezone.utc)
+    transition_position_status(db, p.id, PositionStatus.PACKED.value, changed_by=current_user.id)
+    p.updated_at = now
+    db.commit()
+    db.refresh(p)
+
+    return {
+        "position": _serialize_position(p),
+        "packaging_consumed": consume_result,
+        "photo_count": photo_count,
     }
 
 

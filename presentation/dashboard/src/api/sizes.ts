@@ -18,6 +18,7 @@ export interface SizeItem {
   width_mm: number;
   height_mm: number;
   thickness_mm: number | null;
+  diameter_mm: number | null;
   shape: string | null;
   is_custom: boolean;
   created_at: string | null;
@@ -29,6 +30,7 @@ export interface SizeInput {
   width_mm: number;
   height_mm: number;
   thickness_mm?: number | null;
+  diameter_mm?: number | null;
   shape?: string;
   is_custom?: boolean;
 }

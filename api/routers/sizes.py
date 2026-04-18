@@ -28,6 +28,7 @@ class SizeInput(BaseModel):
     width_mm: int
     height_mm: int
     thickness_mm: Optional[int] = None
+    diameter_mm: Optional[int] = None
     shape: Optional[str] = "rectangle"
     is_custom: bool = False
 
@@ -37,6 +38,7 @@ class SizeUpdateInput(BaseModel):
     width_mm: Optional[int] = None
     height_mm: Optional[int] = None
     thickness_mm: Optional[int] = None
+    diameter_mm: Optional[int] = None
     shape: Optional[str] = None
     is_custom: Optional[bool] = None
 
@@ -67,6 +69,7 @@ def _serialize_size(s: Size) -> dict:
         "width_mm": s.width_mm,
         "height_mm": s.height_mm,
         "thickness_mm": s.thickness_mm,
+        "diameter_mm": getattr(s, "diameter_mm", None),
         "shape": s.shape,
         "is_custom": s.is_custom,
         "created_at": s.created_at.isoformat() if s.created_at else None,
@@ -251,6 +254,7 @@ async def create_size(
         width_mm=data.width_mm,
         height_mm=data.height_mm,
         thickness_mm=data.thickness_mm,
+        diameter_mm=data.diameter_mm,
         shape=data.shape or "rectangle",
         is_custom=data.is_custom,
     )
@@ -293,6 +297,8 @@ async def update_size(
         dimensions_changed = True
     if data.thickness_mm is not None:
         s.thickness_mm = data.thickness_mm
+    if data.diameter_mm is not None:
+        s.diameter_mm = data.diameter_mm
     if data.shape is not None:
         s.shape = data.shape
     if data.is_custom is not None:

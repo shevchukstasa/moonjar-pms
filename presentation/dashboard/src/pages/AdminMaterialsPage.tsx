@@ -26,6 +26,8 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Tabs } from '@/components/ui/Tabs';
 import { MaterialDeduplication } from '@/components/admin/MaterialDeduplication';
 import { buildStoneShortName } from '@/lib/stoneNaming';
+import { TypologySelector, type StoneTypology } from '@/components/material/TypologySelector';
+import { sizesApi } from '@/api/sizes';
 import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
 import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 import { useQueryClient } from '@tanstack/react-query';
@@ -69,10 +71,17 @@ interface CatalogForm {
   full_name: string;
   subgroup_id: string;
   material_type: string;
+  product_subtype: string;  // typology: tiles|3d|sink|countertop|freeform (§29)
   unit: string;
   supplier_id: string;
   size_id: string;
   balance_override: string;  // admin/owner override — blank = don't touch
+  // Custom size editor — when set, overrides size_id by POSTing /sizes first
+  custom_width_cm: string;
+  custom_height_cm: string;
+  custom_thickness_cm: string;
+  custom_diameter_cm: string;
+  custom_shape: '' | 'auto' | 'rectangle' | 'square' | 'round' | 'triangle' | 'octagon' | 'freeform';
 }
 
 const emptyCatalogForm: CatalogForm = {
@@ -81,10 +90,16 @@ const emptyCatalogForm: CatalogForm = {
   full_name: '',
   subgroup_id: '',
   material_type: '',
+  product_subtype: '',
   unit: 'kg',
   supplier_id: '',
   size_id: '',
   balance_override: '',
+  custom_width_cm: '',
+  custom_height_cm: '',
+  custom_thickness_cm: '',
+  custom_diameter_cm: '',
+  custom_shape: '',
 };
 
 /** Build auto-name for stone material from a Size record */
@@ -311,10 +326,16 @@ function CatalogTab() {
         full_name: item.full_name ?? '',
         subgroup_id: item.subgroup_id ?? '',
         material_type: item.material_type ?? '',
+        product_subtype: ((item as unknown as Record<string, unknown>).product_subtype as string) ?? '',
         unit: item.unit,
         supplier_id: item.supplier_id ?? '',
         size_id: ((item as unknown as Record<string, unknown>).size_id as string) ?? '',
         balance_override: '',  // blank = don't override
+        custom_width_cm: '',
+        custom_height_cm: '',
+        custom_thickness_cm: '',
+        custom_diameter_cm: '',
+        custom_shape: '',
       });
       setFormError('');
       // Existing row already has a short_name — treat as manually set so
@@ -341,15 +362,76 @@ function CatalogTab() {
     }
     setFormError('');
 
+    // If user entered custom dimensions, resolve them to a Size row first
+    // (existing orientation-insensitive match, else POST /sizes to create a new one).
+    let resolvedSizeId: string | null = form.size_id || null;
+    const w = parseFloat(form.custom_width_cm);
+    const h = parseFloat(form.custom_height_cm);
+    const t = parseFloat(form.custom_thickness_cm);
+    const d = parseFloat(form.custom_diameter_cm);
+    const hasRect = Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0;
+    const hasRound = Number.isFinite(d) && d > 0;
+    if (hasRect || hasRound) {
+      const wMm = hasRect ? Math.round(w * 10) : Math.round(d * 10);
+      const hMm = hasRect ? Math.round(h * 10) : Math.round(d * 10);
+      const tMm = Number.isFinite(t) && t > 0 ? Math.round(t * 10) : undefined;
+      const dMm = hasRound ? Math.round(d * 10) : undefined;
+      // Shape: user override, or auto-detect (square if W=H, round from diameter, else rectangle)
+      let shape: string = form.custom_shape && form.custom_shape !== 'auto' ? form.custom_shape : '';
+      if (!shape) {
+        if (hasRound) shape = 'round';
+        else if (hasRect && wMm === hMm) shape = 'square';
+        else shape = 'rectangle';
+      }
+      // Find or create
+      const existing = sizes.find((s) => {
+        if (hasRound && s.shape === 'round' && s.diameter_mm === dMm) {
+          return !tMm || s.thickness_mm === tMm;
+        }
+        if (hasRect && !hasRound) {
+          const matches =
+            (s.width_mm === wMm && s.height_mm === hMm) ||
+            (s.width_mm === hMm && s.height_mm === wMm);
+          return matches && (!tMm || s.thickness_mm === tMm);
+        }
+        return false;
+      });
+      if (existing) {
+        resolvedSizeId = existing.id;
+      } else {
+        // Build human-readable name: "5×20×1.2" or "Ø35×3"
+        const fmt = (n: number) => (Math.round(n * 10) / 10).toString();
+        const tStr = Number.isFinite(t) && t > 0 ? `×${fmt(t)}` : '';
+        const newName = hasRound ? `Ø${fmt(d)}${tStr}` : `${fmt(w)}×${fmt(h)}${tStr}`;
+        try {
+          const created = await sizesApi.create({
+            name: newName,
+            width_mm: wMm,
+            height_mm: hMm,
+            thickness_mm: tMm,
+            diameter_mm: dMm,
+            shape,
+            is_custom: true,
+          });
+          resolvedSizeId = created.id;
+        } catch (err: unknown) {
+          const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+          setFormError(`Failed to create size: ${detail ?? 'unknown error'}`);
+          return;
+        }
+      }
+    }
+
     const payload: Record<string, unknown> = {
       name: form.name.trim(),
       short_name: form.short_name.trim() || null,
       full_name: form.full_name.trim() || null,
       material_type: form.material_type,
+      product_subtype: form.product_subtype || null,
       subgroup_id: form.subgroup_id || null,
       unit: form.unit,
       supplier_id: form.supplier_id || null,
-      size_id: form.size_id || null,
+      size_id: resolvedSizeId,
     };
     // Balance override — owner/admin can set balance directly (skips audit).
     // Blank field = don't touch; any parseable number applies.
@@ -633,38 +715,113 @@ function CatalogTab() {
               onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
             />
           </div>
-          {/* Stone size picker — auto-names material from Size */}
+          {/* Stone-specific: typology + size editor (§29) */}
           {isStoneType && (
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                Size (from reference)
-              </label>
-              <Select
-                options={[
-                  { value: '', label: '— select size —' },
-                  ...sizes.map((s) => ({
-                    value: s.id,
-                    label: `${s.name}  (${s.width_mm}\u00D7${s.height_mm}${s.thickness_mm ? ` \u00D7 ${s.thickness_mm}` : ''}mm${s.shape && s.shape !== 'rectangle' ? ` ${s.shape}` : ''})`,
-                  })),
-                ]}
-                value={form.size_id}
-                onChange={(e) => {
-                  const sizeId = e.target.value;
-                  const chosen = sizes.find((s) => s.id === sizeId);
-                  setForm((prev) => ({
-                    ...prev,
-                    size_id: sizeId,
-                    name: chosen ? stoneName(chosen) : prev.name,
-                    unit: 'pcs',
-                  }));
-                }}
-              />
-              {form.size_id && (
-                <p className="mt-1 text-xs text-gray-500">
-                  Auto-name: <span className="font-medium">{stoneName(sizes.find((s) => s.id === form.size_id))}</span>
+            <>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Typology <span className="text-gray-400">(flat tile / 3D / sink / countertop / freeform)</span>
+                </label>
+                <TypologySelector
+                  value={(form.product_subtype || null) as StoneTypology | null}
+                  onChange={(t) => setForm({ ...form, product_subtype: t })}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Size (pick from reference)
+                </label>
+                <Select
+                  options={[
+                    { value: '', label: '— select size —' },
+                    ...sizes.map((s) => ({
+                      value: s.id,
+                      label: `${s.name}  (${s.width_mm}\u00D7${s.height_mm}${s.thickness_mm ? ` \u00D7 ${s.thickness_mm}` : ''}mm${s.shape && s.shape !== 'rectangle' ? ` ${s.shape}` : ''})`,
+                    })),
+                  ]}
+                  value={form.size_id}
+                  onChange={(e) => {
+                    const sizeId = e.target.value;
+                    setForm((prev) => ({
+                      ...prev,
+                      size_id: sizeId,
+                      // Clear any custom dimensions when picking from list
+                      custom_width_cm: '',
+                      custom_height_cm: '',
+                      custom_thickness_cm: '',
+                      custom_diameter_cm: '',
+                      custom_shape: '',
+                    }));
+                  }}
+                />
+                <p className="mt-1 text-xs text-gray-400">
+                  Reference list is the <code>sizes</code> table — seeded + grown by the scan flow.
                 </p>
-              )}
-            </div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-600">
+                  Or enter custom dimensions (overrides picker)
+                </div>
+                <div className="mb-2 grid grid-cols-4 gap-2">
+                  <div>
+                    <label className="block text-[10px] uppercase text-gray-500">W cm</label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      value={form.custom_width_cm}
+                      onChange={(e) => setForm({ ...form, custom_width_cm: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase text-gray-500">H cm</label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      value={form.custom_height_cm}
+                      onChange={(e) => setForm({ ...form, custom_height_cm: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase text-gray-500">T cm</label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      value={form.custom_thickness_cm}
+                      onChange={(e) => setForm({ ...form, custom_thickness_cm: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase text-gray-500">Ø cm (round)</label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      value={form.custom_diameter_cm}
+                      onChange={(e) => setForm({ ...form, custom_diameter_cm: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase text-gray-500">Shape</label>
+                  <Select
+                    options={[
+                      { value: '', label: 'Auto (square if W=H, else rectangle)' },
+                      { value: 'rectangle', label: 'Rectangle' },
+                      { value: 'square', label: 'Square' },
+                      { value: 'round', label: 'Round' },
+                      { value: 'triangle', label: 'Triangle' },
+                      { value: 'octagon', label: 'Octagon' },
+                      { value: 'freeform', label: 'Freeform' },
+                    ]}
+                    value={form.custom_shape}
+                    onChange={(e) => setForm({ ...form, custom_shape: e.target.value as CatalogForm['custom_shape'] })}
+                  />
+                </div>
+                <p className="mt-2 text-[11px] text-gray-500">
+                  On Save: matching Size row is reused if dimensions already exist; otherwise a new
+                  one is created and linked to this material.
+                </p>
+              </div>
+            </>
           )}
           {!editDialog.item && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">

@@ -301,6 +301,51 @@ MESSAGES: dict[str, dict[str, str]] = {
         "id": "#\ufe0f\u20e3 Ref",
         "ru": "#\ufe0f\u20e3 Ссылка",
     },
+    "design_pick_prompt": {
+        "en": "\U0001f3a8 3D position «{name}» — pick design:",
+        "id": "\U0001f3a8 Posisi 3D «{name}» — pilih desain:",
+        "ru": "\U0001f3a8 3D-позиция «{name}» — выбери дизайн:",
+    },
+    "design_none_btn": {
+        "en": "\u2715 No design",
+        "id": "\u2715 Tanpa desain",
+        "ru": "\u2715 Без дизайна",
+    },
+    "design_new_btn": {
+        "en": "\u2795 New design",
+        "id": "\u2795 Desain baru",
+        "ru": "\u2795 Новый дизайн",
+    },
+    "design_new_prompt": {
+        "en": "Enter new design name (e.g. «Design 3» or «design-3|Design 3» for code|name):",
+        "id": "Masukkan nama desain baru (mis. «Design 3» atau «design-3|Design 3» untuk kode|nama):",
+        "ru": "Введи название нового дизайна (например «Дизайн 3» или «design-3|Дизайн 3» для код|название):",
+    },
+    "design_selected": {
+        "en": "\u2705 Design «{design}» selected for «{item}»",
+        "id": "\u2705 Desain «{design}» dipilih untuk «{item}»",
+        "ru": "\u2705 Дизайн «{design}» выбран для «{item}»",
+    },
+    "design_none_selected": {
+        "en": "\u2705 «{item}» recorded without design",
+        "id": "\u2705 «{item}» dicatat tanpa desain",
+        "ru": "\u2705 «{item}» записан без дизайна",
+    },
+    "design_required_warning": {
+        "en": "\u26a0\ufe0f Pick a design first for 3D items: {names}",
+        "id": "\u26a0\ufe0f Pilih desain dulu untuk item 3D: {names}",
+        "ru": "\u26a0\ufe0f Сначала выбери дизайн для 3D-позиций: {names}",
+    },
+    "design_created": {
+        "en": "\u2705 Design «{name}» created and applied",
+        "id": "\u2705 Desain «{name}» dibuat dan diterapkan",
+        "ru": "\u2705 Дизайн «{name}» создан и применён",
+    },
+    "design_create_failed": {
+        "en": "\u274c Failed to create design: {error}",
+        "id": "\u274c Gagal membuat desain: {error}",
+        "ru": "\u274c Не удалось создать дизайн: {error}",
+    },
     "enter_supplier_prompt": {
         "en": "Enter new supplier name:",
         "id": "Masukkan nama supplier baru:",
@@ -1010,6 +1055,13 @@ _pending_edits: dict[int, dict] = {}
 _pending_header_edits: dict[int, dict] = {}
 
 # ────────────────────────────────────────────────────────────────
+# Pending "new design" text-input sessions (in-memory) — 3D tile flow
+# ────────────────────────────────────────────────────────────────
+# key = chat_id (int)
+# value = {"delivery_id": str, "item_index": int}
+_pending_design_new: dict[int, dict] = {}
+
+# ────────────────────────────────────────────────────────────────
 # Pending recipe verification sessions (in-memory)
 # ────────────────────────────────────────────────────────────────
 # key = chat_id (int)
@@ -1090,6 +1142,11 @@ async def handle_update(db: Session, update_data: dict) -> None:
         msg_chat_id = message.get("chat", {}).get("id")
         if msg_chat_id and msg_chat_id in _pending_header_edits and text:
             await _handle_header_edit_text(msg_chat_id, text)
+            return
+
+        # Check if this chat is mid-design-creation for a 3D delivery item
+        if msg_chat_id and msg_chat_id in _pending_design_new and text:
+            await _handle_design_new_text(db, msg_chat_id, text)
             return
 
         # Check if this chat has an active delivery edit session awaiting text input
@@ -1558,7 +1615,7 @@ async def handle_callback_query(db: Session, callback_query: dict) -> None:
         "delivery_confirm", "delivery_cancel", "delivery_match", "delivery_new",
         "delivery_edit", "delivery_edit_supplier", "delivery_edit_date",
         "delivery_edit_ref", "delivery_unit", "delivery_supplier",
-        "delivery_supplier_new", "dedit",
+        "delivery_supplier_new", "ddesign", "dedit",
     ):
         try:
             # Resolve chat_id from the callback_query message
@@ -3292,9 +3349,11 @@ async def _handle_delivery_photo(
     # Match items against DB materials
     materials = db.query(Material).all()
     db_materials = [
-        {"id": str(m.id), "name": m.name, "material_type": m.material_type,
+        {"id": str(m.id), "name": m.name, "short_name": m.short_name,
+         "material_type": m.material_type,
          "unit": m.unit, "product_subtype": m.product_subtype,
-         "size_id": str(m.size_id) if m.size_id else None}
+         "size_id": str(m.size_id) if m.size_id else None,
+         "design_id": str(m.design_id) if m.design_id else None}
         for m in materials
     ]
     sizes = db.query(Size).all()
@@ -3334,9 +3393,10 @@ async def _handle_delivery_photo(
         await _send_message(chat_id, msg("delivery_no_items", lang), parse_mode="")
         return
 
-    # ── Step 2: Convert API response into matched/unmatched lists ─
+    # ── Step 2: Convert API response into matched/unmatched/design lists ─
     matched_items = []   # [{index, original_name, material_id, material_name, quantity, unit, ...}]
     unmatched_items = [] # [{index, original_name, quantity, unit, suggested_name, ...}]
+    design_items = []    # 3D items — need user to pick a design before resolving Material
 
     for idx, item in enumerate(api_items):
         delivery_name = item.get("delivery_name", item.get("name", ""))
@@ -3347,6 +3407,27 @@ async def _handle_delivery_photo(
         unit = item.get("unit", "pcs")
 
         if quantity <= 0:
+            continue
+
+        # 3D tiles of the same size can differ by design — defer Material resolution
+        # until the user picks a design. See BUSINESS_LOGIC_FULL §29 (addendum).
+        if item.get("needs_design_choice"):
+            design_items.append({
+                "index": idx,
+                "original_name": delivery_name,
+                "quantity": str(quantity),
+                "unit": unit,
+                "suggested_short_name": item.get("suggested_short_name"),
+                "suggested_size_name": item.get("suggested_size_name"),
+                "suggested_size_id": item.get("suggested_size_id"),
+                "suggested_product_type": item.get("suggested_product_type"),
+                "parsed_width_mm": item.get("parsed_width_mm"),
+                "parsed_height_mm": item.get("parsed_height_mm"),
+                "parsed_thickness_mm": item.get("parsed_thickness_mm"),
+                "parsed_thickness_raw": item.get("parsed_thickness_raw"),
+                "parsed_diameter_mm": item.get("parsed_diameter_mm"),
+                "parsed_shape": item.get("parsed_shape"),
+            })
             continue
 
         if item.get("matched") and item.get("material_id"):
@@ -3418,13 +3499,14 @@ async def _handle_delivery_photo(
         "readings": readings,
         "matched_items": matched_items,
         "unmatched_items": unmatched_items,
+        "design_items": design_items,
     }
 
     # ── Step 4: Send preview message with inline buttons ──────────
     supplier = readings.get("supplier") or msg("unknown_supplier", lang)
     ref_number = readings.get("reference_number") or "-"
     delivery_date = readings.get("date") or "-"
-    total_items = len(matched_items) + len(unmatched_items)
+    total_items = len(matched_items) + len(unmatched_items) + len(design_items)
 
     lines = [
         msg("delivery_header", lang, supplier=supplier),
@@ -3461,6 +3543,16 @@ async def _handle_delivery_photo(
         lines.append(
             f"{item_num}. \u26a0\ufe0f \"{ui['original_name']}\" \u2014 {ui['quantity']} {ui['unit']}"
             f" ({msg('not_found_label', lang)}{size_hint}){suggested}"
+        )
+
+    for di in design_items:
+        item_num += 1
+        size_hint = ""
+        if di.get("suggested_size_name"):
+            size_hint = f" | {di['suggested_size_name']}"
+        lines.append(
+            f"{item_num}. \U0001f3a8 \"{di['original_name']}\" \u2014 "
+            f"{di['quantity']} {di['unit']}{size_hint} (3D — pick design)"
         )
 
     preview_text = "\n".join(lines)
@@ -3538,6 +3630,10 @@ async def _handle_delivery_photo(
         }])
 
         await send_message_with_buttons(chat_id, suggestion_text, suggestion_rows, parse_mode="")
+
+    # ── Step 5b: Design picker for 3D items ──────────────────────
+    for di in design_items:
+        await _send_design_picker(db, chat_id, delivery_id, di, lang)
 
     # ── Step 6: Unit mismatch resolution buttons ─────────────────
     # Per BUSINESS_LOGIC_FULL §29 — hide buttons that would record an invalid
@@ -3621,10 +3717,163 @@ async def _handle_delivery_photo(
 
     logger.info(
         "Delivery photo processed via API: delivery_id=%s, "
-        "%d matched, %d unmatched, %d unit_mismatches, factory=%s",
+        "%d matched, %d unmatched, %d design, %d unit_mismatches, factory=%s",
         delivery_id, len(matched_items), len(unmatched_items),
-        len(unit_mismatch_items), factory.name,
+        len(design_items), len(unit_mismatch_items), factory.name,
     )
+
+
+async def _send_design_picker(
+    db: Session,
+    chat_id: int,
+    delivery_id: str,
+    di: dict,
+    lang: str,
+) -> None:
+    """Render the per-item design picker for a 3D stone delivery row.
+
+    Lists active `StoneDesign` rows matching typology=3d (plus designs with
+    NULL typology), then "+ new design" and "✕ no design" rows.
+    """
+    from api.models import StoneDesign
+
+    designs = (
+        db.query(StoneDesign)
+        .filter(StoneDesign.is_active.is_(True))
+        .filter((StoneDesign.typology == "3d") | (StoneDesign.typology.is_(None)))
+        .order_by(StoneDesign.display_order, StoneDesign.name)
+        .all()
+    )
+
+    text = msg("design_pick_prompt", lang, name=di["original_name"])
+    if di.get("suggested_size_name"):
+        text += f"\n{di['suggested_size_name']}"
+
+    ui_idx = di["index"]
+    rows: list[list[dict]] = []
+    row: list[dict] = []
+    for d in designs:
+        row.append({
+            "text": d.name,
+            "callback_data": f"ddesign:{delivery_id}:{ui_idx}:{d.id}",
+        })
+        if len(row) >= 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+
+    rows.append([{
+        "text": msg("design_new_btn", lang),
+        "callback_data": f"ddesign:{delivery_id}:{ui_idx}:new",
+    }])
+    rows.append([{
+        "text": msg("design_none_btn", lang),
+        "callback_data": f"ddesign:{delivery_id}:{ui_idx}:none",
+    }])
+
+    await send_message_with_buttons(chat_id, text, rows, parse_mode="")
+
+
+def _resolve_material_for_design(
+    db: Session,
+    di: dict,
+    design_id: str | None,
+) -> "Material":
+    """Find-or-create the stone Material that matches (size, 3d, design_id).
+
+    `di` is the pending design_items entry from `_pending_deliveries`. Creates
+    a Size row on-the-fly if the parsed dimensions don't match any existing
+    Size. Short name follows BUSINESS_LOGIC_FULL §29 convention.
+    """
+    from api.models import Size, StoneDesign
+    from business.services import material_naming as nm
+
+    # 1. Resolve size — use suggested_size_id if exists, else create.
+    size_id = di.get("suggested_size_id")
+    if not size_id:
+        pw = di.get("parsed_width_mm")
+        ph = di.get("parsed_height_mm")
+        pd = di.get("parsed_diameter_mm")
+        pt_mm = di.get("parsed_thickness_mm")
+        pt_raw = di.get("parsed_thickness_raw")
+        shape = di.get("parsed_shape") or ("round" if pd else "rectangle")
+
+        size_name = di.get("suggested_size_name")
+        if not size_name:
+            if pd:
+                d_cm = pd / 10
+                size_name = f"Ø{d_cm:g}"
+                if pt_raw:
+                    size_name += f"×{pt_raw}"
+            elif pw and ph:
+                size_name = f"{pw/10:g}×{ph/10:g}"
+                if pt_raw:
+                    size_name += f"×{pt_raw}"
+            else:
+                size_name = "3D"
+
+        new_size = Size(
+            name=size_name[:50],
+            width_mm=pw or pd,
+            height_mm=ph or pd,
+            thickness_mm=pt_mm,
+            diameter_mm=pd,
+            shape=shape,
+            is_custom=True,
+        )
+        db.add(new_size)
+        db.flush()
+        size_id = str(new_size.id)
+
+    # 2. Look up existing Material by (size_id, '3d', design_id).
+    q = db.query(Material).filter(
+        Material.material_type == "stone",
+        Material.product_subtype == "3d",
+        Material.size_id == size_id,
+    )
+    if design_id:
+        q = q.filter(Material.design_id == design_id)
+    else:
+        q = q.filter(Material.design_id.is_(None))
+    material = q.first()
+    if material:
+        return material
+
+    # 3. Create — derive short_name (include design suffix if any).
+    design_name = None
+    if design_id:
+        d_row = db.query(StoneDesign).filter(StoneDesign.id == design_id).first()
+        if d_row:
+            design_name = d_row.name
+
+    short_name = di.get("suggested_short_name") or ""
+    if short_name and design_name:
+        short_name = f"{short_name} · {design_name}"[:100]
+    elif not short_name:
+        short_name = nm.build_short_name_from_raw(di["original_name"], design_name=design_name)
+
+    # Long `name` must be unique — attach design to keep it distinct.
+    long_name = di["original_name"]
+    if design_name:
+        long_name = f"{long_name} · {design_name}"[:300]
+
+    new_mat = Material(
+        name=long_name,
+        short_name=short_name,
+        material_type="stone",
+        product_subtype="3d",
+        unit=di.get("unit") or "pcs",
+        size_id=size_id,
+        design_id=design_id,
+    )
+    db.add(new_mat)
+    db.flush()
+    logger.info(
+        "3D-design material created: id=%s short_name=%r design_id=%s",
+        new_mat.id, new_mat.short_name, design_id,
+    )
+    return new_mat
 
 
 def _try_link_purchase_request(
@@ -3820,6 +4069,8 @@ async def _handle_delivery_callback(
             del _pending_edits[chat_id]
         if chat_id in _pending_header_edits and _pending_header_edits[chat_id].get("delivery_id", "").startswith(delivery_id[:8]):
             del _pending_header_edits[chat_id]
+        if chat_id in _pending_design_new and _pending_design_new[chat_id].get("delivery_id", "").startswith(delivery_id[:8]):
+            del _pending_design_new[chat_id]
         # Remove inline buttons from the message
         if message_id:
             from business.services.notifications import edit_telegram_message_buttons
@@ -3940,8 +4191,99 @@ async def _handle_delivery_callback(
             await _send_message(chat_id, msg("failed_create_material", lang, error=str(e)), parse_mode="")
         return
 
+    # ── ddesign:{id}:{idx}:{design_id|none|new} ──────────
+    if action == "ddesign":
+        item_index = int(parts[2]) if len(parts) > 2 else -1
+        design_arg = parts[3] if len(parts) > 3 else ""
+
+        design_items = pending.get("design_items", [])
+        target_di = next((x for x in design_items if x["index"] == item_index), None)
+        if not target_di:
+            await answer_callback_query(callback_id, msg("item_not_found", lang))
+            return
+
+        # "new" → ask user for design name via text
+        if design_arg == "new":
+            _pending_design_new[chat_id] = {
+                "delivery_id": delivery_id,
+                "item_index": item_index,
+            }
+            await answer_callback_query(callback_id, "OK")
+            await _send_message(chat_id, msg("design_new_prompt", lang), parse_mode="")
+            return
+
+        design_id = None if design_arg == "none" else design_arg
+
+        # Resolve Material for this (size, 3d, design_id) pair
+        try:
+            material = _resolve_material_for_design(db, target_di, design_id)
+            db.flush()
+        except Exception as e:
+            db.rollback()
+            logger.error("Failed to resolve 3D material: %s", e, exc_info=True)
+            await answer_callback_query(callback_id, msg("error_occurred", lang))
+            await _send_message(
+                chat_id,
+                msg("failed_create_material", lang, error=str(e)),
+                parse_mode="",
+            )
+            return
+
+        # Move from design_items → matched_items
+        design_items.remove(target_di)
+        pending["matched_items"].append({
+            "index": target_di["index"],
+            "original_name": target_di["original_name"],
+            "material_id": str(material.id),
+            "material_name": material.short_name or material.name,
+            "quantity": target_di["quantity"],
+            "unit": target_di.get("unit") or material.unit or "pcs",
+            "db_unit": material.unit or target_di.get("unit") or "pcs",
+            "unit_mismatch": False,
+            "size_label": (
+                f" ({target_di['suggested_size_name']})"
+                if target_di.get("suggested_size_name") else ""
+            ),
+            "suggested_product_type": "3d",
+            "design_id": design_id,
+        })
+        db.commit()
+
+        # Clear the picker buttons
+        if message_id:
+            from business.services.notifications import edit_telegram_message_buttons
+            edit_telegram_message_buttons(str(chat_id), message_id)
+
+        await answer_callback_query(callback_id, "OK")
+        if design_id:
+            await _send_message(
+                chat_id,
+                msg("design_selected", lang,
+                    design=material.design.name if material.design else design_arg,
+                    item=target_di["original_name"]),
+                parse_mode="",
+            )
+        else:
+            await _send_message(
+                chat_id,
+                msg("design_none_selected", lang, item=target_di["original_name"]),
+                parse_mode="",
+            )
+        return
+
     # ── delivery_confirm:{id} ─────────────────────────────────────
     if action == "delivery_confirm":
+        if pending.get("design_items"):
+            names = ", ".join(
+                f"\"{di['original_name']}\"" for di in pending["design_items"]
+            )
+            await answer_callback_query(callback_id, msg("still_unmatched", lang), show_alert=True)
+            await _send_message(
+                chat_id,
+                msg("design_required_warning", lang, names=names),
+                parse_mode="",
+            )
+            return
         if pending["unmatched_items"]:
             unmatched_names = ", ".join(
                 f"\"{ui['original_name']}\"" for ui in pending["unmatched_items"]
@@ -4582,6 +4924,129 @@ def _sync_edit_to_pending(delivery_id: str, edit_session: dict) -> None:
     pending["unmatched_items"] = new_unmatched
 
 
+async def _handle_design_new_text(db: Session, chat_id: int, text: str) -> None:
+    """Create a new StoneDesign from text input, then apply it to a 3D delivery item.
+
+    Accepts either:
+      - "Design 3"           → auto-generate code from name (slug)
+      - "design-3|Design 3"  → explicit code|name
+    """
+    import re as _re
+    from api.models import StoneDesign
+
+    session = _pending_design_new.pop(chat_id, None)
+    if not session:
+        return
+
+    delivery_id = session["delivery_id"]
+    item_index = session["item_index"]
+
+    pending = _pending_deliveries.get(delivery_id)
+    if not pending:
+        for full_id, p in _pending_deliveries.items():
+            if full_id.startswith(delivery_id):
+                delivery_id = full_id
+                pending = p
+                break
+    if not pending:
+        await _send_message(chat_id, "Delivery expired.", parse_mode="")
+        return
+
+    lang = pending.get("lang", "id")
+    raw = text.strip()
+
+    if "|" in raw:
+        code, name = raw.split("|", 1)
+        code = code.strip()
+        name = name.strip()
+    else:
+        name = raw
+        slug = _re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "design"
+        code = slug[:50]
+
+    if not code or not name:
+        await _send_message(
+            chat_id,
+            msg("design_create_failed", lang, error="empty code/name"),
+            parse_mode="",
+        )
+        return
+
+    try:
+        existing = db.query(StoneDesign).filter(StoneDesign.code == code).first()
+        if existing:
+            design = existing
+        else:
+            design = StoneDesign(
+                code=code[:50],
+                name=name[:100],
+                typology="3d",
+                is_active=True,
+            )
+            db.add(design)
+            db.flush()
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error("Failed to create StoneDesign from bot: %s", e, exc_info=True)
+        await _send_message(
+            chat_id,
+            msg("design_create_failed", lang, error=str(e)),
+            parse_mode="",
+        )
+        return
+
+    await _send_message(
+        chat_id,
+        msg("design_created", lang, name=design.name),
+        parse_mode="",
+    )
+
+    # Apply by simulating the design-pick callback path.
+    design_items = pending.get("design_items", [])
+    target_di = next((x for x in design_items if x["index"] == item_index), None)
+    if not target_di:
+        return
+
+    try:
+        material = _resolve_material_for_design(db, target_di, str(design.id))
+        db.flush()
+    except Exception as e:
+        db.rollback()
+        logger.error("Failed to resolve 3D material after new-design: %s", e, exc_info=True)
+        await _send_message(
+            chat_id,
+            msg("failed_create_material", lang, error=str(e)),
+            parse_mode="",
+        )
+        return
+
+    design_items.remove(target_di)
+    pending["matched_items"].append({
+        "index": target_di["index"],
+        "original_name": target_di["original_name"],
+        "material_id": str(material.id),
+        "material_name": material.short_name or material.name,
+        "quantity": target_di["quantity"],
+        "unit": target_di.get("unit") or material.unit or "pcs",
+        "db_unit": material.unit or target_di.get("unit") or "pcs",
+        "unit_mismatch": False,
+        "size_label": (
+            f" ({target_di['suggested_size_name']})"
+            if target_di.get("suggested_size_name") else ""
+        ),
+        "suggested_product_type": "3d",
+        "design_id": str(design.id),
+    })
+    db.commit()
+
+    await _send_message(
+        chat_id,
+        msg("design_selected", lang, design=design.name, item=target_di["original_name"]),
+        parse_mode="",
+    )
+
+
 async def _handle_header_edit_text(chat_id: int, text: str) -> None:
     """Handle text input for delivery header edits (supplier, date, reference)."""
     edit = _pending_header_edits.pop(chat_id, None)
@@ -4639,7 +5104,8 @@ async def _resend_delivery_preview(chat_id: int, delivery_id: str, pending: dict
 
     matched = pending["matched_items"]
     unmatched = pending["unmatched_items"]
-    total_items = len(matched) + len(unmatched)
+    design_pending = pending.get("design_items", [])
+    total_items = len(matched) + len(unmatched) + len(design_pending)
 
     lines = [
         msg("delivery_header", lang, supplier=supplier),
@@ -4661,6 +5127,12 @@ async def _resend_delivery_preview(chat_id: int, delivery_id: str, pending: dict
         lines.append(
             f"{item_num}. \u26a0\ufe0f \"{ui['original_name']}\" \u2014 {ui['quantity']} {ui['unit']}"
             f" ({msg('not_found_label', lang)})"
+        )
+    for di in design_pending:
+        item_num += 1
+        lines.append(
+            f"{item_num}. \U0001f3a8 \"{di['original_name']}\" \u2014 "
+            f"{di['quantity']} {di['unit']} (3D — pick design)"
         )
 
     preview_text = "\n".join(lines)

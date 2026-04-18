@@ -1173,7 +1173,20 @@ async def smart_match_stone_item(
         "parsed_color": color,
         "parsed_base_material": base_material,
         "suggestion_context": suggestion_context,
+        # §29 addendum — 3D tiles of the same size can differ by design
+        # (e.g. "Design 1" / "Design 2"). Matcher cannot disambiguate by
+        # delivery name alone, so we defer to user choice in the bot/UI.
+        "needs_design_choice": product_type == "3d",
     }
+
+    # For 3D items we refuse auto-match: same short_name can map to multiple
+    # materials (one per design). Force the bot/UI to present a design picker
+    # and then resolve Material via (size_id, '3d', design_id).
+    if product_type == "3d":
+        result["matched"] = False
+        result["material_id"] = None
+        result["material_name"] = None
+        result["score"] = 0.0
 
     logger.info(
         "smart_match_stone: %r → matched=%s short_name=%r typology=%s size_exists=%s",

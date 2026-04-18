@@ -1707,3 +1707,23 @@ Alembic `026_material_short_name_typology.py`:
 - ADD `materials.short_name`, `sizes.diameter_mm`, `material_transactions.delivery_name`.
 - Backfill: for `material_type='stone'`, derive `short_name` from existing `name` via parser; default to `name` for non-stone.
 - Map legacy `product_subtype` values: `tiles→tiles`, `sinks→sink`, `table_top→countertop`, `custom→freeform`.
+
+### 3D design picker (addendum)
+
+3D tiles of identical geometry can still differ by **design** (e.g. "Дизайн 1"
+and "Дизайн 2" sharing `5×20×1-2`). Materials are therefore discriminated on
+`(size_id, product_subtype='3d', design_id)` — enforced by the partial unique
+index `uq_materials_size_typology_design` (see `stone_designs_patch`).
+
+**Delivery matching rule for 3D:** the matcher refuses auto-match — delivery
+notes rarely name the design, and picking "the first material with this
+short_name" would silently corrupt the wrong balance. Instead the matcher
+returns `needs_design_choice=true`; the UI/bot presents a design picker and
+only after a choice (existing design / new design / no design) does it
+find-or-create the Material for `(size_id, '3d', design_id)` and record the
+receipt transaction against it.
+
+Where implemented:
+- `business/services/material_matcher.py` — `needs_design_choice` flag; `matched=false` forced for 3D.
+- `business/services/telegram_bot.py` — `_send_design_picker` + `ddesign:*` callback + `_resolve_material_for_design` find-or-create.
+- Web "Scan Delivery Note" uses the existing `DesignPicker` component — see `presentation/dashboard/src/components/material/DesignPicker.tsx`.

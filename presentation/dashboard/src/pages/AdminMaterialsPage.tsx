@@ -606,7 +606,12 @@ function CatalogTab() {
                   className="bg-white transition-colors hover:bg-gray-50"
                 >
                   <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '—'}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-gray-900">{m.short_name || m.name}</div>
+                    {m.short_name && m.short_name !== m.name && (
+                      <div className="text-xs text-gray-400 mt-0.5">{m.name}</div>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
                       {typeIcon(m.material_type)} {typeLabel(m.material_type)}
@@ -1169,7 +1174,12 @@ function StockByFactoryTab() {
                       className={`bg-white transition-colors hover:bg-gray-50 ${m.is_low_stock ? 'bg-red-50 hover:bg-red-50' : ''}`}
                     >
                       <td className="px-4 py-3 font-mono text-xs text-indigo-600">{m.material_code ?? '—'}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900">{m.short_name || m.name}</div>
+                        {m.short_name && m.short_name !== m.name && (
+                          <div className="text-xs text-gray-400 mt-0.5">{m.name}</div>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-xs text-gray-500">{typeLabel(m.material_type)}</td>
                       <td
                         className={`px-4 py-3 text-right font-mono font-semibold ${m.is_low_stock ? 'text-red-600' : 'text-gray-900'}`}

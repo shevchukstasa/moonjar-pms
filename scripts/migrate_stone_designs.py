@@ -44,12 +44,12 @@ from business.services.material_naming import build_short_name_from_raw
 
 
 DEFAULT_DESIGNS = [
-    {"code": "design-1", "name": "Дизайн 1", "name_id": "Desain 1", "typology": "3d",
-     "description": "Первый 3D-узор"},
-    {"code": "design-2", "name": "Дизайн 2", "name_id": "Desain 2", "typology": "3d",
-     "description": "Второй 3D-узор"},
-    {"code": "design-3", "name": "Дизайн 3", "name_id": "Desain 3", "typology": "3d",
-     "description": "Третий 3D-узор"},
+    {"code": "design-1", "name": "Design 1", "name_id": "Desain 1", "typology": "3d",
+     "description": "First 3D pattern"},
+    {"code": "design-2", "name": "Design 2", "name_id": "Desain 2", "typology": "3d",
+     "description": "Second 3D pattern"},
+    {"code": "design-3", "name": "Design 3", "name_id": "Desain 3", "typology": "3d",
+     "description": "Third 3D pattern"},
 ]
 
 # Explicit material → design code mapping. Anything not listed keeps its

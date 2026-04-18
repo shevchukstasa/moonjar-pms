@@ -3365,7 +3365,8 @@ async def _handle_delivery_photo(
     try:
         matches = await match_delivery_items(
             items=[{"name": i.get("material_name", i.get("name", "")),
-                    "quantity": i.get("quantity", 0), "unit": i.get("unit", "pcs")}
+                    "quantity": i.get("quantity", 0), "unit": i.get("unit", "pcs"),
+                    "keterangan": i.get("keterangan")}
                    for i in items_raw],
             db_materials=db_materials, supplier_name=supplier_name, db_sizes=db_sizes,
         )
@@ -3427,6 +3428,9 @@ async def _handle_delivery_photo(
                 "parsed_thickness_raw": item.get("parsed_thickness_raw"),
                 "parsed_diameter_mm": item.get("parsed_diameter_mm"),
                 "parsed_shape": item.get("parsed_shape"),
+                # Keterangan column from the surat jalan — e.g. "H+PROFIL",
+                # "Profil 4" — used as a design hint by the picker.
+                "keterangan": item.get("keterangan"),
             })
             continue
 
@@ -3734,8 +3738,14 @@ async def _send_design_picker(
 
     Lists active `StoneDesign` rows matching typology=3d (plus designs with
     NULL typology), then "+ new design" and "✕ no design" rows.
+
+    When the surat jalan Keterangan column yielded a hint (e.g. "Profil 4"),
+    we show it in the prompt and — if it matches an existing StoneDesign by
+    name/code — pin that design at the top. If no existing design matches we
+    offer a one-tap "create from hint" button.
     """
     from api.models import StoneDesign
+    from sqlalchemy import func
 
     designs = (
         db.query(StoneDesign)
@@ -3749,10 +3759,48 @@ async def _send_design_picker(
     if di.get("suggested_size_name"):
         text += f"\n{di['suggested_size_name']}"
 
+    # ── Keterangan-driven hint ─────────────────────────────────────
+    hint = (di.get("keterangan") or "").strip()
+    hint_match: StoneDesign | None = None
+    if hint:
+        text += f"\n\U0001f4a1 {hint}"
+        hint_lc = hint.lower()
+        hint_match = (
+            db.query(StoneDesign)
+            .filter(StoneDesign.is_active.is_(True))
+            .filter(
+                (func.lower(StoneDesign.code) == hint_lc)
+                | (func.lower(StoneDesign.name) == hint_lc)
+                | (func.lower(StoneDesign.name_id) == hint_lc)
+            )
+            .first()
+        )
+
     ui_idx = di["index"]
     rows: list[list[dict]] = []
+
+    # Hint row — pinned at top
+    if hint_match:
+        rows.append([{
+            "text": f"\U0001f3af {hint_match.name}",
+            "callback_data": f"ddesign:{delivery_id}:{ui_idx}:{hint_match.id}",
+        }])
+    elif hint:
+        # Telegram callback_data cap ≈ 64 bytes → store hint in session,
+        # reference it via a short key so the callback stays small.
+        sess = _pending_deliveries.get(delivery_id)
+        if sess is not None:
+            sess.setdefault("design_hint_by_idx", {})[ui_idx] = hint
+        rows.append([{
+            "text": f"\u2728 {hint[:28]}",
+            "callback_data": f"ddesign:{delivery_id}:{ui_idx}:fromhint",
+        }])
+
+    # Existing designs — skip the one already pinned as hint_match
     row: list[dict] = []
     for d in designs:
+        if hint_match and d.id == hint_match.id:
+            continue
         row.append({
             "text": d.name,
             "callback_data": f"ddesign:{delivery_id}:{ui_idx}:{d.id}",
@@ -4212,7 +4260,42 @@ async def _handle_delivery_callback(
             await _send_message(chat_id, msg("design_new_prompt", lang), parse_mode="")
             return
 
-        design_id = None if design_arg == "none" else design_arg
+        # "fromhint" → create StoneDesign from Keterangan hint and apply
+        if design_arg == "fromhint":
+            hint = (pending.get("design_hint_by_idx") or {}).get(item_index, "").strip()
+            if not hint:
+                await answer_callback_query(callback_id, msg("item_not_found", lang))
+                return
+            try:
+                from api.models import StoneDesign
+                import re as _re
+                slug = _re.sub(r"[^a-z0-9]+", "-", hint.lower()).strip("-")[:50] or "design"
+                existing = db.query(StoneDesign).filter(StoneDesign.code == slug).first()
+                if existing:
+                    new_design = existing
+                else:
+                    new_design = StoneDesign(
+                        code=slug,
+                        name=hint[:100],
+                        typology="3d",
+                        is_active=True,
+                    )
+                    db.add(new_design)
+                    db.flush()
+                db.commit()
+                design_id = str(new_design.id)
+            except Exception as e:
+                db.rollback()
+                logger.error("fromhint design create failed: %s", e, exc_info=True)
+                await answer_callback_query(callback_id, msg("error_occurred", lang))
+                await _send_message(
+                    chat_id,
+                    msg("design_create_failed", lang, error=str(e)),
+                    parse_mode="",
+                )
+                return
+        else:
+            design_id = None if design_arg == "none" else design_arg
 
         # Resolve Material for this (size, 3d, design_id) pair
         try:

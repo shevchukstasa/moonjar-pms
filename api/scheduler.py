@@ -1008,6 +1008,29 @@ def _send_evening_summary(db, factory):
     if forum_group:
         send_telegram_message(forum_group, msg, message_thread_id=daily_topic)
 
+    # DM owners in their own language (group speaks `factory_lang`, but the
+    # owner may prefer Russian and get lost in an Indonesian group message).
+    from api.models import User
+    from api.enums import UserRole, LanguagePreference
+    owners = (
+        db.query(User)
+        .filter(
+            User.role == UserRole.OWNER.value,
+            User.is_active.is_(True),
+            User.telegram_user_id.isnot(None),
+        )
+        .all()
+    )
+    for owner in owners:
+        owner_lang = getattr(owner.language, "value", owner.language) or "en"
+        if owner_lang == factory_lang:
+            continue  # already delivered in the group
+        owner_msg = msgs.get(owner_lang, msgs["en"])
+        try:
+            send_telegram_message(int(owner.telegram_user_id), owner_msg)
+        except Exception as e:
+            logger.warning("Evening DM to owner %s failed: %s", owner.id, e)
+
     logger.info("Evening summary sent for %s: %d done, %d shipped", factory.name, done_today, shipped)
 
 

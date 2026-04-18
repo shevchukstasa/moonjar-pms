@@ -126,6 +126,10 @@ def _serialize_material(mat: Material, stock: MaterialStock | None, db: Session,
         "supplier_id": str(mat.supplier_id) if mat.supplier_id else None,
         "supplier_name": supplier_name,
         "size_id": str(mat.size_id) if mat.size_id else None,
+        "design_id": str(mat.design_id) if getattr(mat, "design_id", None) else None,
+        "design_name": (mat.design.name if getattr(mat, "design", None) else None),
+        "design_code": (mat.design.code if getattr(mat, "design", None) else None),
+        "design_photo_url": (mat.design.photo_url if getattr(mat, "design", None) else None),
         "is_low_stock": available < min_bal if min_bal > 0 else False,
         "created_at": mat.created_at.isoformat() if mat.created_at else None,
         "updated_at": (stock.updated_at if stock else mat.updated_at).isoformat() if (stock or mat) else None,
@@ -176,6 +180,10 @@ def _serialize_material_aggregate(mat: Material, stocks: list[MaterialStock], db
         "unit": mat.unit,
         "material_type": _ev(mat.material_type),
         "product_subtype": getattr(mat, 'product_subtype', None),
+        "design_id": str(mat.design_id) if getattr(mat, "design_id", None) else None,
+        "design_name": (mat.design.name if getattr(mat, "design", None) else None),
+        "design_code": (mat.design.code if getattr(mat, "design", None) else None),
+        "design_photo_url": (mat.design.photo_url if getattr(mat, "design", None) else None),
         "subgroup_id": subgroup_id,
         "subgroup_name": subgroup_name,
         "group_name": group_name,
@@ -246,6 +254,7 @@ class MaterialUpdateInput(BaseModel):
     supplier_id: Optional[UUID] = None
     size_id: Optional[UUID] = None
     product_subtype: Optional[str] = None
+    design_id: Optional[UUID] = None
 
 
 class TransactionInput(BaseModel):
@@ -1387,7 +1396,7 @@ async def update_material(
 
     # Catalog-level fields
     catalog_fields = {'name', 'short_name', 'full_name', 'unit', 'supplier_id',
-                      'product_subtype', 'size_id'}
+                      'product_subtype', 'size_id', 'design_id'}
     # Stock-level fields
     stock_fields = {'balance', 'min_balance', 'min_balance_auto', 'warehouse_section'}
 

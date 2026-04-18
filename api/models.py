@@ -453,6 +453,28 @@ class MaterialSubgroup(Base):
     materials = relationship('Material', back_populates='subgroup')
 
 
+class StoneDesign(Base):
+    """Catalog of 3D/variant designs for stone materials.
+
+    Two stone materials of the same size can coexist when they differ by
+    design (e.g. two 3D relief patterns sharing "5×20×1-2" geometry).
+    Photos are optional — UI must work without them.
+    """
+    __tablename__ = 'stone_designs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code = Column(sa.String(50), nullable=False, unique=True)
+    name = Column(sa.String(100), nullable=False)
+    name_id = Column(sa.String(100), nullable=True)  # Indonesian translation for masters
+    typology = Column(sa.String(30), nullable=True)   # '3d', 'tiles', etc — restricts where applicable (nullable = any)
+    photo_url = Column(sa.String(500), nullable=True)
+    description = Column(sa.Text, nullable=True)
+    display_order = Column(sa.Integer, nullable=False, default=0)
+    is_active = Column(sa.Boolean, nullable=False, default=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+
 class Material(Base):
     """Shared material catalog — name, type, unit, supplier (no factory scope)."""
     __tablename__ = 'materials'
@@ -470,12 +492,14 @@ class Material(Base):
     subgroup_id = Column(UUID(as_uuid=True), ForeignKey('material_subgroups.id'))
     supplier_id = Column(UUID(as_uuid=True), ForeignKey('suppliers.id'))
     size_id = Column(UUID(as_uuid=True), ForeignKey('sizes.id'), nullable=True)
+    design_id = Column(UUID(as_uuid=True), ForeignKey('stone_designs.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
     supplier = relationship('Supplier', foreign_keys=[supplier_id])
     subgroup = relationship('MaterialSubgroup', back_populates='materials')
     size = relationship('Size', foreign_keys=[size_id])
+    design = relationship('StoneDesign', foreign_keys=[design_id])
     stocks = relationship('MaterialStock', back_populates='material', cascade='all, delete-orphan')
 
 

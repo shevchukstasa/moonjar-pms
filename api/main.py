@@ -90,6 +90,7 @@ from api.routers import factory_calendar
 from api.routers import guides
 from api.routers import admin_settings
 from api.routers import delivery
+from api.routers import designs
 from api.routers import employees
 from api.routers import mana_shipments
 from api.routers import pdf_templates
@@ -1880,6 +1881,7 @@ async def lifespan(app: FastAPI):
         ("drying_logic", "api.schema_patches.drying_logic_patch", "apply"),
         ("material_substitution", "api.schema_patches.material_substitution_patch", "run"),
         ("material_full_name", "api.schema_patches.material_full_name_patch", "run"),
+        ("stone_designs", "api.schema_patches.stone_designs_patch", "apply"),
     ]
 
     # Inline patches (too small for separate files)
@@ -2053,6 +2055,7 @@ def setup_routers():
     app.include_router(positions.router, prefix="/api/positions", tags=["positions"])
     app.include_router(schedule.router, prefix="/api/schedule", tags=["schedule"])
     app.include_router(materials.router, prefix="/api/materials", tags=["materials"])
+    app.include_router(designs.router, prefix="/api/designs", tags=["designs"])
     app.include_router(recipes.router, prefix="/api/recipes", tags=["recipes"])
     app.include_router(quality.router, prefix="/api/quality", tags=["quality"])
     app.include_router(defects.router, prefix="/api/defects", tags=["defects"])

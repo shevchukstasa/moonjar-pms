@@ -301,20 +301,23 @@ def build_size_label(parsed: ParsedStoneName) -> str:
     return ""
 
 
-def build_short_name(parsed: ParsedStoneName) -> str:
+def build_short_name(parsed: ParsedStoneName, design_name: str | None = None) -> str:
     """Build canonical short_name. Always "Lava Stone {size}" for stone.
 
+    If design_name is provided, appends " · {design_name}" as a discriminator
+    so materials of same size but different 3D variants/patterns stay distinct.
     Falls back to "Lava Stone Freeform" when no size could be parsed.
     """
     label = build_size_label(parsed)
-    if label:
-        return f"{parsed.base} {label}"[:100]
-    return f"{parsed.base} Freeform"[:100]
+    core = f"{parsed.base} {label}" if label else f"{parsed.base} Freeform"
+    if design_name:
+        core = f"{core} · {design_name.strip()}"
+    return core[:100]
 
 
-def build_short_name_from_raw(raw_name: str) -> str:
+def build_short_name_from_raw(raw_name: str, design_name: str | None = None) -> str:
     """Convenience: parse + build_short_name in one call."""
-    return build_short_name(parse_stone_delivery_name(raw_name))
+    return build_short_name(parse_stone_delivery_name(raw_name), design_name=design_name)
 
 
 __all__ = [

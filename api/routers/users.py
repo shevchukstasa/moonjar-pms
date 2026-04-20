@@ -36,6 +36,7 @@ def _serialize_user(user: User, db: Session) -> dict:
         "name": user.name,
         "role": _ev(user.role),
         "language": _ev(user.language),
+        "telegram_user_id": user.telegram_user_id,
         "is_active": user.is_active,
         "totp_enabled": user.totp_enabled,
         "created_at": user.created_at.isoformat() if user.created_at else None,
@@ -274,3 +275,30 @@ async def admin_reset_password(
     user.updated_at = datetime.now(timezone.utc)
     db.commit()
     return {"status": "ok", "message": f"Password reset for {user.email}"}
+
+
+@router.post("/debug/fire-evening-summary")
+async def debug_fire_evening_summary(
+    data: dict | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Manually trigger `_send_evening_summary` for a factory — debugging only.
+
+    Body: {"factory_id": "<uuid>"}  (defaults to the first factory the user
+    has access to). Useful to verify owner DM delivery without waiting for
+    18:00 local.
+    """
+    from api.scheduler import _send_evening_summary
+    from api.models import Factory
+
+    factory_id = (data or {}).get("factory_id") if data else None
+    if factory_id:
+        factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    else:
+        factory = db.query(Factory).first()
+    if not factory:
+        raise HTTPException(404, "Factory not found")
+
+    _send_evening_summary(db, factory)
+    return {"status": "ok", "factory": factory.name}

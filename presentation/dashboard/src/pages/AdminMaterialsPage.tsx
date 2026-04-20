@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMaterials, useCreateMaterial, useUpdateMaterial, useDeleteMaterial, useCreateTransaction, type MaterialItem } from '@/hooks/useMaterials';
 import {
   useMaterialHierarchy,
@@ -238,6 +238,9 @@ export default function AdminMaterialsPage() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function CatalogTab() {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
   // Hierarchy for dynamic tabs & form dropdown
   const { data: hierarchy, isLoading: hierarchyLoading } = useMaterialHierarchy();
   const subgroups = useMemo(() => flatSubgroups(hierarchy), [hierarchy]);
@@ -303,6 +306,28 @@ function CatalogTab() {
 
   const [csvOpen, setCsvOpen] = useState(false);
   const csvQueryClient = useQueryClient();
+
+  // Auto-open Add Material dialog when landed with ?new=1 (from Bulk Receive).
+  // Runs once on first render when the query flag is present.
+  useEffect(() => {
+    if (searchParams.get('new') === '1' && !editDialog.open) {
+      const sg = subgroups.find((s) => s.value === (searchParams.get('type') || ''));
+      setForm({
+        ...emptyCatalogForm,
+        material_type: searchParams.get('type') || '',
+        subgroup_id: sg?.subgroupId ?? '',
+      });
+      setFormError('');
+      setShortNameTouched(false);
+      setEditDialog({ open: true, item: null });
+      // Drop the `new` flag so refresh doesn't re-open; keep return_to for save handler
+      const next = new URLSearchParams(searchParams);
+      next.delete('new');
+      next.delete('type');
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subgroups]);
 
   // ── Edit/create helpers ─────────────────────────────────────────────────
 
@@ -450,19 +475,31 @@ function CatalogTab() {
     try {
       if (editDialog.item) {
         await updateMaterial.mutateAsync({ id: editDialog.item.id, data: payload });
+        closeEdit();
       } else {
         // Create with default 0 balance (stocks auto-created for all factories)
         payload.balance = 0;
         payload.min_balance = 0;
-        await createMaterial.mutateAsync(payload);
+        const created = await createMaterial.mutateAsync(payload);
+        closeEdit();
+        // Round-trip: if opened from Bulk Receive, return with the new material id
+        if (searchParams.get('return_to') === 'bulk_receive') {
+          const createdId =
+            (created as unknown as { id?: string })?.id ||
+            (created as unknown as { material_id?: string })?.material_id;
+          if (createdId) {
+            navigate(`/manager/materials?bulk_receive_add=${createdId}`);
+          } else {
+            navigate('/manager/materials?bulk_receive_add=refresh');
+          }
+        }
       }
-      closeEdit();
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data
         ?.detail;
       setFormError(detail ?? 'Save failed');
     }
-  }, [form, editDialog.item, createMaterial, updateMaterial, closeEdit]);
+  }, [form, editDialog.item, createMaterial, updateMaterial, closeEdit, searchParams, navigate]);
 
   // ── Delete ──────────────────────────────────────────────────────────────
 

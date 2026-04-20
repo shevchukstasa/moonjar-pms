@@ -266,6 +266,33 @@ export default function ManagerMaterialsPage() {
     return items.filter((m) => m.subgroup_id === bulkSubgroupId);
   }, [items, bulkSubgroupId]);
 
+  // Build an enriched label for each material so the dropdown carries size +
+  // thickness + shape + design + unit — the stuff needed to tell similar
+  // stones apart without expanding the row.
+  const bulkLabelFor = useCallback((m: MaterialItem) => {
+    const matAny = m as unknown as Record<string, unknown>;
+    const sizeId = matAny.size_id as string | undefined;
+    const size = sizeId ? sizeById.get(sizeId) : undefined;
+    const designName = (matAny.design_name as string | null) || null;
+    const parts: string[] = [m.short_name || m.name];
+    if (size) {
+      if (size.diameter_mm) {
+        parts.push(
+          `Ø${size.diameter_mm / 10}${size.thickness_mm ? `×${size.thickness_mm / 10}` : ''}cm`
+        );
+      } else if (size.width_mm && size.height_mm) {
+        const dims = `${size.width_mm / 10}×${size.height_mm / 10}${size.thickness_mm ? `×${size.thickness_mm / 10}` : ''}cm`;
+        parts.push(dims);
+      }
+      if (size.shape && size.shape !== 'rectangle' && size.shape !== 'round') {
+        parts.push(size.shape);
+      }
+    }
+    if (designName) parts.push(designName);
+    parts.push(m.unit);
+    return parts.join(' · ');
+  }, [sizeById]);
+
   const handleOcrFile = useCallback(async (file: File) => {
     if (!file) return;
     setOcrError('');
@@ -596,6 +623,49 @@ export default function ManagerMaterialsPage() {
       setSearchParams(searchParams, { replace: true });
     }
   }, [searchParams, items, openTx, setSearchParams]);
+
+  // Round-trip from Admin → Add Material → back here with ?bulk_receive_add=<id>
+  // Restores the saved Bulk Receive state and appends a row pre-selected to
+  // the material the user just created.
+  useEffect(() => {
+    const newMid = searchParams.get('bulk_receive_add');
+    if (!newMid || !items.length) return;
+    const saved = sessionStorage.getItem('pending_bulk_receive');
+    sessionStorage.removeItem('pending_bulk_receive');
+    // Restore state (supplier/date/ref/subgroup/items) if present
+    if (saved) {
+      try {
+        const s = JSON.parse(saved) as {
+          supplier_id?: string; subgroup_id?: string;
+          date?: string; ref?: string; items?: BulkItem[];
+        };
+        if (s.supplier_id !== undefined) setBulkSupplierId(s.supplier_id);
+        if (s.subgroup_id !== undefined) setBulkSubgroupId(s.subgroup_id);
+        if (s.date) setBulkDate(s.date);
+        if (s.ref !== undefined) setBulkRef(s.ref);
+        if (s.items && s.items.length) setBulkItems(s.items);
+      } catch {
+        // Malformed — ignore, dialog will open with defaults
+      }
+    }
+    // Always append the newly-created material as an empty row
+    if (newMid !== 'refresh') {
+      setBulkItems((prev) => {
+        const rows = [...prev];
+        // Drop trailing blank row if any, then add new material
+        while (rows.length && !rows[rows.length - 1].material_id && !rows[rows.length - 1].quantity) {
+          rows.pop();
+        }
+        rows.push({ material_id: newMid, quantity: '', notes: '' });
+        // Guarantee at least one blank row for further additions
+        rows.push({ material_id: '', quantity: '', notes: '' });
+        return rows;
+      });
+    }
+    setBulkDialog(true);
+    searchParams.delete('bulk_receive_add');
+    setSearchParams(searchParams, { replace: true });
+  }, [searchParams, items, setSearchParams]);
 
   const closeTx = useCallback(() => {
     setTxDialog({ open: false, item: null });
@@ -1532,11 +1602,29 @@ export default function ManagerMaterialsPage() {
             </div>
             <button
               type="button"
-              onClick={() => window.open('/admin/materials', '_blank')}
+              onClick={() => {
+                // Persist current Bulk Receive state so we can restore it after
+                // returning from the Add Material dialog.
+                sessionStorage.setItem(
+                  'pending_bulk_receive',
+                  JSON.stringify({
+                    supplier_id: bulkSupplierId,
+                    subgroup_id: bulkSubgroupId,
+                    date: bulkDate,
+                    ref: bulkRef,
+                    items: bulkItems,
+                  }),
+                );
+                // Pass subgroup → material_type hint so the new-material dialog
+                // pre-selects the right subgroup/type.
+                const sg = subgroups.find((s) => s.subgroupId === bulkSubgroupId);
+                const typeParam = sg?.value ? `&type=${sg.value}` : '';
+                navigate(`/admin/materials?new=1&return_to=bulk_receive${typeParam}`);
+              }}
               className="h-[38px] rounded border border-dashed border-gray-300 px-3 text-sm text-gray-600 hover:border-indigo-400 hover:text-indigo-600 transition whitespace-nowrap"
-              title="Open Materials admin in a new tab to create a new material"
+              title="Open Add Material dialog and return here with the new row"
             >
-              + Create new material ↗
+              + Create new material →
             </button>
           </div>
 
@@ -1585,7 +1673,7 @@ export default function ManagerMaterialsPage() {
                           <option value="">— select material —</option>
                           {bulkEligibleMaterials.map((m) => (
                             <option key={m.id} value={m.id}>
-                              {m.short_name || m.name} · {m.unit}
+                              {bulkLabelFor(m)}
                             </option>
                           ))}
                         </select>

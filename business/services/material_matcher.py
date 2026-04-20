@@ -471,6 +471,7 @@ async def find_best_match(
     threshold: float = 0.4,
     supplier_name: str | None = None,
     db_sizes: list[dict] | None = None,
+    keterangan: str | None = None,
 ) -> dict:
     """
     Find the best matching material from the database.
@@ -522,6 +523,7 @@ async def find_best_match(
             db_materials=db_materials,
             db_sizes=db_sizes or [],
             supplier_type=supplier_type,
+            keterangan=keterangan,
         )
 
     logger.debug(
@@ -757,6 +759,7 @@ async def match_delivery_items(
     """
     results = []
     for item in items:
+        keterangan = item.get("keterangan")
         result = await find_best_match(
             delivery_name=item["name"],
             delivery_qty=item.get("quantity", 0),
@@ -765,10 +768,10 @@ async def match_delivery_items(
             threshold=threshold,
             supplier_name=supplier_name,
             db_sizes=db_sizes,
+            keterangan=keterangan,
         )
         # Carry keterangan (edge profile / shape / design hint) forward so the
         # bot can show it and pre-fill design picker on 3D tiles.
-        keterangan = item.get("keterangan")
         if keterangan:
             result["keterangan"] = keterangan
         results.append(result)
@@ -1033,6 +1036,7 @@ async def smart_match_stone_item(
     db_materials: list[dict],
     db_sizes: list[dict],
     supplier_type: str | None = None,
+    keterangan: str | None = None,
 ) -> dict:
     """
     Smart matching for STONE materials using canonical short_name lookup.
@@ -1073,6 +1077,32 @@ async def smart_match_stone_item(
     product_type = parsed_obj.typology
     needs_user_choice = parsed_obj.needs_typology_choice
     diameter = diameter_cm  # alias for code below that uses cm-scale values
+
+    # ── Keterangan-driven overrides (from the surat jalan notes column) ──
+    # Handwritten keterangan often carries the true typology / shape hint —
+    # "wastafel smooth" → sink, "oktagon" → octagon tiles, "triangel" → triangle,
+    # "sample" tags a non-standard piece, etc. The size-based auto-detection
+    # in material_naming cannot see this text, so apply overrides here.
+    parsed_shape = parsed_obj.shape
+    keterangan_lc = (keterangan or "").lower()
+    if keterangan_lc:
+        if any(w in keterangan_lc for w in ("wastafel", "sink", "washbasin")):
+            product_type = "sink"
+            needs_user_choice = False
+        elif "countertop" in keterangan_lc or "table top" in keterangan_lc:
+            product_type = "countertop"
+            needs_user_choice = False
+        elif "sample" in keterangan_lc:
+            # Samples are small standalone pieces; treat as tiles but remember
+            # they're samples via keterangan (logged downstream).
+            if product_type is None:
+                product_type = "tiles"
+                needs_user_choice = False
+        # Shape overrides — keep typology but annotate shape for Size creation.
+        if "oktagon" in keterangan_lc or "octagon" in keterangan_lc:
+            parsed_shape = "octagon"
+        elif "triangel" in keterangan_lc or "triangle" in keterangan_lc:
+            parsed_shape = "triangle"
 
     logger.debug(
         "smart_match_stone: delivery=%r, parsed=%s",
@@ -1125,6 +1155,12 @@ async def smart_match_stone_item(
         if not mat_short:
             mat_short = nm.build_short_name_from_raw(mat.get("name") or "").lower().strip()
         if mat_short == target:
+            # Don't collapse typologies — same short_name with different
+            # product_subtype is a different Material (sink vs tile, etc.).
+            # When we know the incoming typology, require it to match.
+            mat_subtype = (mat.get("product_subtype") or "").lower()
+            if product_type and mat_subtype and mat_subtype != product_type:
+                continue
             matched_material = mat
             break
         # Same base + same size_id → list as alternative
@@ -1179,7 +1215,7 @@ async def smart_match_stone_item(
         "parsed_thickness_mm": parsed_obj.thickness_mm,
         "parsed_thickness_raw": parsed_obj.thickness_raw,
         "parsed_diameter_mm": parsed_obj.diameter_mm,
-        "parsed_shape": parsed_obj.shape,
+        "parsed_shape": parsed_shape,
         "suggested_product_type": product_type,
         "needs_user_choice": needs_user_choice,
         "parsed_color": color,

@@ -20,7 +20,7 @@ import httpx
 logger = logging.getLogger("moonjar.photo_analysis")
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+ANTHROPIC_MODEL = "claude-sonnet-4-5"
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 OPENAI_VISION_MODEL_OCR = "gpt-4.1-nano"    # Cheap OCR for delivery/scale/packing (~$0.10/1M)
 OPENAI_VISION_MODEL_QUALITY = "gpt-4.1"    # Smart analysis for quality/defect (~$2.00/1M)
@@ -29,10 +29,10 @@ OPENAI_VISION_MODEL_QUALITY = "gpt-4.1"    # Smart analysis for quality/defect (
 _CHEAP_VISION_TYPES = {"scale", "packing"}
 # Types that need smart model (delivery with handwriting, quality defects)
 _SMART_VISION_TYPES = {"quality", "defect", "delivery"}
-# Intentionally empty — earlier attempt to route delivery through Claude Sonnet
-# returned 400 Bad Request in prod (model/media-type mismatch). OpenAI 4.1 is
-# the fallback path. Re-enable per-type here once Claude call is verified.
-_CLAUDE_FIRST_VISION_TYPES: set[str] = set()
+# Claude Sonnet goes first for handwritten surat jalan (delivery notes) —
+# noticeably better on messy Indonesian handwriting and multi-row tables
+# than GPT-4.1. OpenAI 4.1 remains the fallback if Claude errors out.
+_CLAUDE_FIRST_VISION_TYPES: set[str] = {"delivery"}
 
 # ── Prompts per analysis type ────────────────────────────────────────────
 
@@ -103,7 +103,12 @@ _DELIVERY_PROMPT = (
     "   separator exactly as on paper (x, ×, or - for ranges).\n"
     "8. unit is 'pcs' if Pcs column is used, 'm2' if only M2 is filled.\n"
     "9. Supplier appears in a header block (logo + address). Copy verbatim, e.g.\n"
-    "   'CV. BESTONE INDONESIA'. Reference number is next to 'SURAT JALAN No.'.\n\n"
+    "   'CV. BESTONE INDONESIA'. Reference number is next to 'SURAT JALAN No.'.\n"
+    "10. SELF-CHECK before answering: re-scan each row's quantity digit by digit.\n"
+    "    Common handwriting confusions: 1 vs 7, 4 vs 9, 0 vs 6, 3 vs 8. If a\n"
+    "    quantity looks like '2' but the row is clearly about bulk stone, it is\n"
+    "    more likely 2-4 digits. Small counts (1-2) appear only next to 'Sample'\n"
+    "    in Keterangan — otherwise suspect a misread.\n\n"
     "Return ONLY valid JSON (no markdown, no code fences):\n"
     '{"supplier": "<supplier name from header, verbatim, or null>",\n'
     ' "delivery_date": "<YYYY-MM-DD or null>",\n'
@@ -178,7 +183,7 @@ async def _call_openai_vision(system_prompt: str, b64_image: str, media_type: st
                 },
                 json={
                     "model": use_model,
-                    "max_tokens": 1024,
+                    "max_tokens": 4096,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {
@@ -208,6 +213,11 @@ async def _call_openai_vision(system_prompt: str, b64_image: str, media_type: st
 
 async def _call_claude_vision(system_prompt: str, b64_image: str, media_type: str, api_key: str) -> str | None:
     """Call Claude Vision API with prompt caching."""
+    # Claude Messages API only accepts image/jpeg | png | gif | webp. Fall
+    # back to jpeg for anything unexpected (HEIC, TIFF) — better to risk a
+    # cosmetic mis-parse than 400 the whole analysis.
+    if media_type not in {"image/jpeg", "image/png", "image/gif", "image/webp"}:
+        media_type = "image/jpeg"
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -219,7 +229,7 @@ async def _call_claude_vision(system_prompt: str, b64_image: str, media_type: st
                 },
                 json={
                     "model": ANTHROPIC_MODEL,
-                    "max_tokens": 1024,
+                    "max_tokens": 4096,  # delivery tables can be long
                     "system": [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
                     "messages": [{
                         "role": "user",

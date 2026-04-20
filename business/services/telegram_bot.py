@@ -301,6 +301,16 @@ MESSAGES: dict[str, dict[str, str]] = {
         "id": "#\ufe0f\u20e3 Ref",
         "ru": "#\ufe0f\u20e3 Ссылка",
     },
+    "missing_label": {
+        "en": "missing",
+        "id": "belum diisi",
+        "ru": "не распознано",
+    },
+    "header_missing_prompt": {
+        "en": "\u26a0\ufe0f Some header fields weren't recognized. Tap to fill:",
+        "id": "\u26a0\ufe0f Beberapa kolom header tidak dikenali. Ketuk untuk isi:",
+        "ru": "\u26a0\ufe0f Часть полей не распознана. Нажми, чтобы ввести:",
+    },
     "design_pick_prompt": {
         "en": "\U0001f3a8 3D position «{name}» — pick design:",
         "id": "\U0001f3a8 Posisi 3D «{name}» — pilih desain:",
@@ -3588,6 +3598,31 @@ async def _handle_delivery_photo(
 
     await send_message_with_buttons(chat_id, preview_text, keyboard, parse_mode="")
 
+    # ── Step 4b: Proactive prompts for missing header fields ─────
+    # Vision often can't read a handwritten date (date stamp missing or
+    # unreadable) or misses the reference number on a faded note. Rather
+    # than hoping the user spots the small header-edit buttons, surface
+    # each missing field as its own tap-to-fill prompt right under the
+    # preview.
+    missing_rows: list[list[dict]] = []
+    if not (readings.get("date") or "").strip():
+        missing_rows.append([{
+            "text": msg("edit_date_btn", lang) + " — " + msg("missing_label", lang),
+            "callback_data": f"delivery_edit_date:{did8}",
+        }])
+    if not (readings.get("reference_number") or "").strip():
+        missing_rows.append([{
+            "text": msg("edit_ref_btn", lang) + " — " + msg("missing_label", lang),
+            "callback_data": f"delivery_edit_ref:{did8}",
+        }])
+    if missing_rows:
+        await send_message_with_buttons(
+            chat_id,
+            msg("header_missing_prompt", lang),
+            missing_rows,
+            parse_mode="",
+        )
+
     # ── Step 5: For each unmatched item, send suggestion buttons ──
     for ui in unmatched_items:
         ui_idx = ui["index"]
@@ -5166,6 +5201,16 @@ async def _handle_header_edit_text(chat_id: int, text: str) -> None:
     if field == "supplier":
         readings["supplier"] = text
     elif field == "date":
+        # Accept DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, D/M/YY and normalize to
+        # DD/MM/YYYY for display. Invalid strings are kept verbatim so the
+        # user isn't blocked by over-strict parsing.
+        import re as _re
+        m = _re.match(r"^\s*(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})\s*$", text)
+        if m:
+            d, mo, y = m.group(1), m.group(2), m.group(3)
+            if len(y) == 2:
+                y = ("20" + y) if int(y) < 70 else ("19" + y)
+            text = f"{int(d):02d}/{int(mo):02d}/{y}"
         readings["date"] = text
         readings["delivery_date"] = text
     elif field == "reference":

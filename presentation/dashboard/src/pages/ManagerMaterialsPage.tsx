@@ -7,6 +7,7 @@ import apiClient from '@/api/client';
 import { useMaterialHierarchy, type MaterialGroup } from '@/hooks/useMaterialGroups';
 import { useFactories } from '@/hooks/useFactories';
 import { useSuppliers } from '@/hooks/useSuppliers';
+import { useSizes } from '@/hooks/useSizes';
 import { useWarehouseSections } from '@/hooks/useWarehouseSections';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -145,6 +146,15 @@ export default function ManagerMaterialsPage() {
   const { data: suppliersData } = useSuppliers();
   const suppliers = suppliersData?.items ?? [];
 
+  // Sizes — used for bulk-receive material spec preview (size/thickness/shape)
+  const { data: sizesData } = useSizes();
+  const sizes = sizesData?.items ?? [];
+  const sizeById = useMemo(() => {
+    const m = new Map<string, typeof sizes[number]>();
+    for (const s of sizes) m.set(s.id, s);
+    return m;
+  }, [sizes]);
+
   // Warehouse Sections
   const { data: warehouseSectionsData } = useWarehouseSections({ factory_id: effectiveFactoryId || undefined });
   const warehouseSections = warehouseSectionsData?.items ?? [];
@@ -228,11 +238,33 @@ export default function ManagerMaterialsPage() {
   }
   const [bulkDialog, setBulkDialog] = useState(false);
   const [bulkSupplierId, setBulkSupplierId] = useState('');
+  const [bulkSubgroupId, setBulkSubgroupId] = useState('');  // filter material dropdown by subgroup
   const [bulkDate, setBulkDate] = useState(new Date().toISOString().slice(0, 10));
   const [bulkRef, setBulkRef] = useState('');
   const [bulkItems, setBulkItems] = useState<BulkItem[]>([{ material_id: '', quantity: '', notes: '' }]);
   const [bulkError, setBulkError] = useState('');
   const [bulkSaving, setBulkSaving] = useState(false);
+
+  // Auto-fill category when supplier is picked: if supplier has exactly one
+  // linked subgroup, use it; otherwise clear the filter so user picks manually.
+  useEffect(() => {
+    if (!bulkSupplierId) {
+      setBulkSubgroupId('');
+      return;
+    }
+    const sup = suppliers.find((s) => s.id === bulkSupplierId);
+    if (sup && sup.subgroup_ids && sup.subgroup_ids.length === 1) {
+      setBulkSubgroupId(sup.subgroup_ids[0]);
+    } else {
+      setBulkSubgroupId('');
+    }
+  }, [bulkSupplierId, suppliers]);
+
+  // Filter material dropdown by selected subgroup (category).
+  const bulkEligibleMaterials = useMemo(() => {
+    if (!bulkSubgroupId) return items;
+    return items.filter((m) => m.subgroup_id === bulkSubgroupId);
+  }, [items, bulkSubgroupId]);
 
   const handleOcrFile = useCallback(async (file: File) => {
     if (!file) return;
@@ -1478,6 +1510,36 @@ export default function ManagerMaterialsPage() {
             </div>
           </div>
 
+          {/* Category filter — auto-set from supplier, user can override */}
+          <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Category
+                <span className="ml-1 text-xs font-normal text-gray-400">
+                  {bulkSupplierId && bulkSubgroupId
+                    ? '(auto-filled from supplier)'
+                    : '(filter material list)'}
+                </span>
+              </label>
+              <Select
+                options={[
+                  { value: '', label: '— all categories —' },
+                  ...subgroupOptions,
+                ]}
+                value={bulkSubgroupId}
+                onChange={(e) => setBulkSubgroupId(e.target.value)}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => window.open('/admin/materials', '_blank')}
+              className="h-[38px] rounded border border-dashed border-gray-300 px-3 text-sm text-gray-600 hover:border-indigo-400 hover:text-indigo-600 transition whitespace-nowrap"
+              title="Open Materials admin in a new tab to create a new material"
+            >
+              + Create new material ↗
+            </button>
+          </div>
+
           {/* Items table */}
           <div className="rounded-lg border border-gray-200 overflow-hidden">
             <table className="w-full text-sm">
@@ -1492,9 +1554,25 @@ export default function ManagerMaterialsPage() {
               <tbody className="divide-y divide-gray-100">
                 {bulkItems.map((row, idx) => {
                   const mat = items.find((m) => m.id === row.material_id);
+                  // Build one-line spec summary for stone/custom materials so the
+                  // user can verify size/typology/design before confirming quantity.
+                  const matAny = mat as unknown as Record<string, unknown> | undefined;
+                  const typology = (matAny?.product_subtype as string | null) || null;
+                  const designName = (matAny?.design_name as string | null) || null;
+                  const matSize = matAny?.size_id ? sizeById.get(matAny.size_id as string) : undefined;
+                  const sizeInfo = matSize && (() => {
+                    const w = matSize.width_mm;
+                    const h = matSize.height_mm;
+                    const t = matSize.thickness_mm;
+                    const d = matSize.diameter_mm;
+                    const shape = matSize.shape;
+                    if (d) return `Ø${d / 10}cm${t ? `×${t / 10}cm` : ''}${shape && shape !== 'round' ? ` ${shape}` : ''}`;
+                    if (w && h) return `${w / 10}×${h / 10}cm${t ? `×${t / 10}cm` : ''}${shape && shape !== 'rectangle' ? ` ${shape}` : ''}`;
+                    return null;
+                  })();
                   return (
                     <tr key={idx}>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 align-top">
                         <select
                           value={row.material_id}
                           onChange={(e) =>
@@ -1505,14 +1583,41 @@ export default function ManagerMaterialsPage() {
                           className="w-full rounded border border-gray-200 px-2 py-1 text-xs"
                         >
                           <option value="">— select material —</option>
-                          {items.map((m) => (
+                          {bulkEligibleMaterials.map((m) => (
                             <option key={m.id} value={m.id}>
-                              {m.short_name || m.name} ({m.unit})
+                              {m.short_name || m.name} · {m.unit}
                             </option>
                           ))}
                         </select>
+                        {mat && (
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
+                            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-indigo-700">
+                              {mat.unit}
+                            </span>
+                            {sizeInfo && (
+                              <span className="rounded-full bg-gray-100 px-2 py-0.5">
+                                {sizeInfo}
+                              </span>
+                            )}
+                            {typology && (
+                              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">
+                                {typology}
+                              </span>
+                            )}
+                            {designName && (
+                              <span className="rounded-full bg-purple-50 px-2 py-0.5 text-purple-700">
+                                · {designName}
+                              </span>
+                            )}
+                            {mat.supplier_name && (
+                              <span className="text-gray-400">
+                                from {mat.supplier_name}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 align-top">
                         <div className="flex items-center justify-end gap-1">
                           <input
                             type="number"

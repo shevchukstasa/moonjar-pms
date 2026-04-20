@@ -1615,11 +1615,17 @@ export default function ManagerMaterialsPage() {
                     items: bulkItems,
                   }),
                 );
-                // Pass subgroup → material_type hint so the new-material dialog
-                // pre-selects the right subgroup/type.
+                // Pass subgroup → material_type hint and supplier so the
+                // new-material dialog pre-fills the category and supplier the
+                // manager has already chosen in Bulk Receive.
                 const sg = subgroups.find((s) => s.subgroupId === bulkSubgroupId);
-                const typeParam = sg?.value ? `&type=${sg.value}` : '';
-                navigate(`/admin/materials?new=1&return_to=bulk_receive${typeParam}`);
+                const params = new URLSearchParams({
+                  new: '1',
+                  return_to: 'bulk_receive',
+                });
+                if (sg?.value) params.set('type', sg.value);
+                if (bulkSupplierId) params.set('supplier', bulkSupplierId);
+                navigate(`/admin/materials?${params.toString()}`);
               }}
               className="h-[38px] rounded border border-dashed border-gray-300 px-3 text-sm text-gray-600 hover:border-indigo-400 hover:text-indigo-600 transition whitespace-nowrap"
               title="Open Add Material dialog and return here with the new row"

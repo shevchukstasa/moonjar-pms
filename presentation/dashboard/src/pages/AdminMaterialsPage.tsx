@@ -308,22 +308,28 @@ function CatalogTab() {
   const csvQueryClient = useQueryClient();
 
   // Auto-open Add Material dialog when landed with ?new=1 (from Bulk Receive).
-  // Runs once on first render when the query flag is present.
+  // Pre-fills category (type), supplier — whatever the caller already chose,
+  // so the manager doesn't re-enter the same data twice.
   useEffect(() => {
     if (searchParams.get('new') === '1' && !editDialog.open) {
-      const sg = subgroups.find((s) => s.value === (searchParams.get('type') || ''));
+      const typeParam = searchParams.get('type') || '';
+      const supplierParam = searchParams.get('supplier') || '';
+      const sg = subgroups.find((s) => s.value === typeParam);
       setForm({
         ...emptyCatalogForm,
-        material_type: searchParams.get('type') || '',
+        material_type: typeParam,
         subgroup_id: sg?.subgroupId ?? '',
+        supplier_id: supplierParam,
       });
       setFormError('');
       setShortNameTouched(false);
       setEditDialog({ open: true, item: null });
-      // Drop the `new` flag so refresh doesn't re-open; keep return_to for save handler
+      // Drop the `new`/`type`/`supplier` flags so refresh doesn't re-open;
+      // keep return_to for save handler
       const next = new URLSearchParams(searchParams);
       next.delete('new');
       next.delete('type');
+      next.delete('supplier');
       setSearchParams(next, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

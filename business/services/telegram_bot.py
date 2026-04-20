@@ -3343,7 +3343,12 @@ async def _handle_delivery_photo(
         db.rollback()
 
     readings = vision_result.get("readings", {})
-    supplier_name = caption or readings.get("supplier")
+    # OCR-extracted supplier (from the letterhead) takes priority over the
+    # user's photo caption. Caption is just a hint/category label ("New
+    # delivery lava stone"); shadowing the real supplier from the delivery
+    # note breaks supplier→material_type routing (see BUSINESS_LOGIC_FULL §29)
+    # and silently drops the stone-matching path, including the 3D design picker.
+    supplier_name = readings.get("supplier") or caption
     items_raw = readings.get("items", [])
 
     # Match items against DB materials

@@ -4392,6 +4392,12 @@ async def _handle_delivery_callback(
                 msg("design_none_selected", lang, item=target_di["original_name"]),
                 parse_mode="",
             )
+
+        # If this was the LAST thing blocking confirm, re-render the preview
+        # right here with a fresh Confirm button so the user doesn't have to
+        # scroll up to the original preview message.
+        if not pending.get("design_items") and not pending.get("unmatched_items"):
+            await _resend_delivery_preview(chat_id, delivery_id, pending)
         return
 
     # ── delivery_confirm:{id} ─────────────────────────────────────
@@ -5168,6 +5174,11 @@ async def _handle_design_new_text(db: Session, chat_id: int, text: str) -> None:
         msg("design_selected", lang, design=design.name, item=target_di["original_name"]),
         parse_mode="",
     )
+
+    # Last blocker gone → drop a fresh preview right under the confirmation
+    # so the Confirm button is within thumb reach (no scrolling up).
+    if not pending.get("design_items") and not pending.get("unmatched_items"):
+        await _resend_delivery_preview(chat_id, delivery_id, pending)
 
 
 async def _handle_header_edit_text(chat_id: int, text: str) -> None:

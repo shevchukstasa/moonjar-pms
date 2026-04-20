@@ -27,12 +27,12 @@ OPENAI_VISION_MODEL_QUALITY = "gpt-4.1"    # Smart analysis for quality/defect (
 
 # Types that prefer cheap OpenAI model (scale / simple label reading)
 _CHEAP_VISION_TYPES = {"scale", "packing"}
-# Types that need smart model (quality defects — OpenAI 4.1 best here)
-_SMART_VISION_TYPES = {"quality", "defect"}
-# Types that require Claude Vision directly — handwriting + structured table
-# extraction where row-order fidelity matters (surat jalan / delivery note).
-# Claude Sonnet 4 outperforms GPT-4.1 on Indonesian handwriting in testing.
-_CLAUDE_FIRST_VISION_TYPES = {"delivery"}
+# Types that need smart model (delivery with handwriting, quality defects)
+_SMART_VISION_TYPES = {"quality", "defect", "delivery"}
+# Intentionally empty — earlier attempt to route delivery through Claude Sonnet
+# returned 400 Bad Request in prod (model/media-type mismatch). OpenAI 4.1 is
+# the fallback path. Re-enable per-type here once Claude call is verified.
+_CLAUDE_FIRST_VISION_TYPES: set[str] = set()
 
 # ── Prompts per analysis type ────────────────────────────────────────────
 
@@ -231,7 +231,13 @@ async def _call_claude_vision(system_prompt: str, b64_image: str, media_type: st
                 },
                 timeout=60.0,
             )
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                # Anthropic returns JSON error detail — surface it for diagnosis
+                logger.warning(
+                    "Claude Vision %d: %s (model=%s, media_type=%s, image_bytes_b64=%d)",
+                    resp.status_code, resp.text[:500], ANTHROPIC_MODEL, media_type, len(b64_image),
+                )
+                resp.raise_for_status()
             data = resp.json()
             content_blocks = data.get("content", [])
             return "\n".join(b["text"] for b in content_blocks if b.get("type") == "text") or None

@@ -408,6 +408,46 @@ def translate_material_name(indo_name: str) -> str:
 _SPLIT_RE = re.compile(r'[\s\-_,./()]+')
 
 
+_CHEMICAL_ALIASES: dict[str, str] = {
+    # Every variant maps to the DB's canonical token so "Aluminium Oxide"
+    # doesn't match "Cooper oxide" on the shared stop-word "oxide" alone.
+    "aluminium": "alumina",
+    "aluminum":  "alumina",
+    "al2o3":     "alumina",
+    "cuprum":    "copper",
+    "cooper":    "copper",   # common spelling drift (DB has "Cooper oxide")
+    "cu2o":      "copper",
+    "zirconia":  "zircon",
+    "zirconium": "zircon",
+    "silicon":   "silica",
+    "sio2":      "silica",
+    "ferric":    "iron",
+    "ferrous":   "iron",
+    "chromium":  "chrome",
+    "kobalt":    "cobalt",
+    "titanium":  "titania",
+    "tio2":      "titania",
+    "kalsium":   "calcium",
+    "calsium":   "calcium",
+}
+
+# Tokens that appear in MANY material names and therefore shouldn't dominate
+# scoring on their own (they're informational, not discriminative).
+_GENERIC_TOKENS: set[str] = {
+    "oxide", "carbonate", "hydroxide", "nitrate", "sulfate", "sulphate",
+    "chloride", "phosphate", "silicate",
+    "powder", "paste", "liquid", "solution", "glaze", "engobe", "frit",
+    "fine", "coarse", "raw", "pure", "mix", "mixed", "type", "grade",
+    "stone", "tile", "stick", "kg", "pcs", "ml", "gr", "gram",
+    "dark", "light",
+}
+
+
+def _apply_aliases(tokens: set[str]) -> set[str]:
+    """Collapse chemical synonyms so that Aluminium ↔ Alumina etc. match."""
+    return {_CHEMICAL_ALIASES.get(t, t) for t in tokens}
+
+
 def tokenize_for_matching(name: str) -> set[str]:
     """
     Extract meaningful tokens from a material name for matching.
@@ -416,6 +456,7 @@ def tokenize_for_matching(name: str) -> set[str]:
     "Batu Lava 10x10" matches both "batu" and "lava stone".
 
     Tokens shorter than 2 chars are dropped (except size tokens like "5x5").
+    Chemical synonyms are folded into their canonical form.
     """
     normalized = normalize_size(name.lower().strip())
     tokens = set(_SPLIT_RE.split(normalized))
@@ -425,7 +466,9 @@ def tokenize_for_matching(name: str) -> set[str]:
     tokens.update(_SPLIT_RE.split(translated.lower()))
 
     # Remove empty tokens and very short non-size ones
-    return {t for t in tokens if len(t) > 1 or re.match(r'\d', t)}
+    tokens = {t for t in tokens if len(t) > 1 or re.match(r'\d', t)}
+
+    return _apply_aliases(tokens)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -435,15 +478,23 @@ def tokenize_for_matching(name: str) -> set[str]:
 _SIZE_TOKEN_RE = re.compile(r'^\d+(?:\.\d+)?x\d+(?:\.\d+)?$')
 
 
+def _token_weight(token: str) -> float:
+    """Down-weight generic tokens so shared "oxide" alone can't match two
+    different compounds. Size tokens stay at 1.0 — they are discriminative."""
+    if token in _GENERIC_TOKENS:
+        return 0.25
+    return 1.0
+
+
 def calculate_match_score(
     delivery_tokens: set[str],
     db_tokens: set[str],
 ) -> float:
     """
-    Calculate similarity score between delivery name tokens and DB material tokens.
-
-    Uses F1 score (harmonic mean of precision and recall) on token overlap.
-    Returns 0.0–1.0.
+    Weighted F1 over token overlap. Generic tokens (oxide, powder, stone, …)
+    contribute only 0.25 mass, so "Aluminium Oxide" ↔ "Cooper oxide" — which
+    share only "oxide" — can no longer out-score "Aluminium Oxide" ↔
+    "Alumina" after alias folding.
     """
     if not delivery_tokens or not db_tokens:
         return 0.0
@@ -452,8 +503,17 @@ def calculate_match_score(
     if not intersection:
         return 0.0
 
-    recall = len(intersection) / len(delivery_tokens)
-    precision = len(intersection) / len(db_tokens)
+    inter_w = sum(_token_weight(t) for t in intersection)
+    del_w = sum(_token_weight(t) for t in delivery_tokens)
+    db_w = sum(_token_weight(t) for t in db_tokens)
+
+    if del_w == 0 or db_w == 0:
+        return 0.0
+
+    recall = inter_w / del_w
+    precision = inter_w / db_w
+    if recall + precision == 0:
+        return 0.0
 
     f1 = 2 * recall * precision / (recall + precision)
     return f1

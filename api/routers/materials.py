@@ -1694,7 +1694,15 @@ async def create_transaction(
             mat.supplier_id = data.supplier_id
             db.flush()
 
-        # Delegate to warehouse receiving service (handles approval workflow)
+        # Delegate to warehouse receiving service.
+        # Approval gate retired: every manual receive is auto-approved so the
+        # stock balance updates immediately. The old "PM must approve every
+        # receipt" flow routed transactions into a queue that nobody cleared
+        # — receipts piled up as pending, balances stayed at 0, and users
+        # interpreted it as a bug ("I just received +10 but Deficit still
+        # shows 2 kg"). Approval is still visible in transaction history
+        # (approval_status column); callers that need a gate can pass
+        # auto_approve=false explicitly and handle it themselves.
         import logging
         _logger = logging.getLogger("moonjar.materials")
         try:
@@ -1707,7 +1715,7 @@ async def create_transaction(
                 quality_notes=data.quality_notes or data.notes,
                 defect_percent=data.defect_percent or 0.0,
                 received_by_user_id=current_user.id,
-                force_auto_approve=bool(data.auto_approve),
+                force_auto_approve=True,
             )
 
             # Auto-update purchase requests on material receive

@@ -1283,9 +1283,12 @@ function AttendanceTab({
                 const isHoliday = calEntry ? !calEntry.is_working_day : false;
                 const isCalendarWorkingDay = calEntry ? calEntry.is_working_day : !isSunday;
 
+                // Holiday on a non-working day (e.g. holiday falls on Sunday)
+                const isHolidayOnNonWorkingDay = isHoliday && (isSunday || isSaturday);
+
                 let headerBg = '';
                 let headerText = 'text-gray-500';
-                if (isHoliday && !isSunday) {
+                if (isHoliday && !isSunday && !isSaturday) {
                   headerBg = 'bg-red-50';
                   headerText = 'text-red-600 font-semibold';
                 } else if (isSunday && !isCalendarWorkingDay) {
@@ -1305,12 +1308,14 @@ function AttendanceTab({
                 const canBulk = selectedEmpIds.size > 0;
                 const tooltip = canBulk
                   ? `Fill ${selectedEmpIds.size} employee(s) for day ${d}`
-                  : calEntry?.holiday_name ?? (isSunday ? 'Sunday' : isSaturday ? 'Saturday' : 'Working day');
+                  : isHolidayOnNonWorkingDay
+                    ? `${isSunday ? 'Sunday' : 'Saturday'} + ${calEntry?.holiday_name}`
+                    : calEntry?.holiday_name ?? (isSunday ? 'Sunday' : isSaturday ? 'Saturday' : 'Working day');
 
                 return (
                   <th
                     key={d}
-                    className={`px-0.5 py-1.5 text-center font-medium min-w-[28px] ${headerBg} ${headerText} ${canBulk ? 'cursor-pointer hover:ring-2 hover:ring-blue-400 hover:ring-inset' : ''}`}
+                    className={`px-0.5 py-1.5 text-center font-medium min-w-[28px] ${headerBg} ${headerText} ${isHolidayOnNonWorkingDay ? 'border-b-2 border-red-400' : ''} ${canBulk ? 'cursor-pointer hover:ring-2 hover:ring-blue-400 hover:ring-inset' : ''}`}
                     title={tooltip}
                     onClick={canBulk ? () => setBulkDate(dateStr) : undefined}
                   >

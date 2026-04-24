@@ -2309,9 +2309,56 @@ def schedule_position(
     # Without this, a 4750-pc position with glazing_days=5 shows 4750
     # only on day 1 of glazing and nothing on days 2-5.
     try:
+        import math as _math
         _qty = int(_pos_pcs or 0)
         _sqm = float(_pos_sqm or 0)
         _stage_plan: dict[str, dict] = {}
+
+        # Pipeline-overlap: how much of stage N can be done in parallel
+        # with stage N+1. See docs/BUSINESS_LOGIC_FULL.md §4 "Параллельные
+        # стадии". 0.0 = full serial (stage N+1 waits for N to finish),
+        # 0.8 = stage N+1 may start when 20% of stage N is done.
+        #
+        # Rule of thumb:
+        #   - Work stages (team members can divide labour): 0.8
+        #   - Physics-bound stages (drying / kiln / cooling): 0.0
+        _STAGE_OVERLAP_NEXT = {
+            "unpacking_sorting": 0.8,   # → engobe: parallel team
+            "engobe": 0.0,              # → drying_engobe: physics
+            "drying_engobe": 0.8,       # → glazing: as tiles dry they're glazed
+            "glazing": 0.0,             # → drying_glaze: physics
+            "drying_glaze": 0.8,        # → edge_cleaning: parallel
+            "edge_cleaning_loading": 0.0,  # → kiln_loading: strict serial (kiln is a drum)
+            "firing": 0.0,              # → cooling: physics
+            "kiln_cooling_initial": 0.0,
+            "kiln_unloading": 0.0,      # → tile_cooling: serial
+            "tile_cooling": 0.8,        # → sorting: sort as they cool
+            "sorting": 0.8,             # → packing: parallel
+            "packing": 0.0,             # terminal
+        }
+
+        def _overlap_gap_days(days: int, overlap: float) -> int:
+            """How many working days to wait between start of stage N and
+            start of stage N+1.
+
+            Examples:
+              days=1, overlap=0.0 → gap=1  (serial, next working day)
+              days=1, overlap=0.8 → gap=0  (same-day pipeline)
+              days=5, overlap=0.8 → gap=1  (N+1 starts when 20% of N done)
+              days=5, overlap=0.0 → gap=5  (serial)
+            """
+            if days <= 0:
+                return 0
+            if overlap >= 1.0:
+                return 0
+            effective = days * (1.0 - overlap)
+            if overlap < 0.5:
+                # Serial branch: always at least one full working day gap.
+                return max(int(round(effective)), 1)
+            # Pipeline branch: floor with tiny epsilon to neutralise float
+            # rounding (e.g. 5 * 0.2 = 0.9999… in IEEE-754) and let
+            # fractions < 0.5 collapse onto the same day.
+            return max(int(_math.floor(effective + 1e-9)), 0)
 
         def _add_stage(name: str, start_d, days: int) -> "date":
             if days <= 0 or start_d is None:
@@ -2326,7 +2373,14 @@ def schedule_position(
                 "qty_per_day": _per_day,
                 "sqm_per_day": _sqm_per_day,
             }
-            return _skip_weekends(_end + timedelta(days=1))
+            overlap = _STAGE_OVERLAP_NEXT.get(name, 0.0)
+            gap = _overlap_gap_days(days, overlap)
+            if gap == 0:
+                # Same-day pipeline: next stage starts on the same
+                # calendar day. _skip_weekends still applies in case
+                # start_d itself would land on a non-working day.
+                return _skip_weekends(start_d)
+            return _skip_weekends(start_d + timedelta(days=gap))
 
         _cursor = planned_glazing
         _cursor = _add_stage("unpacking_sorting", _cursor, unpacking_days)

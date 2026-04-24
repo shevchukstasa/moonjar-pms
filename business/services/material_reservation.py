@@ -1084,7 +1084,7 @@ def sync_material_procurement_task(
     """
     from api.models import Task, Material
     from api.enums import TaskType, TaskStatus, UserRole
-    from datetime import datetime, time
+    from datetime import datetime, time, timezone
 
     # Ignore stone — handled separately by stone_reservation.py.
     non_stone_shortages = [
@@ -1118,9 +1118,10 @@ def sync_material_procurement_task(
         if days > max_lead_days:
             max_lead_days = days
 
+    # Timezone-aware (UTC) — Task.due_at is tz-aware in DB.
     due_at_value = datetime.combine(
         date.today() + timedelta(days=max_lead_days), time.min,
-    )
+    ).replace(tzinfo=timezone.utc)
 
     # Build human-readable shortage list, sorted by deficit desc.
     items_sorted = sorted(

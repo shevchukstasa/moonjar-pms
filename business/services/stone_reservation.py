@@ -345,7 +345,7 @@ def _check_stone_stock_and_create_task(
     """
     from api.models import MaterialStock, Material as Mat, Task, Supplier
     from api.enums import TaskType, TaskStatus, UserRole
-    from datetime import datetime, time
+    from datetime import datetime, time, timezone
 
     # Default lead time for stone procurement when no supplier info available.
     # Stone from Bali takes ~35 days end-to-end (quarry → factory). See
@@ -475,9 +475,11 @@ def _check_stone_stock_and_create_task(
             if supplier and getattr(supplier, "default_lead_time_days", None):
                 lead_days = int(supplier.default_lead_time_days)
                 supplier_note = f"{supplier.name} lead time"
+        # Build a timezone-aware datetime (UTC) — Task.due_at column is
+        # timezone-aware, mixing naive/aware blows up on comparison.
         due_at_value = datetime.combine(
             date.today() + timedelta(days=lead_days), time.min,
-        )
+        ).replace(tzinfo=timezone.utc)
 
         if existing_task:
             existing_task.description = size_note

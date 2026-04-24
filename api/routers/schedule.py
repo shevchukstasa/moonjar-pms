@@ -796,6 +796,88 @@ async def recalculate_schedule_endpoint(
     return recalculate_schedule(db, factory_id)
 
 
+@router.post("/backfill-procurement-tasks")
+async def backfill_procurement_tasks(
+    factory_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Re-run material reservation for every active position at a factory.
+
+    Purpose: sync `MATERIAL_ORDER` / `STONE_PROCUREMENT` blocking tasks
+    with current stock state. Creates tasks for shortages that never had
+    one, closes tasks for shortages that are now resolved, sets `due_at`
+    from supplier lead times. Safe to run repeatedly — idempotent.
+
+    Covers positions in any non-terminal status (not just `planned`),
+    unlike `/orders/{id}/reschedule` which skips `insufficient_materials`.
+
+    PM/Admin only.
+    """
+    from api.models import Factory, OrderPosition, Recipe
+    from api.enums import PositionStatus
+    from business.services.material_reservation import reserve_materials_for_position
+    from business.services.stone_reservation import reserve_stone_for_position
+
+    factory = db.query(Factory).filter(Factory.id == factory_id).first()
+    if not factory:
+        raise HTTPException(404, detail="Factory not found")
+
+    terminal = {
+        PositionStatus.SHIPPED.value,
+        PositionStatus.CANCELLED.value,
+        PositionStatus.MERGED.value,
+        PositionStatus.PACKED.value,
+        PositionStatus.READY_FOR_SHIPMENT.value,
+    }
+
+    positions = db.query(OrderPosition).filter(
+        OrderPosition.factory_id == factory_id,
+        ~OrderPosition.status.in_(list(terminal)),
+    ).all()
+
+    material_ran = 0
+    stone_ran = 0
+    errors: list[dict] = []
+
+    for p in positions:
+        # Re-run material reservation — sync_material_procurement_task runs
+        # at the tail, keeping MATERIAL_ORDER task lifecycle in sync.
+        if p.recipe_id:
+            try:
+                recipe = db.query(Recipe).filter(Recipe.id == p.recipe_id).first()
+                if recipe:
+                    reserve_materials_for_position(db, p, recipe, factory_id)
+                    material_ran += 1
+            except Exception as e:
+                errors.append({
+                    "position_id": str(p.id),
+                    "stage": "material",
+                    "error": str(e)[:200],
+                })
+
+        # Re-run stone check — refreshes STONE_PROCUREMENT due_at.
+        try:
+            reserve_stone_for_position(db, p)
+            stone_ran += 1
+        except Exception as e:
+            errors.append({
+                "position_id": str(p.id),
+                "stage": "stone",
+                "error": str(e)[:200],
+            })
+
+    db.commit()
+
+    return {
+        "factory_id": str(factory_id),
+        "positions_processed": len(positions),
+        "material_reservation_runs": material_ran,
+        "stone_reservation_runs": stone_ran,
+        "errors": errors,
+    }
+
+
 # ────────────────────────────────────────────────────────────────
 # Scheduler Config — configurable buffer days per factory
 # ────────────────────────────────────────────────────────────────

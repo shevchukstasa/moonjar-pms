@@ -374,19 +374,30 @@ def _check_stone_stock_and_create_task(
             pos_shape_raw = pos_shape_raw.value
         pos_shape = (str(pos_shape_raw) if pos_shape_raw else "rectangle").lower().strip()
 
+        # rectangle ↔ square are interchangeable: a square is just a
+        # rectangle with equal sides. Stone catalog often uses "square"
+        # for 10×10, while orders label the same tile as "rectangle" —
+        # both share the same physical stock. Every other shape
+        # (triangle, round, octagon, oval, freeform, …) stays in its own
+        # equivalence class: you can't cut a triangle out of rectangular
+        # stock (per product owner, 2026-04-24).
+        _RECT_GROUP = {"rectangle", "square"}
+
+        def _shape_group(shape: str) -> frozenset[str]:
+            s = (shape or "rectangle").lower().strip()
+            if s in _RECT_GROUP:
+                return frozenset(_RECT_GROUP)
+            return frozenset({s})
+
+        pos_shape_group = _shape_group(pos_shape)
+
         def _shapes_compatible(mat) -> bool:
-            """Position.shape must match the Size.shape of the material's
-            Size entry. rectangle ↔ square are considered interchangeable
-            only when explicitly desired — here we keep them strict to
-            avoid silent cross-shape fulfillment."""
             mat_size = getattr(mat, "size", None)
             mat_shape = getattr(mat_size, "shape", None) if mat_size else None
             if not mat_shape:
-                # Material doesn't declare a shape → assume rectangle (the
-                # historical default for stone SKUs).
                 mat_shape = "rectangle"
             mat_shape = str(mat_shape).lower().strip()
-            return pos_shape == mat_shape
+            return mat_shape in pos_shape_group
 
         # Fetch ALL stone materials with their stocks at this factory
         stone_rows = (

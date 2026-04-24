@@ -422,6 +422,20 @@ def _check_stone_stock_and_create_task(
                 "STONE_STOCK_OK | position=%s | stone=%s available=%.3f needed=%.3f",
                 position_id, matching_stone.name, effective_available, reserved_sqm,
             )
+            # Stock is now sufficient — close any open STONE_PROCUREMENT task
+            # left over from a previous shortage. Mirrors MATERIAL_ORDER
+            # auto-resolve behaviour in material_reservation.py.
+            stale_task = db.query(Task).filter(
+                Task.related_position_id == position.id,
+                Task.type == TaskType.STONE_PROCUREMENT,
+                Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+            ).first()
+            if stale_task:
+                stale_task.status = TaskStatus.DONE
+                logger.info(
+                    "STONE_PROCUREMENT_CLOSED | position=%s | task=%s — stock sufficient",
+                    position_id, stale_task.id,
+                )
             return
 
         deficit = reserved_sqm - effective_available
@@ -467,6 +481,17 @@ def _check_stone_stock_and_create_task(
 
         if existing_task:
             existing_task.description = size_note
+            # Refresh metadata so UI shows current numbers, not the snapshot
+            # captured when the task was first created.
+            existing_task.metadata_json = {
+                "reserved_sqm": reserved_sqm,
+                "available_sqm": effective_available,
+                "deficit_sqm": deficit,
+                "quantity": quantity,
+                "stone_defect_pct": defect_pct,
+                "lead_days": lead_days,
+                "lead_source": supplier_note,
+            }
             # Keep due_at in sync: if the task was created without one, or
             # supplier lead time was updated since, refresh it. Don't push
             # the date back — only forward, so purchaser-set ETAs stick.

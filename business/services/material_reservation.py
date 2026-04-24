@@ -791,10 +791,71 @@ def reserve_materials_for_position(
             position.id, _task_err,
         )
 
+    # Sync position status with reality: if the position is sitting in
+    # INSUFFICIENT_MATERIALS but all material needs are now reserved AND no
+    # open blocking task remains (stone or material), return it to PLANNED.
+    # This is the missing link that let 27 positions stay "blocked" after
+    # users manually replenished stock — the reserve call succeeded but
+    # the status never rolled back.
+    try:
+        _sync_position_status_after_reserve(db, position, all_ok)
+    except Exception as _status_err:
+        logger.warning(
+            "POSITION_STATUS_SYNC_FAIL | position=%s | %s — continuing",
+            position.id, _status_err,
+        )
+
     return ReservationResult(
         reserved=reserved,
         shortages=shortages,
         all_sufficient=all_ok,
+    )
+
+
+def _sync_position_status_after_reserve(
+    db: Session,
+    position,
+    all_materials_ok: bool,
+) -> None:
+    """If the position is in INSUFFICIENT_MATERIALS but nothing blocks it
+    anymore, return it to PLANNED so the scheduler and UI stop treating
+    it as blocked.
+
+    Conditions to unblock:
+    - Current status is INSUFFICIENT_MATERIALS (other blocked statuses
+      like AWAITING_RECIPE have their own resolution flow, we don't touch).
+    - `all_materials_ok` (non-stone materials reserved).
+    - No open STONE_PROCUREMENT / MATERIAL_ORDER blocking task for this
+      position — if stone is still short, caller will keep/recreate the
+      stone task, and we leave status alone.
+    """
+    from api.enums import PositionStatus, TaskType, TaskStatus
+    from api.models import Task
+
+    current = position.status
+    if hasattr(current, "value"):
+        current = current.value
+    if current != PositionStatus.INSUFFICIENT_MATERIALS.value:
+        return
+    if not all_materials_ok:
+        return
+
+    open_blockers = db.query(Task).filter(
+        Task.related_position_id == position.id,
+        Task.type.in_([TaskType.STONE_PROCUREMENT, TaskType.MATERIAL_ORDER]),
+        Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+        Task.blocking.is_(True),
+    ).count()
+    if open_blockers:
+        return
+
+    position.status = PositionStatus.PLANNED
+    from datetime import datetime, timezone
+    position.updated_at = datetime.now(timezone.utc)
+    logger.info(
+        "POSITION_UNBLOCKED | position=%s | insufficient_materials → planned "
+        "(all materials reserved, no open blockers)",
+        position.id,
     )
 
 

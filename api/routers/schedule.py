@@ -841,8 +841,22 @@ async def backfill_procurement_tasks(
     errors: list[dict] = []
 
     for p in positions:
+        # Run stone FIRST so STONE_PROCUREMENT auto-closes if stock is now
+        # sufficient; material reservation below reads open-blocker state
+        # to decide whether to flip position status back to PLANNED.
+        try:
+            reserve_stone_for_position(db, p)
+            stone_ran += 1
+        except Exception as e:
+            errors.append({
+                "position_id": str(p.id),
+                "stage": "stone",
+                "error": str(e)[:200],
+            })
+
         # Re-run material reservation — sync_material_procurement_task runs
-        # at the tail, keeping MATERIAL_ORDER task lifecycle in sync.
+        # at the tail, keeping MATERIAL_ORDER task lifecycle in sync AND
+        # restoring position.status to PLANNED when all blockers cleared.
         if p.recipe_id:
             try:
                 recipe = db.query(Recipe).filter(Recipe.id == p.recipe_id).first()
@@ -855,17 +869,6 @@ async def backfill_procurement_tasks(
                     "stage": "material",
                     "error": str(e)[:200],
                 })
-
-        # Re-run stone check — refreshes STONE_PROCUREMENT due_at.
-        try:
-            reserve_stone_for_position(db, p)
-            stone_ran += 1
-        except Exception as e:
-            errors.append({
-                "position_id": str(p.id),
-                "stage": "stone",
-                "error": str(e)[:200],
-            })
 
     db.commit()
 

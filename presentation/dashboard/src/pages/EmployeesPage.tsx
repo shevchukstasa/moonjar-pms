@@ -1562,6 +1562,24 @@ function DayBulkDialog({
     }
   };
 
+  const handleReset = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      for (const emp of selectedEmployees) {
+        const existing = lookup[emp.id]?.[dateStr];
+        if (existing) await employeesApi.deleteAttendance(existing.id);
+      }
+      queryClient.invalidateQueries({ queryKey: ['attendance-grid'] });
+      queryClient.invalidateQueries({ queryKey: ['payroll-summary'] });
+      onApplied();
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail ?? 'Failed to reset');
+      setSaving(false);
+    }
+  };
+
   return (
     <Dialog open onClose={onClose} title={`Day ${dayLabel} — ${selectedEmployees.length} employee${selectedEmployees.length !== 1 ? 's' : ''}`} className="w-full max-w-sm">
       <div className="space-y-4">
@@ -1607,7 +1625,14 @@ function DayBulkDialog({
         {saving && <p className="text-sm text-blue-600">Saving…</p>}
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <div className="flex justify-end pt-1">
+        <div className="flex items-center justify-between pt-1">
+          <button
+            disabled={saving}
+            onClick={handleReset}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+          >
+            Reset day
+          </button>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
         </div>
       </div>

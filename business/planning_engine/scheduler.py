@@ -199,6 +199,83 @@ def generate_production_schedule(
     _SORTING_STAGES = ("sorting",)
     _PACKING_STAGES = ("packing",)
 
+    # Ordered pipeline: every production stage in the sequence the
+    # factory physically runs. The index is used to answer one question:
+    # "Has this position already passed this stage?" — if the position's
+    # current status implies a later stage is in progress or done, then
+    # painting earlier stages on future calendar days is misleading.
+    _STAGE_INDEX = {
+        "unpacking_sorting": 1,
+        "engobe": 2,
+        "drying_engobe": 3,
+        "glazing": 4,
+        "drying_glaze": 5,
+        "edge_cleaning_loading": 6,
+        "kiln_loading": 7,
+        "firing": 8,
+        "cooling": 9,
+        "unloading": 10,
+        "sorting": 11,
+        "packing": 12,
+    }
+
+    # How many stages in _STAGE_INDEX each position status has already
+    # completed. "Completed" means physically done — do not render on
+    # future calendar days. 0 = nothing done yet, 12 = all done.
+    # See api/enums.py:PositionStatus for every status we handle.
+    _STATUS_COMPLETED_STAGE_INDEX = {
+        # Pre-production (nothing done yet)
+        "planned": 0,
+        "insufficient_materials": 0,
+        "awaiting_recipe": 0,
+        "awaiting_stencil_silkscreen": 0,
+        "awaiting_color_matching": 0,
+        "awaiting_size_confirmation": 0,
+        "awaiting_consumption_data": 0,
+        # After engobe: unpacking + engobe done; drying_engobe may be running
+        "engobe_applied": 2,
+        "engobe_check": 3,
+        # Ready to glaze (drying_engobe done)
+        "sent_to_glazing": 3,
+        "awaiting_reglaze": 3,
+        # Glazing done
+        "glazed": 4,
+        # Through edge cleaning, ready for kiln
+        "pre_kiln_check": 6,
+        # In kiln / after firing
+        "loaded_in_kiln": 7,
+        "refire": 7,
+        "fired": 8,
+        # Past cooling / unloading
+        "transferred_to_sorting": 10,
+        # Sorted
+        "sorted": 11,
+        "sent_to_quality_check": 11,
+        "quality_check_done": 11,
+        "blocked_by_qm": 11,
+        # Terminal
+        "packed": 12,
+        "ready_for_shipment": 12,
+        "shipped": 12,
+        "merged": 12,
+        "cancelled": 12,
+    }
+
+    def _position_completed_index(pos) -> int:
+        """Return max index of stage that is already completed for this position."""
+        st = pos.status
+        if hasattr(st, "value"):
+            st = st.value
+        return _STATUS_COMPLETED_STAGE_INDEX.get(str(st).lower(), 0)
+
+    def _should_hide_stage(pos, stage_name: str) -> bool:
+        """True if the stage has been completed already → do not paint on
+        future calendar days."""
+        stage_idx = _STAGE_INDEX.get(stage_name)
+        if stage_idx is None:
+            return False
+        return stage_idx <= _position_completed_index(pos)
+
     def _expand_stage(
         stage_name: str,
         stage_info: dict,
@@ -234,33 +311,48 @@ def generate_production_schedule(
     for pos in positions:
         _meta = pos.schedule_metadata or {}
         _plan = _meta.get("stage_plan") if isinstance(_meta, dict) else None
+        _pos_done_idx = _position_completed_index(pos)
 
         if _plan and isinstance(_plan, dict):
-            # New path: distribute across full stage durations.
+            # New path: distribute across full stage durations — but skip
+            # stages the position has already passed per its current status.
             for _sname in _GLAZING_STAGES:
                 _sinfo = _plan.get(_sname)
-                if _sinfo:
-                    _expand_stage(_sname, _sinfo, glazing_by_date, pos)
+                if not _sinfo:
+                    continue
+                if _should_hide_stage(pos, _sname):
+                    continue
+                _expand_stage(_sname, _sinfo, glazing_by_date, pos)
             # kiln_loading is a single-day event on planned_kiln_date
-            if pos.planned_kiln_date:
+            if pos.planned_kiln_date and not _should_hide_stage(pos, "kiln_loading"):
                 kiln_by_date.setdefault(pos.planned_kiln_date, []).append((pos, None))
             for _sname in _SORTING_STAGES:
                 _sinfo = _plan.get(_sname)
-                if _sinfo:
-                    _expand_stage(_sname, _sinfo, sorting_by_date, pos)
+                if not _sinfo:
+                    continue
+                if _should_hide_stage(pos, _sname):
+                    continue
+                _expand_stage(_sname, _sinfo, sorting_by_date, pos)
             for _sname in _PACKING_STAGES:
                 _sinfo = _plan.get(_sname)
-                if _sinfo:
-                    _expand_stage(_sname, _sinfo, completion_by_date, pos)
+                if not _sinfo:
+                    continue
+                if _should_hide_stage(pos, _sname):
+                    continue
+                _expand_stage(_sname, _sinfo, completion_by_date, pos)
         else:
-            # Legacy path — single-day buckets (no stage_plan yet).
-            if pos.planned_glazing_date:
+            # Legacy path — single-day buckets (no stage_plan yet). Map
+            # each planned_*_date to the stage it represents and hide it
+            # if the position is already past that stage.
+            if pos.planned_glazing_date and _pos_done_idx < _STAGE_INDEX["glazing"]:
+                # planned_glazing_date covers the unpacking→glazing block;
+                # once glazing is done (idx=4), don't paint this bucket.
                 glazing_by_date.setdefault(pos.planned_glazing_date, []).append((pos, None))
-            if pos.planned_kiln_date:
+            if pos.planned_kiln_date and _pos_done_idx < _STAGE_INDEX["kiln_loading"]:
                 kiln_by_date.setdefault(pos.planned_kiln_date, []).append((pos, None))
-            if pos.planned_sorting_date:
+            if pos.planned_sorting_date and _pos_done_idx < _STAGE_INDEX["sorting"]:
                 sorting_by_date.setdefault(pos.planned_sorting_date, []).append((pos, None))
-            if pos.planned_completion_date:
+            if pos.planned_completion_date and _pos_done_idx < _STAGE_INDEX["packing"]:
                 completion_by_date.setdefault(pos.planned_completion_date, []).append((pos, None))
 
     # ── Batches in date range ──

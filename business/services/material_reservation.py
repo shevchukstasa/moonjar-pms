@@ -43,6 +43,85 @@ def _is_untracked_utility(material) -> bool:
     return name in _UNTRACKED_UTILITY_NAMES
 
 
+def _release_existing_reserves(db: Session, position) -> None:
+    """Drop any active RESERVE transactions for this position.
+
+    Idempotency guard for reserve_materials_for_position: every time we
+    re-run reservation we want the ledger to reflect EXACTLY the current
+    recipe needs, not an accumulation of older reserve attempts.
+
+    Implementation: for each RESERVE txn linked to the position, insert a
+    matching UNRESERVE for whatever quantity has not already been
+    unreserved. This keeps the full audit trail (no hard deletes) and
+    zeroes out the position's net reservation for all its materials.
+    """
+    from api.models import MaterialTransaction
+    from api.enums import TransactionType
+    from sqlalchemy import func
+
+    reserves = (
+        db.query(MaterialTransaction)
+        .filter(
+            MaterialTransaction.related_position_id == position.id,
+            MaterialTransaction.type == TransactionType.RESERVE,
+        )
+        .all()
+    )
+    if not reserves:
+        return
+
+    # Group by material_id and compute net outstanding, then emit one
+    # UNRESERVE per (position, material) for the exact delta.
+    from collections import defaultdict
+
+    released_count = 0
+    by_material: dict = defaultdict(float)
+    for rsv in reserves:
+        by_material[rsv.material_id] += float(rsv.quantity or 0)
+
+    unreserved_already = (
+        db.query(
+            MaterialTransaction.material_id,
+            func.coalesce(func.sum(MaterialTransaction.quantity), 0),
+        )
+        .filter(
+            MaterialTransaction.related_position_id == position.id,
+            MaterialTransaction.type == TransactionType.UNRESERVE,
+        )
+        .group_by(MaterialTransaction.material_id)
+        .all()
+    )
+    unreserved_map = {mid: float(q or 0) for mid, q in unreserved_already}
+
+    for material_id, total_reserved in by_material.items():
+        net_outstanding = total_reserved - unreserved_map.get(material_id, 0.0)
+        if net_outstanding <= 0:
+            continue
+        # Pick any reserve txn on this (position, material) to carry
+        # forward the order / factory links.
+        template = next(
+            (r for r in reserves if r.material_id == material_id), None,
+        )
+        if template is None:
+            continue
+        db.add(MaterialTransaction(
+            material_id=material_id,
+            factory_id=template.factory_id,
+            type=TransactionType.UNRESERVE,
+            quantity=Decimal(str(net_outstanding)),
+            related_order_id=template.related_order_id,
+            related_position_id=position.id,
+            notes="Auto-released before re-reserve (idempotency guard)",
+        ))
+        released_count += 1
+
+    if released_count:
+        logger.info(
+            "RESERVE_IDEMPOTENCY_RELEASE | position=%s | materials_released=%d",
+            position.id, released_count,
+        )
+
+
 # ────────────────────────────────────────────────────────────────
 # ConsumptionRule lookup — find best matching override for a position
 # ────────────────────────────────────────────────────────────────
@@ -639,6 +718,19 @@ def reserve_materials_for_position(
         .filter(RecipeMaterial.recipe_id == recipe.id)
         .all()
     )
+
+    # --- IDEMPOTENCY GUARD ---
+    # Before reserving, release every active RESERVE transaction previously
+    # recorded for this position. Without this, every re-run of
+    # reserve_materials_for_position (order update, scheduler recalc,
+    # backfill, force-unblock) appends a NEW RESERVE row on top of the
+    # old one, doubling/tripling/… the effective reservation and starving
+    # other positions of stock that's actually available.
+    #
+    # Empirically found 2026-04-24: Grass Green G9444 had 1.92 kg reserved
+    # across 6 positions whose recipe needed 0.29 kg total — because 4
+    # sequential backfills each added a fresh RESERVE.
+    _release_existing_reserves(db, position)
 
     # Find best matching ConsumptionRule (if any) for overrides
     try:

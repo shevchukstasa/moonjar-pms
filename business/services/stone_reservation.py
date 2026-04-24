@@ -360,8 +360,33 @@ def _check_stone_stock_and_create_task(
         #   1. Exact size_id match (Material.size_id == position.size_id) — if populated
         #   2. Name matches position.size (e.g. "Lavastone 8x15" matches size "8x15")
         #   3. No match → treat as zero available (safer than summing all stones)
+        #
+        # Shape guard: even when size_id / name matches, the material's Size
+        # shape must match position.shape. We do NOT cut triangles / rounds
+        # out of rectangular stock — each non-rectangular shape needs its own
+        # stone SKU in the catalog. Without this guard, one generic "10×10"
+        # Size entry would silently serve triangular / octagonal / round
+        # positions from rectangular inventory.
         pos_size = (getattr(position, "size", "") or "").strip().lower().replace(" ", "")
         pos_size_id = getattr(position, "size_id", None)
+        pos_shape_raw = getattr(position, "shape", None)
+        if hasattr(pos_shape_raw, "value"):
+            pos_shape_raw = pos_shape_raw.value
+        pos_shape = (str(pos_shape_raw) if pos_shape_raw else "rectangle").lower().strip()
+
+        def _shapes_compatible(mat) -> bool:
+            """Position.shape must match the Size.shape of the material's
+            Size entry. rectangle ↔ square are considered interchangeable
+            only when explicitly desired — here we keep them strict to
+            avoid silent cross-shape fulfillment."""
+            mat_size = getattr(mat, "size", None)
+            mat_shape = getattr(mat_size, "shape", None) if mat_size else None
+            if not mat_shape:
+                # Material doesn't declare a shape → assume rectangle (the
+                # historical default for stone SKUs).
+                mat_shape = "rectangle"
+            mat_shape = str(mat_shape).lower().strip()
+            return pos_shape == mat_shape
 
         # Fetch ALL stone materials with their stocks at this factory
         stone_rows = (
@@ -411,9 +436,13 @@ def _check_stone_stock_and_create_task(
         matching_stone = None
         matching_balance_sqm = 0.0
         matching_unit = "m2"
+        rejected_by_shape = []  # for logging
         for mat, stock in stone_rows:
             # Strategy 1: exact size_id match
             if pos_size_id and getattr(mat, "size_id", None) == pos_size_id:
+                if not _shapes_compatible(mat):
+                    rejected_by_shape.append(mat.name)
+                    continue  # size is right but shape is wrong — different SKU needed
                 matching_stone = mat
                 matching_unit = (mat.unit or "m2").lower()
                 matching_balance_sqm = _stone_balance_sqm(mat, stock)
@@ -421,10 +450,20 @@ def _check_stone_stock_and_create_task(
             # Strategy 2: name contains position's size string
             mat_name = (mat.name or "").lower().replace(" ", "")
             if pos_size and pos_size in mat_name:
+                if not _shapes_compatible(mat):
+                    rejected_by_shape.append(mat.name)
+                    continue
                 matching_stone = mat
                 matching_unit = (mat.unit or "m2").lower()
                 matching_balance_sqm = _stone_balance_sqm(mat, stock)
                 # Don't break — keep looking for better match (size_id)
+
+        if not matching_stone and rejected_by_shape:
+            logger.info(
+                "STONE_SHAPE_MISMATCH | position=%s shape=%s | size matched "
+                "but shape differs, rejected: %s",
+                position_id, pos_shape, ", ".join(rejected_by_shape[:5]),
+            )
 
         if not matching_stone:
             logger.info(
@@ -492,10 +531,21 @@ def _check_stone_stock_and_create_task(
             f"Qty: {quantity} pcs, defect margin: {defect_pct*100:.0f}%."
         )
         if not matching_stone:
-            size_note = (
-                f"No stone material for size {pos_size}. "
-                f"{size_note} Create a Material entry matching this size."
-            )
+            if rejected_by_shape:
+                # Size exists in catalog but only as other shapes (e.g. we have
+                # rectangular 10×10 stone, position needs triangular 10×10).
+                size_note = (
+                    f"No {pos_shape} stone for size {pos_size}. "
+                    f"Size matches {', '.join(rejected_by_shape[:3])} in catalog, "
+                    f"but shape differs ({pos_shape} vs rectangle). "
+                    f"Need: {reserved_sqm:.2f} m², Qty: {quantity} pcs. "
+                    f"Create a separate Material entry for {pos_shape} stone of this size."
+                )
+            else:
+                size_note = (
+                    f"No stone material for size {pos_size}. "
+                    f"{size_note} Create a Material entry matching this size."
+                )
 
         # Resolve expected arrival date (due_at) from supplier lead time.
         # If matching_stone has a linked supplier with default_lead_time_days,

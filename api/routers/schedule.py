@@ -870,6 +870,18 @@ async def backfill_procurement_tasks(
                     "error": str(e)[:200],
                 })
 
+    # Housekeeping: close stale RECIPE_CONFIGURATION tasks.
+    # They become stale when:
+    #   (a) the task has no related_position_id (orphan catalog spam);
+    #   (b) the linked position already has recipe_id set (phantom);
+    #   (c) the linked position is in a post-kiln status where a recipe
+    #       is no longer needed (transferred_to_sorting / qc / packed /
+    #       shipped / cancelled — covered by `terminal` plus the kiln-
+    #       exit ones).
+    # We only touch type=recipe_configuration; other task types have
+    # their own lifecycle and aren't cleaned up here.
+    recipe_closed = _cleanup_stale_recipe_tasks(db, factory_id)
+
     db.commit()
 
     return {
@@ -877,7 +889,83 @@ async def backfill_procurement_tasks(
         "positions_processed": len(positions),
         "material_reservation_runs": material_ran,
         "stone_reservation_runs": stone_ran,
+        "recipe_tasks_auto_closed": recipe_closed,
         "errors": errors,
+    }
+
+
+def _cleanup_stale_recipe_tasks(db, factory_id: UUID) -> dict:
+    """Close RECIPE_CONFIGURATION tasks that can no longer fire.
+
+    Returns counts by category.
+    """
+    from api.models import Task, OrderPosition
+    from api.enums import TaskType, TaskStatus, PositionStatus
+
+    recipe_done_statuses = {
+        PositionStatus.TRANSFERRED_TO_SORTING.value,
+        PositionStatus.SENT_TO_QUALITY_CHECK.value,
+        PositionStatus.QUALITY_CHECK_DONE.value,
+        PositionStatus.PACKED.value,
+        PositionStatus.SHIPPED.value,
+        PositionStatus.CANCELLED.value,
+        PositionStatus.MERGED.value,
+        PositionStatus.READY_FOR_SHIPMENT.value,
+        # Engobe stages imply a recipe has already been used (engobe
+        # itself is rooted in the recipe), so a "configure recipe" task
+        # is obsolete by the time the position reaches them.
+        PositionStatus.ENGOBE_APPLIED.value,
+        PositionStatus.ENGOBE_CHECK.value,
+        PositionStatus.GLAZED.value,
+        PositionStatus.PRE_KILN_CHECK.value,
+        PositionStatus.LOADED_IN_KILN.value,
+        PositionStatus.FIRED.value,
+    }
+
+    open_tasks = db.query(Task).filter(
+        Task.factory_id == factory_id,
+        Task.type == TaskType.RECIPE_CONFIGURATION.value,
+        Task.status.in_(
+            [TaskStatus.PENDING.value, TaskStatus.IN_PROGRESS.value]
+        ),
+    ).all()
+
+    orphan_closed = 0
+    phantom_closed = 0
+    post_stage_closed = 0
+
+    for t in open_tasks:
+        pid = t.related_position_id
+        reason = None
+        if not pid:
+            reason = "orphan"
+        else:
+            pos = db.query(OrderPosition).filter(
+                OrderPosition.id == pid,
+            ).first()
+            if pos is None:
+                reason = "orphan"  # dangling pointer — treat like orphan
+            elif pos.recipe_id:
+                reason = "phantom"
+            else:
+                cur = pos.status.value if hasattr(pos.status, "value") else pos.status
+                if cur in recipe_done_statuses:
+                    reason = "post_stage"
+        if reason is None:
+            continue
+        t.status = TaskStatus.DONE.value
+        if reason == "orphan":
+            orphan_closed += 1
+        elif reason == "phantom":
+            phantom_closed += 1
+        elif reason == "post_stage":
+            post_stage_closed += 1
+
+    return {
+        "orphan": orphan_closed,
+        "phantom_already_configured": phantom_closed,
+        "post_stage_no_longer_needed": post_stage_closed,
+        "total_closed": orphan_closed + phantom_closed + post_stage_closed,
     }
 
 

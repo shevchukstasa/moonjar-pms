@@ -374,6 +374,39 @@ def _check_stone_stock_and_create_task(
             .all()
         )
 
+        def _stone_balance_sqm(mat, stock) -> float:
+            """Convert Material's stock balance to m², handling both unit="m2"
+            and unit="pcs" (the common case for Bali stone catalog). For
+            pcs, derive tile area from Material.width_mm / height_mm (or
+            parse "WxH" / "WxHxT" from the material name as a last resort).
+
+            Returns 0.0 when no balance available or when the material's
+            geometry can't be derived — mirrors old behaviour for the
+            truly-missing-data case.
+            """
+            if not stock:
+                return 0.0
+            bal = float(stock.balance or 0)
+            unit = (mat.unit or "m2").lower()
+            if unit == "m2":
+                return bal
+            if unit != "pcs":
+                return 0.0
+            # Need tile area in m² to multiply pcs → m².
+            w_mm = getattr(mat, "width_mm", None)
+            h_mm = getattr(mat, "height_mm", None)
+            if not (w_mm and h_mm):
+                # Fallback: parse "WxH" or "WxHxT" in cm from the name.
+                import re
+                m = re.search(r"(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)", mat.name or "")
+                if m:
+                    w_mm = float(m.group(1)) * 10
+                    h_mm = float(m.group(2)) * 10
+            if not (w_mm and h_mm):
+                return 0.0
+            tile_sqm = (float(w_mm) / 1000.0) * (float(h_mm) / 1000.0)
+            return bal * tile_sqm
+
         # Find the stone that matches this position's size
         matching_stone = None
         matching_balance_sqm = 0.0
@@ -383,15 +416,14 @@ def _check_stone_stock_and_create_task(
             if pos_size_id and getattr(mat, "size_id", None) == pos_size_id:
                 matching_stone = mat
                 matching_unit = (mat.unit or "m2").lower()
-                matching_balance_sqm = float(stock.balance) if stock and matching_unit == "m2" else 0.0
+                matching_balance_sqm = _stone_balance_sqm(mat, stock)
                 break
             # Strategy 2: name contains position's size string
             mat_name = (mat.name or "").lower().replace(" ", "")
             if pos_size and pos_size in mat_name:
                 matching_stone = mat
                 matching_unit = (mat.unit or "m2").lower()
-                # Only count balance if unit is m² (pcs stone requires piece-level match we don't have)
-                matching_balance_sqm = float(stock.balance) if stock and matching_unit == "m2" else 0.0
+                matching_balance_sqm = _stone_balance_sqm(mat, stock)
                 # Don't break — keep looking for better match (size_id)
 
         if not matching_stone:

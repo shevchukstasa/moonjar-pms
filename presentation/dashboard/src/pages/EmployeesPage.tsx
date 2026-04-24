@@ -1195,10 +1195,7 @@ function AttendanceTab({
   workingDaysData: WorkingDaysResponse | null;
 }) {
   const [selectedEmpIds, setSelectedEmpIds] = useState<Set<string>>(new Set());
-  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
-  const [bulkStatus, setBulkStatus] = useState('present');
-  const [bulkOvertime, setBulkOvertime] = useState('0');
-  const [bulkDate, setBulkDate] = useState('');
+  const [bulkDate, setBulkDate] = useState<string | null>(null);
 
   if (loading) {
     return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
@@ -1250,14 +1247,12 @@ function AttendanceTab({
       {selectedEmpIds.size > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
           <span className="text-sm font-medium text-blue-700">{selectedEmpIds.size} selected</span>
-          <Button size="sm" onClick={() => setBulkDialogOpen(true)}>
-            Fill selected…
-          </Button>
+          <span className="text-sm text-blue-500">— click any day number above to fill</span>
           <button
             onClick={() => setSelectedEmpIds(new Set())}
-            className="ml-auto text-xs text-blue-500 hover:text-blue-700"
+            className="ml-auto text-xs text-blue-400 hover:text-blue-600"
           >
-            Clear selection
+            Clear
           </button>
         </div>
       )}
@@ -1307,13 +1302,17 @@ function AttendanceTab({
                   headerText = 'text-emerald-700';
                 }
 
-                const tooltip = calEntry?.holiday_name ?? (isSunday ? 'Sunday' : isSaturday ? 'Saturday' : 'Working day');
+                const canBulk = selectedEmpIds.size > 0;
+                const tooltip = canBulk
+                  ? `Fill ${selectedEmpIds.size} employee(s) for day ${d}`
+                  : calEntry?.holiday_name ?? (isSunday ? 'Sunday' : isSaturday ? 'Saturday' : 'Working day');
 
                 return (
                   <th
                     key={d}
-                    className={`px-0.5 py-1.5 text-center font-medium min-w-[28px] ${headerBg} ${headerText}`}
+                    className={`px-0.5 py-1.5 text-center font-medium min-w-[28px] ${headerBg} ${headerText} ${canBulk ? 'cursor-pointer hover:ring-2 hover:ring-blue-400 hover:ring-inset' : ''}`}
                     title={tooltip}
+                    onClick={canBulk ? () => setBulkDate(dateStr) : undefined}
                   >
                     {d}
                   </th>
@@ -1491,19 +1490,16 @@ function AttendanceTab({
         )}
       </div>
 
-      {/* Bulk Fill Dialog */}
-      {bulkDialogOpen && (
-        <BulkFillDialog
-          open={bulkDialogOpen}
-          onClose={() => setBulkDialogOpen(false)}
+      {/* Day Bulk Dialog */}
+      {bulkDate !== null && (
+        <DayBulkDialog
+          dateStr={bulkDate}
           selectedEmployees={activeEmps.filter((e) => selectedEmpIds.has(e.id))}
-          year={year}
-          month={month}
-          daysInMonth={daysInMonth}
           lookup={lookup}
           calendarMap={calendarMap}
+          onClose={() => setBulkDate(null)}
           onApplied={() => {
-            setBulkDialogOpen(false);
+            setBulkDate(null);
             setSelectedEmpIds(new Set());
           }}
         />
@@ -1512,74 +1508,48 @@ function AttendanceTab({
   );
 }
 
-// ── Bulk Fill Dialog ─────────────────────────────────────────
+// ── Day Bulk Dialog ───────────────────────────────────────────
+// Opens when user clicks a day header with employees selected.
+// One-click fill: pick status (+ optional OT) → save for all selected employees.
 
-function BulkFillDialog({
-  open,
-  onClose,
+function DayBulkDialog({
+  dateStr,
   selectedEmployees,
-  year,
-  month,
-  daysInMonth,
   lookup,
   calendarMap,
+  onClose,
   onApplied,
 }: {
-  open: boolean;
-  onClose: () => void;
+  dateStr: string;
   selectedEmployees: Employee[];
-  year: number;
-  month: number;
-  daysInMonth: number;
   lookup: Record<string, Record<string, AttendanceRecord>>;
   calendarMap: Map<string, CalendarEntry>;
+  onClose: () => void;
   onApplied: () => void;
 }) {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState('present');
   const [overtime, setOvertime] = useState('0');
-  const [dateFrom, setDateFrom] = useState(toISO(year, month, 1));
-  const [dateTo, setDateTo] = useState(toISO(year, month, daysInMonth));
-  const [skipNonWorking, setSkipNonWorking] = useState(true);
-  const [skipExisting, setSkipExisting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const handleApply = async () => {
+  const dateObj = new Date(dateStr);
+  const isSunday = dateObj.getDay() === 0;
+  const calEntry = calendarMap.get(dateStr);
+  const isNonWorking = calEntry ? !calEntry.is_working_day : isSunday;
+  const dayLabel = dateStr.slice(8) + ' ' + ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dateObj.getDay()];
+
+  const handleApply = async (chosenStatus: string) => {
     setSaving(true);
     setError('');
     try {
-      const from = new Date(dateFrom);
-      const to = new Date(dateTo);
-      const days: string[] = [];
-      const cur = new Date(from);
-      while (cur <= to) {
-        days.push(cur.toISOString().split('T')[0]);
-        cur.setDate(cur.getDate() + 1);
-      }
-
       for (const emp of selectedEmployees) {
-        for (const dateStr of days) {
-          const dateObj = new Date(dateStr);
-          const isSunday = dateObj.getDay() === 0;
-          const calEntry = calendarMap.get(dateStr);
-          const isNonWorking = calEntry ? !calEntry.is_working_day : isSunday;
-          if (skipNonWorking && isNonWorking) continue;
-
-          const existing = lookup[emp.id]?.[dateStr];
-          if (skipExisting && existing) continue;
-
-          const payload = {
-            date: dateStr,
-            status,
-            overtime_hours: parseFloat(overtime) || 0,
-          };
-
-          if (existing) {
-            await employeesApi.updateAttendance(existing.id, payload);
-          } else {
-            await employeesApi.recordAttendance(emp.id, payload);
-          }
+        const existing = lookup[emp.id]?.[dateStr];
+        const payload = { date: dateStr, status: chosenStatus, overtime_hours: parseFloat(overtime) || 0 };
+        if (existing) {
+          await employeesApi.updateAttendance(existing.id, payload);
+        } else {
+          await employeesApi.recordAttendance(emp.id, payload);
         }
       }
       queryClient.invalidateQueries({ queryKey: ['attendance-grid'] });
@@ -1587,53 +1557,33 @@ function BulkFillDialog({
       onApplied();
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setError(detail ?? 'Failed to apply bulk attendance');
-    } finally {
+      setError(detail ?? 'Failed to save');
       setSaving(false);
     }
   };
 
   return (
-    <Dialog open={open} onClose={onClose} title="Bulk Fill Attendance" className="w-full max-w-md">
+    <Dialog open onClose={onClose} title={`Day ${dayLabel} — ${selectedEmployees.length} employee${selectedEmployees.length !== 1 ? 's' : ''}`} className="w-full max-w-sm">
       <div className="space-y-4">
-        <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700">
-          Applying to <strong>{selectedEmployees.length}</strong> employee{selectedEmployees.length !== 1 ? 's' : ''}:{' '}
+        {isNonWorking && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <strong>Non-working day</strong> ({calEntry?.holiday_name ?? 'Sunday'}) — marking as overtime
+          </div>
+        )}
+        <div className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
           {selectedEmployees.map((e) => e.full_name).join(', ')}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">From</label>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">To</label>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-            />
-          </div>
-        </div>
-
+        {/* One-tap status buttons — clicking immediately saves */}
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">Status</label>
+          <p className="mb-2 text-sm font-medium text-gray-700">Tap status to apply instantly:</p>
           <div className="flex flex-wrap gap-2">
             {ATTENDANCE_STATUSES.map((s) => (
               <button
                 key={s.value}
-                onClick={() => setStatus(s.value)}
-                className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                  status === s.value
-                    ? s.color + ' ring-2 ring-offset-1 ring-gray-400'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
+                disabled={saving}
+                onClick={() => { setStatus(s.value); handleApply(s.value); }}
+                className={`rounded-lg px-4 py-2.5 text-sm font-semibold transition-all ${s.color} hover:opacity-80 active:scale-95 disabled:opacity-50`}
               >
                 {s.value.replace('_', ' ')}
               </button>
@@ -1641,43 +1591,24 @@ function BulkFillDialog({
           </div>
         </div>
 
-        <Input
-          label="Overtime Hours"
-          type="number"
-          min="0"
-          step="0.5"
-          value={overtime}
-          onChange={(e) => setOvertime(e.target.value)}
-        />
-
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              checked={skipNonWorking}
-              onChange={(e) => setSkipNonWorking(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300"
-            />
-            Skip non-working days (holidays, Sundays)
-          </label>
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              checked={skipExisting}
-              onChange={(e) => setSkipExisting(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300"
-            />
-            Skip days that already have a record
-          </label>
+        <div className="flex items-center gap-3">
+          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">OT hours:</label>
+          <input
+            type="number"
+            min="0"
+            step="0.5"
+            value={overtime}
+            onChange={(e) => setOvertime(e.target.value)}
+            className="w-24 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+          />
+          <span className="text-xs text-gray-400">(applied with status above)</span>
         </div>
 
+        {saving && <p className="text-sm text-blue-600">Saving…</p>}
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex justify-end pt-1">
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleApply} disabled={saving}>
-            {saving ? 'Applying…' : `Apply to ${selectedEmployees.length} employee${selectedEmployees.length !== 1 ? 's' : ''}`}
-          </Button>
         </div>
       </div>
     </Dialog>

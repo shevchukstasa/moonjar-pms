@@ -12,7 +12,7 @@ from sqlalchemy import extract
 from api.database import get_db
 from api.auth import get_current_user
 from api.roles import require_management, require_finance
-from api.models import Employee, Attendance, Factory, UserFactory
+from api.models import Employee, Attendance, Factory, UserFactory, SalaryAdvance
 
 router = APIRouter()
 
@@ -134,6 +134,18 @@ class AttendanceUpdateInput(BaseModel):
     status: Optional[str] = None
     overtime_hours: Optional[float] = None
     hours_worked: Optional[float] = None  # NULL = full day; e.g. 5.0 = came late
+    notes: Optional[str] = None
+
+
+class AdvanceCreateInput(BaseModel):
+    date: str
+    amount: float
+    notes: Optional[str] = None
+
+
+class AdvanceUpdateInput(BaseModel):
+    date: Optional[str] = None
+    amount: Optional[float] = None
     notes: Optional[str] = None
 
 
@@ -493,6 +505,23 @@ async def payroll_summary(
             payroll_month=month,
             holiday_dates=emp_holidays,
         )
+
+        # Load advances for this employee in the same pay period
+        if pay_period == '25_to_24':
+            advances_q = db.query(SalaryAdvance).filter(
+                SalaryAdvance.employee_id == emp.id,
+                SalaryAdvance.date >= period_start,
+                SalaryAdvance.date <= period_end,
+            )
+        else:
+            advances_q = db.query(SalaryAdvance).filter(
+                SalaryAdvance.employee_id == emp.id,
+                extract("year", SalaryAdvance.date) == year,
+                extract("month", SalaryAdvance.date) == month,
+            )
+        advances_total = float(sum(float(a.amount) for a in advances_q.all()))
+        payroll["advances_total"] = advances_total
+        payroll["net_salary_after_advances"] = round(payroll["net_salary"] - advances_total, 2)
 
         result.append(payroll)
 
@@ -1175,3 +1204,107 @@ async def delete_attendance(
     db.delete(att)
     db.commit()
     return {"status": "deleted", "id": str(attendance_id)}
+
+
+# ── Salary Advance endpoints ──────────────────────────────────
+
+def _serialize_advance(adv: SalaryAdvance) -> dict:
+    return {
+        "id": str(adv.id),
+        "employee_id": str(adv.employee_id),
+        "date": str(adv.date),
+        "amount": float(adv.amount),
+        "notes": adv.notes,
+        "recorded_by": str(adv.recorded_by) if adv.recorded_by else None,
+        "created_at": adv.created_at.isoformat() if adv.created_at else None,
+    }
+
+
+@router.get("/{employee_id}/advances")
+async def get_advances(
+    employee_id: UUID,
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None, ge=1, le=12),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """List salary advances for an employee, optionally filtered by year/month."""
+    query = db.query(SalaryAdvance).filter(SalaryAdvance.employee_id == employee_id)
+    if year:
+        query = query.filter(extract("year", SalaryAdvance.date) == year)
+    if month:
+        query = query.filter(extract("month", SalaryAdvance.date) == month)
+    items = query.order_by(SalaryAdvance.date).all()
+    return {"items": [_serialize_advance(a) for a in items]}
+
+
+@router.post("/{employee_id}/advances", status_code=201)
+async def create_advance(
+    employee_id: UUID,
+    data: AdvanceCreateInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Record a salary advance payment for an employee."""
+    emp = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not emp:
+        raise HTTPException(404, "Employee not found")
+    try:
+        adv_date = date.fromisoformat(data.date)
+    except (ValueError, TypeError):
+        raise HTTPException(422, f"Invalid date: {data.date}")
+    if data.amount <= 0:
+        raise HTTPException(422, "Amount must be positive")
+
+    adv = SalaryAdvance(
+        employee_id=employee_id,
+        date=adv_date,
+        amount=data.amount,
+        notes=data.notes,
+        recorded_by=current_user.id,
+    )
+    db.add(adv)
+    db.commit()
+    db.refresh(adv)
+    return _serialize_advance(adv)
+
+
+@router.patch("/advances/{advance_id}")
+async def update_advance(
+    advance_id: UUID,
+    data: AdvanceUpdateInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Update a salary advance record."""
+    adv = db.query(SalaryAdvance).filter(SalaryAdvance.id == advance_id).first()
+    if not adv:
+        raise HTTPException(404, "Advance not found")
+    update_data = data.model_dump(exclude_unset=True)
+    if "date" in update_data:
+        try:
+            update_data["date"] = date.fromisoformat(update_data["date"])
+        except (ValueError, TypeError):
+            raise HTTPException(422, f"Invalid date: {update_data['date']}")
+    if "amount" in update_data and update_data["amount"] <= 0:
+        raise HTTPException(422, "Amount must be positive")
+    for key, value in update_data.items():
+        setattr(adv, key, value)
+    db.commit()
+    db.refresh(adv)
+    return _serialize_advance(adv)
+
+
+@router.delete("/advances/{advance_id}")
+async def delete_advance(
+    advance_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Delete a salary advance record."""
+    adv = db.query(SalaryAdvance).filter(SalaryAdvance.id == advance_id).first()
+    if not adv:
+        raise HTTPException(404, "Advance not found")
+    db.delete(adv)
+    db.commit()
+    return {"status": "deleted", "id": str(advance_id)}

@@ -2896,6 +2896,21 @@ class Attendance(Base):
     recorded_by_rel = relationship('User', foreign_keys=[recorded_by])
 
 
+class SalaryAdvance(Base):
+    __tablename__ = 'salary_advances'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    employee_id = Column(UUID(as_uuid=True), ForeignKey('employees.id'), nullable=False)
+    date = Column(sa.Date, nullable=False)
+    amount = Column(sa.Numeric(12, 2), nullable=False)
+    notes = Column(sa.Text, nullable=True)
+    recorded_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    employee = relationship('Employee', backref='salary_advances')
+    recorded_by_rel = relationship('User', foreign_keys=[recorded_by])
+
+
 class Shipment(Base):
     __tablename__ = 'shipments'
 

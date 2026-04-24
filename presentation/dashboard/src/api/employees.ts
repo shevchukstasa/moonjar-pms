@@ -249,6 +249,22 @@ export const employeesApi = {
       .get('/employees/payroll-pdf-employee', { params, responseType: 'blob' })
       .then((r) => r.data),
 
+  // Salary Advances
+  getAdvances: (
+    employeeId: string,
+    params: { year?: number; month?: number },
+  ): Promise<AdvanceListResponse> =>
+    apiClient.get(`/employees/${employeeId}/advances`, { params }).then((r) => r.data),
+
+  createAdvance: (employeeId: string, data: AdvanceCreatePayload): Promise<AdvanceRecord> =>
+    apiClient.post(`/employees/${employeeId}/advances`, data).then((r) => r.data),
+
+  updateAdvance: (advanceId: string, data: AdvanceUpdatePayload): Promise<AdvanceRecord> =>
+    apiClient.patch(`/employees/advances/${advanceId}`, data).then((r) => r.data),
+
+  deleteAdvance: (advanceId: string): Promise<{ status: string; id: string }> =>
+    apiClient.delete(`/employees/advances/${advanceId}`).then((r) => r.data),
+
   // HR Costs (owner/ceo only)
   hrCostsYearly: (params: {
     year: number;
@@ -264,6 +280,34 @@ export const employeesApi = {
       .get(`/employees/hr-costs/employee/${params.employee_id}/history`, { params: { year: params.year } })
       .then((r) => r.data),
 };
+
+// ── Salary Advance types ─────────────────────────────────────
+
+export interface AdvanceRecord {
+  id: string;
+  employee_id: string;
+  date: string;
+  amount: number;
+  notes: string | null;
+  recorded_by: string | null;
+  created_at: string | null;
+}
+
+export interface AdvanceListResponse {
+  items: AdvanceRecord[];
+}
+
+export interface AdvanceCreatePayload {
+  date: string;
+  amount: number;
+  notes?: string | null;
+}
+
+export interface AdvanceUpdatePayload {
+  date?: string;
+  amount?: number;
+  notes?: string | null;
+}
 
 // ── HR Costs types ──────────────────────────────────────────
 

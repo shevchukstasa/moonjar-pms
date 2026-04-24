@@ -7,6 +7,7 @@ import {
   type EmployeeCreatePayload,
   type EmployeeUpdatePayload,
   type AttendanceRecord,
+  type AdvanceRecord,
   type PayrollSummaryItem,
 } from '@/api/employees';
 import { useFactories } from '@/hooks/useFactories';
@@ -102,6 +103,15 @@ export default function EmployeesPage() {
   const [terminateDialogOpen, setTerminateDialogOpen] = useState(false);
   const [terminateEmployee, setTerminateEmployee] = useState<Employee | null>(null);
   const [terminateDate, setTerminateDate] = useState('');
+
+  // Advance dialog
+  const [advDialogOpen, setAdvDialogOpen] = useState(false);
+  const [advEmployee, setAdvEmployee] = useState<Employee | null>(null);
+  const [advExistingId, setAdvExistingId] = useState<string | null>(null);
+  const [advDate, setAdvDate] = useState('');
+  const [advAmount, setAdvAmount] = useState('');
+  const [advNotes, setAdvNotes] = useState('');
+  const [advFormError, setAdvFormError] = useState('');
 
   // Attendance dialog
   const [attDialogOpen, setAttDialogOpen] = useState(false);
@@ -210,6 +220,21 @@ export default function EmployeesPage() {
     return map;
   }, [calendarData]);
 
+  // Advances for all employees for this month
+  const { data: advancesData } = useQuery({
+    queryKey: ['advances-grid', factoryId, year, month],
+    queryFn: async () => {
+      if (!employees.length) return {};
+      const results: Record<string, AdvanceRecord[]> = {};
+      for (const emp of employees) {
+        const res = await employeesApi.getAdvances(emp.id, { year, month });
+        results[emp.id] = res.items;
+      }
+      return results;
+    },
+    enabled: !!factoryId && employees.length > 0 && activeTab === 'attendance',
+  });
+
   // Payroll
   const { data: payrollData, isLoading: payrollLoading } = useQuery({
     queryKey: ['payroll-summary', factoryId, year, month],
@@ -288,6 +313,38 @@ export default function EmployeesPage() {
     onError: (err: unknown) => {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setFormError(detail ?? 'Failed to delete attendance');
+    },
+  });
+
+  const advanceMutation = useMutation({
+    mutationFn: ({ empId, existingId, data }: { empId: string; existingId: string | null; data: { date: string; amount: number; notes?: string } }) =>
+      existingId
+        ? employeesApi.updateAdvance(existingId, { amount: data.amount, notes: data.notes, date: data.date })
+        : employeesApi.createAdvance(empId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['advances-grid'] });
+      queryClient.invalidateQueries({ queryKey: ['payroll-summary'] });
+      setAdvDialogOpen(false);
+      setAdvExistingId(null);
+      setAdvFormError('');
+    },
+    onError: (err: unknown) => {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setAdvFormError(detail ?? 'Failed to save advance');
+    },
+  });
+
+  const deleteAdvanceMutation = useMutation({
+    mutationFn: (advId: string) => employeesApi.deleteAdvance(advId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['advances-grid'] });
+      queryClient.invalidateQueries({ queryKey: ['payroll-summary'] });
+      setAdvDialogOpen(false);
+      setAdvExistingId(null);
+    },
+    onError: (err: unknown) => {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setAdvFormError(detail ?? 'Failed to delete advance');
     },
   });
 
@@ -430,6 +487,34 @@ export default function EmployeesPage() {
     setAttDialogOpen(true);
   }, [calendarMap]);
 
+  const openAdvanceDialog = useCallback((emp: Employee, existing?: AdvanceRecord) => {
+    setAdvEmployee(emp);
+    setAdvFormError('');
+    if (existing) {
+      setAdvExistingId(existing.id);
+      setAdvDate(existing.date);
+      setAdvAmount(String(existing.amount));
+      setAdvNotes(existing.notes ?? '');
+    } else {
+      setAdvExistingId(null);
+      setAdvDate(toISO(year, month, new Date().getDate()));
+      setAdvAmount('');
+      setAdvNotes('');
+    }
+    setAdvDialogOpen(true);
+  }, [year, month]);
+
+  const handleAdvanceSubmit = useCallback(() => {
+    if (!advEmployee || !advDate || !advAmount) return;
+    const amt = parseFloat(advAmount);
+    if (isNaN(amt) || amt <= 0) { setAdvFormError('Enter a valid amount'); return; }
+    advanceMutation.mutate({
+      empId: advEmployee.id,
+      existingId: advExistingId,
+      data: { date: advDate, amount: amt, notes: advNotes || undefined },
+    });
+  }, [advEmployee, advDate, advAmount, advNotes, advExistingId, advanceMutation]);
+
   const handleAttendanceSubmit = useCallback(() => {
     if (!attEmployee || !attDate) return;
     const hwVal = attHoursWorked ? parseFloat(attHoursWorked) : undefined;
@@ -540,11 +625,13 @@ export default function EmployeesPage() {
         <AttendanceTab
           employees={employees}
           attendanceData={attendanceData ?? {}}
+          advancesData={advancesData ?? {}}
           loading={attendanceLoading || employeesLoading}
           year={year}
           month={month}
           daysInMonth={daysInMonth}
           onCellClick={openAttendanceDialog}
+          onAdvanceClick={openAdvanceDialog}
           calendarMap={calendarMap}
           workingDaysData={workingDaysData ?? null}
         />
@@ -855,6 +942,73 @@ export default function EmployeesPage() {
         </div>
       </Dialog>
 
+      {/* ── Advance Dialog ── */}
+      <Dialog
+        open={advDialogOpen}
+        onClose={() => { setAdvDialogOpen(false); setAdvExistingId(null); setAdvFormError(''); }}
+        title={advExistingId ? 'Edit Advance' : 'Record Advance'}
+        className="w-full max-w-sm"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
+            <span className="font-medium text-gray-700">Employee:</span>{' '}
+            <span className="text-gray-900">{advEmployee?.full_name}</span>
+          </div>
+          <Input
+            label="Date"
+            type="date"
+            value={advDate}
+            onChange={(e) => setAdvDate(e.target.value)}
+          />
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Amount (IDR)</label>
+            <div className="relative">
+              <input
+                type="text"
+                inputMode="numeric"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 pr-14 text-sm focus:border-blue-500 focus:outline-none"
+                value={advAmount ? Number(advAmount).toLocaleString('id-ID') : ''}
+                placeholder="0"
+                onChange={(e) => {
+                  const raw = e.target.value.replace(/\D/g, '');
+                  setAdvAmount(raw);
+                }}
+              />
+              <span className="absolute inset-y-0 right-0 flex items-center pr-3 text-xs text-gray-400">IDR</span>
+            </div>
+          </div>
+          <Input
+            label="Notes"
+            placeholder="Reason (optional)"
+            value={advNotes}
+            onChange={(e) => setAdvNotes(e.target.value)}
+          />
+          {advFormError && <p className="text-sm text-red-600">{advFormError}</p>}
+          <div className="flex justify-between pt-2">
+            {advExistingId ? (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (advExistingId && confirm('Delete this advance record?')) {
+                    deleteAdvanceMutation.mutate(advExistingId);
+                  }
+                }}
+                disabled={deleteAdvanceMutation.isPending}
+                className="text-red-600 hover:bg-red-50 hover:text-red-700"
+              >
+                {deleteAdvanceMutation.isPending ? 'Deleting...' : 'Delete'}
+              </Button>
+            ) : <div />}
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setAdvDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleAdvanceSubmit} disabled={advanceMutation.isPending}>
+                {advanceMutation.isPending ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Dialog>
+
       {/* ── Terminate Dialog ── */}
       <Dialog
         open={terminateDialogOpen}
@@ -1018,57 +1172,111 @@ function EmployeeListTab({
 function AttendanceTab({
   employees,
   attendanceData,
+  advancesData,
   loading,
   year,
   month,
   daysInMonth,
   onCellClick,
+  onAdvanceClick,
   calendarMap,
   workingDaysData,
 }: {
   employees: Employee[];
   attendanceData: Record<string, AttendanceRecord[]>;
+  advancesData: Record<string, AdvanceRecord[]>;
   loading: boolean;
   year: number;
   month: number;
   daysInMonth: number;
   onCellClick: (emp: Employee, dateStr: string, existingRecord?: { id?: string; status: string; overtime_hours?: number; hours_worked?: number | null; notes?: string }) => void;
+  onAdvanceClick: (emp: Employee, existing?: AdvanceRecord) => void;
   calendarMap: Map<string, CalendarEntry>;
   workingDaysData: WorkingDaysResponse | null;
 }) {
+  const [selectedEmpIds, setSelectedEmpIds] = useState<Set<string>>(new Set());
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState('present');
+  const [bulkOvertime, setBulkOvertime] = useState('0');
+  const [bulkDate, setBulkDate] = useState('');
+
   if (loading) {
     return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
   }
 
   // Build attendance lookup: employeeId -> date -> record
-  const lookup = useMemo(() => {
-    const map: Record<string, Record<string, AttendanceRecord>> = {};
-    for (const [empId, records] of Object.entries(attendanceData)) {
-      map[empId] = {};
-      for (const rec of records) {
-        map[empId][rec.date] = rec;
-      }
+  const lookup: Record<string, Record<string, AttendanceRecord>> = {};
+  for (const [empId, records] of Object.entries(attendanceData)) {
+    lookup[empId] = {};
+    for (const rec of records) {
+      lookup[empId][rec.date] = rec;
     }
-    return map;
-  }, [attendanceData]);
+  }
 
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const activeEmps = employees.filter((e) => e.is_active);
+
+  const toggleSelectAll = () => {
+    if (selectedEmpIds.size === activeEmps.length) {
+      setSelectedEmpIds(new Set());
+    } else {
+      setSelectedEmpIds(new Set(activeEmps.map((e) => e.id)));
+    }
+  };
+
+  const toggleSelect = (empId: string) => {
+    const next = new Set(selectedEmpIds);
+    if (next.has(empId)) next.delete(empId); else next.add(empId);
+    setSelectedEmpIds(next);
+  };
 
   return (
     <Card>
-      <div className="mb-3 flex items-center gap-4 text-xs text-gray-500">
+      {/* Legend + bulk toolbar */}
+      <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-gray-500">
         <span>Click a cell to record attendance.</span>
         <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded bg-emerald-100" /> Present</span>
         <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded bg-red-100" /> Absent</span>
         <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded bg-yellow-100" /> Sick</span>
         <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded bg-blue-100" /> Leave</span>
         <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded bg-orange-100" /> Half</span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-3 w-3 rounded bg-emerald-100 ring-1 ring-orange-400 ring-offset-0" />
+          <span>+ OT</span>
+        </span>
       </div>
+
+      {/* Bulk fill toolbar */}
+      {selectedEmpIds.size > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+          <span className="text-sm font-medium text-blue-700">{selectedEmpIds.size} selected</span>
+          <Button size="sm" onClick={() => setBulkDialogOpen(true)}>
+            Fill selected…
+          </Button>
+          <button
+            onClick={() => setSelectedEmpIds(new Set())}
+            className="ml-auto text-xs text-blue-500 hover:text-blue-700"
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead className="bg-gray-50">
             <tr>
-              <th className="sticky left-0 z-10 bg-gray-50 px-2 py-1.5 text-left font-medium text-gray-600 min-w-[140px]">
+              {/* Select-all checkbox */}
+              <th className="sticky left-0 z-10 bg-gray-50 w-6 px-1 py-1.5">
+                <input
+                  type="checkbox"
+                  checked={selectedEmpIds.size === activeEmps.length && activeEmps.length > 0}
+                  onChange={toggleSelectAll}
+                  className="h-3.5 w-3.5 rounded border-gray-300"
+                  title="Select all"
+                />
+              </th>
+              <th className="sticky left-6 z-10 bg-gray-50 px-2 py-1.5 text-left font-medium text-gray-600 min-w-[130px]">
                 Employee
               </th>
               {days.map((d) => {
@@ -1077,41 +1285,29 @@ function AttendanceTab({
                 const isSunday = dateObj.getDay() === 0;
                 const isSaturday = dateObj.getDay() === 6;
                 const calEntry = calendarMap.get(dateStr);
-                // Determine day type: holiday (from calendar), Sunday, Saturday, or working day
                 const isHoliday = calEntry ? !calEntry.is_working_day : false;
                 const isCalendarWorkingDay = calEntry ? calEntry.is_working_day : !isSunday;
 
                 let headerBg = '';
                 let headerText = 'text-gray-500';
                 if (isHoliday && !isSunday) {
-                  // Explicit holiday from calendar
                   headerBg = 'bg-red-50';
                   headerText = 'text-red-600 font-semibold';
                 } else if (isSunday && !isCalendarWorkingDay) {
-                  // Regular Sunday (non-working)
                   headerBg = 'bg-gray-100';
                   headerText = 'text-gray-400';
                 } else if (isSunday && isCalendarWorkingDay) {
-                  // Sunday overridden to working day (overtime)
                   headerBg = 'bg-amber-50';
                   headerText = 'text-amber-600 font-semibold';
                 } else if (isSaturday && isCalendarWorkingDay) {
-                  // Saturday — working day for 6-day schedule, half day + auto-OT
                   headerBg = 'bg-blue-50';
                   headerText = 'text-blue-600 font-semibold';
                 } else if (isCalendarWorkingDay) {
-                  // Normal working day (Mon-Fri)
                   headerBg = 'bg-emerald-50';
                   headerText = 'text-emerald-700';
                 }
 
-                const tooltip = calEntry?.holiday_name
-                  ? calEntry.holiday_name
-                  : isSunday
-                    ? 'Sunday'
-                    : isSaturday
-                      ? 'Saturday'
-                      : 'Working day';
+                const tooltip = calEntry?.holiday_name ?? (isSunday ? 'Sunday' : isSaturday ? 'Saturday' : 'Working day');
 
                 return (
                   <th
@@ -1123,46 +1319,64 @@ function AttendanceTab({
                   </th>
                 );
               })}
-              <th className="px-2 py-1.5 text-center font-medium text-gray-600">Total</th>
+              <th className="px-2 py-1.5 text-center font-medium text-gray-600 min-w-[70px]">Days</th>
+              <th className="px-2 py-1.5 text-center font-medium text-orange-600 min-w-[50px]">OT h</th>
+              <th className="px-2 py-1.5 text-center font-medium text-violet-600 min-w-[50px]">Adv.</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {employees.filter((e) => e.is_active).map((emp) => {
+            {activeEmps.map((emp) => {
               const empRecords = lookup[emp.id] ?? {};
+              const empAdvances = advancesData[emp.id] ?? [];
+              const totalAdvances = empAdvances.reduce((s, a) => s + a.amount, 0);
               let presentCount = 0;
+              let totalOT = 0;
+
+              // Pre-calculate counts for the whole row
+              for (const d of days) {
+                const dateStr = toISO(year, month, d);
+                const record = empRecords[dateStr];
+                if (record?.status === 'present') {
+                  presentCount += record.hours_worked != null
+                    ? Math.min(record.hours_worked / 7.5, 1)
+                    : 1;
+                }
+                if (record?.status === 'half_day') presentCount += 0.5;
+                if (record?.overtime_hours) totalOT += Number(record.overtime_hours);
+              }
+
+              const isSelected = selectedEmpIds.has(emp.id);
+
               return (
-                <tr key={emp.id}>
-                  <td className="sticky left-0 z-10 bg-white px-2 py-1 font-medium text-gray-900 border-r">
+                <tr key={emp.id} className={isSelected ? 'bg-blue-50' : undefined}>
+                  <td className="sticky left-0 z-10 bg-inherit w-6 px-1 py-1 text-center border-r border-gray-100">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelect(emp.id)}
+                      className="h-3.5 w-3.5 rounded border-gray-300"
+                    />
+                  </td>
+                  <td className="sticky left-6 z-10 bg-inherit px-2 py-1 font-medium text-gray-900 border-r">
                     {emp.full_name}
                   </td>
                   {days.map((d) => {
                     const dateStr = toISO(year, month, d);
                     const record = empRecords[dateStr];
-                    if (record?.status === 'present') {
-                      if (record.hours_worked != null) {
-                        // Partial day: count fraction (assume 7h for 6-day, 8h for 5-day — use 7.5 avg)
-                        presentCount += Math.min(record.hours_worked / 7.5, 1);
-                      } else {
-                        presentCount++;
-                      }
-                    }
-                    if (record?.status === 'half_day') presentCount += 0.5;
                     const statusInfo = record
                       ? ATTENDANCE_STATUSES.find((s) => s.value === record.status)
                       : null;
+                    const hasOT = record && Number(record.overtime_hours) > 0;
 
-                    // Calendar-aware styling for empty cells
                     const dateObj = new Date(year, month - 1, d);
                     const isSunday = dateObj.getDay() === 0;
                     const isSaturday = dateObj.getDay() === 6;
                     const calEntry = calendarMap.get(dateStr);
-                    // For 5-day schedule employees, Saturday is also non-working
                     const isFiveDaySatOff = isSaturday && emp.work_schedule === 'five_day';
                     const isNonWorking = calEntry
                       ? !calEntry.is_working_day
                       : (isSunday || isFiveDaySatOff);
 
-                    // Empty cell style: working days show light bg, non-working show striped/dim
                     const emptyCellClass = isNonWorking
                       ? 'bg-gray-100 text-gray-200 hover:bg-gray-200'
                       : 'bg-gray-50 text-gray-300 hover:bg-gray-100';
@@ -1177,11 +1391,9 @@ function AttendanceTab({
                       <td key={d} className="px-0.5 py-1 text-center">
                         <button
                           onClick={() => onCellClick(emp, dateStr, record ?? undefined)}
-                          className={`inline-flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold transition-colors ${
-                            statusInfo
-                              ? statusInfo.color
-                              : emptyCellClass
-                          }`}
+                          className={`relative inline-flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold transition-colors ${
+                            statusInfo ? statusInfo.color : emptyCellClass
+                          } ${hasOT ? 'ring-2 ring-orange-400 ring-offset-0' : ''}`}
                           title={cellTitle}
                         >
                           {statusInfo?.label ?? (isNonWorking ? '\u00B7' : '-')}
@@ -1189,15 +1401,49 @@ function AttendanceTab({
                       </td>
                     );
                   })}
+                  {/* Days total */}
                   <td className="px-2 py-1 text-center font-semibold text-gray-700">
-                    {presentCount}
+                    {Math.round(presentCount * 10) / 10}
+                  </td>
+                  {/* OT total */}
+                  <td className="px-2 py-1 text-center font-semibold text-orange-600">
+                    {totalOT > 0 ? totalOT : <span className="text-gray-300">–</span>}
+                  </td>
+                  {/* Advances */}
+                  <td className="px-1 py-1 text-center">
+                    <button
+                      onClick={() => onAdvanceClick(emp)}
+                      title={totalAdvances > 0 ? `Advances: ${formatIDR(totalAdvances)} — click to manage` : 'Add advance'}
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                        totalAdvances > 0
+                          ? 'bg-violet-100 text-violet-700 hover:bg-violet-200'
+                          : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                      }`}
+                    >
+                      {totalAdvances > 0 ? `${(totalAdvances / 1000).toFixed(0)}k` : '+'}
+                    </button>
+                    {/* Individual advance records as small chips */}
+                    {empAdvances.length > 0 && (
+                      <div className="mt-0.5 flex flex-col gap-0.5">
+                        {empAdvances.map((adv) => (
+                          <button
+                            key={adv.id}
+                            onClick={() => onAdvanceClick(emp, adv)}
+                            className="rounded bg-violet-50 px-1 py-0 text-[9px] text-violet-600 hover:bg-violet-100"
+                            title={`${adv.date}: ${formatIDR(adv.amount)}${adv.notes ? ' — ' + adv.notes : ''}`}
+                          >
+                            {adv.date.slice(8)}/{(adv.amount / 1000).toFixed(0)}k
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </td>
                 </tr>
               );
             })}
-            {employees.filter((e) => e.is_active).length === 0 && (
+            {activeEmps.length === 0 && (
               <tr>
-                <td colSpan={daysInMonth + 2} className="py-8 text-center text-gray-400">
+                <td colSpan={daysInMonth + 5} className="py-8 text-center text-gray-400">
                   No active employees.
                 </td>
               </tr>
@@ -1205,7 +1451,8 @@ function AttendanceTab({
           </tbody>
         </table>
       </div>
-      {/* Working Days Summary from Factory Calendar */}
+
+      {/* Working Days Summary */}
       <div className="mt-4 flex flex-wrap items-center gap-6 border-t pt-3">
         {workingDaysData ? (
           <>
@@ -1243,7 +1490,197 @@ function AttendanceTab({
           <span className="text-xs text-gray-400">Loading calendar data...</span>
         )}
       </div>
+
+      {/* Bulk Fill Dialog */}
+      {bulkDialogOpen && (
+        <BulkFillDialog
+          open={bulkDialogOpen}
+          onClose={() => setBulkDialogOpen(false)}
+          selectedEmployees={activeEmps.filter((e) => selectedEmpIds.has(e.id))}
+          year={year}
+          month={month}
+          daysInMonth={daysInMonth}
+          lookup={lookup}
+          calendarMap={calendarMap}
+          onApplied={() => {
+            setBulkDialogOpen(false);
+            setSelectedEmpIds(new Set());
+          }}
+        />
+      )}
     </Card>
+  );
+}
+
+// ── Bulk Fill Dialog ─────────────────────────────────────────
+
+function BulkFillDialog({
+  open,
+  onClose,
+  selectedEmployees,
+  year,
+  month,
+  daysInMonth,
+  lookup,
+  calendarMap,
+  onApplied,
+}: {
+  open: boolean;
+  onClose: () => void;
+  selectedEmployees: Employee[];
+  year: number;
+  month: number;
+  daysInMonth: number;
+  lookup: Record<string, Record<string, AttendanceRecord>>;
+  calendarMap: Map<string, CalendarEntry>;
+  onApplied: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [status, setStatus] = useState('present');
+  const [overtime, setOvertime] = useState('0');
+  const [dateFrom, setDateFrom] = useState(toISO(year, month, 1));
+  const [dateTo, setDateTo] = useState(toISO(year, month, daysInMonth));
+  const [skipNonWorking, setSkipNonWorking] = useState(true);
+  const [skipExisting, setSkipExisting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleApply = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      const from = new Date(dateFrom);
+      const to = new Date(dateTo);
+      const days: string[] = [];
+      const cur = new Date(from);
+      while (cur <= to) {
+        days.push(cur.toISOString().split('T')[0]);
+        cur.setDate(cur.getDate() + 1);
+      }
+
+      for (const emp of selectedEmployees) {
+        for (const dateStr of days) {
+          const dateObj = new Date(dateStr);
+          const isSunday = dateObj.getDay() === 0;
+          const calEntry = calendarMap.get(dateStr);
+          const isNonWorking = calEntry ? !calEntry.is_working_day : isSunday;
+          if (skipNonWorking && isNonWorking) continue;
+
+          const existing = lookup[emp.id]?.[dateStr];
+          if (skipExisting && existing) continue;
+
+          const payload = {
+            date: dateStr,
+            status,
+            overtime_hours: parseFloat(overtime) || 0,
+          };
+
+          if (existing) {
+            await employeesApi.updateAttendance(existing.id, payload);
+          } else {
+            await employeesApi.recordAttendance(emp.id, payload);
+          }
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ['attendance-grid'] });
+      queryClient.invalidateQueries({ queryKey: ['payroll-summary'] });
+      onApplied();
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail ?? 'Failed to apply bulk attendance');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Bulk Fill Attendance" className="w-full max-w-md">
+      <div className="space-y-4">
+        <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700">
+          Applying to <strong>{selectedEmployees.length}</strong> employee{selectedEmployees.length !== 1 ? 's' : ''}:{' '}
+          {selectedEmployees.map((e) => e.full_name).join(', ')}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">From</label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">To</label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">Status</label>
+          <div className="flex flex-wrap gap-2">
+            {ATTENDANCE_STATUSES.map((s) => (
+              <button
+                key={s.value}
+                onClick={() => setStatus(s.value)}
+                className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                  status === s.value
+                    ? s.color + ' ring-2 ring-offset-1 ring-gray-400'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {s.value.replace('_', ' ')}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Input
+          label="Overtime Hours"
+          type="number"
+          min="0"
+          step="0.5"
+          value={overtime}
+          onChange={(e) => setOvertime(e.target.value)}
+        />
+
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={skipNonWorking}
+              onChange={(e) => setSkipNonWorking(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300"
+            />
+            Skip non-working days (holidays, Sundays)
+          </label>
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={skipExisting}
+              onChange={(e) => setSkipExisting(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300"
+            />
+            Skip days that already have a record
+          </label>
+        </div>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleApply} disabled={saving}>
+            {saving ? 'Applying…' : `Apply to ${selectedEmployees.length} employee${selectedEmployees.length !== 1 ? 's' : ''}`}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
   );
 }
 

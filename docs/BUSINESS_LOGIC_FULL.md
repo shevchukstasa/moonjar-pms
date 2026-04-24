@@ -260,6 +260,94 @@ daily_cap = brigade_size × shift_count × shift_duration_hours × productivity_
 9. `schedule_metadata` — логируем `left_shift_trace`, `capacity_trace`, `shifted_reason` для debug.
 10. Никаких «быстро поправлю backward на forward без чтения §4» — см. project CLAUDE.md.
 
+### Отображение графика: скрытие уже выполненных стадий (bug-fix 2026-04-25, commit 7bfeef6)
+
+**Правило:** UI календарь **не рисует** позицию на будущие дни для стадий, которые она уже прошла по своему текущему статусу.
+
+**Почему это важно.** `schedule_position` записывает в `stage_plan` даты для ВСЕХ 12 стадий, даже если позиция уже в `GLAZED` или `FIRED`. Если эти исторические записи разложить по календарю 1:1 — пользователь видит «сегодня Unpack, завтра Engobe», хотя физически мастер уже прошёл эти этапы часы назад. Это путает и обесценивает расписание.
+
+**Как реализовано** (`business/planning_engine/scheduler.py:generate_production_schedule`):
+
+Маппинг «какая стадия уже в прошлом для данного статуса» — `_STATUS_COMPLETED_STAGE_INDEX`:
+
+| Статус позиции | Пройдено стадий (индекс) |
+|---|---|
+| `planned`, `insufficient_materials`, `awaiting_*` | 0 (ничего) |
+| `engobe_applied` | 2 (unpacking + engobe) |
+| `engobe_check`, `sent_to_glazing`, `awaiting_reglaze` | 3 |
+| `glazed` | 4 (до glazing включительно) |
+| `pre_kiln_check` | 6 (через edge_cleaning_loading) |
+| `loaded_in_kiln`, `refire` | 7 |
+| `fired` | 8 |
+| `transferred_to_sorting` | 10 (через cooling + unloading) |
+| `sorted`, `sent_to_quality_check`, `quality_check_done`, `blocked_by_qm` | 11 |
+| `packed`, `ready_for_shipment`, `shipped`, `merged`, `cancelled` | 12 (всё) |
+
+`_STAGE_INDEX` — каноничный порядок стадий: `unpacking_sorting=1, engobe=2, drying_engobe=3, glazing=4, drying_glaze=5, edge_cleaning_loading=6, kiln_loading=7, firing=8, cooling=9, unloading=10, sorting=11, packing=12`.
+
+**Правило скрытия:** если `_STAGE_INDEX[stage] <= _STATUS_COMPLETED_STAGE_INDEX[position.status]` — позицию не добавляем в ячейку этого дня. Применяется и к `stage_plan` пути, и к legacy path (`planned_*_date` buckets), и к single-day событию `kiln_loading`.
+
+**Что НЕ делает это правило:** оно не переписывает `stage_plan` в БД и не перепланирует даты. Это чисто UI-фильтр. Если позиция в `glazed` — `stage_plan['unpacking_sorting']` в БД всё ещё содержит историческую дату, но в календаре она не показывается.
+
+**Идейная проверка:** когда позиция становится `shipped` (=12) — она в любом случае уже в `_TERMINAL_STATUSES` и отфильтровывается на входе `generate_production_schedule`, поэтому индекс 12 в маппинге — для симметрии, а не для боевой логики.
+
+### Параллельные стадии (pipeline overlap) — ТРЕБУЕТ РЕАЛИЗАЦИИ
+
+**Статус:** задокументировано как правило, реализация идёт отдельным коммитом (bug #2).
+
+**Проблема.** Текущий `_add_stage()` в `production_scheduler.py:2316` ставит каждую следующую стадию строго после окончания предыдущей:
+```python
+cursor = _add_stage("unpacking_sorting", cursor, 1)  # Apr 24
+cursor = _add_stage("engobe",           cursor, 1)  # Apr 25
+cursor = _add_stage("drying_engobe",    cursor, 1)  # Apr 27 (26 — Вс)
+cursor = _add_stage("glazing",          cursor, 1)  # Apr 28
+```
+
+Итого для партии 162 шт — **4 рабочих дня**. На реальном производстве команда из 3 человек делает все эти стадии **внахлёст**:
+- Worker 1 распаковывает и выкладывает на доски.
+- Как только 1-2 доски готовы (~15 минут) — Worker 2 начинает наносить энгоб.
+- Worker 3 подключает компрессор, готовит линию, работает параллельно с Worker 2.
+- Пока один ангобит, другой уже выкладывает следующую партию, третий сушит/глазурит первые.
+
+Итоговая длительность цепочки 4 стадий = **0.5–1 день**, не 4.
+
+**Правило:** стадии выполняются **pipeline-стилем с перекрытием**. Стадия N+1 может начинаться, когда стадия N выполнена на `(1 − overlap_ratio) × 100%`.
+
+**Коэффициенты перекрытия по умолчанию:**
+
+| Переход между стадиями | `overlap_ratio` | Обоснование |
+|---|---|---|
+| `unpacking_sorting → engobe` | **0.8** | Параллельная работа разных workers по партии |
+| `engobe → drying_engobe` | **0.0** (full serial) | Сушка — естественный процесс, идёт от таймера, не от работы |
+| `drying_engobe → glazing` | **0.8** | Как только часть высохла — можно глазурить |
+| `glazing → drying_glaze` | **0.0** (full serial) | Та же физика сушки |
+| `drying_glaze → edge_cleaning_loading` | **0.8** | Обработка кромок — параллельно по мере сушки |
+| `edge_cleaning_loading → kiln_loading` | **0.0** (full serial) | Печь — дискретное событие, ждёт полной партии |
+| `firing → cooling` | **0.0** (full serial) | Остывание — физический процесс |
+| `cooling → unloading` | **0.0** (full serial) | Разгрузка — после остывания |
+| `unloading → sorting` | **0.8** | Параллельная сортировка по мере разгрузки |
+| `sorting → packing` | **0.8** | Параллельная упаковка |
+
+**Правило перекрытия описано в таблице `StageOverlapRule` (создаётся миграцией)**, настраивается на уровне фабрики. Если записи нет — используются дефолты из таблицы выше.
+
+**Формула:**
+```
+stage_N+1_start = stage_N_start + stage_N_duration × (1 − overlap_ratio)
+```
+С округлением вверх до рабочего дня (минимум +0 дней если перекрытие высокое).
+
+**Важные инварианты:**
+- **Drying-стадии остаются полностью последовательными** (`overlap = 0`) — мы не можем физически начать glazing пока ангоб не высох.
+- **Kiln — всегда serial** — печь как drum (§5, §6), не pipeline.
+- **Firing/Cooling — full serial** — физическая невозможность.
+- **При `overlap = 0`** поведение полностью совпадает со старым (backward compat).
+
+**Где реализовать:**
+- `business/services/production_scheduler.py` — изменить сигнатуру `_add_stage` или обёртку поверх.
+- Конфиг overlap — прочитать `StageOverlapRule` или таблицу-дефолт в коде.
+- `stage_plan` в БД — сохраняем `start/end` с учётом пересечения (чтобы UI показывал корректно).
+- UI `DailyProductionView` — уже работает корректно с пересекающимися диапазонами (позиция появится в двух stage-бейджах на один день — это правильно).
+
 ---
 
 ## 5. Batch Formation & Kiln Assignment

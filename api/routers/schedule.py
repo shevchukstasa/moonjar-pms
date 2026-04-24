@@ -1045,6 +1045,12 @@ def _cleanup_stale_consumption_tasks(db, factory_id: UUID) -> dict:
             survivors.append(tasks[0])
 
     # Orphan / post_stage filter on survivors.
+    # Also: if ShapeConsumptionCoefficient covers this position's shape, the
+    # scheduler can compute the material needs geometrically; no empirical
+    # measurement is required. See BUSINESS_LOGIC_FULL.md §2.
+    from api.models import ShapeConsumptionCoefficient
+
+    shape_already_covered_closed = 0
     final_survivors: list = []
     for t in survivors:
         pid = t.related_position_id
@@ -1064,6 +1070,23 @@ def _cleanup_stale_consumption_tasks(db, factory_id: UUID) -> dict:
             t.status = TaskStatus.DONE.value
             post_stage_closed += 1
             continue
+        # Check if shape coefficient already exists → measurement unnecessary.
+        shape_val = pos.shape.value if hasattr(pos.shape, "value") else pos.shape
+        if shape_val:
+            product_type_val = getattr(pos, "product_type", None)
+            if hasattr(product_type_val, "value"):
+                product_type_val = product_type_val.value
+            product_type_val = (product_type_val or "tile").lower()
+            coeff = db.query(ShapeConsumptionCoefficient).filter(
+                ShapeConsumptionCoefficient.shape == shape_val,
+                ShapeConsumptionCoefficient.product_type.in_(
+                    [product_type_val, "tile"]
+                ),
+            ).first()
+            if coeff:
+                t.status = TaskStatus.DONE.value
+                shape_already_covered_closed += 1
+                continue
         final_survivors.append(t)
 
     # Seed due_at on final survivors without one.
@@ -1079,8 +1102,12 @@ def _cleanup_stale_consumption_tasks(db, factory_id: UUID) -> dict:
         "duplicates_closed": duplicate_closed,
         "orphan": orphan_closed,
         "post_stage_no_longer_needed": post_stage_closed,
+        "shape_already_covered_by_coefficient": shape_already_covered_closed,
         "due_at_seeded_on_survivors": due_at_seeded,
-        "total_closed": duplicate_closed + orphan_closed + post_stage_closed,
+        "total_closed": (
+            duplicate_closed + orphan_closed + post_stage_closed
+            + shape_already_covered_closed
+        ),
         "survivors_remaining": len(final_survivors),
     }
 
@@ -1362,15 +1389,39 @@ async def batch_check_readiness(
                                 pos_ok = False
 
                 # 4. Consumption rules check — for non-standard shapes
+                #
+                # Rationale (see BUSINESS_LOGIC_FULL.md §2):
+                #   consumption = recipe.ml_per_sqm × actual_area (m²)
+                # actual_area is computed via ShapeConsumptionCoefficient,
+                # which for all standard shapes (rectangle, square, round,
+                # triangle, octagon, freeform) holds a geometrically exact
+                # ratio between the bounding box and the real glazed surface.
+                # As long as such a coefficient exists, the scheduler has
+                # everything it needs — an empirical ConsumptionRule override
+                # for this shape is optional, NOT a blocker.
+                #
+                # We only raise the CONSUMPTION_MEASUREMENT blocker when both
+                # an explicit ConsumptionRule AND a ShapeConsumptionCoefficient
+                # are missing — i.e. the system genuinely doesn't know how to
+                # convert bbox → glaze-area for this shape.
                 shape_val = pos.shape.value if hasattr(pos.shape, 'value') else str(pos.shape) if pos.shape else 'rectangle'
                 if shape_val not in ('rectangle', 'square') and (pos.id, 'consumption_measurement') not in existing_tasks:
-                    # Non-standard shape — check if consumption rules exist
-                    from api.models import ConsumptionRule
+                    from api.models import ConsumptionRule, ShapeConsumptionCoefficient
                     rule = db.query(ConsumptionRule).filter(
                         ConsumptionRule.is_active.is_(True),
                         ConsumptionRule.shape == shape_val,
                     ).first()
-                    if not rule:
+                    product_type_val = getattr(pos, 'product_type', None)
+                    if hasattr(product_type_val, 'value'):
+                        product_type_val = product_type_val.value
+                    product_type_val = (product_type_val or 'tile').lower()
+                    shape_coeff = db.query(ShapeConsumptionCoefficient).filter(
+                        ShapeConsumptionCoefficient.shape == shape_val,
+                        ShapeConsumptionCoefficient.product_type.in_(
+                            [product_type_val, 'tile']
+                        ),
+                    ).first()
+                    if not rule and not shape_coeff:
                         method = getattr(pos, 'application_method_code', 'SS') or 'SS'
                         db.add(Task(
                             factory_id=factory_id,

@@ -2636,11 +2636,16 @@ async def get_position_materials(
         except Exception:
             pass
 
+        from business.services.material_reservation import _is_untracked_utility
+
         for rm in recipe_materials:
             material = None
             try:
                 material = db.query(Material).filter(Material.id == rm.material_id).first()
                 if not material:
+                    continue
+                # Water / steam etc. — not tracked as deficits, hide from UI.
+                if _is_untracked_utility(material):
                     continue
 
                 mat_type = (material.material_type or "").lower()

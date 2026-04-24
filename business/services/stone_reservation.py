@@ -343,8 +343,14 @@ def _check_stone_stock_and_create_task(
 
     Best-effort: never raises — failures are logged and swallowed.
     """
-    from api.models import MaterialStock, Material as Mat, Task
+    from api.models import MaterialStock, Material as Mat, Task, Supplier
     from api.enums import TaskType, TaskStatus, UserRole
+    from datetime import datetime, time
+
+    # Default lead time for stone procurement when no supplier info available.
+    # Stone from Bali takes ~35 days end-to-end (quarry → factory). See
+    # docs/BUSINESS_LOGIC_FULL.md §2 for rationale.
+    STONE_DEFAULT_LEAD_DAYS = 35
 
     position_id = str(position.id)
 
@@ -445,11 +451,31 @@ def _check_stone_stock_and_create_task(
                 f"{size_note} Create a Material entry matching this size."
             )
 
+        # Resolve expected arrival date (due_at) from supplier lead time.
+        # If matching_stone has a linked supplier with default_lead_time_days,
+        # use it; otherwise fall back to STONE_DEFAULT_LEAD_DAYS (~35 days).
+        lead_days = STONE_DEFAULT_LEAD_DAYS
+        supplier_note = "default lead time"
+        if matching_stone and getattr(matching_stone, "supplier_id", None):
+            supplier = db.query(Supplier).get(matching_stone.supplier_id)
+            if supplier and getattr(supplier, "default_lead_time_days", None):
+                lead_days = int(supplier.default_lead_time_days)
+                supplier_note = f"{supplier.name} lead time"
+        due_at_value = datetime.combine(
+            date.today() + timedelta(days=lead_days), time.min,
+        )
+
         if existing_task:
             existing_task.description = size_note
+            # Keep due_at in sync: if the task was created without one, or
+            # supplier lead time was updated since, refresh it. Don't push
+            # the date back — only forward, so purchaser-set ETAs stick.
+            if existing_task.due_at is None or existing_task.due_at < due_at_value:
+                existing_task.due_at = due_at_value
             logger.info(
-                "STONE_TASK_UPDATED | position=%s | task=%s",
-                position_id, existing_task.id,
+                "STONE_TASK_UPDATED | position=%s | task=%s | due_at=%s (%s, %d days)",
+                position_id, existing_task.id, existing_task.due_at.date(),
+                supplier_note, lead_days,
             )
         else:
             # Create new blocking task
@@ -463,12 +489,15 @@ def _check_stone_stock_and_create_task(
                 blocking=True,
                 description=size_note,
                 priority=3,
+                due_at=due_at_value,
                 metadata_json={
                     "reserved_sqm": reserved_sqm,
                     "available_sqm": effective_available,
                     "deficit_sqm": deficit,
                     "quantity": quantity,
                     "stone_defect_pct": defect_pct,
+                    "lead_days": lead_days,
+                    "lead_source": supplier_note,
                 },
             )
             db.add(task)
@@ -476,8 +505,9 @@ def _check_stone_stock_and_create_task(
 
             logger.info(
                 "STONE_PROCUREMENT_TASK | position=%s | task=%s | "
-                "need=%.3f available=%.3f deficit=%.3f",
+                "need=%.3f available=%.3f deficit=%.3f | due=%s (%s, %d days)",
                 position_id, task.id, reserved_sqm, effective_available, deficit,
+                due_at_value.date(), supplier_note, lead_days,
             )
 
         # Transition position to INSUFFICIENT_MATERIALS (runs for both

@@ -119,6 +119,7 @@ Calculates material needs per position (from recipe BOM), reserves stock, and wr
 - `unreserve_materials_for_position(db, position_id)` — Reverse all reservations (e.g., on cancellation).
 - `check_material_availability_smart(db, position)` — Smart check: returns needs, availability, substitution suggestions, and purchase request recommendations.
 - `create_auto_purchase_request(db, factory_id, missing_materials)` — Auto-creates purchase request for missing materials.
+- `sync_material_procurement_task(db, position, shortages)` — Creates/updates/closes a blocking `MATERIAL_ORDER` task (non-stone). Called at the tail of `reserve_materials_for_position` on every reserve attempt. One task per position, covers all non-stone shortages. Closes itself (status=DONE) when stock catches up.
 - `check_and_unblock_positions_after_receive(db, factory_id, material_id)` — After material receipt, checks if any INSUFFICIENT_MATERIALS positions can now be unblocked.
 
 ### Business Rules
@@ -127,6 +128,16 @@ Calculates material needs per position (from recipe BOM), reserves stock, and wr
 3. Engobe is consumed separately from glaze (needs_engobe flag on ApplicationMethod).
 4. Area calculation uses `glazeable_sqm` from position or recalculates via surface_area service.
 5. Defect margin pieces are included in reservation.
+6. **Untracked utilities** (`water`, `вода`) never count as deficit — they're infrastructure, always assumed unlimited. Skipped in reserve / deficit checks / UI requirements list. Match is case-insensitive on exact material name. See `_UNTRACKED_UTILITY_NAMES` in `material_reservation.py`.
+7. **Blocking task lifecycle (single rule for all materials):**
+   - Stone deficit → `STONE_PROCUREMENT` blocking task (one per position), created/updated in `stone_reservation.py`.
+   - Any other material deficit (pigment, frit, bulk, etc.) → `MATERIAL_ORDER` blocking task (one per position, covers all non-stone items), created/updated in `material_reservation.py:sync_material_procurement_task`.
+   - Both tasks get `due_at = today + lead_days` set automatically:
+     - Stone: `supplier.default_lead_time_days` or **35 days** default.
+     - Non-stone: `max(supplier.default_lead_time_days)` across shortages, per-type fallback (pigment=7, frit/oxide/other_bulk=14, …), ultimate fallback **14 days**.
+   - `due_at` is **only pushed forward** by auto-recalc, never backwards — so a purchaser-entered precise ETA always wins.
+   - When shortage disappears (materials received), the matching task auto-closes (`status=DONE`) on the next reserve attempt / recalc.
+   - The scheduler reads `Task.due_at` via `_get_blocking_task_ready_date` → this becomes `material_ready_date` for that position, i.e. the planner won't start glazing before the deficit is expected to clear.
 
 ---
 

@@ -24,6 +24,26 @@ logger = logging.getLogger("moonjar.material_reservation")
 
 
 # ────────────────────────────────────────────────────────────────
+# Untracked utilities — materials excluded from deficit checks
+# ────────────────────────────────────────────────────────────────
+
+# Materials listed here are treated as unlimited / infrastructure-provided.
+# They appear in recipes (for documentation / consumption tracking) but must
+# NOT trigger INSUFFICIENT_MATERIALS blocks or generate purchase tasks.
+# Match is case-insensitive on trimmed name; exact match required.
+# See docs/BUSINESS_LOGIC_FULL.md §2.
+_UNTRACKED_UTILITY_NAMES = {"water", "вода"}
+
+
+def _is_untracked_utility(material) -> bool:
+    """True if the material is a utility (water, steam, …) that must never block."""
+    if material is None:
+        return False
+    name = (getattr(material, "name", "") or "").strip().lower()
+    return name in _UNTRACKED_UTILITY_NAMES
+
+
+# ────────────────────────────────────────────────────────────────
 # ConsumptionRule lookup — find best matching override for a position
 # ────────────────────────────────────────────────────────────────
 
@@ -647,6 +667,16 @@ def reserve_materials_for_position(
             )
             continue
 
+        # Skip untracked utilities (water, steam) — they are always assumed
+        # available in unlimited supply and must never block production.
+        # See docs/BUSINESS_LOGIC_FULL.md §2.
+        if _is_untracked_utility(material):
+            logger.debug(
+                "MATERIAL_SKIP_UTILITY | position=%s material=%s — not deficit-tracked",
+                position.id, material.name,
+            )
+            continue
+
         # Determine which consumption rule applies to this material
         mat_type = ''
         if hasattr(rm, 'material') and rm.material:
@@ -749,6 +779,18 @@ def reserve_materials_for_position(
             position.id, len(reserved),
         )
 
+    # Sync blocking MATERIAL_ORDER task with current shortages. This is the
+    # single source of truth: creates the task when deficit appears, closes
+    # it when stock catches up. Called on every reserve attempt, so recalc
+    # → task lifecycle stays consistent.
+    try:
+        sync_material_procurement_task(db, position, shortages)
+    except Exception as _task_err:
+        logger.warning(
+            "MATERIAL_ORDER_SYNC_FAIL | position=%s | %s — continuing",
+            position.id, _task_err,
+        )
+
     return ReservationResult(
         reserved=reserved,
         shortages=shortages,
@@ -787,6 +829,8 @@ def force_reserve_materials(
     for rm in recipe_materials:
         material = db.query(Material).get(rm.material_id)
         if not material:
+            continue
+        if _is_untracked_utility(material):
             continue
 
         # Calculate required quantity and convert to stock unit
@@ -925,6 +969,167 @@ def unreserve_materials_for_position(db: Session, position_id: UUID) -> None:
 # §4.4  Auto purchase request creation
 # ────────────────────────────────────────────────────────────────
 
+# ────────────────────────────────────────────────────────────────
+# Material procurement blocking task (non-stone)
+# ────────────────────────────────────────────────────────────────
+
+# Default lead time per material type when supplier.default_lead_time_days
+# is not set. Matches the categories in schedule_estimation.py so the
+# planner sees consistent dates. See docs/BUSINESS_LOGIC_FULL.md §2.
+_DEFAULT_LEAD_DAYS_BY_TYPE = {
+    "pigment": 7,
+    "frit": 14,
+    "oxide_carbonate": 14,
+    "other_bulk": 14,
+    "consumable": 7,
+    "packaging": 7,
+    "other": 14,
+    "engobe": 14,
+    "glaze": 14,
+}
+_FALLBACK_NON_STONE_LEAD_DAYS = 14
+
+
+def _resolve_material_lead_days(db: Session, material) -> int:
+    """Pick the best-known lead time (days) for a single material."""
+    from api.models import Supplier
+
+    supplier_id = getattr(material, "supplier_id", None)
+    if supplier_id:
+        supplier = db.query(Supplier).get(supplier_id)
+        if supplier and getattr(supplier, "default_lead_time_days", None):
+            return int(supplier.default_lead_time_days)
+
+    mtype = (getattr(material, "material_type", "") or "").lower().strip()
+    return _DEFAULT_LEAD_DAYS_BY_TYPE.get(mtype, _FALLBACK_NON_STONE_LEAD_DAYS)
+
+
+def sync_material_procurement_task(
+    db: Session,
+    position,
+    shortages: list,  # list[MaterialNeed]
+) -> None:
+    """Create / update / close a blocking MATERIAL_ORDER task for a position.
+
+    Rules:
+    - Stone shortages are handled by stone_reservation.py (STONE_PROCUREMENT).
+      We skip material_type='stone' here to avoid double-booking.
+    - One MATERIAL_ORDER task per position, covering all non-stone shortages.
+    - due_at = today + max(supplier.default_lead_time_days) across shortages,
+      falling back to per-type defaults.
+    - If shortages is empty → close (status=DONE) any open task for the position.
+
+    See docs/BUSINESS_LOGIC_FULL.md §2 and docs/BLOCKING_TASKS.md.
+    """
+    from api.models import Task, Material
+    from api.enums import TaskType, TaskStatus, UserRole
+    from datetime import datetime, time
+
+    # Ignore stone — handled separately by stone_reservation.py.
+    non_stone_shortages = [
+        s for s in shortages
+        if (s.material_type or "").lower() != "stone"
+    ]
+
+    existing = db.query(Task).filter(
+        Task.related_position_id == position.id,
+        Task.type == TaskType.MATERIAL_ORDER,
+        Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+    ).first()
+
+    if not non_stone_shortages:
+        # All non-stone materials now reserved → close the blocker.
+        if existing:
+            existing.status = TaskStatus.DONE
+            logger.info(
+                "MATERIAL_ORDER_CLOSED | position=%s | task=%s — all materials reserved",
+                position.id, existing.id,
+            )
+        return
+
+    # Compute due_at: latest arrival wins (must wait for the slowest item).
+    max_lead_days = 0
+    lead_details: list[tuple[str, int]] = []
+    for s in non_stone_shortages:
+        mat = db.query(Material).get(s.material_id)
+        days = _resolve_material_lead_days(db, mat) if mat else _FALLBACK_NON_STONE_LEAD_DAYS
+        lead_details.append((s.material_name, days))
+        if days > max_lead_days:
+            max_lead_days = days
+
+    due_at_value = datetime.combine(
+        date.today() + timedelta(days=max_lead_days), time.min,
+    )
+
+    # Build human-readable shortage list, sorted by deficit desc.
+    items_sorted = sorted(
+        non_stone_shortages,
+        key=lambda s: float(s.deficit or 0),
+        reverse=True,
+    )
+    unit_hint = ""  # per-material unit isn't in MaterialNeed; keep simple
+    shortage_lines = [
+        f"{s.material_name}: need {float(s.required):.3f}, have {float(s.available):.3f}"
+        f" (deficit {float(s.deficit):.3f}){unit_hint}"
+        for s in items_sorted
+    ]
+    description = (
+        f"Material shortage ({len(non_stone_shortages)} item"
+        f"{'s' if len(non_stone_shortages) > 1 else ''}): "
+        + "; ".join(shortage_lines)
+    )
+
+    metadata = {
+        "materials": [
+            {
+                "material_id": str(s.material_id),
+                "name": s.material_name,
+                "type": s.material_type,
+                "deficit": float(s.deficit or 0),
+                "required": float(s.required or 0),
+                "available": float(s.available or 0),
+            }
+            for s in non_stone_shortages
+        ],
+        "lead_days_max": max_lead_days,
+        "lead_days_by_material": {name: days for name, days in lead_details},
+    }
+
+    if existing:
+        existing.description = description
+        existing.metadata_json = metadata
+        # Only push due_at forward (don't override purchaser-set ETAs with an
+        # earlier auto-calculated date). If existing.due_at is None, seed it.
+        if existing.due_at is None or existing.due_at < due_at_value:
+            existing.due_at = due_at_value
+        logger.info(
+            "MATERIAL_ORDER_UPDATED | position=%s | task=%s | items=%d | due=%s",
+            position.id, existing.id, len(non_stone_shortages),
+            existing.due_at.date(),
+        )
+    else:
+        task = Task(
+            factory_id=position.factory_id,
+            type=TaskType.MATERIAL_ORDER,
+            status=TaskStatus.PENDING,
+            assigned_role=UserRole.PURCHASER,
+            related_order_id=position.order_id,
+            related_position_id=position.id,
+            blocking=True,
+            description=description,
+            priority=3,
+            due_at=due_at_value,
+            metadata_json=metadata,
+        )
+        db.add(task)
+        db.flush()
+        logger.info(
+            "MATERIAL_ORDER_TASK | position=%s | task=%s | items=%d | due=%s (+%d days)",
+            position.id, task.id, len(non_stone_shortages),
+            due_at_value.date(), max_lead_days,
+        )
+
+
 def create_auto_purchase_request(
     db: Session,
     factory_id: UUID,
@@ -1056,6 +1261,8 @@ def check_and_unblock_positions_after_receive(
             for rm in recipe_materials:
                 material = db.query(Material).get(rm.material_id)
                 if not material:
+                    continue
+                if _is_untracked_utility(material):
                     continue
 
                 required_calc = _calculate_required(rm, position, recipe=recipe)

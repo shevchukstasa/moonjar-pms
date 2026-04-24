@@ -134,20 +134,24 @@ Note: When a size is auto-created, a non-blocking SIZE_RESOLUTION task is create
 
 ---
 
-### 7. MATERIAL_ORDER (implicit via INSUFFICIENT_MATERIALS)
+### 7. MATERIAL_ORDER (non-stone shortage)
 
 | Field | Value |
 |-------|-------|
 | **TaskType** | `material_order` |
-| **Created by** | `business/services/material_reservation.py` — `create_auto_purchase_request()` (called from order_intake when shortages detected) |
-| **Trigger** | Material reservation finds shortages AND smart availability check confirms material is truly unavailable (not covered by pending purchase orders arriving in time) |
-| **Blocks position to** | `PositionStatus.INSUFFICIENT_MATERIALS` (set by order_intake, not by this task directly) |
-| **Assigned to** | Purchaser role |
-| **Auto-resolves** | Partially. When materials are received via warehouse (`on_material_received`), the system rechecks blocked positions. PM can trigger reprocess to re-evaluate. |
-| **Force Unblock options** | Via `insufficient_materials` options: |
-| | 1. **Proceed with available stock** — force-reserve what's available, balance may go negative |
-| | 2. **Wait for delivery** — create purchase request with estimated delivery date |
-| | 3. **Substitute material** — specify alternative material and re-reserve |
+| **Created by** | `business/services/material_reservation.py` — `sync_material_procurement_task()`, called at the tail of `reserve_materials_for_position()` (and therefore on every order intake AND every scheduler recalc / reserve attempt). |
+| **Trigger** | `reserve_materials_for_position` returns shortages for any material that is **not** stone (stone goes to `STONE_PROCUREMENT`). |
+| **Blocks position to** | `PositionStatus.INSUFFICIENT_MATERIALS` (set elsewhere — this task is purely the purchaser-facing counterpart). |
+| **Assigned to** | `UserRole.PURCHASER`, `blocking=True` |
+| **Granularity** | **One task per position**, aggregating ALL non-stone shortages for that position (pigment + frit + bulk + …). Re-runs update the same task in place. |
+| **Auto-resolves** | **Yes.** When shortage clears (stock received, recipe changed, position split), the next call to `reserve_materials_for_position` detects empty non-stone shortage list → flips `status = DONE`. |
+| **due_at (ETA)** | `today + max(lead_days)` across all shortages in the task. Per-material lead days resolved in order: `Material.supplier.default_lead_time_days` → per-type default (`pigment=7`, `frit/oxide/other_bulk/other=14`, `consumable/packaging=7`) → fallback `14`. |
+| **ETA is monotone forward** | If the task already has a later `due_at` (e.g. purchaser manually set a confirmed delivery date), auto-recalc **does not** push it back. Only extends. |
+| **Scheduler integration** | `production_scheduler._get_blocking_task_ready_date` reads `Task.due_at` → becomes `material_ready_date` for the position → planner doesn't start glazing before that date. |
+| **Force Unblock options** | Via `insufficient_materials` options (unchanged): 1) proceed with available stock, 2) wait for delivery, 3) substitute material. |
+| **Untracked utilities** | Materials in `_UNTRACKED_UTILITY_NAMES` (water / вода) never generate this task — they're skipped in reservation entirely. |
+
+Metadata includes: `materials[]` (name, type, required/available/deficit), `lead_days_max`, `lead_days_by_material`.
 
 The force-reserve path calls `force_reserve_materials()` which creates RESERVE transactions regardless of balance, tracking negative balances in the `negative_balances` table.
 
@@ -158,14 +162,18 @@ The force-reserve path calls `force_reserve_materials()` which creates RESERVE t
 | Field | Value |
 |-------|-------|
 | **TaskType** | `stone_procurement` |
-| **Created by** | `business/services/order_intake.py` — `process_order_item()` (stone reservation section) |
-| **Trigger** | Stone reservation succeeds but factory doesn't have enough stone stock for the reserved quantity |
-| **Blocks position to** | Does NOT directly change position status (task is blocking but position may remain PLANNED) |
-| **Assigned to** | `UserRole.PURCHASER` |
-| **Auto-resolves** | No. Purchaser must procure stone and receive it in warehouse. |
-| **Force Unblock options** | No specific Smart Unblock options (covered under `insufficient_materials` if position gets blocked) |
+| **Created by** | `business/services/stone_reservation.py` — `_check_stone_stock_and_create_task()` (invoked during `reserve_stone_for_position`, runs on order intake and on every reserve/recalc). |
+| **Trigger** | Position reserves stone but matched stone material at this factory has `effective_available < reserved_sqm` (after subtracting other active stone reservations for the same size). |
+| **Blocks position to** | `PositionStatus.INSUFFICIENT_MATERIALS` when current status is in the blockable set (`planned`, `awaiting_recipe`, `awaiting_stencil_silkscreen`, `awaiting_color_matching`, `awaiting_consumption_data`). |
+| **Assigned to** | `UserRole.PURCHASER`, `blocking=True` |
+| **Granularity** | One task per position. Dedup via `(related_position_id, type, status ∈ {pending, in_progress})`. Re-runs update description + `due_at` in place. |
+| **Auto-resolves** | Not automatically — purchaser must procure stone and receive into warehouse. Warehouse receipt triggers `check_and_unblock_positions_after_receive`. |
+| **due_at (ETA)** | `today + lead_days`. `lead_days = matching_stone.supplier.default_lead_time_days` if supplier linked, else **35 days** (Bali stone default, `STONE_DEFAULT_LEAD_DAYS`). |
+| **ETA is monotone forward** | Same as MATERIAL_ORDER — existing later `due_at` is never pushed back by auto-recalc. |
+| **Scheduler integration** | Same — `production_scheduler` reads `Task.due_at` and anchors `material_ready_date` to it. |
+| **Force Unblock options** | No specific Smart Unblock options (covered under `insufficient_materials` if position gets blocked). |
 
-Metadata includes: `reserved_sqm`, `stone_defect_pct`, `reserved_qty`, lead time estimate.
+Metadata includes: `reserved_sqm`, `available_sqm`, `deficit_sqm`, `quantity`, `stone_defect_pct`, `lead_days`, `lead_source` (supplier name or "default lead time").
 
 ---
 

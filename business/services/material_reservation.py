@@ -928,17 +928,44 @@ def _sync_position_status_after_reserve(
     if hasattr(current, "value"):
         current = current.value
     if current != PositionStatus.INSUFFICIENT_MATERIALS.value:
+        logger.debug(
+            "STATUS_SYNC_SKIP | position=%s current=%s (not insufficient)",
+            position.id, current,
+        )
         return
     if not all_materials_ok:
+        logger.debug(
+            "STATUS_SYNC_SKIP | position=%s all_ok=False",
+            position.id,
+        )
         return
+
+    # Flush so pending status changes (e.g. stone_procurement DONE done in
+    # the same transaction by stone_reservation) are visible to the count
+    # query below.
+    try:
+        db.flush()
+    except Exception:
+        pass
+
+    # Pass enum .value strings explicitly — Task.type / Task.status columns
+    # are stored as plain strings, and in_() with Enum instances misbehaves
+    # on some SQLAlchemy + pg combinations (observed empty result despite
+    # matching rows on prod 2026-04-24).
+    blocker_types = [TaskType.STONE_PROCUREMENT.value, TaskType.MATERIAL_ORDER.value]
+    open_statuses = [TaskStatus.PENDING.value, TaskStatus.IN_PROGRESS.value]
 
     open_blockers = db.query(Task).filter(
         Task.related_position_id == position.id,
-        Task.type.in_([TaskType.STONE_PROCUREMENT, TaskType.MATERIAL_ORDER]),
-        Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]),
+        Task.type.in_(blocker_types),
+        Task.status.in_(open_statuses),
         Task.blocking.is_(True),
     ).count()
     if open_blockers:
+        logger.info(
+            "STATUS_SYNC_STILL_BLOCKED | position=%s | %d open blocker(s)",
+            position.id, open_blockers,
+        )
         return
 
     position.status = PositionStatus.PLANNED

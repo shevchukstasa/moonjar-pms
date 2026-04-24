@@ -882,6 +882,11 @@ async def backfill_procurement_tasks(
     # their own lifecycle and aren't cleaned up here.
     recipe_closed = _cleanup_stale_recipe_tasks(db, factory_id)
 
+    # Same treatment for CONSUMPTION_MEASUREMENT: close duplicates, close
+    # post-stage / phantom; set due_at = today + 7d on survivors so the
+    # scheduler doesn't apply the 14-day fallback.
+    consumption_closed = _cleanup_stale_consumption_tasks(db, factory_id)
+
     db.commit()
 
     return {
@@ -890,6 +895,7 @@ async def backfill_procurement_tasks(
         "material_reservation_runs": material_ran,
         "stone_reservation_runs": stone_ran,
         "recipe_tasks_auto_closed": recipe_closed,
+        "consumption_tasks_auto_closed": consumption_closed,
         "errors": errors,
     }
 
@@ -966,6 +972,116 @@ def _cleanup_stale_recipe_tasks(db, factory_id: UUID) -> dict:
         "phantom_already_configured": phantom_closed,
         "post_stage_no_longer_needed": post_stage_closed,
         "total_closed": orphan_closed + phantom_closed + post_stage_closed,
+    }
+
+
+def _cleanup_stale_consumption_tasks(db, factory_id: UUID) -> dict:
+    """Close duplicate/stale CONSUMPTION_MEASUREMENT tasks and set due_at
+    on the survivors.
+
+    Three categories closed:
+      - duplicate: same (position, description) → keep newest, close rest
+      - orphan:    no related_position_id or position doesn't exist
+      - post_stage: linked position has already moved past engobe/glaze
+                    (consumption was either measured implicitly or is
+                    no longer relevant)
+
+    Survivors without due_at get today + 7 days (default lead for a
+    measurement — one week is enough for PM to schedule it). This
+    replaces the scheduler's 14-day fallback.
+    """
+    from api.models import Task, OrderPosition
+    from api.enums import TaskType, TaskStatus, PositionStatus
+    from datetime import datetime, time, timezone, date, timedelta
+    from collections import defaultdict
+
+    done_statuses = {
+        PositionStatus.TRANSFERRED_TO_SORTING.value,
+        PositionStatus.SENT_TO_QUALITY_CHECK.value,
+        PositionStatus.QUALITY_CHECK_DONE.value,
+        PositionStatus.PACKED.value,
+        PositionStatus.SHIPPED.value,
+        PositionStatus.CANCELLED.value,
+        PositionStatus.MERGED.value,
+        PositionStatus.READY_FOR_SHIPMENT.value,
+        PositionStatus.LOADED_IN_KILN.value,
+        PositionStatus.FIRED.value,
+        PositionStatus.GLAZED.value,
+        PositionStatus.PRE_KILN_CHECK.value,
+        PositionStatus.ENGOBE_APPLIED.value,
+        PositionStatus.ENGOBE_CHECK.value,
+    }
+
+    open_tasks = db.query(Task).filter(
+        Task.factory_id == factory_id,
+        Task.type == TaskType.CONSUMPTION_MEASUREMENT.value,
+        Task.status.in_(
+            [TaskStatus.PENDING.value, TaskStatus.IN_PROGRESS.value]
+        ),
+    ).all()
+
+    duplicate_closed = 0
+    orphan_closed = 0
+    post_stage_closed = 0
+    due_at_seeded = 0
+
+    # Group by (position, description) to detect duplicates.
+    groups: dict[tuple, list] = defaultdict(list)
+    for t in open_tasks:
+        key = (t.related_position_id, t.description)
+        groups[key].append(t)
+
+    survivors: list = []
+    for key, tasks in groups.items():
+        if len(tasks) > 1:
+            # Keep the newest, close the rest.
+            tasks.sort(key=lambda x: x.created_at or datetime.min, reverse=True)
+            survivor = tasks[0]
+            for t in tasks[1:]:
+                t.status = TaskStatus.DONE.value
+                duplicate_closed += 1
+            survivors.append(survivor)
+        else:
+            survivors.append(tasks[0])
+
+    # Orphan / post_stage filter on survivors.
+    final_survivors: list = []
+    for t in survivors:
+        pid = t.related_position_id
+        if not pid:
+            t.status = TaskStatus.DONE.value
+            orphan_closed += 1
+            continue
+        pos = db.query(OrderPosition).filter(
+            OrderPosition.id == pid,
+        ).first()
+        if pos is None:
+            t.status = TaskStatus.DONE.value
+            orphan_closed += 1
+            continue
+        cur = pos.status.value if hasattr(pos.status, "value") else pos.status
+        if cur in done_statuses:
+            t.status = TaskStatus.DONE.value
+            post_stage_closed += 1
+            continue
+        final_survivors.append(t)
+
+    # Seed due_at on final survivors without one.
+    default_due = datetime.combine(
+        date.today() + timedelta(days=7), time.min,
+    ).replace(tzinfo=timezone.utc)
+    for t in final_survivors:
+        if t.due_at is None:
+            t.due_at = default_due
+            due_at_seeded += 1
+
+    return {
+        "duplicates_closed": duplicate_closed,
+        "orphan": orphan_closed,
+        "post_stage_no_longer_needed": post_stage_closed,
+        "due_at_seeded_on_survivors": due_at_seeded,
+        "total_closed": duplicate_closed + orphan_closed + post_stage_closed,
+        "survivors_remaining": len(final_survivors),
     }
 
 

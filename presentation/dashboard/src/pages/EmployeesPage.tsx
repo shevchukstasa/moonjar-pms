@@ -2010,7 +2010,7 @@ function PayrollTab({
                   )}
                 </td>
                 <td className="px-3 py-2 text-gray-600">{row.position}</td>
-                <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(row.prorated_salary ?? row.base_salary)}</td>
+                <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(row.base_salary ?? row.prorated_salary)}</td>
                 <td className="px-3 py-2 text-right font-mono text-gray-700">{formatIDR(row.prorated_allowances ?? row.total_allowances)}</td>
                 <td className="px-3 py-2 text-center text-emerald-700 font-semibold">
                   {getDays(row)}{row.working_days_in_month ? `/${row.working_days_in_month}` : ''}

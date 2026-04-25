@@ -247,16 +247,25 @@ def transition_position_status(
     changed_by: UUID,
     is_override: bool = False,
     notes: Optional[str] = None,
+    caller_role: Optional[str] = None,
 ) -> OrderPosition:
     """
     Validate and apply a status transition on an OrderPosition.
 
     - Validates transition (unless is_override=True for PM/admin overrides)
+    - Role-aware bypass guard for terminal/business statuses
+      (PACKED / READY_FOR_SHIPMENT / SHIPPED / QUALITY_CHECK_DONE):
+        • owner / administrator → free pass
+        • production_manager    → requires is_override=True + audit log
+        • other roles           → blocked, must use /pack /ship /qc
     - Updates position status
     - Fires special routing for FIRED status (multi-firing)
     - Returns updated position
 
-    Raises ValueError if transition is invalid.
+    Raises ValueError if transition is invalid or role-blocked.
+
+    See docs/BUSINESS_LOGIC_FULL.md §30 "Status Machine vs Business
+    Endpoints".
     """
     position = db.query(OrderPosition).filter(OrderPosition.id == position_id).first()
     if not position:
@@ -264,6 +273,39 @@ def transition_position_status(
 
     old_status = position.status.value if isinstance(position.status, PositionStatus) else str(position.status)
     new_status_str = new_status
+
+    # ── Role-aware bypass guard (§30) ─────────────────────────────
+    # These statuses MUST be reached through the dedicated business
+    # endpoints (/pack, /ship, QC flow) so all the side-effects fire
+    # — packing photo, box consumption, ShipmentItem records, QC log.
+    # The plain /status endpoint is an enum override and skips all of
+    # that, hence we restrict who's allowed to use it for these.
+    _BYPASS_PROTECTED = {
+        PositionStatus.PACKED.value,
+        PositionStatus.READY_FOR_SHIPMENT.value,
+        PositionStatus.SHIPPED.value,
+        PositionStatus.QUALITY_CHECK_DONE.value,
+    }
+    if new_status_str in _BYPASS_PROTECTED and caller_role is not None:
+        role = (caller_role or "").lower().strip()
+        if role in ("owner", "administrator"):
+            pass  # free pass
+        elif role == "production_manager":
+            if not is_override:
+                raise ValueError(
+                    f"Direct status change to '{new_status_str}' bypasses the "
+                    f"business endpoint that runs photo upload / packing / "
+                    f"shipment side-effects. PMs may proceed only with "
+                    f"explicit override=true (will be audit-logged)."
+                )
+            # is_override=True falls through to the normal override
+            # branch below which writes the audit log entry.
+        else:
+            raise ValueError(
+                f"Role '{role}' cannot bypass business endpoint for status "
+                f"'{new_status_str}'. Use the dedicated /pack /ship /qc "
+                f"endpoint instead."
+            )
 
     # Validate unless override
     if not is_override:
@@ -286,6 +328,7 @@ def transition_position_status(
                 "old_status": old_status,
                 "new_status": new_status_str,
                 "notes": notes,
+                "caller_role": caller_role,
             },
         )
 
@@ -319,17 +362,35 @@ def transition_position_status(
 
     # ── Material consumption on glazing start ─────────────────────
     # When position transitions to ENGOBE_APPLIED or GLAZED (first time),
-    # consume BOM materials and release reservations.
+    # consume BOM materials and release reservations. ALSO consume stone
+    # at this point — see docs/BUSINESS_LOGIC_FULL.md §3 "Stone
+    # Consumption" (decision: stone is physically taken off the shelf
+    # when engobe is applied to it, so write-off happens here, not at
+    # kiln loading).
     if new_ps in (PositionStatus.ENGOBE_APPLIED, PositionStatus.GLAZED):
         if not position.materials_written_off_at:
+            # 1) Glaze / pigment / frit / bulk materials (from recipe BOM)
             try:
                 from business.services.material_consumption import on_glazing_start
                 on_glazing_start(db, position.id)
             except Exception as _e:
                 import logging
-                logging.getLogger("moonjar.status_machine").warning(
-                    "Failed to consume materials for position %s on glazing start: %s",
-                    position_id, _e,
+                logging.getLogger("moonjar.status_machine").error(
+                    "GLAZING_CONSUME_CRASH | position=%s | %s",
+                    position_id, _e, exc_info=True,
+                )
+
+            # 2) Stone (from StoneReservation, not from recipe). Always
+            # try, even when on_glazing_start crashed — stone bookkeeping
+            # is independent of glaze materials.
+            try:
+                from business.services.stone_reservation import consume_stone_for_position
+                consume_stone_for_position(db, position.id)
+            except Exception as _e:
+                import logging
+                logging.getLogger("moonjar.status_machine").error(
+                    "STONE_CONSUME_CRASH | position=%s | %s",
+                    position_id, _e, exc_info=True,
                 )
         elif (position.firing_round or 1) > 1:
             # Refire/reglaze cycle — consume only surface materials

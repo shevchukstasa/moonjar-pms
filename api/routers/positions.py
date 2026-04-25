@@ -323,6 +323,10 @@ def _serialize_position(p) -> dict:
 class StatusChangeInput(BaseModel):
     status: str
     notes: Optional[str] = None
+    # Explicit override flag for production_manager bypassing the
+    # /pack /ship /qc endpoints. Owner / administrator are always
+    # allowed without setting this. See BUSINESS_LOGIC_FULL §30.
+    override: bool = False
 
 
 @router.get("")
@@ -677,18 +681,29 @@ async def change_position_status(
                 "Assign a recipe first (glazed tile must have a recipe for material deduction).",
             )
 
-    # Determine if this is a management override (skip validation)
-    is_management = hasattr(current_user, 'role') and _ev(current_user.role) in (
-        'production_manager', 'administrator', 'owner'
+    # Determine caller role + override flag for the role-aware bypass
+    # guard inside transition_position_status (see BUSINESS_LOGIC_FULL §30).
+    caller_role = (
+        _ev(current_user.role) if hasattr(current_user, 'role') else None
     )
+    # owner / administrator: always treated as override (full bypass)
+    # production_manager  : only if data.override is set, audit-logged
+    # other roles         : no override; if status is one of the
+    #                       protected ones the status_machine will
+    #                       raise ValueError → HTTP 400.
+    if caller_role in ("owner", "administrator"):
+        is_override = True
+    elif caller_role == "production_manager":
+        is_override = bool(data.override)
+    else:
+        is_override = False
 
-    # Delegate to status machine — handles validation, status assignment,
-    # stage history, material consumption, rescheduling, alerts, and commit.
     try:
         p = transition_position_status(
             db, position_id, data.status, current_user.id,
-            is_override=is_management,
+            is_override=is_override,
             notes=data.notes,
+            caller_role=caller_role,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))

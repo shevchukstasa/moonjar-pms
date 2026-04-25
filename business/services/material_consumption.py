@@ -69,144 +69,188 @@ def on_glazing_start(
     )
 
     consumed = []
+    failed = []
     adjustments = []
     actual_map = actual_quantities or {}
 
     for rm in recipe_materials:
-        material = db.query(Material).get(rm.material_id)
-        if not material:
-            continue
-
-        # Expected quantity from calculation (in recipe's calculation unit)
+        # ── PER-MATERIAL ISOLATION ─────────────────────────────────
+        # One bad material (missing geometry, broken unit conversion,
+        # invalid enum etc.) MUST NOT poison the rest. Anything that
+        # raises is logged with full traceback and the loop continues.
+        # See docs/BUSINESS_LOGIC_FULL.md §2 → "Consumption: required
+        # side-effects".
         try:
-            expected_calc = _calculate_required(rm, position, recipe=recipe)
-        except Exception as e:
-            logger.warning("on_glazing_start: _calculate_required failed for material %s: %s", material.name, e)
-            continue
+            material = db.query(Material).get(rm.material_id)
+            if not material:
+                continue
 
-        if expected_calc is None or expected_calc <= 0:
-            continue
-
-        # Determine units for conversion
-        calc_unit = get_calculation_unit(rm.unit)
-        stock_unit = (material.unit or "pcs").lower().strip()
-        sg = recipe.specific_gravity if recipe else None
-
-        # Convert expected to stock unit for balance operations
-        expected = convert_to_stock_unit(
-            expected_calc, calc_unit, stock_unit,
-            specific_gravity=sg, material_name=material.name,
-        )
-
-        # Actual quantity (from glazing master — assumed in stock unit, or use expected)
-        mat_id_str = str(rm.material_id)
-        if mat_id_str in actual_map:
-            actual = Decimal(str(actual_map[mat_id_str]))
-        else:
-            actual = expected  # If no actual data, use expected (already in stock unit)
-
-        # --- Create CONSUME transaction (in stock unit) ---
-        consume_txn = MaterialTransaction(
-            material_id=rm.material_id,
-            factory_id=position.factory_id,
-            type=TransactionType.CONSUME,
-            quantity=actual,
-            related_order_id=position.order_id,
-            related_position_id=position.id,
-            notes=f"Glazing consumption for position #{position.position_number or ''}",
-        )
-        db.add(consume_txn)
-
-        # --- Create UNRESERVE transaction to release reservation ---
-        # Release the full expected amount (what was originally reserved — in stock unit)
-        unreserve_txn = MaterialTransaction(
-            material_id=rm.material_id,
-            factory_id=position.factory_id,
-            type=TransactionType.UNRESERVE,
-            quantity=expected,
-            related_order_id=position.order_id,
-            related_position_id=position.id,
-            notes="Released reservation (glazing started)",
-        )
-        db.add(unreserve_txn)
-
-        # --- Deduct from stock balance (both in stock unit now) ---
-        stock = (
-            db.query(MaterialStock)
-            .filter(
-                MaterialStock.material_id == rm.material_id,
-                MaterialStock.factory_id == position.factory_id,
-            )
-            .first()
-        )
-        if stock:
-            current_balance = Decimal(str(stock.balance))
-            if current_balance < actual:
-                logger.warning(
-                    "Insufficient stock for %s: balance=%.3f, needed=%.3f — consuming available",
-                    material.name, float(current_balance), float(actual),
+            try:
+                expected_calc = _calculate_required(rm, position, recipe=recipe)
+            except Exception as e:
+                logger.error(
+                    "CONSUME_CALC_FAIL | position=%s | material=%s | %s",
+                    position_id, getattr(material, "name", rm.material_id), e,
+                    exc_info=True,
                 )
-                actual = current_balance
-            stock.balance = current_balance - actual
+                failed.append({
+                    "material_id": str(rm.material_id),
+                    "material_name": getattr(material, "name", "?"),
+                    "stage": "_calculate_required",
+                    "error": str(e),
+                })
+                continue
 
-        consumed.append({
-            "material_id": mat_id_str,
-            "material_name": material.name,
-            "expected": float(expected),
-            "actual": float(actual),
-            "unit": stock_unit,
-        })
+            if expected_calc is None or expected_calc <= 0:
+                continue
 
-        # --- Create ConsumptionAdjustment if variance exists ---
-        if expected > 0 and actual != expected:
-            variance_pct = ((actual - expected) / expected * Decimal("100")).quantize(Decimal("0.01"))
+            calc_unit = get_calculation_unit(rm.unit)
+            stock_unit = (material.unit or "pcs").lower().strip()
+            sg = recipe.specific_gravity if recipe else None
 
-            # Suggest a coefficient correction
-            suggested_coeff = None
-            shape_val = position.shape.value if position.shape else None
-            ptype_val = position.product_type.value if position.product_type else None
-
-            if expected > 0 and shape_val:
-                # suggested = current_coefficient × (actual / expected)
-                from business.services.surface_area import get_shape_coefficient
-                current_coeff = get_shape_coefficient(db, shape_val, ptype_val or "tile")
-                suggested_coeff = Decimal(str(current_coeff)) * (actual / expected)
-                suggested_coeff = suggested_coeff.quantize(Decimal("0.001"))
-
-            adj = ConsumptionAdjustment(
-                factory_id=position.factory_id,
-                position_id=position.id,
-                material_id=rm.material_id,
-                expected_qty=expected,
-                actual_qty=actual,
-                variance_pct=variance_pct,
-                shape=shape_val,
-                product_type=ptype_val,
-                suggested_coefficient=suggested_coeff,
-                status="pending",
+            expected = convert_to_stock_unit(
+                expected_calc, calc_unit, stock_unit,
+                specific_gravity=sg, material_name=material.name,
             )
-            db.add(adj)
-            adjustments.append({
+
+            mat_id_str = str(rm.material_id)
+            if mat_id_str in actual_map:
+                actual = Decimal(str(actual_map[mat_id_str]))
+            else:
+                actual = expected
+
+            # CONSUME txn (in stock unit)
+            db.add(MaterialTransaction(
+                material_id=rm.material_id,
+                factory_id=position.factory_id,
+                type=TransactionType.CONSUME,
+                quantity=actual,
+                related_order_id=position.order_id,
+                related_position_id=position.id,
+                notes=f"Glazing consumption for position #{position.position_number or ''}",
+            ))
+
+            # UNRESERVE txn to release the reservation
+            db.add(MaterialTransaction(
+                material_id=rm.material_id,
+                factory_id=position.factory_id,
+                type=TransactionType.UNRESERVE,
+                quantity=expected,
+                related_order_id=position.order_id,
+                related_position_id=position.id,
+                notes="Released reservation (glazing started)",
+            ))
+
+            # Deduct from stock balance
+            stock = (
+                db.query(MaterialStock)
+                .filter(
+                    MaterialStock.material_id == rm.material_id,
+                    MaterialStock.factory_id == position.factory_id,
+                )
+                .first()
+            )
+            if stock:
+                current_balance = Decimal(str(stock.balance))
+                if current_balance < actual:
+                    logger.warning(
+                        "CONSUME_INSUFFICIENT | position=%s | material=%s | "
+                        "balance=%.3f, needed=%.3f — consuming available",
+                        position_id, material.name,
+                        float(current_balance), float(actual),
+                    )
+                    actual = current_balance
+                stock.balance = current_balance - actual
+
+            consumed.append({
+                "material_id": mat_id_str,
                 "material_name": material.name,
                 "expected": float(expected),
                 "actual": float(actual),
-                "variance_pct": float(variance_pct),
-                "suggested_coefficient": float(suggested_coeff) if suggested_coeff else None,
+                "unit": stock_unit,
             })
 
-    # Mark position as materials written off
+            # ConsumptionAdjustment if variance
+            if expected > 0 and actual != expected:
+                variance_pct = (
+                    (actual - expected) / expected * Decimal("100")
+                ).quantize(Decimal("0.01"))
+
+                suggested_coeff = None
+                shape_val = position.shape.value if position.shape else None
+                ptype_val = position.product_type.value if position.product_type else None
+
+                if expected > 0 and shape_val:
+                    from business.services.surface_area import get_shape_coefficient
+                    current_coeff = get_shape_coefficient(db, shape_val, ptype_val or "tile")
+                    suggested_coeff = Decimal(str(current_coeff)) * (actual / expected)
+                    suggested_coeff = suggested_coeff.quantize(Decimal("0.001"))
+
+                db.add(ConsumptionAdjustment(
+                    factory_id=position.factory_id,
+                    position_id=position.id,
+                    material_id=rm.material_id,
+                    expected_qty=expected,
+                    actual_qty=actual,
+                    variance_pct=variance_pct,
+                    shape=shape_val,
+                    product_type=ptype_val,
+                    suggested_coefficient=suggested_coeff,
+                    status="pending",
+                ))
+                adjustments.append({
+                    "material_name": material.name,
+                    "expected": float(expected),
+                    "actual": float(actual),
+                    "variance_pct": float(variance_pct),
+                    "suggested_coefficient": (
+                        float(suggested_coeff) if suggested_coeff else None
+                    ),
+                })
+
+        except Exception as e:
+            # Catch-all per-material guard — anything else (DB error,
+            # decimal overflow, …) gets logged and we move on.
+            logger.error(
+                "CONSUME_MATERIAL_FAIL | position=%s | material_id=%s | %s",
+                position_id, rm.material_id, e, exc_info=True,
+            )
+            failed.append({
+                "material_id": str(rm.material_id),
+                "material_name": getattr(
+                    db.query(Material).get(rm.material_id), "name", "?",
+                ) if rm.material_id else "?",
+                "stage": "consume_loop",
+                "error": str(e),
+            })
+            continue
+
+    # Mark position as materials written off — ALWAYS, even when some
+    # materials failed. The failed list is logged + returned in the
+    # response so callers can surface it. Without this flag the
+    # status_machine would re-trigger consumption forever.
     from datetime import datetime, timezone
     position.materials_written_off_at = datetime.now(timezone.utc)
 
-    logger.info(
-        "GLAZING_CONSUME | position=%s | %d materials consumed | %d adjustments",
-        position_id, len(consumed), len(adjustments),
-    )
+    if failed:
+        logger.error(
+            "GLAZING_CONSUME_PARTIAL | position=%s | consumed=%d | FAILED=%d | "
+            "first_fail=%s",
+            position_id, len(consumed), len(failed),
+            failed[0] if failed else None,
+        )
+    else:
+        logger.info(
+            "GLAZING_CONSUME | position=%s | %d materials consumed | %d adjustments",
+            position_id, len(consumed), len(adjustments),
+        )
 
     return {
         "consumed": consumed,
+        "failed": failed,
         "adjustments": adjustments,
         "total_consumed": len(consumed),
+        "total_failed": len(failed),
     }
 
 

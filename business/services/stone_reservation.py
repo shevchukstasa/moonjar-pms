@@ -321,6 +321,232 @@ def reserve_stone_for_position(
 
 
 # ──────────────────────────────────────────────────────────────────
+# §3a  Stone consumption (called when position transitions to ENGOBE_APPLIED)
+# ──────────────────────────────────────────────────────────────────
+
+def consume_stone_for_position(db: Session, position_id) -> dict:
+    """Write stone off the warehouse when production physically begins.
+
+    Triggered by status_machine when a position transitions to
+    ENGOBE_APPLIED — at that moment the raw stone has been picked up
+    from the shelf, engobe is being applied to it, and physically the
+    stone is no longer on the shelf even if it hasn't entered the kiln
+    yet. See docs/BUSINESS_LOGIC_FULL.md §3 → "Stone Consumption".
+
+    Effects (idempotent):
+      1. Find the matching stone Material via the same matcher used in
+         `_check_stone_stock_and_create_task` (size_id with shape guard,
+         then name substring fallback).
+      2. Insert MaterialTransaction(type=CONSUME) for `quantity` pcs
+         (or `reserved_sqm` for unit='m2' materials).
+      3. Decrement MaterialStock.balance accordingly.
+      4. Mark the active StoneReservation row as status='consumed'.
+      5. If matching stone is missing or already consumed for this
+         position — log + return without raising; status_machine must
+         not fail on stone consumption.
+
+    Returns dict with {ok, material_id, quantity_consumed, sqm_consumed,
+    skipped_reason}. Never raises in normal operation.
+    """
+    from api.models import (
+        OrderPosition, Material as Mat, MaterialStock, MaterialTransaction,
+        Supplier,  # noqa: F401  (used elsewhere via getattr)
+    )
+    from api.enums import TransactionType
+    from sqlalchemy import text
+
+    position = db.query(OrderPosition).get(position_id)
+    if not position:
+        logger.error("CONSUME_STONE | position=%s — not found", position_id)
+        return {"ok": False, "skipped_reason": "position_not_found"}
+
+    pos_id_str = str(position.id)
+    factory_id = position.factory_id
+
+    # Idempotency: skip if a CONSUME transaction for stone already exists
+    # for this position.
+    existing_consume = (
+        db.query(MaterialTransaction)
+        .join(Mat, Mat.id == MaterialTransaction.material_id)
+        .filter(
+            MaterialTransaction.related_position_id == position.id,
+            MaterialTransaction.type == TransactionType.CONSUME,
+            Mat.material_type == "stone",
+        )
+        .first()
+    )
+    if existing_consume:
+        logger.info(
+            "CONSUME_STONE_SKIP | position=%s — already consumed (txn=%s)",
+            pos_id_str, existing_consume.id,
+        )
+        return {
+            "ok": True,
+            "skipped_reason": "already_consumed",
+            "material_id": str(existing_consume.material_id),
+        }
+
+    # Reuse the same shape-aware matcher logic as the availability
+    # check. We import here to avoid circular imports at module load.
+    pos_size = (getattr(position, "size", "") or "").strip().lower().replace(" ", "")
+    pos_size_id = getattr(position, "size_id", None)
+    pos_shape_raw = getattr(position, "shape", None)
+    if hasattr(pos_shape_raw, "value"):
+        pos_shape_raw = pos_shape_raw.value
+    pos_shape = (str(pos_shape_raw) if pos_shape_raw else "rectangle").lower().strip()
+    _RECT_GROUP = {"rectangle", "square"}
+    pos_shape_group = (
+        frozenset(_RECT_GROUP) if pos_shape in _RECT_GROUP else frozenset({pos_shape})
+    )
+
+    stone_rows = (
+        db.query(Mat, MaterialStock)
+        .outerjoin(
+            MaterialStock,
+            (MaterialStock.material_id == Mat.id)
+            & (MaterialStock.factory_id == factory_id),
+        )
+        .filter(Mat.material_type == "stone")
+        .all()
+    )
+
+    def _shape_ok(mat) -> bool:
+        ms = getattr(mat, "size", None)
+        sh = getattr(ms, "shape", None) if ms else None
+        return str(sh or "rectangle").lower().strip() in pos_shape_group
+
+    matching = None
+    matching_stock = None
+    for mat, stock in stone_rows:
+        if pos_size_id and getattr(mat, "size_id", None) == pos_size_id:
+            if _shape_ok(mat):
+                matching, matching_stock = mat, stock
+                break
+        mat_name = (mat.name or "").lower().replace(" ", "")
+        if pos_size and pos_size in mat_name and _shape_ok(mat):
+            matching, matching_stock = mat, stock
+            # don't break — prefer size_id match if it appears later
+
+    if not matching:
+        logger.error(
+            "CONSUME_STONE_NO_MATCH | position=%s shape=%s size=%s — "
+            "cannot write off, manual intervention needed",
+            pos_id_str, pos_shape, pos_size,
+        )
+        return {"ok": False, "skipped_reason": "no_matching_stone"}
+
+    # Compute quantity to consume.
+    quantity = int(getattr(position, "quantity", 0) or 0)
+    if quantity <= 0:
+        logger.warning(
+            "CONSUME_STONE_ZERO_QTY | position=%s — quantity is 0, nothing to consume",
+            pos_id_str,
+        )
+        return {"ok": False, "skipped_reason": "zero_quantity"}
+
+    unit = (matching.unit or "pcs").lower().strip()
+    if unit == "pcs":
+        consume_qty = Decimal(str(quantity))
+        notes = (
+            f"Stone consumption for position #{position.position_number or '?'} — "
+            f"engobe applied"
+        )
+    elif unit == "m2":
+        # Use the StoneReservation.reserved_sqm — it already accounts for
+        # defect margin. Read it from the active reservation row.
+        try:
+            row = db.execute(text("""
+                SELECT reserved_sqm FROM stone_reservations
+                WHERE position_id = :pid AND status = 'active'
+                ORDER BY created_at DESC LIMIT 1
+            """), {"pid": pos_id_str}).fetchone()
+            if not row or row[0] is None:
+                logger.error(
+                    "CONSUME_STONE_NO_RESERVATION | position=%s | unit=m2 but "
+                    "no active reservation to read sqm from",
+                    pos_id_str,
+                )
+                return {"ok": False, "skipped_reason": "no_reservation"}
+            consume_qty = Decimal(str(row[0]))
+        except Exception as e:
+            logger.error(
+                "CONSUME_STONE_RESERVATION_QUERY_FAIL | position=%s | %s",
+                pos_id_str, e, exc_info=True,
+            )
+            return {"ok": False, "skipped_reason": "reservation_query_fail"}
+        notes = (
+            f"Stone consumption for position #{position.position_number or '?'} — "
+            f"engobe applied (m² unit)"
+        )
+    else:
+        logger.error(
+            "CONSUME_STONE_UNSUPPORTED_UNIT | position=%s | material=%s unit=%s",
+            pos_id_str, matching.name, unit,
+        )
+        return {"ok": False, "skipped_reason": f"unsupported_unit:{unit}"}
+
+    # CONSUME transaction.
+    db.add(MaterialTransaction(
+        material_id=matching.id,
+        factory_id=factory_id,
+        type=TransactionType.CONSUME,
+        quantity=consume_qty,
+        related_order_id=position.order_id,
+        related_position_id=position.id,
+        notes=notes,
+    ))
+
+    # Decrement balance.
+    if matching_stock is not None:
+        current_balance = Decimal(str(matching_stock.balance or 0))
+        if current_balance < consume_qty:
+            logger.warning(
+                "CONSUME_STONE_INSUFFICIENT | position=%s | material=%s | "
+                "balance=%.3f < needed=%.3f — consuming what's available",
+                pos_id_str, matching.name,
+                float(current_balance), float(consume_qty),
+            )
+            consume_qty_actual = current_balance
+        else:
+            consume_qty_actual = consume_qty
+        matching_stock.balance = current_balance - consume_qty_actual
+    else:
+        consume_qty_actual = Decimal("0")
+        logger.warning(
+            "CONSUME_STONE_NO_STOCK_ROW | position=%s | material=%s — "
+            "MaterialStock row missing, txn recorded but balance unchanged",
+            pos_id_str, matching.name,
+        )
+
+    # Close the active StoneReservation.
+    try:
+        db.execute(text("""
+            UPDATE stone_reservations
+            SET status = 'consumed'
+            WHERE position_id = :pid AND status = 'active'
+        """), {"pid": pos_id_str})
+    except Exception as e:
+        logger.warning(
+            "CONSUME_STONE_RESERVATION_CLOSE_FAIL | position=%s | %s",
+            pos_id_str, e,
+        )
+
+    logger.info(
+        "CONSUME_STONE | position=%s | material=%s | qty=%s %s | balance_after=%s",
+        pos_id_str, matching.name, consume_qty_actual, unit,
+        matching_stock.balance if matching_stock else "?",
+    )
+
+    return {
+        "ok": True,
+        "material_id": str(matching.id),
+        "material_name": matching.name,
+        "quantity_consumed": float(consume_qty_actual),
+        "unit": unit,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────
 # §3b  Stone stock availability check + blocking task
 # ──────────────────────────────────────────────────────────────────
 

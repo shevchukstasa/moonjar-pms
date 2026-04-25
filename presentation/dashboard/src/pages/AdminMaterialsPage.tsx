@@ -495,8 +495,9 @@ function CatalogTab() {
         payload.min_balance = 0;
         const created = await createMaterial.mutateAsync(payload);
         closeEdit();
+        const returnTo = searchParams.get('return_to');
         // Round-trip: if opened from Bulk Receive, return with the new material id
-        if (searchParams.get('return_to') === 'bulk_receive') {
+        if (returnTo === 'bulk_receive') {
           const createdId =
             (created as unknown as { id?: string })?.id ||
             (created as unknown as { material_id?: string })?.material_id;
@@ -505,6 +506,12 @@ function CatalogTab() {
           } else {
             navigate('/manager/materials?bulk_receive_add=refresh');
           }
+        }
+        // Any other return_to that looks like a path → navigate back
+        // (e.g. dashboard with ?openMaterials=<position_id> from
+        // MaterialReservationsPanel "+ Create" flow).
+        else if (returnTo && returnTo.startsWith('/')) {
+          navigate(returnTo);
         }
       }
     } catch (err: unknown) {

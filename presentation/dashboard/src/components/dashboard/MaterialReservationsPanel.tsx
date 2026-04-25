@@ -46,7 +46,15 @@ const GROUP_STYLES: Record<string, { border: string; bg: string; icon: string }>
   packaging: { border: 'border-l-emerald-500', bg: 'bg-emerald-50', icon: '📦' },
 };
 
-function GroupSection({ group, onClose }: { group: MaterialReservationGroup; onClose: () => void }) {
+function GroupSection({
+  group,
+  onClose,
+  positionId,
+}: {
+  group: MaterialReservationGroup;
+  onClose: () => void;
+  positionId: string;
+}) {
   const style = GROUP_STYLES[group.group] || { border: 'border-l-gray-400', bg: 'bg-gray-50', icon: '' };
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
@@ -66,11 +74,18 @@ function GroupSection({ group, onClose }: { group: MaterialReservationGroup; onC
       .replace(/\s*\(no material configured\)\s*/i, '')
       .replace(/\s*\(no [^)]*\)\s*/i, '')
       .trim();
+    // Build return URL = current page + ?openMaterials=<positionId> so
+    // BlockingTasksTab re-opens the modal automatically when AdminMaterialsPage
+    // routes the user back after save.
+    const here = `${window.location.pathname}${window.location.search}`;
+    const sep = here.includes('?') ? '&' : '?';
+    const returnTo = `${here}${sep}openMaterials=${positionId}`;
     onClose();
     const matType = group.group === 'stone' ? 'stone' : '';
     const params = new URLSearchParams({ new: '1' });
     if (matType) params.set('type', matType);
     if (cleanName) params.set('name', cleanName);
+    params.set('return_to', returnTo);
     navigate(`/admin/materials?${params.toString()}`);
   };
 
@@ -249,7 +264,7 @@ export function MaterialReservationsPanel({ positionId, onClose }: MaterialReser
         {hasGroups ? (
           <div className="space-y-1">
             {data.groups!.map((g) => (
-              <GroupSection key={g.group} group={g} onClose={onClose} />
+              <GroupSection key={g.group} group={g} onClose={onClose} positionId={positionId} />
             ))}
           </div>
         ) : !data.has_recipe ? (

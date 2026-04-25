@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useBlockingSummary } from '@/hooks/usePositions';
 import { positionsApi } from '@/api/positions';
@@ -58,11 +58,27 @@ function timeSince(dateStr: string | null): string {
 
 export function BlockingTasksTab({ factoryId }: BlockingTasksTabProps) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data, isLoading, error } = useBlockingSummary(factoryId);
   const [unblockTarget, setUnblockTarget] = useState<BlockedPositionInfo | null>(null);
   const [materialsTarget, setMaterialsTarget] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<string | null>(null);
   const [recipeAssignTarget, setRecipeAssignTarget] = useState<BlockedPositionInfo | null>(null);
+
+  // Re-open Material Reservations modal when returning from
+  // /admin/materials after creating a missing catalog entry
+  // (handleCreateMaterial sends ?openMaterials=<positionId> on the
+  // return URL).
+  useEffect(() => {
+    const auto = searchParams.get('openMaterials');
+    if (auto) {
+      setMaterialsTarget(auto);
+      const next = new URLSearchParams(searchParams);
+      next.delete('openMaterials');
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (isLoading) {
     return <div className="flex justify-center py-12"><Spinner /></div>;

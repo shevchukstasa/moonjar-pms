@@ -2873,6 +2873,31 @@ class Employee(Base):
 
     # Relationships
     factory = relationship('Factory', backref='employees')
+    salary_history = relationship(
+        'SalaryHistory',
+        back_populates='employee',
+        order_by='SalaryHistory.effective_date.desc()',
+        lazy='select',
+    )
+
+
+class SalaryHistory(Base):
+    __tablename__ = 'salary_history'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    employee_id = Column(UUID(as_uuid=True), ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    effective_date = Column(sa.Date, nullable=False)
+    base_salary = Column(sa.Numeric(12, 2), nullable=False, server_default='0')
+    allowance_bike = Column(sa.Numeric(10, 2), nullable=False, server_default='0')
+    allowance_housing = Column(sa.Numeric(10, 2), nullable=False, server_default='0')
+    allowance_food = Column(sa.Numeric(10, 2), nullable=False, server_default='0')
+    allowance_bpjs = Column(sa.Numeric(10, 2), nullable=False, server_default='0')
+    allowance_other = Column(sa.Numeric(10, 2), nullable=False, server_default='0')
+    recorded_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    notes = Column(sa.Text, nullable=True)
+    created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+
+    employee = relationship('Employee', back_populates='salary_history')
 
 
 class Attendance(Base):

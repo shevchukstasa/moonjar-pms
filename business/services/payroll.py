@@ -367,6 +367,48 @@ def calculate_overtime_pay_detailed(
     return {"total": _round(total), "breakdown": breakdown}
 
 
+# ── Salary History Lookup ────────────────────────────────────────────────────
+
+def get_salary_for_month(db_session, employee_id, year: int, month: int):
+    """Return the SalaryHistory row effective for the given payroll month, or None."""
+    import calendar as _cal
+    from datetime import date as _date
+    from api.models import SalaryHistory
+    last_day = _date(year, month, _cal.monthrange(year, month)[1])
+    return (
+        db_session.query(SalaryHistory)
+        .filter(
+            SalaryHistory.employee_id == employee_id,
+            SalaryHistory.effective_date <= last_day,
+        )
+        .order_by(SalaryHistory.effective_date.desc())
+        .first()
+    )
+
+
+class _SalaryProxy:
+    """Wraps an Employee ORM object, overriding salary fields with history values."""
+    _SALARY_FIELDS = frozenset((
+        'base_salary', 'allowance_bike', 'allowance_housing',
+        'allowance_food', 'allowance_bpjs', 'allowance_other',
+    ))
+
+    def __init__(self, employee, history_row):
+        self._emp = employee
+        self._hist = history_row
+
+    def __getattr__(self, name):
+        if name in self._SALARY_FIELDS and self._hist is not None:
+            return getattr(self._hist, name)
+        return getattr(self._emp, name)
+
+
+def effective_employee(db_session, emp, year: int, month: int):
+    """Return emp wrapped with historical salary if available, otherwise emp itself."""
+    hist = get_salary_for_month(db_session, emp.id, year, month)
+    return _SalaryProxy(emp, hist) if hist else emp
+
+
 # ── Main Payroll Calculation ─────────────────────────────────────────────────
 
 def calculate_monthly_payroll(

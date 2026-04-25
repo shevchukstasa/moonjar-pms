@@ -154,6 +154,34 @@ class AdvanceUpdateInput(BaseModel):
     notes: Optional[str] = None
 
 
+class SalaryHistoryOut(BaseModel):
+    id: str
+    employee_id: str
+    effective_date: str
+    base_salary: float
+    allowance_bike: float
+    allowance_housing: float
+    allowance_food: float
+    allowance_bpjs: float
+    allowance_other: float
+    recorded_by: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: Optional[str] = None
+
+class SalaryHistoryListResponse(BaseModel):
+    items: List[SalaryHistoryOut]
+
+class SalaryHistoryCreateInput(BaseModel):
+    effective_date: str
+    base_salary: float = 0
+    allowance_bike: float = 0
+    allowance_housing: float = 0
+    allowance_food: float = 0
+    allowance_bpjs: float = 0
+    allowance_other: float = 0
+    notes: Optional[str] = None
+
+
 class PayrollTotals(BaseModel):
     total_employees: int = 0
     formal_count: int = 0
@@ -364,7 +392,7 @@ async def payroll_summary(
     current_user=Depends(require_management),
 ):
     """Calculate full payroll summary with Indonesian tax/BPJS for a given month."""
-    from business.services.payroll import calculate_monthly_payroll
+    from business.services.payroll import calculate_monthly_payroll, effective_employee
     from api.models import FactoryCalendar
     import calendar
     from datetime import date as _date
@@ -505,7 +533,7 @@ async def payroll_summary(
         emp_holidays = _factory_holidays.get(emp_fid, set())
 
         payroll = calculate_monthly_payroll(
-            employee=emp,
+            employee=effective_employee(db, emp, year, month),
             attendance_records=attendance_records,
             working_days_in_month=working_days,
             payroll_year=year,
@@ -744,7 +772,7 @@ async def hr_costs_employee_history(
     current_user=Depends(require_finance),
 ):
     """Per-employee monthly payroll history for a year — for owner/ceo drill-down."""
-    from business.services.payroll import calculate_monthly_payroll
+    from business.services.payroll import calculate_monthly_payroll, effective_employee
     from api.models import FactoryCalendar
     import calendar as _cal
     from datetime import date as _date
@@ -806,7 +834,7 @@ async def hr_costs_employee_history(
         working_days = max(working_days - len(emp_holidays), 1)
 
         payroll = calculate_monthly_payroll(
-            employee=emp,
+            employee=effective_employee(db, emp, year, m),
             attendance_records=attendance_records,
             working_days_in_month=working_days,
             payroll_year=year,
@@ -903,7 +931,7 @@ async def payroll_pdf_employee(
         factory_name = fac.name if fac else ""
 
     # Calculate payroll for this employee
-    from business.services.payroll import calculate_monthly_payroll
+    from business.services.payroll import calculate_monthly_payroll, effective_employee
     from api.models import FactoryCalendar
     import calendar as _cal
 
@@ -965,7 +993,7 @@ async def payroll_pdf_employee(
         working_days = count
 
     payroll = calculate_monthly_payroll(
-        employee=emp,
+        employee=effective_employee(db, emp, year, month),
         attendance_records=attendance_records,
         working_days_in_month=working_days,
         payroll_year=year,
@@ -1081,8 +1109,23 @@ async def update_employee(
             elif not val:
                 update_data[date_field] = None
 
+    _SALARY_FIELDS = {'base_salary', 'allowance_bike', 'allowance_housing',
+                      'allowance_food', 'allowance_bpjs', 'allowance_other'}
+    salary_changed = _SALARY_FIELDS.intersection(update_data.keys())
+    if salary_changed:
+        new_salary = {f: float(update_data.get(f, getattr(emp, f, 0) or 0)) for f in _SALARY_FIELDS}
+
     for key, value in update_data.items():
         setattr(emp, key, value)
+
+    if salary_changed:
+        from api.models import SalaryHistory
+        db.add(SalaryHistory(
+            employee_id=emp.id,
+            effective_date=date.today(),
+            recorded_by=current_user.id,
+            **new_salary,
+        ))
 
     db.commit()
     db.refresh(emp)
@@ -1378,3 +1421,78 @@ async def delete_advance(
     db.delete(adv)
     db.commit()
     return {"status": "deleted", "id": str(advance_id)}
+
+
+# ── Salary History ────────────────────────────────────────────
+
+def _serialize_salary_history(h) -> dict:
+    return {
+        "id": str(h.id),
+        "employee_id": str(h.employee_id),
+        "effective_date": str(h.effective_date),
+        "base_salary": float(h.base_salary or 0),
+        "allowance_bike": float(h.allowance_bike or 0),
+        "allowance_housing": float(h.allowance_housing or 0),
+        "allowance_food": float(h.allowance_food or 0),
+        "allowance_bpjs": float(h.allowance_bpjs or 0),
+        "allowance_other": float(h.allowance_other or 0),
+        "recorded_by": str(h.recorded_by) if h.recorded_by else None,
+        "notes": h.notes,
+        "created_at": str(h.created_at) if h.created_at else None,
+    }
+
+
+@router.get("/{employee_id}/salary-history")
+async def get_salary_history(
+    employee_id: UUID,
+    limit: int = Query(default=24, ge=1, le=120),
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Return salary history for an employee, newest first."""
+    from api.models import SalaryHistory
+    rows = (
+        db.query(SalaryHistory)
+        .filter(SalaryHistory.employee_id == employee_id)
+        .order_by(SalaryHistory.effective_date.desc())
+        .limit(limit)
+        .all()
+    )
+    return {"items": [_serialize_salary_history(r) for r in rows]}
+
+
+@router.post("/{employee_id}/salary-history", status_code=201)
+async def create_salary_history(
+    employee_id: UUID,
+    data: SalaryHistoryCreateInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Manually add a salary history entry (for backdating)."""
+    from api.models import SalaryHistory
+    emp = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not emp:
+        raise HTTPException(404, "Employee not found")
+    h = SalaryHistory(
+        employee_id=emp.id,
+        effective_date=date.fromisoformat(data.effective_date),
+        base_salary=data.base_salary,
+        allowance_bike=data.allowance_bike,
+        allowance_housing=data.allowance_housing,
+        allowance_food=data.allowance_food,
+        allowance_bpjs=data.allowance_bpjs,
+        allowance_other=data.allowance_other,
+        notes=data.notes,
+        recorded_by=current_user.id,
+    )
+    db.add(h)
+    # Update current employee salary to match
+    emp.base_salary = data.base_salary
+    emp.allowance_bike = data.allowance_bike
+    emp.allowance_housing = data.allowance_housing
+    emp.allowance_food = data.allowance_food
+    emp.allowance_bpjs = data.allowance_bpjs
+    emp.allowance_other = data.allowance_other
+    db.commit()
+    db.refresh(h)
+    return _serialize_salary_history(h)

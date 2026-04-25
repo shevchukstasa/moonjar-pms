@@ -59,6 +59,21 @@ function GroupSection({ group, onClose }: { group: MaterialReservationGroup; onC
     navigate(`/manager/materials?receive=${materialId}`);
   };
 
+  const handleCreateMaterial = (item: MaterialReservationGroupItem) => {
+    // Strip annotation suffixes like " (no material configured)" so the
+    // create dialog gets just the canonical name to pre-fill.
+    const cleanName = (item.material || '')
+      .replace(/\s*\(no material configured\)\s*/i, '')
+      .replace(/\s*\(no [^)]*\)\s*/i, '')
+      .trim();
+    onClose();
+    const matType = group.group === 'stone' ? 'stone' : '';
+    const params = new URLSearchParams({ new: '1' });
+    if (matType) params.set('type', matType);
+    if (cleanName) params.set('name', cleanName);
+    navigate(`/admin/materials?${params.toString()}`);
+  };
+
   const handleConfigurePackaging = () => {
     onClose();
     navigate('/admin/packaging');
@@ -114,7 +129,13 @@ function GroupSection({ group, onClose }: { group: MaterialReservationGroup; onC
             const res = formatQty(m.reserved, m.unit);
             const avl = formatQty(m.available, m.unit);
             const dfc = formatQty(m.deficit, m.unit);
+            // Material entry exists in catalog → can receive shipment to stock.
             const showReceive = (m.status === 'insufficient' || m.status === 'partially_reserved') && m.material_id;
+            // Material entry MISSING → need to create it first.
+            const showCreate = m.status === 'insufficient' && !m.material_id;
+            // Make the red Insufficient badge itself clickable when no
+            // material entry exists — opens the create dialog directly.
+            const statusInteractive = showCreate;
 
             return (
               <tr key={`${group.group}-${idx}`} className="border-b border-gray-100 hover:bg-gray-50">
@@ -134,9 +155,19 @@ function GroupSection({ group, onClose }: { group: MaterialReservationGroup; onC
                   {m.deficit > 0 ? (<>{dfc.value} <span className="text-xs text-gray-400">{dfc.unit}</span></>) : '\u2014'}
                 </td>
                 <td className="py-2 px-2">
-                  <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[m.status] || 'bg-gray-100 text-gray-600'}`}>
-                    {STATUS_LABELS[m.status] || m.status}
-                  </span>
+                  {statusInteractive ? (
+                    <button
+                      onClick={() => handleCreateMaterial(m)}
+                      title="No material entry in catalog — click to create"
+                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium transition-colors cursor-pointer ${STATUS_COLORS[m.status] || 'bg-gray-100 text-gray-600'} hover:ring-2 hover:ring-red-300 hover:bg-red-200`}
+                    >
+                      {STATUS_LABELS[m.status] || m.status} <span aria-hidden>→</span>
+                    </button>
+                  ) : (
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[m.status] || 'bg-gray-100 text-gray-600'}`}>
+                      {STATUS_LABELS[m.status] || m.status}
+                    </span>
+                  )}
                 </td>
                 <td className="py-2 px-2">
                   {showReceive && (
@@ -146,6 +177,15 @@ function GroupSection({ group, onClose }: { group: MaterialReservationGroup; onC
                       title="Receive this material to warehouse"
                     >
                       + Receive
+                    </button>
+                  )}
+                  {showCreate && (
+                    <button
+                      onClick={() => handleCreateMaterial(m)}
+                      className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700"
+                      title="Create this material in the catalog"
+                    >
+                      + Create
                     </button>
                   )}
                 </td>

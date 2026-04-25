@@ -314,22 +314,29 @@ function CatalogTab() {
     if (searchParams.get('new') === '1' && !editDialog.open) {
       const typeParam = searchParams.get('type') || '';
       const supplierParam = searchParams.get('supplier') || '';
+      const nameParam = searchParams.get('name') || '';
       const sg = subgroups.find((s) => s.value === typeParam);
       setForm({
         ...emptyCatalogForm,
         material_type: typeParam,
         subgroup_id: sg?.subgroupId ?? '',
         supplier_id: supplierParam,
+        // Pre-fill name when caller supplies one (e.g. from
+        // MaterialReservationsPanel "+ Create" button when a recipe
+        // references a material that doesn't exist in the catalog yet).
+        name: nameParam,
+        short_name: nameParam,
       });
       setFormError('');
-      setShortNameTouched(false);
+      setShortNameTouched(Boolean(nameParam));
       setEditDialog({ open: true, item: null });
-      // Drop the `new`/`type`/`supplier` flags so refresh doesn't re-open;
-      // keep return_to for save handler
+      // Drop the `new`/`type`/`supplier`/`name` flags so refresh doesn't
+      // re-open; keep return_to for save handler.
       const next = new URLSearchParams(searchParams);
       next.delete('new');
       next.delete('type');
       next.delete('supplier');
+      next.delete('name');
       setSearchParams(next, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

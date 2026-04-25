@@ -139,6 +139,47 @@ Calculates material needs per position (from recipe BOM), reserves stock, and wr
    - When shortage disappears (materials received), the matching task auto-closes (`status=DONE`) on the next reserve attempt / recalc.
    - The scheduler reads `Task.due_at` via `_get_blocking_task_ready_date` → this becomes `material_ready_date` for that position, i.e. the planner won't start glazing before the deficit is expected to clear.
 
+### Reservation: required side-effects (2026-04-25)
+
+**`reserve_materials_for_position()` ОБЯЗАН**, в порядке:
+1. Для каждого RecipeMaterial: `MaterialTransaction(type=RESERVE, qty=expected, position_id, material_id)`
+2. Уменьшать "available" (через сумму активных RESERVE), НО `MaterialStock.balance` не трогать (balance = физический склад)
+3. После полного успеха — выставить **`OrderPosition.reservation_at = now()`** (это маркер «зарезервировано»). Если хоть один материал упал — НЕ сетить, оставить `reservation_at = NULL`.
+4. Идемпотентность: перед reserve вызвать `_release_existing_reserves(position)` — иначе повторные вызовы плодят фантомные резервы (см. commit `6aada32`).
+
+### Consumption: required side-effects (2026-04-25)
+
+**Триггер:** переход позиции в `ENGOBE_APPLIED` (камень физически взят, энгоб нанесён) — см. также §3 для stone consumption.
+
+**`on_glazing_start()` ОБЯЗАН**, для каждого RecipeMaterial:
+1. **Per-material try/except** — exception на одном материале НЕ должен убить весь loop. Failed materials логируются как ERROR с traceback'ом, остальные обрабатываются.
+2. `MaterialTransaction(type=CONSUME, qty=actual, position_id, material_id)` — запись о фактическом расходе.
+3. `MaterialTransaction(type=UNRESERVE, qty=expected, position_id, material_id)` — закрыть исходный резерв.
+4. `MaterialStock.balance -= actual` — реальное уменьшение склада.
+5. Если `actual ≠ expected` (отчёт мастера) — создать `ConsumptionAdjustment` для PM-ревью.
+6. После цикла **обязательно**: `position.materials_written_off_at = now()` — даже если часть материалов failed (с полным error log'ом). Это маркер «consumption attempted».
+
+**Если функция падает совсем** (catastrophic) — status_machine ловит exception но НЕ должен глотать как WARNING. Это ERROR с traceback'ом + позиция помечается флагом `consumption_failed_at` для последующего ручного backfill'а.
+
+### Side-effects checklist для каждого статуса
+
+Это чек-лист для проверки «формально или реально прошло»:
+
+| Статус | Обязательные side-effects |
+|---|---|
+| `planned` | `reservation_at` set + RESERVE-транзакции для всех материалов рецепта + active StoneReservation |
+| `engobe_applied` | `materials_written_off_at` set + CONSUME+UNRESERVE-транзакции + `MaterialStock.balance` уменьшен + StoneReservation.status='consumed' + CONSUME stone transaction |
+| `glazed` | (если ещё не было consume на engobe — то же что для engobe_applied) + `glazed_at` timestamp |
+| `loaded_in_kiln` | привязка к Batch (`batch_id` set) |
+| `fired` | `fired_at` set; route_after_firing вызван |
+| `transferred_to_sorting` | `transferred_at` set |
+| `sorted` | `sorted_at` set; SortingResult записан |
+| `packed` | **обязательно** через `/positions/{id}/pack` endpoint: PackingPhoto загружено, packaging materials consumed, packed_at set |
+| `ready_for_shipment` | в составе ShipmentItem или alone-флаг |
+| `shipped` | **обязательно** через `/shipments/{id}/ship` endpoint: ShipmentItem существует, материалы в shipped_at |
+
+Прямой переход через `/positions/{id}/status` без сайд-эффектов = **формально прошло, содержательно НЕТ**. Это разрешено только в override-режиме (см. §X Status Machine vs Business Endpoints).
+
 ---
 
 ## 3. Stone Reservation System
@@ -160,6 +201,24 @@ Reserves raw stone (bisque) for positions based on size category and product typ
 1. Size categories: "small" (<20x20), "medium" (20x30 to 30x30), "large" (>30x30).
 2. Defect rate varies by size_category + product_type (tiles vs sinks).
 3. Reserved qty = ordered_qty / (1 - defect_pct).
+
+### Stone Consumption — required side-effects (2026-04-25)
+
+**Триггер:** переход позиции в `ENGOBE_APPLIED` (камень физически взят со склада, на него нанесён энгоб — после этого он уже не вернётся в каталог).
+
+**`consume_stone_for_position(position_id)` ОБЯЗАН:**
+1. Найти `matching_stone` Material для этой позиции — через тот же matcher что в `_check_stone_stock_and_create_task` (size_id с shape guard, потом name substring).
+2. Создать `MaterialTransaction(type=CONSUME, material_id=matching_stone.id, qty=position.quantity, position_id, factory_id)`.
+3. Уменьшить `MaterialStock.balance` на `position.quantity` (для unit='pcs') или на `reserved_sqm` (для unit='m2').
+4. Перевести **активный** `StoneReservation` для этой позиции в `status='consumed'`.
+5. Если `matching_stone` не найден → НЕ падать, логировать ERROR + создать manual-task PM «не смогли списать камень для позиции X — проверь каталог».
+6. Идемпотентность: если для позиции уже есть `MaterialTransaction(type=CONSUME)` для stone — не дублировать.
+
+**Где вызывается:** `business/services/status_machine.py` при переходе в `ENGOBE_APPLIED` (рядом с уже существующим вызовом `on_glazing_start` для glaze materials).
+
+**Почему именно `engobe_applied`, а не `loaded_in_kiln`:** камень физически взят и обработан энгобом — даже если потом обжиг не получится, камень уже потрачен. Списываем по факту физической работы, не по логистическому событию (загрузка в печь).
+
+**Откат:** если позиция отменена ПОСЛЕ engobe_applied — `MaterialTransaction(type=CONSUME)` НЕ откатывается (камень реально потрачен). Это списание брака.
 
 ---
 
@@ -1845,3 +1904,93 @@ Where implemented:
 - `business/services/material_matcher.py` — `needs_design_choice` flag; `matched=false` forced for 3D.
 - `business/services/telegram_bot.py` — `_send_design_picker` + `ddesign:*` callback + `_resolve_material_for_design` find-or-create.
 - Web "Scan Delivery Note" uses the existing `DesignPicker` component — see `presentation/dashboard/src/components/material/DesignPicker.tsx`.
+
+---
+
+## §30 Status Machine vs Business Endpoints (2026-04-25)
+
+### Зачем эта глава
+
+Запросы на смену статуса позиции идут двумя путями, и **их нельзя путать**:
+
+1. **`POST /positions/{id}/status`** — это **enum-bypass endpoint для администрирования**. Он просто переключает поле `status` через `transition_position_status()` + вызывает `on_glazing_start` для consumption-стадий. Никаких других side-effects.
+2. **Бизнес-endpoints** (`/pack`, `/ship`, `/qc`, `/sort`, `/process-firing`) — выполняют **полную бизнес-операцию** со всеми побочными эффектами: загрузка фото, создание `Shipment` / `BoxAssignment` / `QualityCheck` записей, списание упаковки, валидация правил и т.д.
+
+**Без этого правила** возникает «фантомное прохождение»: позиция помечена как `packed`, но коробок не списано, фото нет, packaging rules не проверены. Это и нашли на проде 25 апреля 2026 — все 12 столов «отгружены», камень и коробки на месте, никаких записей.
+
+### Правила доступа к `/positions/{id}/status`
+
+| Роль | Может прыгнуть напрямую в `packed` / `ready_for_shipment` / `shipped` / `quality_check_done` ? |
+|---|---|
+| `owner` | ✅ Да, без подтверждения. Override mode для исправления данных. |
+| `administrator` | ✅ Да, без подтверждения. То же самое. |
+| `production_manager` | ⚠️ Да, но **система требует confirm-флаг** в payload (`override=true`) И обязательно пишет audit-log с указанием PM, before/after status, timestamp, опциональной причиной. |
+| `quality_manager`, `warehouse`, `sorter_packer`, `purchaser`, прочие | ❌ Нет. Прямой переход в эти статусы запрещён, должны идти через бизнес-endpoint. |
+
+Промежуточные статусы (`engobe_applied`, `glazed`, `loaded_in_kiln`, `fired`, `transferred_to_sorting`, `sorted`) можно ставить через `/status` всем management-ролям без override-флага — это нормальный workflow для мастеров (нет отдельного `/glaze` endpoint, все эти переходы идут через master button «Я сделал»).
+
+**Реализация:**
+- `business/services/status_machine.py` — добавить проверку `_BYPASS_PROTECTED_STATUSES = {PACKED, READY_FOR_SHIPMENT, SHIPPED, QUALITY_CHECK_DONE}` + role-aware gate с обязательным `override` для PM.
+- `api/routers/positions.py:change_position_status` — пробрасывать `override` flag из payload.
+- `api/middleware/audit.py` (или новая) — логировать каждый override в `AuditLog` (already exists в проекте).
+
+### Reference на бизнес-endpoints (когда что использовать)
+
+| Целевой статус | Бизнес-endpoint | Что обязан сделать |
+|---|---|---|
+| `packed` | `POST /positions/{id}/pack` | photo upload + check `PackagingBoxCapacity` + `MaterialTransaction(consume)` для боксов + `packed_at` |
+| `ready_for_shipment` | автоматически после `packed` (логика в /pack) | флаг готовности |
+| `shipped` | `POST /shipments/{id}/ship` (через Shipment агрегат) | `ShipmentItem` строка + `shipped_at` + (для нескольких pos одной перевозки — единая Shipment запись) |
+| `quality_check_done` | `POST /positions/{id}/quality-check` (или эквивалент в QC модуле) | `QualityCheck` запись + photo + результат (good/defect/refire) |
+
+---
+
+## §31 Packing Rules (2026-04-25)
+
+### Бизнес-правило
+
+Каждый активный `Size` в каталоге обязан иметь хотя бы одну запись `PackagingBoxCapacity` (= для какой коробки сколько штук этого размера помещается). Без этой записи **физически нельзя упаковать** позицию — мы не знаем какие коробки и сколько брать со склада.
+
+### Что должно происходить при `POST /positions/{id}/pack`
+
+1. **Проверка наличия rule:** найти `PackagingBoxCapacity` для `position.size_id`. Если нет → **HTTP 400** + создать blocking task `PACKAGING_RULES_NEEDED` для PM с описанием «Заведи packaging rules для размера X». Позиция **остаётся в `sorted`**, не переходит в `packed`.
+2. **Проверка наличия фото:** `position.packing_photos` должен иметь минимум 1 файл (uploaded через UI). Если нет → HTTP 400 «Загрузи фото упаковки».
+3. **Проверка остатка боксов:** для каждого box-материала из правила — проверить `MaterialStock.balance ≥ required_qty`. Если нет — blocking task `BOX_INSUFFICIENT` для PM, позиция остаётся в `sorted`.
+4. **Side-effects при успехе:**
+   - `MaterialTransaction(type=CONSUME)` для каждого box-материала по правилу.
+   - `MaterialStock.balance -= consumed_qty`.
+   - `position.packed_at = now()`.
+   - `position.status = PACKED`.
+   - `BoxAssignment` запись (какие коробки, сколько штук).
+
+### Что должно происходить при `POST /shipments/{id}/ship`
+
+1. **Минимум 1 ShipmentItem** — иначе HTTP 400.
+2. **Все позиции в Shipment должны быть в `packed`** — иначе HTTP 400.
+3. **Side-effects при успехе:**
+   - `Shipment.shipped_at = now()`.
+   - Для каждого ShipmentItem: `position.shipped_at = now()`, `position.status = SHIPPED`.
+   - Создать carrier-документ (PDF), сохранить в Shipment.
+
+### Audit для существующих positions
+
+Скрипт `scripts/audit_packing_rules_coverage.py` (создать) проходит по всем активным `Size`'ам и для каждого проверяет наличие `PackagingBoxCapacity`. Возвращает список Size'ов без правил. Для каждого автоматически создаёт blocking task PM (одна задача на size, не на каждую позицию).
+
+### Side-effects checklist для статуса `packed` / `shipped` (расширение §2)
+
+Контрольный список «формально или реально прошло» — для последующих audit-проходов:
+
+| Хочешь убедиться, что позиция реально `packed` | Проверь что |
+|---|---|
+| `position.packed_at IS NOT NULL` | ✓ |
+| `position.packing_photos.count() ≥ 1` | ✓ |
+| `MaterialTransaction WHERE position_id=X AND type='consume' AND material.material_type='packaging'` существует | ✓ |
+| `BoxAssignment WHERE position_id=X` существует | ✓ |
+
+| Хочешь убедиться, что позиция реально `shipped` | Проверь что |
+|---|---|
+| `position.shipped_at IS NOT NULL` | ✓ |
+| `ShipmentItem WHERE position_id=X` существует | ✓ |
+| `Shipment.shipped_at IS NOT NULL` | ✓ |
+
+Если хоть одна строка не выполняется — позиция **формально в статусе, реально процесс не пройден**. Owner / Admin override должен явно фиксироваться в `AuditLog` с указанием причины.

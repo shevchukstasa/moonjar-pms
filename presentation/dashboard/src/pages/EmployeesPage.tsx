@@ -110,6 +110,9 @@ export default function EmployeesPage() {
   const [advExistingId, setAdvExistingId] = useState<string | null>(null);
   const [advDate, setAdvDate] = useState('');
   const [advAmount, setAdvAmount] = useState('');
+  const [advDeductYear, setAdvDeductYear] = useState<number>(today.getFullYear());
+  const [advDeductMonth, setAdvDeductMonth] = useState<number>(today.getMonth() + 1);
+  const [advCarryAmount, setAdvCarryAmount] = useState(''); // partial carry-over amount
   const [advNotes, setAdvNotes] = useState('');
   const [advFormError, setAdvFormError] = useState('');
 
@@ -317,9 +320,9 @@ export default function EmployeesPage() {
   });
 
   const advanceMutation = useMutation({
-    mutationFn: ({ empId, existingId, data }: { empId: string; existingId: string | null; data: { date: string; amount: number; notes?: string } }) =>
+    mutationFn: ({ empId, existingId, data }: { empId: string; existingId: string | null; data: { date: string; amount: number; deduct_year?: number; deduct_month?: number; carry_amount?: number; notes?: string } }) =>
       existingId
-        ? employeesApi.updateAdvance(existingId, { amount: data.amount, notes: data.notes, date: data.date })
+        ? employeesApi.updateAdvance(existingId, { amount: data.amount, notes: data.notes, date: data.date, deduct_year: data.deduct_year, deduct_month: data.deduct_month })
         : employeesApi.createAdvance(empId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['advances-grid'] });
@@ -490,15 +493,20 @@ export default function EmployeesPage() {
   const openAdvanceDialog = useCallback((emp: Employee, existing?: AdvanceRecord) => {
     setAdvEmployee(emp);
     setAdvFormError('');
+    setAdvCarryAmount('');
     if (existing) {
       setAdvExistingId(existing.id);
       setAdvDate(existing.date);
       setAdvAmount(String(existing.amount));
+      setAdvDeductYear(existing.deduct_year);
+      setAdvDeductMonth(existing.deduct_month);
       setAdvNotes(existing.notes ?? '');
     } else {
       setAdvExistingId(null);
       setAdvDate(toISO(year, month, new Date().getDate()));
       setAdvAmount('');
+      setAdvDeductYear(year);
+      setAdvDeductMonth(month);
       setAdvNotes('');
     }
     setAdvDialogOpen(true);
@@ -508,12 +516,23 @@ export default function EmployeesPage() {
     if (!advEmployee || !advDate || !advAmount) return;
     const amt = parseFloat(advAmount);
     if (isNaN(amt) || amt <= 0) { setAdvFormError('Enter a valid amount'); return; }
+    const carry = advCarryAmount ? parseFloat(advCarryAmount) : undefined;
+    if (carry !== undefined && (isNaN(carry) || carry <= 0 || carry >= amt)) {
+      setAdvFormError('Carry-over amount must be between 0 and total amount'); return;
+    }
     advanceMutation.mutate({
       empId: advEmployee.id,
       existingId: advExistingId,
-      data: { date: advDate, amount: amt, notes: advNotes || undefined },
+      data: {
+        date: advDate,
+        amount: amt,
+        deduct_year: advDeductYear,
+        deduct_month: advDeductMonth,
+        carry_amount: carry,
+        notes: advNotes || undefined,
+      },
     });
-  }, [advEmployee, advDate, advAmount, advNotes, advExistingId, advanceMutation]);
+  }, [advEmployee, advDate, advAmount, advCarryAmount, advDeductYear, advDeductMonth, advNotes, advExistingId, advanceMutation]);
 
   const handleAttendanceSubmit = useCallback(() => {
     if (!attEmployee || !attDate) return;
@@ -977,6 +996,73 @@ export default function EmployeesPage() {
               <span className="absolute inset-y-0 right-0 flex items-center pr-3 text-xs text-gray-400">IDR</span>
             </div>
           </div>
+
+          {/* Deduct in */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Deduct in</label>
+            <div className="flex gap-2">
+              <select
+                className="flex-1 rounded-md border border-gray-300 px-2 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                value={advDeductMonth}
+                onChange={(e) => setAdvDeductMonth(Number(e.target.value))}
+              >
+                {MONTH_NAMES.map((m, i) => (
+                  <option key={i + 1} value={i + 1}>{m}</option>
+                ))}
+              </select>
+              <input
+                type="number"
+                className="w-20 rounded-md border border-gray-300 px-2 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                value={advDeductYear}
+                onChange={(e) => setAdvDeductYear(Number(e.target.value))}
+                min={2024}
+                max={2099}
+              />
+            </div>
+          </div>
+
+          {/* Carry-over (only for new advances) */}
+          {!advExistingId && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Carry over to next month{' '}
+                <span className="font-normal text-gray-400">(optional)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 pr-14 text-sm focus:border-blue-500 focus:outline-none"
+                  value={advCarryAmount ? Number(advCarryAmount).toLocaleString('id-ID') : ''}
+                  placeholder="0"
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/\D/g, '');
+                    setAdvCarryAmount(raw);
+                  }}
+                />
+                <span className="absolute inset-y-0 right-0 flex items-center pr-3 text-xs text-gray-400">IDR</span>
+              </div>
+              {/* Preview split */}
+              {advCarryAmount && advAmount && (() => {
+                const total = parseFloat(advAmount) || 0;
+                const carry = parseFloat(advCarryAmount) || 0;
+                const thisMonth = total - carry;
+                if (carry <= 0 || carry >= total) return null;
+                const nextM = advDeductMonth === 12 ? 1 : advDeductMonth + 1;
+                const nextY = advDeductMonth === 12 ? advDeductYear + 1 : advDeductYear;
+                return (
+                  <div className="mt-2 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                    <span className="font-semibold">{(thisMonth / 1000).toFixed(0)}k</span>
+                    {' '}deducted in {MONTH_NAMES[advDeductMonth - 1]}{' '}
+                    <span className="text-blue-400">+</span>{' '}
+                    <span className="font-semibold">{(carry / 1000).toFixed(0)}k</span>
+                    {' '}carries to {MONTH_NAMES[nextM - 1]} {nextY !== advDeductYear ? nextY : ''}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
           <Input
             label="Notes"
             placeholder="Reason (optional)"
@@ -1429,16 +1515,21 @@ function AttendanceTab({
                     {/* Individual advance records as small chips */}
                     {empAdvances.length > 0 && (
                       <div className="mt-0.5 flex flex-col gap-0.5">
-                        {empAdvances.map((adv) => (
-                          <button
-                            key={adv.id}
-                            onClick={() => onAdvanceClick(emp, adv)}
-                            className="rounded bg-violet-50 px-1 py-0 text-[9px] text-violet-600 hover:bg-violet-100"
-                            title={`${adv.date}: ${formatIDR(adv.amount)}${adv.notes ? ' — ' + adv.notes : ''}`}
-                          >
-                            {adv.date.slice(8)}/{(adv.amount / 1000).toFixed(0)}k
-                          </button>
-                        ))}
+                        {empAdvances.map((adv) => {
+                          const advDateMonth = parseInt(adv.date.slice(5, 7), 10);
+                          const advDateYear = parseInt(adv.date.slice(0, 4), 10);
+                          const isCarryOver = adv.deduct_year !== advDateYear || adv.deduct_month !== advDateMonth;
+                          return (
+                            <button
+                              key={adv.id}
+                              onClick={() => onAdvanceClick(emp, adv)}
+                              className={`rounded px-1 py-0 text-[9px] hover:bg-violet-100 ${isCarryOver ? 'bg-amber-50 text-amber-600' : 'bg-violet-50 text-violet-600'}`}
+                              title={`${adv.date}: ${formatIDR(adv.amount)}${isCarryOver ? ` (→ ${MONTH_NAMES[adv.deduct_month! - 1]})` : ''}${adv.notes ? ' — ' + adv.notes : ''}`}
+                            >
+                              {isCarryOver && '→'}{adv.date.slice(8)}/{(adv.amount / 1000).toFixed(0)}k
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </td>

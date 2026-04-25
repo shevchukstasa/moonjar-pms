@@ -286,8 +286,10 @@ export const employeesApi = {
 export interface AdvanceRecord {
   id: string;
   employee_id: string;
-  date: string;
+  date: string;         // date cash was given
   amount: number;
+  deduct_year: number;  // which year to deduct from payroll
+  deduct_month: number; // which month to deduct (1-12)
   notes: string | null;
   recorded_by: string | null;
   created_at: string | null;
@@ -300,12 +302,17 @@ export interface AdvanceListResponse {
 export interface AdvanceCreatePayload {
   date: string;
   amount: number;
+  deduct_year?: number;
+  deduct_month?: number;
+  carry_amount?: number; // if set: auto-splits into two records
   notes?: string | null;
 }
 
 export interface AdvanceUpdatePayload {
   date?: string;
   amount?: number;
+  deduct_year?: number;
+  deduct_month?: number;
   notes?: string | null;
 }
 

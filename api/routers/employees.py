@@ -140,12 +140,17 @@ class AttendanceUpdateInput(BaseModel):
 class AdvanceCreateInput(BaseModel):
     date: str
     amount: float
+    deduct_year: Optional[int] = None   # defaults to date year
+    deduct_month: Optional[int] = None  # defaults to date month
+    carry_amount: Optional[float] = None  # if set: deduct (amount-carry_amount) this month, carry_amount next month
     notes: Optional[str] = None
 
 
 class AdvanceUpdateInput(BaseModel):
     date: Optional[str] = None
     amount: Optional[float] = None
+    deduct_year: Optional[int] = None
+    deduct_month: Optional[int] = None
     notes: Optional[str] = None
 
 
@@ -506,18 +511,28 @@ async def payroll_summary(
             holiday_dates=emp_holidays,
         )
 
-        # Load advances for this employee in the same pay period
+        # Load advances deductible in this pay period (by deduct_year/month, fallback to date)
+        from sqlalchemy import or_ as _or_, and_ as _and_
         if pay_period == '25_to_24':
+            # For 25-to-24 period we use the deduction month matching this calendar month
             advances_q = db.query(SalaryAdvance).filter(
                 SalaryAdvance.employee_id == emp.id,
-                SalaryAdvance.date >= period_start,
-                SalaryAdvance.date <= period_end,
+                _or_(
+                    _and_(SalaryAdvance.deduct_year == year, SalaryAdvance.deduct_month == month),
+                    _and_(SalaryAdvance.deduct_year.is_(None),
+                          SalaryAdvance.date >= period_start,
+                          SalaryAdvance.date <= period_end),
+                ),
             )
         else:
             advances_q = db.query(SalaryAdvance).filter(
                 SalaryAdvance.employee_id == emp.id,
-                extract("year", SalaryAdvance.date) == year,
-                extract("month", SalaryAdvance.date) == month,
+                _or_(
+                    _and_(SalaryAdvance.deduct_year == year, SalaryAdvance.deduct_month == month),
+                    _and_(SalaryAdvance.deduct_year.is_(None),
+                          extract("year", SalaryAdvance.date) == year,
+                          extract("month", SalaryAdvance.date) == month),
+                ),
             )
         advances_total = float(sum(float(a.amount) for a in advances_q.all()))
         payroll["advances_total"] = advances_total
@@ -1209,11 +1224,16 @@ async def delete_attendance(
 # ── Salary Advance endpoints ──────────────────────────────────
 
 def _serialize_advance(adv: SalaryAdvance) -> dict:
+    # Effective deduction month — fallback to advance date if not explicitly set
+    eff_year = adv.deduct_year if adv.deduct_year else adv.date.year
+    eff_month = adv.deduct_month if adv.deduct_month else adv.date.month
     return {
         "id": str(adv.id),
         "employee_id": str(adv.employee_id),
         "date": str(adv.date),
         "amount": float(adv.amount),
+        "deduct_year": eff_year,
+        "deduct_month": eff_month,
         "notes": adv.notes,
         "recorded_by": str(adv.recorded_by) if adv.recorded_by else None,
         "created_at": adv.created_at.isoformat() if adv.created_at else None,
@@ -1228,12 +1248,29 @@ async def get_advances(
     db: Session = Depends(get_db),
     current_user=Depends(require_management),
 ):
-    """List salary advances for an employee, optionally filtered by year/month."""
+    """List salary advances for an employee.
+
+    Filters by the effective deduction month (deduct_year/deduct_month if set,
+    otherwise falls back to the advance date's year/month).
+    """
+    from sqlalchemy import or_, and_
     query = db.query(SalaryAdvance).filter(SalaryAdvance.employee_id == employee_id)
-    if year:
-        query = query.filter(extract("year", SalaryAdvance.date) == year)
-    if month:
-        query = query.filter(extract("month", SalaryAdvance.date) == month)
+    if year and month:
+        query = query.filter(
+            or_(
+                and_(SalaryAdvance.deduct_year == year, SalaryAdvance.deduct_month == month),
+                and_(SalaryAdvance.deduct_year.is_(None),
+                     extract("year", SalaryAdvance.date) == year,
+                     extract("month", SalaryAdvance.date) == month),
+            )
+        )
+    elif year:
+        query = query.filter(
+            or_(
+                SalaryAdvance.deduct_year == year,
+                and_(SalaryAdvance.deduct_year.is_(None), extract("year", SalaryAdvance.date) == year),
+            )
+        )
     items = query.order_by(SalaryAdvance.date).all()
     return {"items": [_serialize_advance(a) for a in items]}
 
@@ -1256,12 +1293,43 @@ async def create_advance(
     if data.amount <= 0:
         raise HTTPException(422, "Amount must be positive")
 
+    # Resolve effective deduction month
+    ded_year = data.deduct_year or adv_date.year
+    ded_month = data.deduct_month or adv_date.month
+
+    # Handle carry-over split: deduct (amount - carry_amount) this month, carry_amount next month
+    carry = data.carry_amount
+    if carry is not None:
+        if carry <= 0 or carry >= data.amount:
+            raise HTTPException(422, "carry_amount must be between 0 and amount (exclusive)")
+        this_month_amount = round(data.amount - carry, 2)
+        # Next deduction month
+        if ded_month == 12:
+            next_year, next_month = ded_year + 1, 1
+        else:
+            next_year, next_month = ded_year, ded_month + 1
+
+        adv_this = SalaryAdvance(
+            employee_id=employee_id, date=adv_date,
+            amount=this_month_amount, deduct_year=ded_year, deduct_month=ded_month,
+            notes=data.notes, recorded_by=current_user.id,
+        )
+        adv_next = SalaryAdvance(
+            employee_id=employee_id, date=adv_date,
+            amount=carry, deduct_year=next_year, deduct_month=next_month,
+            notes=f"[carry-over] {data.notes or ''}".strip(),
+            recorded_by=current_user.id,
+        )
+        db.add_all([adv_this, adv_next])
+        db.commit()
+        db.refresh(adv_this)
+        db.refresh(adv_next)
+        return {"items": [_serialize_advance(adv_this), _serialize_advance(adv_next)]}
+
     adv = SalaryAdvance(
-        employee_id=employee_id,
-        date=adv_date,
-        amount=data.amount,
-        notes=data.notes,
-        recorded_by=current_user.id,
+        employee_id=employee_id, date=adv_date,
+        amount=data.amount, deduct_year=ded_year, deduct_month=ded_month,
+        notes=data.notes, recorded_by=current_user.id,
     )
     db.add(adv)
     db.commit()

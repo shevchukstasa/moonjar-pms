@@ -2901,8 +2901,10 @@ class SalaryAdvance(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     employee_id = Column(UUID(as_uuid=True), ForeignKey('employees.id'), nullable=False)
-    date = Column(sa.Date, nullable=False)
+    date = Column(sa.Date, nullable=False)          # date cash was handed out
     amount = Column(sa.Numeric(12, 2), nullable=False)
+    deduct_year = Column(sa.Integer, nullable=True)  # which year to deduct from payroll (NULL = same as date year)
+    deduct_month = Column(sa.Integer, nullable=True)  # which month to deduct (NULL = same as date month)
     notes = Column(sa.Text, nullable=True)
     recorded_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())

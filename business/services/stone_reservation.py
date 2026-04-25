@@ -482,16 +482,24 @@ def _check_stone_stock_and_create_task(
                 return 0.0
             return bal * tile_sqm
 
-        # Find the stone that matches this position's size
+        # Find the stone that matches this position's size.
+        # rejected_by_shape stores (material_name, material_shape) so we
+        # can build an accurate "shape differs (X vs Y)" message later.
         matching_stone = None
         matching_balance_sqm = 0.0
         matching_unit = "m2"
-        rejected_by_shape = []  # for logging
+        rejected_by_shape: list[tuple[str, str]] = []
+
+        def _mat_shape_str(mat) -> str:
+            ms = getattr(mat, "size", None)
+            sh = getattr(ms, "shape", None) if ms else None
+            return str(sh or "rectangle").lower().strip()
+
         for mat, stock in stone_rows:
             # Strategy 1: exact size_id match
             if pos_size_id and getattr(mat, "size_id", None) == pos_size_id:
                 if not _shapes_compatible(mat):
-                    rejected_by_shape.append(mat.name)
+                    rejected_by_shape.append((mat.name, _mat_shape_str(mat)))
                     continue  # size is right but shape is wrong — different SKU needed
                 matching_stone = mat
                 matching_unit = (mat.unit or "m2").lower()
@@ -501,7 +509,7 @@ def _check_stone_stock_and_create_task(
             mat_name = (mat.name or "").lower().replace(" ", "")
             if pos_size and pos_size in mat_name:
                 if not _shapes_compatible(mat):
-                    rejected_by_shape.append(mat.name)
+                    rejected_by_shape.append((mat.name, _mat_shape_str(mat)))
                     continue
                 matching_stone = mat
                 matching_unit = (mat.unit or "m2").lower()
@@ -512,7 +520,8 @@ def _check_stone_stock_and_create_task(
             logger.info(
                 "STONE_SHAPE_MISMATCH | position=%s shape=%s | size matched "
                 "but shape differs, rejected: %s",
-                position_id, pos_shape, ", ".join(rejected_by_shape[:5]),
+                position_id, pos_shape,
+                ", ".join(f"{n}({s})" for n, s in rejected_by_shape[:5]),
             )
 
         if not matching_stone:
@@ -582,14 +591,21 @@ def _check_stone_stock_and_create_task(
         )
         if not matching_stone:
             if rejected_by_shape:
-                # Size exists in catalog but only as other shapes (e.g. we have
-                # rectangular 10×10 stone, position needs triangular 10×10).
+                # Size exists in catalog but only as other shapes (e.g. we
+                # have rectangular 10×10 stone, position needs triangular
+                # 10×10). Show pos.shape vs the actual catalog shape, not
+                # a hardcoded "rectangle".
+                cat_names = ", ".join(n for n, _s in rejected_by_shape[:3])
+                cat_shapes = ", ".join(
+                    sorted({s for _n, s in rejected_by_shape})
+                )
                 size_note = (
                     f"No {pos_shape} stone for size {pos_size}. "
-                    f"Size matches {', '.join(rejected_by_shape[:3])} in catalog, "
-                    f"but shape differs ({pos_shape} vs rectangle). "
+                    f"Size matches {cat_names} in catalog, "
+                    f"but shape differs ({pos_shape} vs {cat_shapes}). "
                     f"Need: {reserved_sqm:.2f} m², Qty: {quantity} pcs. "
-                    f"Create a separate Material entry for {pos_shape} stone of this size."
+                    f"Create a separate Material entry for {pos_shape} "
+                    f"stone of this size."
                 )
             else:
                 size_note = (

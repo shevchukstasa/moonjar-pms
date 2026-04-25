@@ -57,6 +57,95 @@ def _validate_material_type(material_type: str | None) -> str | None:
     return material_type
 
 
+# ────────────────────────────────────────────────────────────────
+# unit ↔ material_type validation (BUSINESS_LOGIC_FULL §29)
+# ────────────────────────────────────────────────────────────────
+#
+# Each material category dictates which units are physically meaningful.
+# Allowing arbitrary combos (e.g. glaze in pcs, stone in kg) lets recipes
+# request "ml" of stone or "m²" of pigment — which then silently loses
+# accuracy through unit_conversion. The owner approved hard validation:
+# reject the create / update at the API layer.
+#
+# Whitelist by category:
+_UNIT_RULES: dict[str, set[str]] = {
+    "stone":           {"pcs", "m2"},
+    "pigment":         {"kg", "g"},
+    "frit":            {"kg", "g"},
+    "oxide_carbonate": {"kg", "g"},
+    "other_bulk":      {"kg", "g", "l", "ml"},
+    "consumable":      {"pcs", "kg", "g", "l", "ml", "m"},
+    "packaging":       {"pcs", "m"},
+    # 'other' category is intentionally permissive — used for utilities
+    # (water/steam) which we already treat as untracked anyway.
+    "other":           {"pcs", "kg", "g", "l", "ml", "m", "m2"},
+}
+
+
+def _validate_unit_for_material_type(
+    unit: str | None, material_type: str | None,
+) -> None:
+    """Reject combinations that are physically meaningless.
+
+    Raises HTTPException(422) on mismatch. No-op when either value is
+    missing — that surfaces through other validators.
+    """
+    if not unit or not material_type:
+        return
+    u = (unit or "").strip().lower()
+    mt = (material_type or "").strip().lower()
+    allowed = _UNIT_RULES.get(mt)
+    if allowed is None:
+        return  # unknown material_type already warned by _validate_material_type
+    if u not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"unit '{u}' is not valid for material_type '{mt}'. "
+                f"Allowed units for {mt}: {sorted(allowed)}. "
+                f"See BUSINESS_LOGIC_FULL.md §29."
+            ),
+        )
+
+
+def _require_geometry_if_stone_pcs(
+    material_type: str | None,
+    unit: str | None,
+    size_id,
+    db: Session,
+) -> None:
+    """For stone+pcs, the material MUST be linked to a Size with
+    geometry filled in — otherwise consumption / availability code
+    can't compute m² and silently returns 0. See §29.
+    """
+    if (material_type or "").lower() != "stone" or (unit or "").lower() != "pcs":
+        return
+    if not size_id:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "stone material with unit='pcs' must be linked to a Size "
+                "(size_id is required). Without geometry the system can't "
+                "convert pieces to m² for availability checks."
+            ),
+        )
+    from api.models import Size
+    s = db.query(Size).filter(Size.id == size_id).first()
+    if not s:
+        raise HTTPException(404, "Size not found")
+    has_w_h = bool(s.width_mm and s.height_mm)
+    has_diam = bool(s.diameter_mm)
+    if not (has_w_h or has_diam):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Size '{s.name}' has no geometry (width_mm/height_mm or "
+                f"diameter_mm). Fill it in on the Sizes admin page first, "
+                f"then create the stone material."
+            ),
+        )
+
+
 def _ev(val):
     return val.value if hasattr(val, "value") else str(val) if val else None
 
@@ -1275,6 +1364,11 @@ async def create_material(
         material_type = sg.code  # sync material_type from subgroup.code
 
     material_type = _validate_material_type(material_type)
+    # Hard validation per BUSINESS_LOGIC_FULL §29.
+    _validate_unit_for_material_type(data.unit, material_type)
+    _require_geometry_if_stone_pcs(
+        material_type, data.unit, data.size_id, db,
+    )
 
     # Get or create catalog material
     mat = db.query(Material).filter(Material.name == data.name).first()
@@ -1393,6 +1487,15 @@ async def update_material(
     # Handle size_id
     if 'size_id' in updates:
         mat.size_id = updates.pop('size_id')
+
+    # ── §29 validation on the post-update state ───────────────────
+    # Check the COMBINATION of new+old values (e.g. user changes only
+    # unit but material_type is already set on the row).
+    final_unit = updates.get('unit', mat.unit)
+    final_mtype = mat.material_type  # already synced from subgroup above
+    final_size_id = mat.size_id
+    _validate_unit_for_material_type(final_unit, final_mtype)
+    _require_geometry_if_stone_pcs(final_mtype, final_unit, final_size_id, db)
 
     # Catalog-level fields
     catalog_fields = {'name', 'short_name', 'full_name', 'unit', 'supplier_id',

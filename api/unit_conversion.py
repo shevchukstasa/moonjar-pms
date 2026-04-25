@@ -156,6 +156,13 @@ def convert_to_stock_unit(
 
     If units already match or conversion is not applicable (e.g. pcs→pcs),
     returns the original amount unchanged.
+
+    NB: pcs ↔ m² is NOT done here — it requires geometry (shape +
+    dimensions) which lives in the Material's Size row, not in this
+    helper. Use `convert_pcs_to_sqm()` / `convert_sqm_to_pcs()` below
+    when the geometry is available. If you call convert_to_stock_unit
+    with pcs↔non-pcs units the value is returned as-is and a warning is
+    logged so the caller notices.
     """
     calc_u = calc_unit.lower().strip()
     stock_u = stock_unit.lower().strip()
@@ -164,8 +171,17 @@ def convert_to_stock_unit(
     if calc_u == stock_u:
         return amount
 
-    # pcs is not convertible to weight/volume and vice versa
+    # pcs is not convertible to weight/volume here. The right path for
+    # pcs ↔ m² goes through convert_pcs_to_sqm/sqm_to_pcs which need
+    # tile geometry — see BUSINESS_LOGIC_FULL §29.
     if calc_u == "pcs" or stock_u == "pcs":
+        if {calc_u, stock_u} == {"pcs", "m2"}:
+            _logger.warning(
+                "UNIT_CONVERT_NEED_GEOMETRY | material=%s | %s->%s | "
+                "pcs↔m² requires shape/size — use convert_pcs_to_sqm; "
+                "returning raw value, this is almost certainly wrong",
+                material_name, calc_u, stock_u,
+            )
         return amount
 
     # Prepare specific_gravity as float for convert_units
@@ -184,3 +200,106 @@ def convert_to_stock_unit(
             material_name, calc_u, stock_u, exc,
         )
         return amount
+
+
+# ────────────────────────────────────────────────────────────────
+# pcs ↔ m² with geometry (BUSINESS_LOGIC_FULL §29)
+# ────────────────────────────────────────────────────────────────
+
+class GeometryMissingError(Exception):
+    """Raised when pcs↔m² conversion is requested but the geometry of
+    the material is incomplete (no width/height/diameter). Loud failure
+    is preferred over silently returning 0 — see how the bug bit prod
+    on 25 Apr 2026 (12 round D29.2 tables looked like they had no stock
+    because the rectangle path computed 58 cm² per piece instead of
+    670 cm²)."""
+
+
+def _tile_area_sqm_from_geometry(
+    shape: Optional[str],
+    width_mm: Optional[float],
+    height_mm: Optional[float],
+    diameter_mm: Optional[float] = None,
+) -> float:
+    """Compute the area of ONE tile in m² from its shape + dimensions.
+
+    Wrapper around business.services.surface_area.calculate_glazeable_surface
+    so the formulas stay in ONE place. We can't import surface_area at
+    module top-level (api/ → business/ would create a cycle when
+    business/services/material_consumption.py imports from api/), so the
+    import is local.
+
+    Raises GeometryMissingError when not enough data to compute area.
+    """
+    sh = (shape or "rectangle").lower().strip()
+
+    # round needs diameter (or width as fallback)
+    if sh == "round":
+        diam = diameter_mm or width_mm
+        if not diam or diam <= 0:
+            raise GeometryMissingError(
+                f"round geometry requires diameter (got "
+                f"diameter_mm={diameter_mm} width_mm={width_mm})"
+            )
+        # Use surface_area helper for consistency
+        from business.services.surface_area import calculate_glazeable_surface
+        L_cm = float(diam) / 10.0
+        return calculate_glazeable_surface(
+            shape="round", length_cm=L_cm, width_cm=L_cm,
+        )
+
+    # all other shapes need W and H
+    if not width_mm or not height_mm:
+        raise GeometryMissingError(
+            f"{sh} geometry requires width_mm + height_mm "
+            f"(got width_mm={width_mm} height_mm={height_mm})"
+        )
+
+    from business.services.surface_area import calculate_glazeable_surface
+    L_cm = float(width_mm) / 10.0
+    W_cm = float(height_mm) / 10.0
+    return calculate_glazeable_surface(
+        shape=sh, length_cm=L_cm, width_cm=W_cm,
+    )
+
+
+def convert_pcs_to_sqm(
+    qty_pcs: float,
+    shape: Optional[str],
+    width_mm: Optional[float],
+    height_mm: Optional[float],
+    diameter_mm: Optional[float] = None,
+) -> float:
+    """Convert a piece count to m² given the tile geometry.
+
+    Raises GeometryMissingError on incomplete inputs. Callers should
+    catch this and either fall back gracefully (with a logged ERROR)
+    or surface a hard validation failure to the user. NEVER swallow
+    silently and return 0 — that's the bug we just fixed.
+    """
+    if qty_pcs is None or qty_pcs <= 0:
+        return 0.0
+    one = _tile_area_sqm_from_geometry(shape, width_mm, height_mm, diameter_mm)
+    return float(qty_pcs) * one
+
+
+def convert_sqm_to_pcs(
+    qty_sqm: float,
+    shape: Optional[str],
+    width_mm: Optional[float],
+    height_mm: Optional[float],
+    diameter_mm: Optional[float] = None,
+) -> float:
+    """Inverse: how many pieces to cover qty_sqm of glaze area.
+
+    Raises GeometryMissingError on incomplete inputs. Returns float so
+    the caller can decide whether to round / ceil / floor.
+    """
+    if qty_sqm is None or qty_sqm <= 0:
+        return 0.0
+    one = _tile_area_sqm_from_geometry(shape, width_mm, height_mm, diameter_mm)
+    if one <= 0:
+        raise GeometryMissingError(
+            "tile area is zero — refuse to divide by zero"
+        )
+    return float(qty_sqm) / one

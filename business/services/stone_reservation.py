@@ -639,17 +639,14 @@ def _check_stone_stock_and_create_task(
         def _stone_balance_sqm(mat, stock) -> float:
             """Convert Material's stock balance to m².
 
-            unit='m2'  → balance is already m², return as-is.
-            unit='pcs' → balance × area-of-one-tile, where area depends on
-                         the material's Size shape:
-                            round       π × (D/2)²
-                            triangle    L × W / 2
-                            octagon     2(1+√2) × s²   (s = L/(1+√2))
-                            other       L × W (rectangle / square / freeform)
-                         Geometry comes from Material.size (Size row); when
-                         that's missing, fall back to parsing "WxH" out of
-                         the material name (legacy stones without size_id).
-            Returns 0.0 when no balance, no geometry, or unsupported unit.
+            Single source of truth for shape area = `unit_conversion.
+            convert_pcs_to_sqm()`, which itself delegates to
+            `surface_area.calculate_glazeable_surface()`. Adding new
+            shapes (e.g. trapezoid) only requires editing surface_area.
+
+            Returns 0.0 (with ERROR log) when geometry is missing —
+            previously this silently returned 0 and caused phantom
+            stone shortages (see prod incident 25 Apr 2026).
             """
             if not stock:
                 return 0.0
@@ -660,13 +657,10 @@ def _check_stone_stock_and_create_task(
             if unit != "pcs":
                 return 0.0
 
-            # Pull geometry — prefer the linked Size row.
             size = getattr(mat, "size", None)
             shape = (
-                getattr(size, "shape", None) if size else None
-            ) or "rectangle"
-            shape = str(shape).lower().strip()
-
+                str(getattr(size, "shape", None) or "rectangle").lower().strip()
+            )
             w_mm = getattr(size, "width_mm", None) if size else None
             h_mm = getattr(size, "height_mm", None) if size else None
             d_mm = getattr(size, "diameter_mm", None) if size else None
@@ -682,31 +676,20 @@ def _check_stone_stock_and_create_task(
                     w_mm = w_mm or float(m.group(1)) * 10
                     h_mm = h_mm or float(m.group(2)) * 10
 
-            from math import pi, sqrt
-
-            tile_sqm = 0.0
-            if shape == "round":
-                # Diameter from Size, else fall back to width_mm.
-                diam_mm = float(d_mm or w_mm or 0)
-                if diam_mm > 0:
-                    r_m = (diam_mm / 1000.0) / 2.0
-                    tile_sqm = pi * r_m * r_m
-            elif shape == "triangle":
-                if w_mm and h_mm:
-                    tile_sqm = (float(w_mm) / 1000.0) * (float(h_mm) / 1000.0) / 2.0
-            elif shape == "octagon":
-                if w_mm:
-                    L_m = float(w_mm) / 1000.0
-                    s_m = L_m / (1.0 + sqrt(2))
-                    tile_sqm = 2.0 * (1.0 + sqrt(2)) * s_m * s_m
-            else:
-                # rectangle / square / freeform / unknown — bounding box.
-                if w_mm and h_mm:
-                    tile_sqm = (float(w_mm) / 1000.0) * (float(h_mm) / 1000.0)
-
-            if tile_sqm <= 0:
+            from api.unit_conversion import (
+                convert_pcs_to_sqm, GeometryMissingError,
+            )
+            try:
+                return convert_pcs_to_sqm(
+                    bal, shape=shape,
+                    width_mm=w_mm, height_mm=h_mm, diameter_mm=d_mm,
+                )
+            except GeometryMissingError as e:
+                logger.error(
+                    "STONE_BALANCE_GEOMETRY_FAIL | material=%s | %s",
+                    mat.name, e,
+                )
                 return 0.0
-            return bal * tile_sqm
 
         # Find the stone that matches this position's size.
         # rejected_by_shape stores (material_name, material_shape) so we

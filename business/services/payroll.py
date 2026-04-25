@@ -660,7 +660,7 @@ def calculate_monthly_payroll(
                     leave_compensation = _round(unused_leave * leave_daily_rate)
 
     # ── Gross salary ─────────────────────────────────────────────────────
-    prorated_allowances = _round(total_allowances * proration_factor)
+    prorated_allowances = total_allowances  # Allowances are fixed, not attendance-prorated
     gross_salary = prorated_salary + prorated_allowances + overtime_pay + commission + leave_compensation
 
     # ── BPJS + PPh21 ─────────────────────────────────────────────────────

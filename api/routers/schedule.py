@@ -900,6 +900,90 @@ async def backfill_procurement_tasks(
     }
 
 
+@router.post("/admin/backfill-position-consumption")
+async def backfill_position_consumption(
+    position_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """One-shot backfill of consumption side-effects for a single
+    position that was advanced past ENGOBE_APPLIED through the enum
+    bypass (or by an old version of the system) without firing
+    on_glazing_start / consume_stone_for_position.
+
+    Repairs phantom inventory: writes the missing CONSUME / UNRESERVE
+    transactions, decrements the stock balance, closes the active
+    StoneReservation, and stamps materials_written_off_at.
+
+    Idempotent — safe to re-run. Skips if materials_written_off_at is
+    already set (unless `force=True`, not exposed yet on purpose).
+
+    See BUSINESS_LOGIC_FULL.md §2 / §3 / §30.
+    """
+    from api.models import OrderPosition
+    from business.services.material_consumption import on_glazing_start
+    from business.services.stone_reservation import consume_stone_for_position
+
+    position = db.query(OrderPosition).filter(
+        OrderPosition.id == position_id,
+    ).first()
+    if not position:
+        raise HTTPException(404, "Position not found")
+
+    result = {
+        "position_id": str(position_id),
+        "status_before": (
+            position.status.value if hasattr(position.status, "value")
+            else position.status
+        ),
+        "materials_written_off_at_before": (
+            position.materials_written_off_at.isoformat()
+            if position.materials_written_off_at else None
+        ),
+    }
+
+    glaze_result = None
+    stone_result = None
+
+    # 1) Glaze / pigment / frit / bulk materials (BOM)
+    try:
+        glaze_result = on_glazing_start(db, position.id)
+    except Exception as e:
+        logger.error(
+            "BACKFILL_GLAZE_FAIL | position=%s | %s", position_id, e,
+            exc_info=True,
+        )
+        glaze_result = {"error": str(e)}
+
+    # 2) Stone (independent path — runs even if glaze step crashed)
+    try:
+        stone_result = consume_stone_for_position(db, position.id)
+    except Exception as e:
+        logger.error(
+            "BACKFILL_STONE_FAIL | position=%s | %s", position_id, e,
+            exc_info=True,
+        )
+        stone_result = {"error": str(e)}
+
+    # If on_glazing_start didn't run (no recipe etc.) materials_written_off_at
+    # may still be NULL — set it explicitly so the position isn't stuck in
+    # "still consumable" state forever.
+    if not position.materials_written_off_at:
+        from datetime import datetime, timezone
+        position.materials_written_off_at = datetime.now(timezone.utc)
+        result["materials_written_off_at_set_manually"] = True
+
+    db.commit()
+
+    result["glaze_result"] = glaze_result
+    result["stone_result"] = stone_result
+    result["materials_written_off_at_after"] = (
+        position.materials_written_off_at.isoformat()
+        if position.materials_written_off_at else None
+    )
+    return result
+
+
 def _cleanup_stale_recipe_tasks(db, factory_id: UUID) -> dict:
     """Close RECIPE_CONFIGURATION tasks that can no longer fire.
 

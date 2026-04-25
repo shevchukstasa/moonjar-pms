@@ -45,6 +45,26 @@ const UNIT_OPTIONS = [
   { value: 'm2',  label: 'm\u00B2' },
 ];
 
+// Mirrors api/routers/materials.py::_UNIT_RULES — keep in sync.
+// See BUSINESS_LOGIC_FULL.md §29.
+const UNITS_BY_TYPE: Record<string, string[]> = {
+  stone:           ['pcs', 'm2'],
+  pigment:         ['kg', 'g'],
+  frit:            ['kg', 'g'],
+  oxide_carbonate: ['kg', 'g'],
+  other_bulk:      ['kg', 'g', 'l', 'ml'],
+  consumable:      ['pcs', 'kg', 'g', 'l', 'ml', 'm'],
+  packaging:       ['pcs', 'm'],
+  other:           ['pcs', 'kg', 'g', 'l', 'ml', 'm', 'm2'],
+};
+
+function unitsAllowedForType(materialType: string): { value: string; label: string }[] {
+  if (!materialType) return UNIT_OPTIONS;
+  const allowed = UNITS_BY_TYPE[materialType];
+  if (!allowed) return UNIT_OPTIONS;
+  return UNIT_OPTIONS.filter((u) => allowed.includes(u.value));
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 /** Build a flat list of subgroups from hierarchy for type tabs & dropdowns */
@@ -765,10 +785,15 @@ function CatalogTab() {
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">Unit</label>
               <Select
-                options={UNIT_OPTIONS}
+                options={unitsAllowedForType(form.material_type)}
                 value={form.unit}
                 onChange={(e) => setForm({ ...form, unit: e.target.value })}
               />
+              {form.material_type && UNITS_BY_TYPE[form.material_type] && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Allowed for {form.material_type}: {UNITS_BY_TYPE[form.material_type].join(', ')}
+                </p>
+              )}
             </div>
           </div>
           <div>

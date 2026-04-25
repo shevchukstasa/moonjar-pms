@@ -458,11 +458,6 @@ def generate_payslip_pdf(item: dict, year: int, month: int, factory_name: str = 
     ]))
     elements.append(net_t)
 
-    # Total biaya perusahaan
-    elements.append(Spacer(1, 2 * mm))
-    elements.append(_tbl([
-        [Paragraph("Total Biaya Perusahaan", lbl), Paragraph(f"Rp {_fmt_idr(item.get('total_cost_to_company', 0))}", val)],
-    ]))
 
     # ══════════════════════════════════════════════════════════
     # MOTIVATIONAL QUOTE — dopamine element

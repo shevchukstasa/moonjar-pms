@@ -181,7 +181,15 @@ def enable_fast_track(
     )
     db.add(audit_task)
 
-    # 6. Security event
+    # 6. Persist primary changes BEFORE security_audit_log call.
+    # log_security_event has its own try/except db.rollback() — if its
+    # INSERT fails (e.g. enum value not yet ensured on this DB), it would
+    # roll back the entire pending session, including everything above.
+    # Committing first guarantees the fast-track changes are durable.
+    db.commit()
+    db.refresh(order)
+
+    # 7. Security event — best-effort, must not affect persisted state.
     try:
         from api.auth import log_security_event
         log_security_event(
@@ -198,9 +206,6 @@ def enable_fast_track(
         )
     except Exception as e:
         logger.warning("FAST_TRACK_AUDIT_FAIL | %s", e)
-
-    db.commit()
-    db.refresh(order)
 
     logger.warning(
         "ORDER_FAST_TRACK | user=%s | order=%s (%s) | target=%s | "

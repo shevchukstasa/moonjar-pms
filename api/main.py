@@ -247,6 +247,9 @@ def _ensure_schema():
         # Sorted — separates sort step (category distribution) from pack step
         # (physical packing + photo + packaging consumption).
         ("position_status", "sorted"),
+        # Express mode (Material Tracking Disabled) — owner override.
+        # See docs/BUSINESS_LOGIC_FULL.md §2.6.
+        ("audit_action_type", "order_fast_track"),
     ]
     try:
         raw_conn = engine.raw_connection()

@@ -2025,9 +2025,14 @@ async def eve_of_kiln_check():
 
         tomorrow = date.today() + timedelta(days=1)
 
-        # Find positions with kiln date = tomorrow that are not yet completed
+        # Find positions with kiln date = tomorrow that are not yet finished.
+        # NB: 'completed' is NOT a valid PositionStatus value — including
+        # it here crashed the whole job with psycopg2 InvalidTextRepresentation
+        # because the enum cast failed before the IN-list could even run.
+        # The actual terminal states are packed / ready_for_shipment / shipped /
+        # cancelled / merged.
         terminal_statuses = (
-            'completed', 'shipped', 'cancelled', 'packed', 'ready_for_shipment',
+            'shipped', 'cancelled', 'packed', 'ready_for_shipment', 'merged',
         )
         positions = db.query(OrderPosition).filter(
             OrderPosition.planned_kiln_date == tomorrow,

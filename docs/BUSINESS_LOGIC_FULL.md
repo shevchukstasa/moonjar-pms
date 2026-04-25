@@ -260,13 +260,19 @@ daily_cap = brigade_size × shift_count × shift_duration_hours × productivity_
 9. `schedule_metadata` — логируем `left_shift_trace`, `capacity_trace`, `shifted_reason` для debug.
 10. Никаких «быстро поправлю backward на forward без чтения §4» — см. project CLAUDE.md.
 
-### Отображение графика: скрытие уже выполненных стадий (bug-fix 2026-04-25, commit 7bfeef6)
+### Отображение графика: скрытие уже выполненных стадий (bug-fix 2026-04-25, commits 7bfeef6 + later sync)
 
-**Правило:** UI календарь **не рисует** позицию на будущие дни для стадий, которые она уже прошла по своему текущему статусу.
+**Правило:** **любой** UI view расписания (календарь Daily Production View, Plan vs Fact, любые будущие views) **не показывает** позицию на стадиях, которые она уже прошла по своему текущему статусу.
 
-**Почему это важно.** `schedule_position` записывает в `stage_plan` даты для ВСЕХ 12 стадий, даже если позиция уже в `GLAZED` или `FIRED`. Если эти исторические записи разложить по календарю 1:1 — пользователь видит «сегодня Unpack, завтра Engobe», хотя физически мастер уже прошёл эти этапы часы назад. Это путает и обесценивает расписание.
+**Почему это важно.** `schedule_position` записывает в `stage_plan` даты для ВСЕХ 12 стадий, даже если позиция уже в `GLAZED` или `FIRED`. Если эти исторические записи разложить по UI 1:1 — пользователь видит «сегодня Unpack, завтра Engobe», хотя физически мастер уже прошёл эти этапы часы назад. Хуже того: разные views (календарь vs Plan vs Fact) могут показывать **противоречивые данные про одну и ту же позицию** на одну и ту же дату, если фильтр применён только в одном месте.
 
-**Как реализовано** (`business/planning_engine/scheduler.py:generate_production_schedule`):
+**Single source of truth:** маппинг и helper-функции живут в `business/services/stage_progress.py` (`STAGE_INDEX`, `STATUS_COMPLETED_STAGE_INDEX`, `position_completed_index()`, `stage_already_done()`). Любой views должен импортировать и применять `stage_already_done(pos, stage_key)` перед тем как класть позицию в выдачу.
+
+**Применяется в:**
+- `business/planning_engine/scheduler.py::generate_production_schedule` — Daily Production View calendar
+- `api/routers/schedule.py::get_daily_plan` — Plan vs Fact daily tracking
+
+**Маппинг status → пройденных стадий** (живёт в `stage_progress.py`):
 
 Маппинг «какая стадия уже в прошлом для данного статуса» — `_STATUS_COMPLETED_STAGE_INDEX`:
 

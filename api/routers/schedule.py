@@ -1631,6 +1631,15 @@ async def get_daily_plan(
         total_carryover = 0
 
         for pos in positions:
+            # Skip positions whose current status implies this stage is
+            # already done — same filter the calendar view applies.
+            # Without it, Plan vs Fact lists e.g. "Engobe today: 162 pcs"
+            # for a position that's been in `glazed` for hours.
+            # See docs/BUSINESS_LOGIC_FULL.md §4 → "Отображение графика".
+            from business.services.stage_progress import stage_already_done
+            if stage_already_done(pos, stage_key):
+                continue
+
             meta = pos.schedule_metadata or {}
             stage_plan = meta.get("stage_plan", {}) if isinstance(meta, dict) else {}
             sinfo = stage_plan.get(stage_key, {}) if isinstance(stage_plan, dict) else {}

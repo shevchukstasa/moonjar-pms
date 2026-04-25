@@ -289,7 +289,7 @@ export default function EmployeesPage() {
   });
 
   const attendanceMutation = useMutation({
-    mutationFn: ({ empId, existingId, data }: { empId: string; existingId: string | null; data: { date: string; status: string; overtime_hours: number; hours_worked?: number; notes?: string } }) =>
+    mutationFn: ({ empId, existingId, data }: { empId: string; existingId: string | null; data: { date: string; status: string; overtime_hours: number; hours_worked?: number | null; notes?: string } }) =>
       existingId
         ? employeesApi.updateAttendance(existingId, { status: data.status, overtime_hours: data.overtime_hours, hours_worked: data.hours_worked, notes: data.notes })
         : employeesApi.recordAttendance(empId, data),
@@ -536,7 +536,7 @@ export default function EmployeesPage() {
 
   const handleAttendanceSubmit = useCallback(() => {
     if (!attEmployee || !attDate) return;
-    const hwVal = attHoursWorked ? parseFloat(attHoursWorked) : undefined;
+    const hwVal = attHoursWorked ? parseFloat(attHoursWorked) : null;
     attendanceMutation.mutate({
       empId: attEmployee.id,
       existingId: attExistingId,
@@ -544,7 +544,7 @@ export default function EmployeesPage() {
         date: attDate,
         status: attStatus,
         overtime_hours: parseFloat(attOvertime) || 0,
-        hours_worked: hwVal != null && !isNaN(hwVal) ? hwVal : undefined,
+        hours_worked: hwVal != null && !isNaN(hwVal) ? hwVal : null,
         notes: attNotes || undefined,
       },
     });

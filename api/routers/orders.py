@@ -50,7 +50,7 @@ def _canonicalize_place(val: Optional[str]) -> Optional[str]:
 
 from api.database import get_db
 from api.auth import apply_factory_filter
-from api.roles import require_management
+from api.roles import require_management, require_finance
 from api.models import ProductionOrder, ProductionOrderItem, OrderPosition, Factory, FinishedGoodsStock, Task, ProductionOrderStatusLog
 from api.enums import OrderStatus, OrderSource, PositionStatus, TaskStatus, is_stock_collection, ChangeRequestStatus
 from business.services.status_machine import transition_position_status
@@ -215,6 +215,13 @@ def _order_detail(order, db: Session) -> dict:
         "cancellation_decided_at": (
             order.cancellation_decided_at.isoformat()
             if getattr(order, "cancellation_decided_at", None) else None
+        ),
+        # Express mode — material tracking disabled (BUSINESS_LOGIC_FULL §2.6)
+        "material_tracking_disabled": bool(getattr(order, "material_tracking_disabled", False)),
+        "material_tracking_disabled_reason": getattr(order, "material_tracking_disabled_reason", None),
+        "material_tracking_disabled_at": (
+            order.material_tracking_disabled_at.isoformat()
+            if getattr(order, "material_tracking_disabled_at", None) else None
         ),
         "items": [
             {
@@ -993,6 +1000,53 @@ async def reschedule_order(
         "materials_reserved": reserved_count,
         "reservation_errors": reservation_errors,
     }
+
+
+# ────────────────────────────────────────────────────────────────
+# Express mode (Material Tracking Disabled)
+# See docs/BUSINESS_LOGIC_FULL.md §2.6
+# Role gate: require_finance = owner + administrator + ceo.
+#   CEO inclusion is TEMPORARY — see docs/TEMPORARY_DELEGATIONS.md
+# ────────────────────────────────────────────────────────────────
+
+class FastTrackInput(BaseModel):
+    reason: str
+    target_status: Optional[str] = None
+
+
+@router.post("/{order_id}/fast-track")
+async def fast_track_order(
+    order_id: UUID,
+    data: FastTrackInput,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_finance),
+):
+    """Enable Express mode for an order.
+
+    Owner-level override: bypasses material reservation/consumption for the
+    rest of the order's life. Releases existing reservations, marks every
+    position as `materials_written_off_at = now`, and (optionally) jumps
+    every position to `target_status` (e.g. `loaded_in_kiln`, `fired`).
+
+    Once enabled, cannot be disabled (write-once) — protects inventory
+    integrity. Logged in security_events + Task audit + position history.
+    """
+    from business.services.order_fast_track import enable_fast_track
+
+    try:
+        result = enable_fast_track(
+            db=db,
+            order_id=order_id,
+            reason=data.reason,
+            target_status=data.target_status,
+            user_id=current_user.id,
+        )
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    return result
 
 
 @router.get("/{order_id}")

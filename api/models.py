@@ -285,6 +285,12 @@ class ProductionOrder(Base):
     change_req_requested_at = Column(sa.DateTime(timezone=True), nullable=True)
     change_req_decided_at = Column(sa.DateTime(timezone=True), nullable=True)
     change_req_decided_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    # Express mode — owner override that bypasses material reservation/consumption.
+    # See docs/BUSINESS_LOGIC_FULL.md §2.6.
+    material_tracking_disabled = Column(sa.Boolean, nullable=False, server_default=sa.text('false'))
+    material_tracking_disabled_reason = Column(sa.Text, nullable=True)
+    material_tracking_disabled_at = Column(sa.DateTime(timezone=True), nullable=True)
+    material_tracking_disabled_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at = Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 

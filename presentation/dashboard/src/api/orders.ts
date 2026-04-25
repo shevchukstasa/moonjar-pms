@@ -138,4 +138,9 @@ export const ordersApi = {
   // Reschedule order (recalculate dates, assign kilns, reserve materials)
   rescheduleOrder: (orderId: string) =>
     apiClient.post(`/orders/${orderId}/reschedule`).then((r) => r.data),
+  // Express mode (Material Tracking Disabled) — owner override.
+  // Bypasses material reservation/consumption for the rest of the order's life.
+  // See docs/BUSINESS_LOGIC_FULL.md §2.6.
+  fastTrackOrder: (orderId: string, payload: { reason: string; target_status?: string }) =>
+    apiClient.post(`/orders/${orderId}/fast-track`, payload).then((r) => r.data),
 };

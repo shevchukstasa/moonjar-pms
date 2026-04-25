@@ -48,6 +48,7 @@ def on_glazing_start(
     from api.models import (
         OrderPosition, Recipe, RecipeMaterial, Material,
         MaterialTransaction, MaterialStock, ConsumptionAdjustment,
+        ProductionOrder,
     )
     from api.enums import TransactionType
     from business.services.material_reservation import _calculate_required
@@ -56,6 +57,19 @@ def on_glazing_start(
     if not position:
         logger.error("on_glazing_start: position %s not found", position_id)
         return {"error": "Position not found"}
+
+    # EXPRESS MODE GUARD (BUSINESS_LOGIC_FULL §2.6) — owner override that
+    # disables material tracking for the parent order. Skip consumption.
+    if position.order_id:
+        order = db.query(ProductionOrder).get(position.order_id)
+        if order and order.material_tracking_disabled:
+            from datetime import datetime, timezone as _tz
+            position.materials_written_off_at = datetime.now(_tz.utc)
+            logger.info(
+                "CONSUME_SKIP_EXPRESS | position=%s | order=%s in express mode",
+                position_id, order.id,
+            )
+            return {"skipped": "express_mode", "consumed": [], "adjustments": []}
 
     recipe = db.query(Recipe).get(position.recipe_id) if position.recipe_id else None
     if not recipe:
@@ -286,6 +300,7 @@ def consume_refire_materials(
     from api.models import (
         OrderPosition, Recipe, RecipeMaterial, Material,
         MaterialTransaction, MaterialStock, ConsumptionAdjustment,
+        ProductionOrder,
     )
     from api.enums import TransactionType
     from business.services.material_reservation import _calculate_required
@@ -294,6 +309,16 @@ def consume_refire_materials(
     if not position:
         logger.error("consume_refire_materials: position %s not found", position_id)
         return {"error": "Position not found"}
+
+    # EXPRESS MODE GUARD (BUSINESS_LOGIC_FULL §2.6).
+    if position.order_id:
+        order = db.query(ProductionOrder).get(position.order_id)
+        if order and order.material_tracking_disabled:
+            logger.info(
+                "REFIRE_CONSUME_SKIP_EXPRESS | position=%s | order=%s in express mode",
+                position_id, order.id,
+            )
+            return {"skipped": "express_mode", "consumed": []}
 
     recipe = db.query(Recipe).get(position.recipe_id) if position.recipe_id else None
     if not recipe:

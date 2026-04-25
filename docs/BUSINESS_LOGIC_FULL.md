@@ -1994,3 +1994,66 @@ Where implemented:
 | `Shipment.shipped_at IS NOT NULL` | ✓ |
 
 Если хоть одна строка не выполняется — позиция **формально в статусе, реально процесс не пройден**. Owner / Admin override должен явно фиксироваться в `AuditLog` с указанием причины.
+
+---
+
+## §2.6 Express Mode — Material Tracking Disabled (owner override)
+
+**Назначение.** Иногда заказ невозможно или невыгодно проводить через стандартный материальный учёт: уникальный камень индивидуального размера (не повторится), пробная партия, ремонт по гарантии, давальческое сырьё клиента. Для таких случаев есть «Express mode» — заказ ведётся по статусам, но **без резервирования и списания материалов**. Это owner-level override: владелец берёт ответственность за инвентарь вне системы.
+
+### Поля на `production_orders`
+
+| Колонка | Тип | Назначение |
+|---|---|---|
+| `material_tracking_disabled` | `boolean NOT NULL DEFAULT false` | Флаг "express". Write-once: после `true` — обратно `false` нельзя без миграции. |
+| `material_tracking_disabled_reason` | `text` | Обязательная причина. Хранится для аудита и отчётов OPEX. |
+| `material_tracking_disabled_at` | `timestamptz` | Когда включили. |
+| `material_tracking_disabled_by` | `uuid → users.id` | Кто включил. |
+
+### Поведение при `material_tracking_disabled = true`
+
+1. **`reserve_materials_for_position`** — early return. Не создаёт `MaterialTransaction(type=RESERVE)`. Не выставляет `INSUFFICIENT_MATERIALS`. Если резервы уже были — снимаются (через `unreserve_materials_for_position`).
+2. **`on_glazing_start` / `consume_refire_materials`** — early return. Не создаёт `MaterialTransaction(type=CONSUME)`. Stock balances не двигаются.
+3. **`materials_written_off_at`** ставится в момент включения флага (для всех уже созданных позиций), чтобы статус-машина никогда не пыталась повторно вызвать consume.
+4. **Position status** — owner может через тот же fast-track перевести позиции сразу в любой целевой статус (типично `loaded_in_kiln` или `fired`), state-machine validation пропускается (override).
+5. **Audit** — security_event + Task с `metadata_json.action = "fast_track"` создаются на каждое включение. Telegram CEO/Owner.
+6. **UI** — на карточке заказа крупный бейдж `📦🚫 EXPRESS — без учёта материалов` + причина. В отчётах OPEX и материальном расходе такие заказы выделяются отдельной строкой.
+
+### Что НЕ затрагивает Express mode
+
+- Все остальные стадии работают как обычно: planning, kiln assignment, QC, sorting, packing, shipping. Списываются только packaging-материалы (на этапе `packed`), потому что без коробок физически отгрузить нельзя — и клиенту это видно.
+- Финансовые проводки (если есть) — работают штатно.
+- Telegram-уведомления и role-based access — работают штатно.
+
+### Проверки целостности (audit)
+
+Аналог §2 «формально vs реально». Для express-заказов:
+
+| Хочешь убедиться, что заказ реально проведён без учёта | Проверь что |
+|---|---|
+| `production_orders.material_tracking_disabled = true` | ✓ |
+| `production_orders.material_tracking_disabled_reason IS NOT NULL` | ✓ |
+| Для каждой `OrderPosition`: `materials_written_off_at IS NOT NULL` | ✓ |
+| Нет `MaterialTransaction(type IN ('reserve','consume')) WHERE related_order_id = X` (кроме packaging) | ✓ |
+| В `Task` есть запись `metadata_json.action = 'fast_track' AND related_order_id = X` | ✓ |
+
+Если хоть одна строка не выполняется — express был включён криво. Чинить вручную.
+
+### Endpoint
+
+`POST /api/orders/{id}/fast-track`
+
+Body:
+```json
+{ "reason": "string (required)", "target_status": "loaded_in_kiln | fired | planned | ..." (optional) }
+```
+
+Roles: `owner | administrator | ceo` (CEO — временно, см. `docs/TEMPORARY_DELEGATIONS.md`).
+
+Returns: `{ order_id, positions_updated, reservations_released, target_status }`.
+
+### Когда НЕ использовать
+
+- Серийный продукт со стандартными размерами — нужен нормальный учёт.
+- Когда не хватает материала на складе и хочется «обойти» — это путь `Force Unblock → proceed_with_available` (с уходом баланса в минус), а не Express. Express значит «учёт по этому заказу не нужен в принципе», а не «закрыть глаза на дефицит».
+- Если непонятно «почему именно express, а не нормальный путь» — значит надо нормальный путь.

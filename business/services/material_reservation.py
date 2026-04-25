@@ -708,10 +708,23 @@ def reserve_materials_for_position(
 
     Returns ReservationResult.
     """
-    from api.models import RecipeMaterial, MaterialStock, MaterialTransaction, Material
+    from api.models import RecipeMaterial, MaterialStock, MaterialTransaction, Material, ProductionOrder
     from api.enums import TransactionType
     from sqlalchemy import func
     from datetime import datetime, timezone
+
+    # --- EXPRESS MODE GUARD (BUSINESS_LOGIC_FULL §2.6) ---
+    # If parent order has material_tracking_disabled=true, skip reservation
+    # entirely. Release any pre-existing reserves so stock is freed up.
+    if position.order_id:
+        order = db.query(ProductionOrder).get(position.order_id)
+        if order and order.material_tracking_disabled:
+            _release_existing_reserves(db, position)
+            logger.info(
+                "RESERVE_SKIP_EXPRESS | position=%s | order=%s in express mode",
+                position.id, order.id,
+            )
+            return ReservationResult(reserved=[], shortages=[], all_sufficient=True)
 
     recipe_materials = (
         db.query(RecipeMaterial)

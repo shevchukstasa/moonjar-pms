@@ -87,6 +87,29 @@ export default function OrderDetailPage() {
   const currentUser = useCurrentUser();
   const queryClient = useQueryClient();
   const canReprocess = currentUser && ['production_manager', 'administrator', 'owner'].includes(currentUser.role);
+  // Express mode (Material Tracking Disabled).
+  // CEO is included TEMPORARILY — see docs/TEMPORARY_DELEGATIONS.md.
+  const canFastTrack = currentUser && ['owner', 'administrator', 'ceo'].includes(currentUser.role);
+  const [showFastTrackDialog, setShowFastTrackDialog] = useState(false);
+  const [fastTrackReason, setFastTrackReason] = useState('');
+  const [fastTrackTargetStatus, setFastTrackTargetStatus] = useState<string>('loaded_in_kiln');
+  const fastTrackMutation = useMutation({
+    mutationFn: (payload: { id: string; reason: string; target_status: string }) =>
+      ordersApi.fastTrackOrder(payload.id, {
+        reason: payload.reason,
+        target_status: payload.target_status || undefined,
+      }),
+    onSuccess: () => {
+      setShowFastTrackDialog(false);
+      setFastTrackReason('');
+      queryClient.invalidateQueries({ queryKey: ['orders', orderId] });
+      toast.success('Express mode enabled — учёт материалов отключён по этому заказу.');
+    },
+    onError: (err: unknown) => {
+      const e = err as { response?: { data?: { detail?: string } } };
+      toast.error(e.response?.data?.detail || 'Не удалось включить Express mode');
+    },
+  });
   const [reprocessResult, setReprocessResult] = useState<{ message: string; details?: Record<string, unknown> } | null>(null);
   const reprocessMutation = useMutation({
     mutationFn: (id: string) => ordersApi.reprocessOrder(id),
@@ -271,6 +294,17 @@ export default function OrderDetailPage() {
               )}
             </div>
 
+            {/* Express mode badge (already enabled) */}
+            {order.material_tracking_disabled && (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200"
+                title={order.material_tracking_disabled_reason || ''}
+              >
+                <span aria-hidden>📦🚫</span>
+                Express mode — без учёта материалов
+              </span>
+            )}
+
             {/* Edit button */}
             {!isEditing && (
               <button
@@ -282,6 +316,17 @@ export default function OrderDetailPage() {
             )}
           </div>
         </div>
+
+        {/* Express mode toggle -- Owner/Admin/CEO (CEO temporarily, see TEMPORARY_DELEGATIONS.md) */}
+        {canFastTrack && !order.material_tracking_disabled && (
+          <Button
+            variant="secondary"
+            className="border-amber-300 text-amber-800 hover:bg-amber-50"
+            onClick={() => setShowFastTrackDialog(true)}
+          >
+            Express mode
+          </Button>
+        )}
 
         {/* Reschedule Order button -- PM/Admin only */}
         {canReprocess && (
@@ -630,6 +675,79 @@ export default function OrderDetailPage() {
         title="Override Order Status"
         message={`Manually set order #${order.order_number} status to "${VALID_STATUSES.find((s) => s.value === overrideStatus)?.label ?? overrideStatus}"? This bypasses automatic status calculation.`}
       />
+
+      {/* Express mode dialog */}
+      {showFastTrackDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-gray-900">Express mode — без учёта материалов</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Этот режим переводит заказ <span className="font-medium">#{order.order_number}</span> на путь без резервирования и списания материалов.
+              Используется для уникальных одноразовых заказов (нестандартный камень, давальческое сырьё, гарантийный ремонт).
+            </p>
+            <ul className="mt-3 list-disc pl-5 text-xs text-gray-500 space-y-1">
+              <li>Текущие резервы будут освобождены.</li>
+              <li>Списания глазури/ангоба не будет на любых стадиях.</li>
+              <li>Включить нельзя обратно — write-once. Это намеренно.</li>
+              <li>Все действия логируются в audit + Telegram.</li>
+            </ul>
+
+            <label className="mt-4 block text-sm font-medium text-gray-700">
+              Причина <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={fastTrackReason}
+              onChange={(e) => setFastTrackReason(e.target.value)}
+              rows={3}
+              placeholder="Например: уникальный камень индивидуального размера, не повторится"
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+            />
+
+            <label className="mt-3 block text-sm font-medium text-gray-700">
+              Перевести позиции в статус
+            </label>
+            <select
+              value={fastTrackTargetStatus}
+              onChange={(e) => setFastTrackTargetStatus(e.target.value)}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            >
+              <option value="">— оставить как есть —</option>
+              <option value="planned">Planned</option>
+              <option value="loaded_in_kiln">Loaded in kiln (обжигается)</option>
+              <option value="fired">Fired (обжиг закончен)</option>
+              <option value="ready_for_shipment">Ready for shipment</option>
+            </select>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowFastTrackDialog(false);
+                  setFastTrackReason('');
+                }}
+                disabled={fastTrackMutation.isPending}
+              >
+                Отмена
+              </Button>
+              <Button
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                disabled={!fastTrackReason.trim() || fastTrackMutation.isPending}
+                onClick={() => {
+                  if (!orderId) return;
+                  fastTrackMutation.mutate({
+                    id: orderId,
+                    reason: fastTrackReason.trim(),
+                    target_status: fastTrackTargetStatus,
+                  });
+                }}
+              >
+                {fastTrackMutation.isPending ? <Spinner className="h-4 w-4 mr-2" /> : null}
+                Включить Express mode
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

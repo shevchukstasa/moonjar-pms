@@ -900,6 +900,29 @@ async def backfill_procurement_tasks(
     }
 
 
+@router.post("/admin/audit-packing-coverage")
+async def audit_packing_coverage(
+    factory_id: UUID,
+    dry_run: bool = True,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_management),
+):
+    """Run scripts.audit_packing_rules_coverage for one factory via HTTP.
+
+    Returns counts (sizes_checked / missing_rules / tasks_created)
+    plus the list of sizes lacking PackagingBoxCapacity. Idempotent:
+    `dry_run=true` (default) only reports, `dry_run=false` creates
+    PACKING_MATERIALS_NEEDED tasks for the gaps.
+
+    See BUSINESS_LOGIC_FULL §31.
+    """
+    from scripts.audit_packing_rules_coverage import audit_factory
+    from api.models import Factory
+    if not db.query(Factory).filter(Factory.id == factory_id).first():
+        raise HTTPException(404, "Factory not found")
+    return audit_factory(db, factory_id, dry_run=dry_run)
+
+
 @router.post("/admin/backfill-position-consumption")
 async def backfill_position_consumption(
     position_id: UUID,

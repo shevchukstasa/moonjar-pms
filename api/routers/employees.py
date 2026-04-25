@@ -207,6 +207,8 @@ class PayrollSummaryItem(BaseModel):
     total_deductions: float
     net_salary: float
     total_cost_to_company: float
+    advances_total: float = 0.0
+    net_salary_after_advances: float = 0.0
 
 
 class PayrollSummaryResponse(BaseModel):

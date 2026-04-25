@@ -154,6 +154,8 @@ export interface PayrollItem {
   total_deductions: number;
   net_salary: number;
   total_cost_to_company: number;
+  advances_total?: number;
+  net_salary_after_advances?: number;
 }
 
 export interface PayrollTotals {

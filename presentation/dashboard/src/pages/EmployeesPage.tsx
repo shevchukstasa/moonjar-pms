@@ -617,6 +617,7 @@ export default function EmployeesPage() {
         tabs={[
           { id: 'employees', label: 'Employee List' },
           { id: 'attendance', label: 'Attendance' },
+          { id: 'overtime', label: 'Overtime' },
           { id: 'payroll', label: 'Payroll Summary' },
         ]}
         activeTab={activeTab}
@@ -656,9 +657,23 @@ export default function EmployeesPage() {
         />
       )}
 
+      {activeTab === 'overtime' && (
+        <OvertimeTab
+          employees={employees}
+          attendanceData={attendanceData ?? {}}
+          loading={attendanceLoading || employeesLoading}
+          year={year}
+          month={month}
+          daysInMonth={daysInMonth}
+          calendarMap={calendarMap}
+        />
+      )}
+
       {activeTab === 'payroll' && (
         <PayrollTab
-          data={payrollData?.items ?? []}
+          data={isStaffView
+            ? (payrollData?.items ?? []).filter((r: any) => r.department === 'production')
+            : (payrollData?.items ?? [])}
           loading={payrollLoading}
           year={year}
           month={month}
@@ -1736,6 +1751,153 @@ function DayBulkDialog({
   );
 }
 
+// ── Overtime Tab ─────────────────────────────────────────────
+
+function OvertimeTab({
+  employees,
+  attendanceData,
+  loading,
+  year,
+  month,
+  daysInMonth,
+  calendarMap,
+}: {
+  employees: Employee[];
+  attendanceData: Record<string, AttendanceRecord[]>;
+  loading: boolean;
+  year: number;
+  month: number;
+  daysInMonth: number;
+  calendarMap: Record<string, { name: string; is_working: boolean }>;
+}) {
+  const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  const getOT = (empId: string, day: number): number => {
+    const recs = attendanceData[empId] ?? [];
+    const rec = recs.find((r) => parseInt(r.date.slice(8), 10) === day);
+    return rec?.overtime_hours ?? 0;
+  };
+
+  const empTotals: Record<string, number> = {};
+  for (const emp of employees) {
+    empTotals[emp.id] = days.reduce((s, d) => s + getOT(emp.id, d), 0);
+  }
+  const dayTotals: Record<number, number> = {};
+  for (const d of days) {
+    dayTotals[d] = employees.reduce((s, e) => s + getOT(e.id, d), 0);
+  }
+  const grandTotal = employees.reduce((s, e) => s + (empTotals[e.id] ?? 0), 0);
+
+  const activeEmps = employees.filter((e) => (empTotals[e.id] ?? 0) > 0);
+
+  const handlePrint = () => {
+    const rows = activeEmps.map((emp) => {
+      const cells = days.map((d) => {
+        const ot = getOT(emp.id, d);
+        return `<td style="text-align:center;padding:3px 4px;border:1px solid #e5e7eb;${ot > 0 ? 'background:#fff7ed;font-weight:600;color:#c2410c' : 'color:#d1d5db'}">${ot > 0 ? ot : '·'}</td>`;
+      }).join('');
+      return `<tr><td style="padding:3px 8px;border:1px solid #e5e7eb;white-space:nowrap;font-weight:500">${emp.full_name}</td><td style="padding:3px 6px;border:1px solid #e5e7eb;color:#6b7280">${emp.position}</td>${cells}<td style="padding:3px 8px;border:1px solid #e5e7eb;text-align:right;font-weight:700;color:#c2410c">${empTotals[emp.id]}h</td></tr>`;
+    }).join('');
+    const totRow = days.map((d) => {
+      const t = dayTotals[d];
+      return `<td style="text-align:center;padding:3px 4px;border:1px solid #e5e7eb;font-weight:600;color:#374151">${t > 0 ? t : '·'}</td>`;
+    }).join('');
+    const win = window.open('', '_blank');
+    if (!win) return;
+    win.document.write(`<!DOCTYPE html><html><head><title>Overtime ${MONTH_NAMES[month - 1]} ${year}</title>
+<style>body{font-family:Arial,sans-serif;font-size:11px;padding:16px}table{border-collapse:collapse;width:100%}@media print{@page{size:landscape}}</style>
+</head><body>
+<h2 style="margin:0 0 8px">Overtime Report — ${MONTH_NAMES[month - 1]} ${year}</h2>
+<table><thead><tr>
+<th style="padding:4px 8px;border:1px solid #e5e7eb;text-align:left">Name</th>
+<th style="padding:4px 8px;border:1px solid #e5e7eb;text-align:left">Position</th>
+${days.map((d) => `<th style="padding:4px 3px;border:1px solid #e5e7eb;text-align:center;width:24px">${d}</th>`).join('')}
+<th style="padding:4px 8px;border:1px solid #e5e7eb;text-align:right">Total</th>
+</tr></thead><tbody>${rows}
+<tr style="background:#f9fafb;font-weight:600"><td colspan="2" style="padding:4px 8px;border:1px solid #e5e7eb">TOTAL</td>${totRow}<td style="padding:4px 8px;border:1px solid #e5e7eb;text-align:right;color:#c2410c">${grandTotal}h</td></tr>
+</tbody></table></body></html>`);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); }, 300);
+  };
+
+  if (loading) return <div className="flex justify-center py-12"><Spinner className="h-8 w-8" /></div>;
+
+  return (
+    <Card>
+      <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <p className="text-sm font-medium text-gray-700">Overtime — {MONTH_NAMES[month - 1]} {year}</p>
+          <p className="text-xs text-gray-500 mt-0.5">Total: <span className="font-semibold text-orange-600">{grandTotal}h</span> across {employees.filter(e => empTotals[e.id] > 0).length} employees</p>
+        </div>
+        <Button variant="secondary" onClick={handlePrint} disabled={grandTotal === 0}>
+          ↓ PDF
+        </Button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-2 py-2 text-left text-gray-500 font-medium border border-gray-200 whitespace-nowrap">Name</th>
+              <th className="px-2 py-2 text-left text-gray-500 font-medium border border-gray-200">Position</th>
+              {days.map((d) => {
+                const dateStr = toISO(year, month, d);
+                const holiday = calendarMap[dateStr];
+                const isWeekend = new Date(dateStr).getDay() === 0 || new Date(dateStr).getDay() === 6;
+                return (
+                  <th key={d}
+                    className={`w-7 px-0.5 py-2 text-center font-medium border border-gray-200 ${holiday ? 'bg-red-50 text-red-600' : isWeekend ? 'bg-gray-100 text-gray-400' : 'text-gray-500'}`}
+                    title={holiday?.name}
+                  >
+                    {d}
+                  </th>
+                );
+              })}
+              <th className="px-3 py-2 text-right text-gray-500 font-medium border border-gray-200">Total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {employees.map((emp) => {
+              const total = empTotals[emp.id] ?? 0;
+              return (
+                <tr key={emp.id} className={total === 0 ? 'opacity-40' : 'bg-white'}>
+                  <td className="px-2 py-1.5 font-medium text-gray-900 border border-gray-200 whitespace-nowrap">{emp.full_name}</td>
+                  <td className="px-2 py-1.5 text-gray-500 border border-gray-200">{emp.position}</td>
+                  {days.map((d) => {
+                    const ot = getOT(emp.id, d);
+                    return (
+                      <td key={d} className={`w-7 text-center border border-gray-200 py-1 ${ot > 0 ? 'bg-orange-50 text-orange-700 font-semibold' : 'text-gray-300'}`}>
+                        {ot > 0 ? ot : '·'}
+                      </td>
+                    );
+                  })}
+                  <td className={`px-3 py-1.5 text-right font-bold border border-gray-200 ${total > 0 ? 'text-orange-600' : 'text-gray-300'}`}>
+                    {total > 0 ? `${total}h` : '—'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot className="border-t-2 border-gray-300">
+            <tr className="bg-gray-50 font-semibold">
+              <td colSpan={2} className="px-2 py-2 text-gray-700 border border-gray-200">TOTAL</td>
+              {days.map((d) => {
+                const t = dayTotals[d];
+                return (
+                  <td key={d} className={`w-7 text-center border border-gray-200 py-1.5 ${t > 0 ? 'text-orange-700' : 'text-gray-300'}`}>
+                    {t > 0 ? t : '·'}
+                  </td>
+                );
+              })}
+              <td className="px-3 py-2 text-right text-orange-600 font-bold border border-gray-200">{grandTotal}h</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
 // ── Payroll Tab ──────────────────────────────────────────────
 
 function PayrollTab({
@@ -1794,10 +1956,13 @@ function PayrollTab({
 
   // Support both old (gross_total) and new (gross_salary) API response format
   const getGross = (r: any) => r.gross_salary ?? r.gross_total ?? 0;
-  const getNet = (r: any) => r.net_salary ?? 0;
+  const getNetBase = (r: any) => r.net_salary ?? 0;
+  const getNetFinal = (r: any) => r.net_salary_after_advances ?? r.net_salary ?? 0;
+  const getAdvances = (r: any) => r.advances_total ?? 0;
   const getDays = (r: any) => r.present_days ?? r.working_days ?? 0;
   const grandGross = data.reduce((sum, r) => sum + getGross(r), 0);
-  const grandNet = data.reduce((sum, r) => sum + getNet(r), 0);
+  const grandNet = data.reduce((sum, r) => sum + getNetFinal(r), 0);
+  const grandAdvances = data.reduce((sum, r: any) => sum + getAdvances(r), 0);
 
   return (
     <Card>
@@ -1807,7 +1972,8 @@ function PayrollTab({
         </p>
         <div className="flex items-center gap-4 text-sm">
           <span className="text-gray-700">Gross: <strong>{formatIDR(grandGross)}</strong></span>
-          {grandNet > 0 && <span className="text-green-700">Net: <strong>{formatIDR(grandNet)}</strong></span>}
+          {grandAdvances > 0 && <span className="text-orange-600">Advances: <strong>−{formatIDR(grandAdvances)}</strong></span>}
+          {grandNet > 0 && <span className="text-green-700">To Pay: <strong>{formatIDR(grandNet)}</strong></span>}
           <Button variant="secondary" onClick={downloadPdf} disabled={pdfLoading || data.length === 0}>
             {pdfLoading ? 'Generating...' : '↓ PDF'}
           </Button>
@@ -1827,7 +1993,8 @@ function PayrollTab({
               <th className="px-3 py-2 text-right">OT Pay</th>
               <th className="px-3 py-2 text-right">Gross</th>
               <th className="px-3 py-2 text-right">Deductions</th>
-              <th className="px-3 py-2 text-right font-bold">Net</th>
+              <th className="px-3 py-2 text-right text-orange-600">Advances</th>
+              <th className="px-3 py-2 text-right font-bold">To Pay</th>
               <th className="px-3 py-2 text-center">Slip</th>
             </tr>
           </thead>
@@ -1860,7 +2027,8 @@ function PayrollTab({
                   )}
                 </td>
                 <td className="px-3 py-2 text-right font-mono text-red-600">{(row.total_deductions ?? 0) > 0 ? formatIDR(row.total_deductions) : '-'}</td>
-                <td className="px-3 py-2 text-right font-mono font-bold text-green-700">{formatIDR(getNet(row))}</td>
+                <td className="px-3 py-2 text-right font-mono text-orange-600">{getAdvances(row) > 0 ? `−${formatIDR(getAdvances(row))}` : '-'}</td>
+                <td className="px-3 py-2 text-right font-mono font-bold text-green-700">{formatIDR(getNetFinal(row))}</td>
                 <td className="px-3 py-2 text-center">
                   <button
                     onClick={() => downloadPayslip(row.employee_id, row.full_name)}
@@ -1875,7 +2043,7 @@ function PayrollTab({
             ))}
             {data.length === 0 && (
               <tr>
-                <td colSpan={12} className="py-8 text-center text-gray-400">
+                <td colSpan={13} className="py-8 text-center text-gray-400">
                   No payroll data for this period.
                 </td>
               </tr>
@@ -1887,6 +2055,7 @@ function PayrollTab({
                 <td className="px-3 py-2 text-gray-700" colSpan={2}>TOTAL</td>
                 <td className="px-3 py-2" colSpan={4}></td>
                 <td className="px-3 py-2" colSpan={1}></td>
+
                 <td className="px-3 py-2 text-right font-mono text-gray-700">
                   {formatIDR(data.reduce((s, r: any) => s + (r.overtime_pay ?? 0), 0))}
                 </td>
@@ -1895,6 +2064,9 @@ function PayrollTab({
                 </td>
                 <td className="px-3 py-2 text-right font-mono text-red-600">
                   {formatIDR(data.reduce((s, r: any) => s + (r.total_deductions ?? 0), 0))}
+                </td>
+                <td className="px-3 py-2 text-right font-mono text-orange-600">
+                  {grandAdvances > 0 ? `−${formatIDR(grandAdvances)}` : '-'}
                 </td>
                 <td className="px-3 py-2 text-right font-mono font-bold text-green-700">
                   {formatIDR(grandNet)}

@@ -291,6 +291,19 @@ daily_cap = brigade_size × shift_count × shift_duration_hours × productivity_
 
 **Идейная проверка:** когда позиция становится `shipped` (=12) — она в любом случае уже в `_TERMINAL_STATUSES` и отфильтровывается на входе `generate_production_schedule`, поэтому индекс 12 в маппинге — для симметрии, а не для боевой логики.
 
+### Триггеры пересчёта расписания
+
+Помимо ночного крон-задания и ручной кнопки, расписание фабрики обязано пересчитываться **в реальном времени** в ответ на следующие события — иначе календарь рассинхронизируется с фактом:
+
+| Триггер | Когда срабатывает | Реализация |
+|---|---|---|
+| **Position status change** | мастер отметил «нанесён ангоб», «загружена в печь» и т. д. | `api/schedule_triggers.py::_collect_status_changes` слушает `OrderPosition.status` через SQLAlchemy `after_flush`, дебаунсит по `factory_id` и зовёт `reschedule_factory(fid)` через `after_commit` в фоновом потоке. |
+| **Cron** | каждую ночь в 02:00 WITA | `api/scheduler.py` — APScheduler. Ловит drift, который не попал в event-driven путь. |
+| **Manual recalc** | кнопка PM, drag-n-drop в Tablo, force-unblock | `POST /api/schedule/recalculate`, `POST /api/schedule/reorder-queue`, `POST /api/schedule/backfill-procurement-tasks`. |
+| **Material received** | приход партии материала на склад → `MaterialTransaction(type=RECEIVE)` | `api/schedule_triggers.py::_collect_material_receipts` — тот же паттерн, что и для статусов. Важно: позиции, висящие в `INSUFFICIENT_MATERIALS`, могут разблокироваться сразу после прихода — без триггера они оставались бы заблокированными до утреннего крона. |
+
+**Инвариант:** все триггеры должны проходить через единственную точку — `_trigger_reschedule(session)`, привязанную к `after_commit`, чтобы пересчёт фабрики происходил **один раз** на коммит независимо от того, сколько событий накопилось (статусы + приходы материалов в одной транзакции — один пересчёт).
+
 ### Параллельные стадии (pipeline overlap) — ТРЕБУЕТ РЕАЛИЗАЦИИ
 
 **Статус:** задокументировано как правило, реализация идёт отдельным коммитом (bug #2).

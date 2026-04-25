@@ -411,14 +411,19 @@ def _check_stone_stock_and_create_task(
         )
 
         def _stone_balance_sqm(mat, stock) -> float:
-            """Convert Material's stock balance to m², handling both unit="m2"
-            and unit="pcs" (the common case for Bali stone catalog). For
-            pcs, derive tile area from Material.width_mm / height_mm (or
-            parse "WxH" / "WxHxT" from the material name as a last resort).
+            """Convert Material's stock balance to m².
 
-            Returns 0.0 when no balance available or when the material's
-            geometry can't be derived — mirrors old behaviour for the
-            truly-missing-data case.
+            unit='m2'  → balance is already m², return as-is.
+            unit='pcs' → balance × area-of-one-tile, where area depends on
+                         the material's Size shape:
+                            round       π × (D/2)²
+                            triangle    L × W / 2
+                            octagon     2(1+√2) × s²   (s = L/(1+√2))
+                            other       L × W (rectangle / square / freeform)
+                         Geometry comes from Material.size (Size row); when
+                         that's missing, fall back to parsing "WxH" out of
+                         the material name (legacy stones without size_id).
+            Returns 0.0 when no balance, no geometry, or unsupported unit.
             """
             if not stock:
                 return 0.0
@@ -428,19 +433,53 @@ def _check_stone_stock_and_create_task(
                 return bal
             if unit != "pcs":
                 return 0.0
-            # Need tile area in m² to multiply pcs → m².
-            w_mm = getattr(mat, "width_mm", None)
-            h_mm = getattr(mat, "height_mm", None)
-            if not (w_mm and h_mm):
-                # Fallback: parse "WxH" or "WxHxT" in cm from the name.
+
+            # Pull geometry — prefer the linked Size row.
+            size = getattr(mat, "size", None)
+            shape = (
+                getattr(size, "shape", None) if size else None
+            ) or "rectangle"
+            shape = str(shape).lower().strip()
+
+            w_mm = getattr(size, "width_mm", None) if size else None
+            h_mm = getattr(size, "height_mm", None) if size else None
+            d_mm = getattr(size, "diameter_mm", None) if size else None
+
+            # Legacy fallback: parse "WxH" / "WxHxT" in cm from the
+            # material name when size_id isn't populated.
+            if not w_mm or not h_mm:
                 import re
-                m = re.search(r"(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)", mat.name or "")
+                m = re.search(
+                    r"(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)", mat.name or "",
+                )
                 if m:
-                    w_mm = float(m.group(1)) * 10
-                    h_mm = float(m.group(2)) * 10
-            if not (w_mm and h_mm):
+                    w_mm = w_mm or float(m.group(1)) * 10
+                    h_mm = h_mm or float(m.group(2)) * 10
+
+            from math import pi, sqrt
+
+            tile_sqm = 0.0
+            if shape == "round":
+                # Diameter from Size, else fall back to width_mm.
+                diam_mm = float(d_mm or w_mm or 0)
+                if diam_mm > 0:
+                    r_m = (diam_mm / 1000.0) / 2.0
+                    tile_sqm = pi * r_m * r_m
+            elif shape == "triangle":
+                if w_mm and h_mm:
+                    tile_sqm = (float(w_mm) / 1000.0) * (float(h_mm) / 1000.0) / 2.0
+            elif shape == "octagon":
+                if w_mm:
+                    L_m = float(w_mm) / 1000.0
+                    s_m = L_m / (1.0 + sqrt(2))
+                    tile_sqm = 2.0 * (1.0 + sqrt(2)) * s_m * s_m
+            else:
+                # rectangle / square / freeform / unknown — bounding box.
+                if w_mm and h_mm:
+                    tile_sqm = (float(w_mm) / 1000.0) * (float(h_mm) / 1000.0)
+
+            if tile_sqm <= 0:
                 return 0.0
-            tile_sqm = (float(w_mm) / 1000.0) * (float(h_mm) / 1000.0)
             return bal * tile_sqm
 
         # Find the stone that matches this position's size

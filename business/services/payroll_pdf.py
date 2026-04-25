@@ -381,8 +381,7 @@ def generate_payslip_pdf(item: dict, year: int, month: int, factory_name: str = 
         hr = item.get("hourly_rate", 0)
         elements.append(Paragraph(f"LEMBUR  \u2022  Tarif per jam: Rp {_fmt_idr(hr)} (gaji pokok / 173)", sec))
         ot_rows = []
-        for mult_key, mult_val, mult_label in [("ot_hours_at_1_5x", 1.5, "1,5\u00d7"), ("ot_hours_at_2x", 2, "2\u00d7"),
-                                                  ("ot_hours_at_3x", 3, "3\u00d7"), ("ot_hours_at_4x", 4, "4\u00d7")]:
+        for mult_key, mult_val, mult_label in [("ot_hours_at_1_5x", 1.5, "1,5\u00d7"), ("ot_hours_at_2x", 2, "2\u00d7")]:
             h = item.get(mult_key, 0)
             if h > 0:
                 pay = round(h * hr * mult_val)
@@ -428,30 +427,7 @@ def generate_payslip_pdf(item: dict, year: int, month: int, factory_name: str = 
             [Paragraph(f"PPh 21 (TER {ter_s}% \u00d7 gaji kotor)", lbl), Paragraph(f"Rp {_fmt_idr(pph21_val)}", val)],
         ]))
 
-        # BPJS
-        bd = item.get("bpjs_breakdown", {})
-        if item.get("bpjs_employer", 0) > 0 or item.get("company_bpjs_for_employee", 0) > 0:
-            elements.append(Paragraph("BPJS \u2014 PERUSAHAAN (10,89%)", sec))
-            er_rows = [
-                [Paragraph("JKN 4% + JKK 0,89% + JKM 0,3%", lbl),
-                 Paragraph(f"Rp {_fmt_idr(bd.get('jkn_employer', 0) + bd.get('jkk_employer', 0) + bd.get('jkm_employer', 0))}", val)],
-                [Paragraph("JHT 3,7% + JP 2%", lbl),
-                 Paragraph(f"Rp {_fmt_idr(bd.get('jht_employer', 0) + bd.get('jp_employer', 0))}", val)],
-                [Paragraph("Total Perusahaan", ParagraphStyle("b", parent=val, fontSize=8.5)),
-                 Paragraph(f"Rp {_fmt_idr(item.get('bpjs_employer', 0))}", val)],
-            ]
-            elements.append(_tbl(er_rows, total_row=True))
-
-            elements.append(Paragraph("BPJS \u2014 KARYAWAN (4%)  \u2022  dibayar perusahaan", sec))
-            ee_rows = [
-                [Paragraph("JKN 1% + JHT 2% + JP 1%", lbl),
-                 Paragraph(f"Rp {_fmt_idr(bd.get('jkn_employee', 0) + bd.get('jht_employee', 0) + bd.get('jp_employee', 0))}", val)],
-            ]
-            elements.append(_tbl(ee_rows))
-            elements.append(Paragraph("BPJS karyawan ditanggung sepenuhnya oleh perusahaan \u2014 tidak dipotong dari gaji", note))
-
-        elif is_probation:
-            elements.append(Paragraph("BPJS \u2014 Masa percobaan, belum terdaftar", note))
+        # BPJS section hidden — calculations under review
 
     # Potongan (Deductions)
     if item.get("absence_deduction", 0) > 0 or item.get("contractor_tax", 0) > 0:

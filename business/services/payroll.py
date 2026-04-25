@@ -347,22 +347,9 @@ def calculate_overtime_pay_detailed(
             total += hourly_rate * Decimal("1.5") * hours
             breakdown["1.5"] += hours
     else:
-        # Holiday / Rest day overtime
-        limit = Decimal("8") if work_schedule == "five_day" else Decimal("7")
-        # 1-limit: 2x
-        h2 = min(hours, limit)
-        total += hourly_rate * Decimal("2") * h2
-        breakdown["2"] += h2
-        # next 1 hour: 3x
-        if hours > limit:
-            h3 = min(hours - limit, Decimal("1"))
-            total += hourly_rate * Decimal("3") * h3
-            breakdown["3"] += h3
-        # remaining: 4x
-        if hours > limit + Decimal("1"):
-            h4 = hours - limit - Decimal("1")
-            total += hourly_rate * Decimal("4") * h4
-            breakdown["4"] += h4
+        # Holiday / Rest day overtime — company policy: max 2× for all hours
+        total += hourly_rate * Decimal("2") * hours
+        breakdown["2"] += hours
 
     return {"total": _round(total), "breakdown": breakdown}
 

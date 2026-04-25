@@ -976,8 +976,28 @@ async def payroll_pdf_employee(
         ).all():
             emp_holidays.add(row[0])
 
+    # Load holidays for the full pay period (not just current month)
+    if emp.factory_id:
+        if pay_period == "25_to_24":
+            for row in db.query(FactoryCalendar.date).filter(
+                FactoryCalendar.factory_id == emp.factory_id,
+                FactoryCalendar.is_working_day == False,
+                FactoryCalendar.date >= period_start,
+                FactoryCalendar.date <= period_end,
+            ).all():
+                emp_holidays.add(row[0])
+
     # Subtract factory holidays from working days count
-    if emp_holidays and pay_period == "calendar_month":
+    if pay_period == "25_to_24":
+        working_days = sum(
+            1 for d in range((period_end - period_start).days + 1)
+            if (lambda dt: (
+                dt not in emp_holidays and
+                ((ws == 'six_day' and dt.weekday() < 6) or
+                 (ws != 'six_day' and dt.weekday() < 5))
+            ))(period_start + timedelta(days=d))
+        )
+    elif emp_holidays:
         month_days_list2 = list(_cal.Calendar().itermonthdays2(year, month))
         count = 0
         for day_num, wd in month_days_list2:

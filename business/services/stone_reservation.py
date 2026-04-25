@@ -16,6 +16,7 @@ Lifecycle:
 """
 import logging
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 

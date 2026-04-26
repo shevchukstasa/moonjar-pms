@@ -2205,15 +2205,21 @@ class FinishedGoodsStock(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     factory_id = Column(UUID(as_uuid=True), ForeignKey('factories.id'), nullable=False)
     color = Column(sa.String(100), nullable=False)
+    description = Column(sa.String(200))
     size = Column(sa.String(50), nullable=False)
+    application = Column(sa.String(50))
     collection = Column(sa.String(100))
     product_type = Column(PgEnum(ProductType), default=ProductType.TILE)
     quantity = Column(sa.Integer, nullable=False, default=0)
     reserved_quantity = Column(sa.Integer, nullable=False, default=0)
+    location_note = Column(sa.String(50))
+    price_per_m2 = Column(sa.Numeric(15, 2))
+    received_at = Column(sa.Date())
     updated_at = Column(sa.DateTime(timezone=True), server_default=sa.func.now())
 
     __table_args__ = (
         UniqueConstraint('factory_id', 'color', 'size', 'collection', 'product_type',
+                         'application', 'location_note',
                          name='uq_finished_goods_stock'),
     )
 

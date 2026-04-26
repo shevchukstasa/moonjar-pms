@@ -7,7 +7,8 @@ export const SHAPE_OPTIONS = [
   { value: 'rectangle', label: 'Rectangle' },
   { value: 'square', label: 'Square' },
   { value: 'round', label: 'Round' },
-  { value: 'triangle', label: 'Triangle' },
+  { value: 'right_triangle', label: 'Right triangle' },
+  { value: 'triangle', label: 'Triangle (any)' },
   { value: 'octagon', label: 'Octagon' },
   { value: 'freeform', label: 'Freeform' },
 ] as const;

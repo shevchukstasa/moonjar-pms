@@ -33,6 +33,7 @@ SHAPE_DIMENSIONS_PATCH_SQL = [
     "ALTER TYPE shapetype ADD VALUE IF NOT EXISTS 'rhombus'",
     "ALTER TYPE shapetype ADD VALUE IF NOT EXISTS 'parallelogram'",
     "ALTER TYPE shapetype ADD VALUE IF NOT EXISTS 'semicircle'",
+    "ALTER TYPE shapetype ADD VALUE IF NOT EXISTS 'right_triangle'",
 ]
 
 

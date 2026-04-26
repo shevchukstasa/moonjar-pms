@@ -20,7 +20,7 @@ from typing import Literal
 # ── Type aliases ───────────────────────────────────────────────────
 
 Typology = Literal["tiles", "3d", "sink", "countertop", "freeform"]
-Shape = Literal["rectangle", "round", "triangle", "octagon", "freeform"]
+Shape = Literal["rectangle", "round", "triangle", "right_triangle", "octagon", "freeform"]
 
 
 # ── Constants ──────────────────────────────────────────────────────

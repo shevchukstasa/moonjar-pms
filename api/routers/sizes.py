@@ -46,12 +46,12 @@ class SizeUpdateInput(BaseModel):
 # ── Helpers ───────────────────────────────────────────────
 
 VALID_SHAPES = {
-    "rectangle", "square", "round", "freeform", "triangle", "octagon",
+    "rectangle", "square", "round", "freeform", "triangle", "right_triangle", "octagon",
     # Extended shapes exposed by the frontend ShapeDimensionEditor.
     # Downstream business code (capacity, surface_area) only distinguishes
-    # "round" vs "triangle" vs "octagon" vs everything-else (treated as
-    # rectangle). These are stored as-is so the UI can re-render with the
-    # right dimension fields on edit.
+    # "round" vs "triangle"/"right_triangle" vs "octagon" vs everything-else
+    # (treated as rectangle). These are stored as-is so the UI can re-render
+    # with the right dimension fields on edit.
     "oval", "semicircle", "trapezoid", "trapezoid_truncated",
     "rhombus", "parallelogram",
 }
@@ -90,6 +90,7 @@ def _serialize_size(s: Size) -> dict:
         "thickness_mm": s.thickness_mm,
         "diameter_mm": getattr(s, "diameter_mm", None),
         "shape": s.shape,
+        "shape_dimensions": getattr(s, "shape_dimensions", None),
         "is_custom": s.is_custom,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "glazing_board": board,

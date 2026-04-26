@@ -221,6 +221,7 @@ class ShapeType(str, Enum):
     CIRCLE = 'circle'
     OVAL = 'oval'
     TRIANGLE = 'triangle'
+    RIGHT_TRIANGLE = 'right_triangle'
     OCTAGON = 'octagon'
     TRAPEZOID = 'trapezoid'
     TRAPEZOID_TRUNCATED = 'trapezoid_truncated'

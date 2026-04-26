@@ -82,6 +82,9 @@ def calculate_edge_surface(
         # Approximate equilateral triangle with base L and height W
         side = L  # simplified
         perimeter = 3 * side
+    elif shape == "right_triangle":
+        # Right triangle: two legs (treat L, W as legs) + hypotenuse √(L²+W²)
+        perimeter = L + W + sqrt(L * L + W * W)
     elif shape == "octagon":
         s = L / (1 + sqrt(2))
         perimeter = 8 * s
@@ -145,8 +148,8 @@ def calculate_glazeable_surface(
         # Circular: π × r²
         r = L / 2.0
         flat_area_cm2 = pi * r * r
-    elif shape == "triangle":
-        # Triangle: (base × height) / 2
+    elif shape in ("triangle", "right_triangle"):
+        # Triangle (any kind): (base × height) / 2
         flat_area_cm2 = (L * W) / 2.0
     elif shape == "octagon":
         # Regular octagon: 2(1+√2) × s²
@@ -256,6 +259,14 @@ def calculate_area_from_dimensions(shape: str, dimensions: dict) -> Optional[flo
             p = (a + b + c) / 2
             area_sq = p * (p - a) * (p - b) * (p - c)
             return sqrt(max(area_sq, 0))
+
+    elif shape in ('right_triangle',):
+        # Two legs are stored; hypotenuse derived. side_c is optional and
+        # ignored if the legs disagree with it (legs are authoritative).
+        a = dimensions.get('side_a_cm') or dimensions.get('leg_a_cm') or dimensions.get('a')
+        b = dimensions.get('side_b_cm') or dimensions.get('leg_b_cm') or dimensions.get('b')
+        if a and b:
+            return float(a) * float(b) / 2.0
 
     elif shape in ('circle', 'round'):
         d = dimensions.get('diameter_cm') or dimensions.get('d')

@@ -811,6 +811,7 @@ def _ensure_schema():
             ("square", "tile", 1.0, "Square: full bounding box"),
             ("round", "tile", 0.785, "Circle: π/4 of bounding box"),
             ("triangle", "tile", 0.5, "Triangle: half of bounding box"),
+            ("right_triangle", "tile", 0.5, "Right triangle: legs a,b → area a*b/2"),
             ("octagon", "tile", 0.828, "Regular octagon: 2(1+√2)s²/bbox"),
             ("freeform", "tile", 0.85, "Freeform: estimated 85% of bbox"),
             # Countertops (same as tiles for flat surfaces)

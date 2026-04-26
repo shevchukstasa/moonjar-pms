@@ -10,11 +10,22 @@ export interface ShapeDefinition {
   value: string;
   label: string;
   icon: string;
-  fields: { key: string; label: string; unit: string }[];
+  fields: {
+    key: string;
+    label: string;
+    unit: string;
+    /** When true, this field is auto-derived from the others and read-only. */
+    derived?: boolean;
+  }[];
   /** Returns area in cm^2 given numeric dimension values, or null if invalid */
   area: (d: Record<string, number>) => number | null;
   /** Optional extra validation; returns error string or null */
   validate?: (d: Record<string, number>) => string | null;
+  /**
+   * Optional hook to derive values from user-entered ones. Called after every
+   * input change. Used e.g. by right_triangle to compute hypotenuse from legs.
+   */
+  derive?: (d: Record<string, number>) => Record<string, number>;
 }
 
 export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
@@ -44,8 +55,30 @@ export const SHAPE_DEFINITIONS: ShapeDefinition[] = [
     },
   },
   {
+    value: 'right_triangle',
+    label: 'Right triangle',
+    icon: '📐',
+    fields: [
+      { key: 'side_a', label: 'Leg A (cm)', unit: 'cm' },
+      { key: 'side_b', label: 'Leg B (cm)', unit: 'cm' },
+      { key: 'side_c', label: 'Hypotenuse (cm)', unit: 'cm', derived: true },
+    ],
+    area: (d) => {
+      const a = d.side_a, b = d.side_b;
+      if (!a || !b || a <= 0 || b <= 0) return null;
+      return (a * b) / 2;
+    },
+    derive: (d) => {
+      const a = d.side_a, b = d.side_b;
+      if (a && b && a > 0 && b > 0) {
+        return { ...d, side_c: Math.sqrt(a * a + b * b) };
+      }
+      return d;
+    },
+  },
+  {
     value: 'triangle',
-    label: 'Triangle',
+    label: 'Triangle (any)',
     icon: '🔺',
     fields: [
       { key: 'side_a', label: 'Side A (cm)', unit: 'cm' },
@@ -244,6 +277,67 @@ export function formatShapeBadge(
 }
 
 // ---------------------------------------------------------------------------
+// Compact size label used in dropdowns / table cells.
+// Source of truth for "350×350 × 12mm round" type strings — shape-aware so a
+// circle shows "Ø350mm" rather than "350×350" and a right triangle shows the
+// two legs rather than a square bounding box.
+// ---------------------------------------------------------------------------
+
+export interface SizeForLabel {
+  width_mm?: number | null;
+  height_mm?: number | null;
+  diameter_mm?: number | null;
+  thickness_mm?: number | null;
+  shape?: string | null;
+  shape_dimensions?: Record<string, number> | null;
+}
+
+/** Render a size as a one-line label, e.g. "Ø350 × 12mm round". */
+export function formatSizeLabel(s: SizeForLabel): string {
+  const shape = (s.shape || 'rectangle').toLowerCase();
+  const dims = s.shape_dimensions ?? null;
+  const t = s.thickness_mm;
+  const fmt = (n: number) => String(Number(n.toFixed(2)));
+  const cmToMm = (cm: number) => fmt(cm * 10);
+  const thicknessPart = t ? ` × ${t}mm` : 'mm';
+  const shapeLabel = shape === 'rectangle' ? '' : ` ${shape.replace(/_/g, '-')}`;
+
+  // Prefer shape_dimensions (authoritative — entered by user), fall back to
+  // bounding-box width_mm/height_mm/diameter_mm for legacy rows.
+  if ((shape === 'round' || shape === 'circle') && (dims?.diameter || s.diameter_mm)) {
+    const dMm = dims?.diameter ? cmToMm(dims.diameter) : String(s.diameter_mm ?? s.width_mm);
+    return `Ø${dMm}${thicknessPart}${shapeLabel}`;
+  }
+  if (shape === 'semicircle' && (dims?.diameter || s.width_mm)) {
+    const dMm = dims?.diameter ? cmToMm(dims.diameter) : String(s.width_mm);
+    return `Ø${dMm}/2${thicknessPart}${shapeLabel}`;
+  }
+  if (shape === 'oval' && dims?.diameter_1 && dims?.diameter_2) {
+    return `${cmToMm(dims.diameter_1)}×${cmToMm(dims.diameter_2)}${thicknessPart}${shapeLabel}`;
+  }
+  if (shape === 'right_triangle' && dims?.side_a && dims?.side_b) {
+    return `${cmToMm(dims.side_a)}×${cmToMm(dims.side_b)}${thicknessPart}${shapeLabel}`;
+  }
+  if (shape === 'triangle' && dims?.side_a && dims?.side_b && dims?.side_c) {
+    return `${cmToMm(dims.side_a)}×${cmToMm(dims.side_b)}×${cmToMm(dims.side_c)}${thicknessPart}${shapeLabel}`;
+  }
+  if (shape === 'rhombus' && dims?.diagonal_1 && dims?.diagonal_2) {
+    return `◇${cmToMm(dims.diagonal_1)}×${cmToMm(dims.diagonal_2)}${thicknessPart}${shapeLabel}`;
+  }
+  // Square: collapse to one value when bbox is square.
+  const w = s.width_mm ?? 0;
+  const h = s.height_mm ?? 0;
+  if (shape === 'square' && w && h && w === h) {
+    return `${w}×${w}${thicknessPart}${shapeLabel}`;
+  }
+  // Default: bounding-box width × height.
+  if (w || h) {
+    return `${w}×${h}${thicknessPart}${shapeLabel}`;
+  }
+  return shapeLabel.trim() || 'unknown';
+}
+
+// ---------------------------------------------------------------------------
 // Shape SVG preview
 // ---------------------------------------------------------------------------
 
@@ -262,6 +356,13 @@ function ShapePreview({ shape }: { shape: string }) {
         return (
           <polygon
             points={`${size / 2},${pad} ${pad},${size - pad} ${size - pad},${size - pad}`}
+          />
+        );
+      case 'right_triangle':
+        // Right angle at bottom-left; hypotenuse goes top-right to bottom-right
+        return (
+          <polygon
+            points={`${pad},${pad} ${pad},${size - pad} ${size - pad},${size - pad}`}
           />
         );
       case 'circle':
@@ -390,12 +491,18 @@ export function ShapeDimensionEditor({
 
   const handleDimensionChange = useCallback(
     (key: string, raw: string) => {
-      const val = parseFloat(raw);
-      const newDims = { ...currentDims };
-      if (raw === '' || isNaN(val)) {
+      // Accept Russian decimal comma "14,14" as "14.14".
+      const normalized = raw.replace(',', '.');
+      const val = parseFloat(normalized);
+      let newDims = { ...currentDims };
+      if (normalized === '' || isNaN(val)) {
         delete newDims[key];
       } else {
         newDims[key] = val;
+      }
+      // Derive auto-computed fields (e.g. hypotenuse on right triangle).
+      if (shapeDef?.derive) {
+        newDims = shapeDef.derive(newDims);
       }
       const newArea = shapeDef?.area(newDims);
       onChange(shape, newDims, newArea ?? 0);
@@ -424,19 +531,30 @@ export function ShapeDimensionEditor({
         <div className="flex gap-4 items-start">
           <ShapePreview shape={shape} />
           <div className="flex-1 grid grid-cols-2 gap-2">
-            {shapeDef.fields.map((f) => (
-              <Input
-                key={f.key}
-                label={f.label}
-                type="number"
-                step="any"
-                min="0"
-                value={currentDims[f.key] != null ? String(currentDims[f.key]) : ''}
-                onChange={(e) => handleDimensionChange(f.key, e.target.value)}
-                disabled={disabled}
-                placeholder="0"
-              />
-            ))}
+            {shapeDef.fields.map((f) => {
+              const isDerived = f.derived === true;
+              const val = currentDims[f.key];
+              const displayVal =
+                val != null
+                  ? isDerived
+                    ? Number(val.toFixed(2)).toString()
+                    : String(val)
+                  : '';
+              return (
+                <Input
+                  key={f.key}
+                  label={isDerived ? `${f.label} (auto)` : f.label}
+                  type="number"
+                  step="any"
+                  min="0"
+                  inputMode="decimal"
+                  value={displayVal}
+                  onChange={(e) => handleDimensionChange(f.key, e.target.value)}
+                  disabled={disabled || isDerived}
+                  placeholder="0"
+                />
+              );
+            })}
           </div>
         </div>
       )}

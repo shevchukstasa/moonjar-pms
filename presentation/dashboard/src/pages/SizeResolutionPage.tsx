@@ -18,7 +18,7 @@ interface SizeOption {
   shape: string | null;
 }
 
-const SHAPE_OPTIONS = ['rectangle', 'square', 'round', 'freeform', 'triangle', 'octagon'];
+const SHAPE_OPTIONS = ['rectangle', 'square', 'round', 'freeform', 'right_triangle', 'triangle', 'octagon'];
 
 const PRODUCT_TYPE_OPTIONS = [
   { value: 'tile', label: 'Tile' },

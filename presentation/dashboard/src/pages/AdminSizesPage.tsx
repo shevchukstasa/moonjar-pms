@@ -80,6 +80,12 @@ function deriveBoundingBoxMm(
       const longest = Math.max(a, b, c);
       return { width_mm: toMm(longest), height_mm: toMm(longest), diameter_mm: null };
     }
+    case 'right_triangle': {
+      // Right triangle: bounding box = leg_a × leg_b (the two legs of the right angle).
+      const a = dims.side_a, b = dims.side_b;
+      if (!a || !b) return null;
+      return { width_mm: toMm(a), height_mm: toMm(b), diameter_mm: null };
+    }
     case 'octagon': {
       const w = dims.width, h = dims.height;
       if (!w || !h) return null;
@@ -143,7 +149,7 @@ export default function AdminSizesPage() {
     // backend canonical_shape() maps it back on save.
     const shape = item.shape === 'round' ? 'circle' : (item.shape || 'rectangle');
     const shapeDef = getShapeDefinition(shape);
-    const dims: Record<string, number> = (item as unknown as Record<string, unknown>).shape_dimensions as Record<string, number> ?? {};
+    const dims: Record<string, number> = item.shape_dimensions ?? {};
     // Reconstruct shape_dimensions from width_mm/height_mm/diameter_mm when
     // not stored separately (legacy rows).
     if (Object.keys(dims).length === 0 && shapeDef) {

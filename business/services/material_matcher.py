@@ -1161,7 +1161,11 @@ async def smart_match_stone_item(
         # Shape overrides — keep typology but annotate shape for Size creation.
         if "oktagon" in keterangan_lc or "octagon" in keterangan_lc:
             parsed_shape = "octagon"
-        elif "triangel" in keterangan_lc or "triangle" in keterangan_lc:
+        elif "right triangle" in keterangan_lc or "right-triangle" in keterangan_lc \
+                or "siku" in keterangan_lc:  # "segitiga siku-siku" = right triangle (id)
+            parsed_shape = "right_triangle"
+        elif "triangel" in keterangan_lc or "triangle" in keterangan_lc \
+                or "segitiga" in keterangan_lc:
             parsed_shape = "triangle"
 
     logger.debug(

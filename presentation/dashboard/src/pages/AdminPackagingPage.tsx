@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
 import { CSV_CONFIGS } from '@/config/csvImportConfigs';
+import { formatSizeLabel } from '@/components/shared/ShapeDimensionEditor';
 
 /* ── Row types ────────────────────────────────────────── */
 
@@ -207,7 +208,7 @@ export default function AdminPackagingPage() {
               <option value="">Select size...</option>
               {sizes.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name} ({s.width_mm}{'\u00D7'}{s.height_mm}mm){s.is_custom ? ' — custom' : ''}
+                  {s.name} ({formatSizeLabel(s)}){s.is_custom ? ' — custom' : ''}
                 </option>
               ))}
             </select>

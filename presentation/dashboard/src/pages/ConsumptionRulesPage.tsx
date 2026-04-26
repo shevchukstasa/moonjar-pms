@@ -8,6 +8,7 @@ import {
   useDeleteConsumptionRule,
 } from '@/hooks/useConsumptionRules';
 import { useSizes } from '@/hooks/useSizes';
+import { formatSizeLabel } from '@/components/shared/ShapeDimensionEditor';
 import type { ConsumptionRuleItem, ConsumptionRuleInput } from '@/api/consumptionRules';
 import { referenceApi } from '@/api/reference';
 import { Card } from '@/components/ui/Card';
@@ -244,7 +245,7 @@ export default function ConsumptionRulesPage() {
   const sizeOptions = useMemo(() =>
     sizes.map((s) => ({
       value: s.id,
-      label: `${s.name} (${s.width_mm}x${s.height_mm})`,
+      label: `${s.name} (${formatSizeLabel(s)})`,
     })),
   [sizes]);
 

@@ -29,6 +29,7 @@ import { buildStoneShortName } from '@/lib/stoneNaming';
 import { TypologySelector, type StoneTypology } from '@/components/material/TypologySelector';
 import { DesignPicker } from '@/components/material/DesignPicker';
 import { sizesApi } from '@/api/sizes';
+import { formatSizeLabel } from '@/components/shared/ShapeDimensionEditor';
 import { CsvImportDialog } from '@/components/admin/CsvImportDialog';
 import { CSV_CONFIGS } from '@/config/csvImportConfigs';
 import { useQueryClient } from '@tanstack/react-query';
@@ -873,7 +874,7 @@ function CatalogTab() {
                     { value: '', label: '— select size —' },
                     ...sizes.map((s) => ({
                       value: s.id,
-                      label: `${s.name}  (${s.width_mm}\u00D7${s.height_mm}${s.thickness_mm ? ` \u00D7 ${s.thickness_mm}` : ''}mm${s.shape && s.shape !== 'rectangle' ? ` ${s.shape}` : ''})`,
+                      label: `${s.name}  (${formatSizeLabel(s)})`,
                     })),
                   ]}
                   value={form.size_id}

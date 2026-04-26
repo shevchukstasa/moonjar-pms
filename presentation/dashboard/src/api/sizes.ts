@@ -20,6 +20,9 @@ export interface SizeItem {
   thickness_mm: number | null;
   diameter_mm: number | null;
   shape: string | null;
+  /** Authoritative per-shape inputs (cm) — preferred over width_mm/height_mm
+   *  when rendering labels. See ShapeDimensionEditor.formatSizeLabel. */
+  shape_dimensions: Record<string, number> | null;
   is_custom: boolean;
   created_at: string | null;
   glazing_board: GlazingBoardInfo | null;

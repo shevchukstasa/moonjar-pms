@@ -389,7 +389,8 @@ def consume_stone_for_position(db: Session, position_id) -> dict:
 
     # Reuse the same shape-aware matcher logic as the availability
     # check. We import here to avoid circular imports at module load.
-    pos_size = (getattr(position, "size", "") or "").strip().lower().replace(" ", "")
+    from business.services.size_normalizer import normalize_size_str
+    pos_size = normalize_size_str(getattr(position, "size", ""))
     pos_size_id = getattr(position, "size_id", None)
     pos_shape_raw = getattr(position, "shape", None)
     if hasattr(pos_shape_raw, "value"):
@@ -423,7 +424,7 @@ def consume_stone_for_position(db: Session, position_id) -> dict:
             if _shape_ok(mat):
                 matching, matching_stock = mat, stock
                 break
-        mat_name = (mat.name or "").lower().replace(" ", "")
+        mat_name = normalize_size_str(mat.name)
         if pos_size and pos_size in mat_name and _shape_ok(mat):
             matching, matching_stock = mat, stock
             # don't break — prefer size_id match if it appears later
@@ -594,7 +595,8 @@ def _check_stone_stock_and_create_task(
         # stone SKU in the catalog. Without this guard, one generic "10×10"
         # Size entry would silently serve triangular / octagonal / round
         # positions from rectangular inventory.
-        pos_size = (getattr(position, "size", "") or "").strip().lower().replace(" ", "")
+        from business.services.size_normalizer import normalize_size_str
+        pos_size = normalize_size_str(getattr(position, "size", ""))
         pos_size_id = getattr(position, "size_id", None)
         pos_shape_raw = getattr(position, "shape", None)
         if hasattr(pos_shape_raw, "value"):
@@ -715,8 +717,8 @@ def _check_stone_stock_and_create_task(
                 matching_unit = (mat.unit or "m2").lower()
                 matching_balance_sqm = _stone_balance_sqm(mat, stock)
                 break
-            # Strategy 2: name contains position's size string
-            mat_name = (mat.name or "").lower().replace(" ", "")
+            # Strategy 2: name contains position's size string (both normalised)
+            mat_name = normalize_size_str(mat.name)
             if pos_size and pos_size in mat_name:
                 if not _shapes_compatible(mat):
                     rejected_by_shape.append((mat.name, _mat_shape_str(mat)))

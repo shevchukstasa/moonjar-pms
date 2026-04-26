@@ -2069,7 +2069,8 @@ async def get_material_reservations(
 
         # Match stone material by position size (not sum all stones).
         # Same logic as _check_stone_stock_and_create_task in stone_reservation.py.
-        pos_size = (getattr(p, "size", "") or "").strip().lower().replace(" ", "")
+        from business.services.size_normalizer import normalize_size_str as _norm_size
+        pos_size = _norm_size(getattr(p, "size", ""))
         stone_rows = (
             db.query(Material, MaterialStock)
             .outerjoin(
@@ -2083,7 +2084,7 @@ async def get_material_reservations(
         matching_stone_id = None
         stone_available = 0.0
         for mat, stock in stone_rows:
-            mat_name = (mat.name or "").lower().replace(" ", "")
+            mat_name = _norm_size(mat.name)
             if pos_size and pos_size in mat_name:
                 matching_stone_name = mat.name
                 matching_stone_id = str(mat.id)

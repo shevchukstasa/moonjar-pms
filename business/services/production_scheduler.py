@@ -1668,7 +1668,8 @@ def _auto_create_missing_typology(
         l = float(position.length_cm or 0) if getattr(position, 'length_cm', None) else 0
         if not w and not l and getattr(position, 'size', None):
             try:
-                parts = str(position.size).lower().replace('\u0445', 'x').split('x')
+                from business.services.size_normalizer import normalize_size_str
+                parts = normalize_size_str(position.size).split('x')
                 w = float(parts[0])
                 l = float(parts[1]) if len(parts) > 1 else w
             except (ValueError, IndexError):

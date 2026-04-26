@@ -64,10 +64,11 @@ def _get_position_sqm(position: OrderPosition) -> float:
     """Get the area in sqm for a position, with fallback calculation."""
     if position.quantity_sqm:
         return float(position.quantity_sqm)
-    # Fallback: try to calculate from size string (e.g. "10x10" -> 0.01 sqm per piece)
+    # Fallback: try to calculate from size string (e.g. "10x10", "5×21,5" -> sqm per piece)
     try:
-        parts = position.size.lower().replace("x", " ").split()
-        if len(parts) == 2:
+        from business.services.size_normalizer import normalize_size_str
+        parts = normalize_size_str(position.size).split("x")
+        if len(parts) >= 2:
             w_cm, h_cm = float(parts[0]), float(parts[1])
             sqm_per_piece = (w_cm * h_cm) / 10000.0
             return sqm_per_piece * position.quantity

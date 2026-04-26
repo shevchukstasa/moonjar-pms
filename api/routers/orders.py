@@ -1083,11 +1083,14 @@ async def create_order(
     # Auto-derive dimensions from size for large-format products
     for item in data.items:
         if item.product_type in ("countertop", "sink") and not (item.length_cm and item.width_cm):
-            if item.size and "x" in item.size.lower():
+            if item.size:
                 try:
-                    parts = item.size.lower().replace(" ", "").split("x")
-                    item.length_cm = float(parts[0])
-                    item.width_cm = float(parts[1]) if len(parts) > 1 else item.length_cm
+                    from business.services.size_normalizer import normalize_size_str
+                    norm = normalize_size_str(item.size)
+                    if "x" in norm:
+                        parts = norm.split("x")
+                        item.length_cm = float(parts[0])
+                        item.width_cm = float(parts[1]) if len(parts) > 1 else item.length_cm
                 except (ValueError, IndexError):
                     pass
 

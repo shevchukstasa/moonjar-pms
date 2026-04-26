@@ -1802,6 +1802,24 @@ Computed via `_get_stage_daily_capacity()` from `StageTypologySpeed` — `effect
 ### Purpose
 Single source of truth for how stone materials are named, classified, matched against the catalog on delivery, and which units are valid per material type. Drives matcher (`business/services/material_matcher.py`), delivery flow (`api/routers/delivery.py`), naming service (`business/services/material_naming.py`), Telegram bot, and the web "Scan Delivery Note" dialog.
 
+### Size string normalisation (2026-04-26)
+
+Size strings come from many typists in many shapes: `"5×21,5"`, `"5x21.5"`, `"5 x 21.5"`, `"5х21,5"` (cyrillic ха), `"5*21.5"`. Without normalisation, `"5x21,5" in "5x21.5"` returns `False` and stone matching silently misses the stock — that's the bug behind the prod incident on 25 Apr 2026.
+
+**Single canonical form** — lowercase, comma → dot, all of `×`/`х`/`Х`/`✕`/`*` → ASCII `x`, every whitespace removed.
+
+```
+"5×21,5"      → "5x21.5"
+" 5 x 21.5 "  → "5x21.5"
+"5х21,5"      → "5x21.5"     (cyrillic)
+"10 X 10"     → "10x10"
+"5*20"        → "5x20"
+```
+
+**Helper:** `business/services/size_normalizer.py::normalize_size_str()`. **Mandatory** at every comparison site (matcher) and every parse site (size→dimensions). No ad-hoc `.lower().replace()` chains anywhere — they always end up incomplete.
+
+Active call sites: `stone_reservation.py` (both matching strategies), `typology_matcher.py`, `production_scheduler.py`, `surplus_handling.py`, `kiln/capacity.py::parse_size`, `api/routers/positions.py`, `api/routers/orders.py`.
+
 ### Naming model
 
 Every `Material` has two name fields:
@@ -1832,7 +1850,19 @@ Ambiguous round Ø 29-40 cm → `needs_user_choice=true` returned to UI; user pi
 `Size` table fields:
 - `width_mm`, `height_mm`, `thickness_mm` — for rectangular shapes
 - `diameter_mm` (NEW, nullable) — for round shapes
-- `shape` — `'rectangle'` | `'round'` | `'triangle'` | `'octagon'` | `'freeform'`
+- `shape` — `'rectangle'` | `'square'` | `'round'` | `'oval'` | `'right_triangle'` | `'triangle'` | `'octagon'` | `'trapezoid'` | `'trapezoid_truncated'` | `'rhombus'` | `'parallelogram'` | `'semicircle'` | `'freeform'`
+- `shape_dimensions` (JSONB) — authoritative per-shape inputs (in cm). Preferred over `width_mm/height_mm` for display (`formatSizeLabel`). Keys depend on the shape.
+
+#### Triangle types
+
+Triangles are split into **two distinct shapes** because their loading on shelves differs and operator input is different:
+
+- `right_triangle` — operator enters two legs `side_a`, `side_b`; hypotenuse `side_c = √(a²+b²)` is auto-derived and read-only. Bounding box for display = `a × b` (the legs of the right angle), NOT a square. Area = `a*b/2`.
+- `triangle` — general triangle. Operator enters all three sides `side_a`, `side_b`, `side_c`. Validated by triangle inequality. Area = Heron's formula. Display lists all three sides (`a × b × c`).
+
+Existing rows whose three sides satisfy `a²+b²≈c²` (within 1% tolerance) are auto-classified as `right_triangle` by Alembic migration `031`.
+
+For kiln packing, both triangle types are loaded **as pairs** (two pieces fit into a single rectangular footprint with a small gap) — see `business/kiln/capacity.py::_effective_dims`.
 
 Size lookup uses `(shape, dimensions)` tuple; orientation-insensitive for rectangles (`5×20` matches `20×5`).
 

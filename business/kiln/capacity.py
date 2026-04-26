@@ -45,8 +45,9 @@ def _c(constants: dict, loading_rules: dict, key_lr: str, key_c: str, fallback):
 # ── Geometry helpers ──────────────────────────────────────────────────────────
 
 def parse_size(size_str: str) -> dict:
-    """Parse '30x60' or '30х60' (cyrillic) → {width_cm, height_cm}."""
-    s = size_str.lower().replace("х", "x")
+    """Parse '30x60' / '30х60' (cyrillic) / '5×21,5' → {width_cm, height_cm}."""
+    from business.services.size_normalizer import normalize_size_str
+    s = normalize_size_str(size_str)
     parts = s.split("x")
     w = float(parts[0])
     h = float(parts[1]) if len(parts) > 1 else w
@@ -61,18 +62,22 @@ def _product_area(product: dict) -> float:
     if shape == "round":
         r = product["length"] / 2.0 / 100.0
         return pi * r * r
-    elif shape == "triangle":
+    elif shape in ("triangle", "right_triangle"):
         return (lm * wm) / 2.0
     return lm * wm
 
 
 def _effective_dims(product: dict, triangle_gap: float) -> tuple:
-    """Return (eff_length, eff_width, is_triangle_pair)."""
+    """Return (eff_length, eff_width, is_triangle_pair).
+
+    Both general triangle and right_triangle are loaded as pairs so two pieces
+    fit into a single rectangular footprint (with a small gap between them).
+    """
     shape = product.get("shape", "rectangle")
     L, W = product["length"], product["width"]
     if shape == "round":
         return L, L, False
-    elif shape == "triangle":
+    elif shape in ("triangle", "right_triangle"):
         return L + triangle_gap, W + triangle_gap, True
     return L, W, False
 

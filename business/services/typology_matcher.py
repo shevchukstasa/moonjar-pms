@@ -50,10 +50,11 @@ def _size_in_range(typology: KilnLoadingTypology, position: OrderPosition) -> bo
     w = float(position.width_cm or 0) if position.width_cm else 0
     l = float(position.length_cm or 0) if position.length_cm else 0
 
-    # Fallback: parse from size string ("10x10", "30х60")
+    # Fallback: parse from size string ("10x10", "30х60", "5×21,5")
     if not w and not l and position.size:
         try:
-            parts = position.size.lower().replace("\u0445", "x").split("x")
+            from business.services.size_normalizer import normalize_size_str
+            parts = normalize_size_str(position.size).split("x")
             w = float(parts[0])
             l = float(parts[1]) if len(parts) > 1 else w
         except (ValueError, IndexError):
@@ -166,7 +167,8 @@ def classify_loading_zone(position) -> str:
         l = float(position.length_cm or 0) if getattr(position, 'length_cm', None) else 0
         if not w and not l and getattr(position, 'size', None):
             try:
-                parts = str(position.size).lower().replace('х', 'x').split('x')
+                from business.services.size_normalizer import normalize_size_str
+                parts = normalize_size_str(position.size).split('x')
                 w = float(parts[0])
                 l = float(parts[1]) if len(parts) > 1 else w
             except (ValueError, IndexError):

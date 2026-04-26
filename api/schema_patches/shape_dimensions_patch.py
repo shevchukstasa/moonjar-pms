@@ -23,6 +23,12 @@ SHAPE_DIMENSIONS_PATCH_SQL = [
     # ── Add shape_dimensions JSONB column to production_order_items ──────
     "ALTER TABLE production_order_items ADD COLUMN IF NOT EXISTS shape_dimensions JSONB",
 
+    # ── Add shape_dimensions JSONB column to sizes ───────────────────────
+    # The Size model has declared this column since the universal shape
+    # system landed, but the prod table missed it — every PATCH that tried
+    # to set shape_dimensions silently dropped the field on commit.
+    "ALTER TABLE sizes ADD COLUMN IF NOT EXISTS shape_dimensions JSONB",
+
     # ── Add new ShapeType enum values ────────────────────────────────────
     # PostgreSQL enums need explicit ALTER TYPE for new values.
     # Each value is added separately with IF NOT EXISTS (PG 9.3+).

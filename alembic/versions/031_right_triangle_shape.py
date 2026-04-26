@@ -37,7 +37,7 @@ def _is_right_triangle(a: float, b: float, c: float) -> bool:
 
 def upgrade() -> None:
     # 1. Add the new enum value (PG enum is append-only).
-    op.execute("ALTER TYPE shapetype ADD VALUE IF NOT EXISTS 'right_triangle'")
+    op.execute("ALTER TYPE shape_type ADD VALUE IF NOT EXISTS 'right_triangle'")
 
     # The new value is not visible inside the same transaction in some PG
     # configurations — commit before issuing UPDATE statements that reference it.

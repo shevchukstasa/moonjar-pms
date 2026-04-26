@@ -30,6 +30,7 @@ class SizeInput(BaseModel):
     thickness_mm: Optional[int] = None
     diameter_mm: Optional[int] = None
     shape: Optional[str] = "rectangle"
+    shape_dimensions: Optional[dict] = None
     is_custom: bool = False
 
 
@@ -40,6 +41,7 @@ class SizeUpdateInput(BaseModel):
     thickness_mm: Optional[int] = None
     diameter_mm: Optional[int] = None
     shape: Optional[str] = None
+    shape_dimensions: Optional[dict] = None
     is_custom: Optional[bool] = None
 
 
@@ -277,6 +279,7 @@ async def create_size(
         thickness_mm=data.thickness_mm,
         diameter_mm=data.diameter_mm,
         shape=canonical or "rectangle",
+        shape_dimensions=data.shape_dimensions,
         is_custom=data.is_custom,
     )
     db.add(s)
@@ -323,6 +326,8 @@ async def update_size(
         s.diameter_mm = data.diameter_mm
     if data.shape is not None:
         s.shape = canonical_upd
+    if data.shape_dimensions is not None:
+        s.shape_dimensions = data.shape_dimensions
     if data.is_custom is not None:
         s.is_custom = data.is_custom
 

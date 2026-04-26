@@ -70,7 +70,7 @@ function unitsAllowedForType(materialType: string): { value: string; label: stri
 /** Build a flat list of subgroups from hierarchy for type tabs & dropdowns */
 function flatSubgroups(hierarchy: MaterialGroup[] | undefined) {
   if (!hierarchy) return [];
-  const result: { value: string; label: string; subgroupId: string; icon: string }[] = [];
+  const result: { value: string; label: string; subgroupId: string; icon: string; default_unit: string }[] = [];
   for (const g of hierarchy) {
     for (const sg of g.subgroups) {
       result.push({
@@ -78,10 +78,30 @@ function flatSubgroups(hierarchy: MaterialGroup[] | undefined) {
         label: sg.name,
         subgroupId: sg.id,
         icon: sg.icon || '',
+        default_unit: sg.default_unit || '',
       });
     }
   }
   return result;
+}
+
+/**
+ * Pick a sensible unit for a given material_type:
+ *   - if currentUnit is allowed → keep it
+ *   - else use subgroup's default_unit (if it's allowed)
+ *   - else fall back to the first allowed unit
+ *   - else keep currentUnit (unknown type — backend will validate)
+ */
+function pickUnitForType(
+  materialType: string,
+  currentUnit: string,
+  subgroupDefault?: string,
+): string {
+  const allowed = UNITS_BY_TYPE[materialType];
+  if (!allowed) return currentUnit;
+  if (allowed.includes(currentUnit)) return currentUnit;
+  if (subgroupDefault && allowed.includes(subgroupDefault)) return subgroupDefault;
+  return allowed[0] || currentUnit;
 }
 
 // ── Form interfaces ─────────────────────────────────────────────────────
@@ -341,6 +361,11 @@ function CatalogTab() {
         material_type: typeParam,
         subgroup_id: sg?.subgroupId ?? '',
         supplier_id: supplierParam,
+        // Realign default unit ('kg' from emptyCatalogForm) to whatever is
+        // allowed for this material_type — prevents the "I picked Stone but
+        // submit says unit kg is invalid" trap when the dropdown shows the
+        // first allowed unit while form state still holds 'kg'.
+        unit: pickUnitForType(typeParam, emptyCatalogForm.unit, sg?.default_unit),
         // Pre-fill name when caller supplies one (e.g. from
         // MaterialReservationsPanel "+ Create" button when a recipe
         // references a material that doesn't exist in the catalog yet).
@@ -367,10 +392,13 @@ function CatalogTab() {
   const openCreate = useCallback(
     (defaultType?: string) => {
       const sg = subgroups.find((s) => s.value === defaultType);
+      const t = defaultType ?? '';
       setForm({
         ...emptyCatalogForm,
-        material_type: defaultType ?? '',
+        material_type: t,
         subgroup_id: sg?.subgroupId ?? '',
+        // Same unit-realignment fix as the ?new=1 path.
+        unit: pickUnitForType(t, emptyCatalogForm.unit, sg?.default_unit),
       });
       setFormError('');
       setShortNameTouched(false);  // fresh form — allow auto-fill
@@ -593,11 +621,18 @@ function CatalogTab() {
   const handleSubgroupChange = useCallback(
     (sgId: string) => {
       const sg = subgroups.find((s) => s.subgroupId === sgId);
-      setForm((prev) => ({
-        ...prev,
-        subgroup_id: sgId,
-        material_type: sg?.value ?? prev.material_type,
-      }));
+      setForm((prev) => {
+        const newType = sg?.value ?? prev.material_type;
+        return {
+          ...prev,
+          subgroup_id: sgId,
+          material_type: newType,
+          // Auto-realign unit to one allowed for the new material_type so the
+          // dropdown's visible value (first allowed) doesn't desync from form
+          // state (which would still hold the previous incompatible unit).
+          unit: pickUnitForType(newType, prev.unit, sg?.default_unit),
+        };
+      });
     },
     [subgroups],
   );
